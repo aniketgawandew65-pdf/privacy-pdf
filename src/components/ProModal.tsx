@@ -81,7 +81,7 @@ export function ProModal({
           </li>
           <li className="flex items-center gap-2">
             <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>100% offline standalone license</span>
+            <span>100% offline standalone license — 1 year access</span>
           </li>
           <li className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -107,7 +107,7 @@ export function ProModal({
               onClick={() => openCheckout(checkoutUrl)}
               className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold transition shadow-lg shadow-emerald-500/20 mb-4"
             >
-              Get Pro Access — $19
+              Get Pro Access — $19/year
             </button>
 
             {/* License Input Form */}
