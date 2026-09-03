@@ -173,11 +173,12 @@ export async function pdfToImages(file: File): Promise<string[]> {
 
     if (!ctx) continue;
 
-    await page.render({
+  await page.render({
       canvasContext: ctx,
       viewport: viewport,
+      canvas: canvas,
     }).promise;
-
+    
     imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
   }
 
