@@ -156,3 +156,30 @@ export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint
 
   return await pdfDoc.save();
 }
+export async function pdfToImages(file: File): Promise<string[]> {
+  const fileBytes = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
+  const pdfDoc = await loadingTask.promise;
+  const imageUrls: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 2.0 });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) continue;
+
+    await page.render({
+      canvasContext: ctx,
+      viewport: viewport,
+    }).promise;
+
+    imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
+  }
+
+  return imageUrls;
+}

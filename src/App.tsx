@@ -5,8 +5,9 @@ import { Merger } from './components/Merger';
 import { Splitter } from './components/Splitter';
 import { ImageToPdf } from './components/ImageToPdf';
 import { RotatePdf } from './components/RotatePdf';
+import { PdfToImages } from './components/PdfToImages';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download } from 'lucide-react';
+import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -14,11 +15,12 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function App() {
-  const [activeTool, setActiveTool] = useState<'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate'>('compress');
+  const [activeTool, setActiveTool] = useState<
+    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images'
+  >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
-  // Capture desktop/mobile install trigger
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -139,6 +141,17 @@ export default function App() {
             Image to PDF
           </button>
           <button
+            onClick={() => setActiveTool('pdf-to-images')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'pdf-to-images'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <FileImage className="w-4 h-4" />
+            PDF to JPG
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'rotate'
@@ -163,6 +176,9 @@ export default function App() {
         )}
         {activeTool === 'image-to-pdf' && (
           <ImageToPdf />
+        )}
+        {activeTool === 'pdf-to-images' && (
+          <PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
