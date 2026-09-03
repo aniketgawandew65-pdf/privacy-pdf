@@ -1,4 +1,4 @@
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDocument, degrees, StandardFonts, rgb } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure offline worker for 100% local processing (works in Airplane Mode)
@@ -221,6 +221,35 @@ export async function addWatermarkToPDF(file: File, watermarkText: string): Prom
       rotate: degrees(45),
     });
   }
+
+  return await pdfDoc.save();
+}
+export async function addPageNumbersToPDF(
+  file: File,
+  position: 'bottom-center' | 'bottom-right' = 'bottom-center'
+): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  const pages = pdfDoc.getPages();
+  const total = pages.length;
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  pages.forEach((page, index) => {
+    const { width } = page.getSize();
+    const text = `Page ${index + 1} of ${total}`;
+    const textSize = 10;
+    const textWidth = font.widthOfTextAtSize(text, textSize);
+
+    const x = position === 'bottom-right' ? width - textWidth - 36 : (width - textWidth) / 2;
+
+    page.drawText(text, {
+      x,
+      y: 24,
+      size: textSize,
+      font,
+      color: rgb(0.3, 0.3, 0.3),
+    });
+  });
 
   return await pdfDoc.save();
 }

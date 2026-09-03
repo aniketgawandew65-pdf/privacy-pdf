@@ -8,8 +8,9 @@ import { RotatePdf } from './components/RotatePdf';
 import { PdfToImages } from './components/PdfToImages';
 import { RemovePages } from './components/RemovePages';
 import { Watermark } from './components/Watermark';
+import { PageNumbers } from './components/PageNumbers';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2, Stamp } from 'lucide-react';
+import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2, Stamp, Hash } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -18,7 +19,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function App() {
   const [activeTool, setActiveTool] = useState<
-    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages' | 'watermark'
+    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages' | 'watermark' | 'page-numbers'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -176,6 +177,17 @@ export default function App() {
             Watermark
           </button>
           <button
+            onClick={() => setActiveTool('page-numbers')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'page-numbers'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Hash className="w-4 h-4" />
+            Page Numbers
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'rotate'
@@ -209,6 +221,9 @@ export default function App() {
         )}
         {activeTool === 'watermark' && (
           <Watermark file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'page-numbers' && (
+          <PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
