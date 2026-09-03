@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
 import { TrustBadge } from './components/TrustBadge';
 import { Compressor } from './components/Compressor';
 import { Merger } from './components/Merger';
@@ -15,6 +16,7 @@ import { SignPdf } from './components/SignPdf';
 import { ProtectPdf } from './components/ProtectPdf';
 import { UnlockPdf } from './components/UnlockPdf';
 import { MonetizationCard } from './components/MonetizationCard';
+import { TOOLS_METADATA } from './seoConfig';
 import {
   ShieldCheck,
   Sliders,
@@ -40,25 +42,21 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function App() {
-  const [activeTool, setActiveTool] = useState<
-    | 'compress'
-    | 'merge'
-    | 'split'
-    | 'image-to-pdf'
-    | 'rotate'
-    | 'pdf-to-images'
-    | 'remove-pages'
-    | 'watermark'
-    | 'page-numbers'
-    | 'pdf-to-text'
-    | 'edit-metadata'
-    | 'sign'
-    | 'protect'
-    | 'unlock'
-  >('compress');
+  const location = useLocation();
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
+  // Dynamic SEO title & description updates
+  useEffect(() => {
+    const meta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
+    document.title = meta.title;
+    const descMeta = document.querySelector('meta[name="description"]');
+    if (descMeta) {
+      descMeta.setAttribute('content', meta.description);
+    }
+  }, [location.pathname]);
+
+  // PWA install handler
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -88,23 +86,30 @@ export default function App() {
     }
   };
 
+  const currentMeta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
+
+  const navClass = ({ isActive }: { isActive: boolean }) =>
+    `flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+      isActive ? 'bg-zinc-800 text-emerald-400 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+    }`;
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-6 selection:bg-emerald-500 selection:text-black">
       {/* Header */}
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-b border-zinc-800/80">
-        <div className="flex items-center gap-3">
+        <NavLink to="/" className="flex items-center gap-3 text-left">
           <img
-             src="/logo.png"
-             alt="1into1 Logo"
-             width="40"
-             height="40"
-             className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
-             />
+            src="/logo.png"
+            alt="1into1 Logo"
+            width="40"
+            height="40"
+            className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
+          />
           <div>
             <h1 className="text-lg font-bold tracking-tight">1into1 PDF</h1>
             <p className="text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
           </div>
-        </div>
+        </NavLink>
 
         <div className="flex items-center gap-3">
           {installPrompt && (
@@ -128,213 +133,94 @@ export default function App() {
         </div>
 
         <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
-          PDF Tools with <span className="text-emerald-400">Zero Server Cost</span>
+          {currentMeta.heading.replace('Zero Server Cost', '')}
+          {currentMeta.heading.includes('Zero Server Cost') ? (
+            <span className="text-emerald-400">Zero Server Cost</span>
+          ) : null}
         </h2>
         <p className="text-zinc-400 text-base max-w-lg mx-auto mb-6">
-          Your files never leave your computer. All operations run directly in your browser.
+          {currentMeta.subheading}
         </p>
 
-        {/* Tool Navigation */}
+        {/* SEO Navigation Bar */}
         <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8 max-w-3xl">
-          <button
-            onClick={() => setActiveTool('compress')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'compress'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          <NavLink to="/compress-pdf" className={navClass}>
             <Sliders className="w-4 h-4" />
             Compress
-          </button>
-          <button
-            onClick={() => setActiveTool('merge')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'merge'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/merge-pdf" className={navClass}>
             <Files className="w-4 h-4" />
             Merge
-          </button>
-          <button
-            onClick={() => setActiveTool('split')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'split'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/split-pdf" className={navClass}>
             <Scissors className="w-4 h-4" />
             Split
-          </button>
-          <button
-            onClick={() => setActiveTool('image-to-pdf')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'image-to-pdf'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/image-to-pdf" className={navClass}>
             <ImageIcon className="w-4 h-4" />
             Image to PDF
-          </button>
-          <button
-            onClick={() => setActiveTool('pdf-to-images')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'pdf-to-images'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/pdf-to-jpg" className={navClass}>
             <FileImage className="w-4 h-4" />
             PDF to JPG
-          </button>
-          <button
-            onClick={() => setActiveTool('remove-pages')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'remove-pages'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/remove-pages" className={navClass}>
             <Trash2 className="w-4 h-4" />
             Remove Pages
-          </button>
-          <button
-            onClick={() => setActiveTool('watermark')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'watermark'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/watermark-pdf" className={navClass}>
             <Stamp className="w-4 h-4" />
             Watermark
-          </button>
-          <button
-            onClick={() => setActiveTool('page-numbers')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'page-numbers'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/page-numbers" className={navClass}>
             <Hash className="w-4 h-4" />
             Page Numbers
-          </button>
-          <button
-            onClick={() => setActiveTool('pdf-to-text')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'pdf-to-text'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/extract-text" className={navClass}>
             <AlignLeft className="w-4 h-4" />
             Extract Text
-          </button>
-          <button
-            onClick={() => setActiveTool('sign')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'sign'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/sign-pdf" className={navClass}>
             <PenTool className="w-4 h-4" />
             Sign
-          </button>
-          <button
-            onClick={() => setActiveTool('protect')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'protect'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/protect-pdf" className={navClass}>
             <Lock className="w-4 h-4" />
             Protect
-          </button>
-          <button
-            onClick={() => setActiveTool('unlock')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'unlock'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/unlock-pdf" className={navClass}>
             <Unlock className="w-4 h-4" />
             Unlock
-          </button>
-          <button
-            onClick={() => setActiveTool('edit-metadata')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'edit-metadata'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/edit-metadata" className={navClass}>
             <Tag className="w-4 h-4" />
             Metadata
-          </button>
-          <button
-            onClick={() => setActiveTool('rotate')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-              activeTool === 'rotate'
-                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
+          </NavLink>
+          <NavLink to="/rotate-pdf" className={navClass}>
             <RotateCw className="w-4 h-4" />
             Rotate
-          </button>
+          </NavLink>
         </div>
 
-        {/* Active Tool View */}
-        {activeTool === 'compress' && (
-          <Compressor file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'merge' && (
-          <Merger files={sharedFiles} onFilesChange={setSharedFiles} />
-        )}
-        {activeTool === 'split' && (
-          <Splitter file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'image-to-pdf' && (
-          <ImageToPdf />
-        )}
-        {activeTool === 'pdf-to-images' && (
-          <PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'remove-pages' && (
-          <RemovePages file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'watermark' && (
-          <Watermark file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'page-numbers' && (
-          <PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'pdf-to-text' && (
-          <PdfToText file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'sign' && (
-          <SignPdf file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'protect' && (
-          <ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'unlock' && (
-          <UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'edit-metadata' && (
-          <EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
-        {activeTool === 'rotate' && (
-          <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
-        )}
+        {/* Route Definitions */}
+        <Routes>
+          <Route path="/" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/compress-pdf" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/merge-pdf" element={<Merger files={sharedFiles} onFilesChange={setSharedFiles} />} />
+          <Route path="/split-pdf" element={<Splitter file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/image-to-pdf" element={<ImageToPdf />} />
+          <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/remove-pages" element={<RemovePages file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/watermark-pdf" element={<Watermark file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/page-numbers" element={<PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/extract-text" element={<PdfToText file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/sign-pdf" element={<SignPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/protect-pdf" element={<ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/unlock-pdf" element={<UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/edit-metadata" element={<EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/rotate-pdf" element={<RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
 
         <MonetizationCard />
       </main>
