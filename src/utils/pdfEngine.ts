@@ -1,4 +1,4 @@
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, degrees } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure offline worker for 100% local processing (works in Airplane Mode)
@@ -110,4 +110,49 @@ export async function compressPDFToTarget(
   }
 
   return await outputPdf.save();
+}
+export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+
+  for (const file of imageFiles) {
+    // Convert any image format (JPG, PNG, WEBP) to JPEG bytes via canvas
+    const imgBitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = imgBitmap.width;
+    canvas.height = imgBitmap.height;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) continue;
+    ctx.drawImage(imgBitmap, 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.92)
+    );
+    if (!blob) continue;
+
+    const jpegBytes = await blob.arrayBuffer();
+    const embeddedImage = await pdfDoc.embedJpg(jpegBytes);
+
+    const page = pdfDoc.addPage([embeddedImage.width, embeddedImage.height]);
+    page.drawImage(embeddedImage, {
+      x: 0,
+      y: 0,
+      width: embeddedImage.width,
+      height: embeddedImage.height,
+    });
+  }
+
+  return await pdfDoc.save();
+}
+export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  const pages = pdfDoc.getPages();
+
+  for (const page of pages) {
+    const currentAngle = page.getRotation().angle;
+    page.setRotation(degrees((currentAngle + rotationAngle) % 360));
+  }
+
+  return await pdfDoc.save();
 }

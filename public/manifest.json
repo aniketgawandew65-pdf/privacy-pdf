@@ -1,0 +1,17 @@
+{
+  "name": "1into1 PDF",
+  "short_name": "1into1",
+  "description": "100% In-Browser Privacy-First PDF Suite",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

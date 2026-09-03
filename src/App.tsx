@@ -3,11 +3,13 @@ import { TrustBadge } from './components/TrustBadge';
 import { Compressor } from './components/Compressor';
 import { Merger } from './components/Merger';
 import { Splitter } from './components/Splitter';
+import { ImageToPdf } from './components/ImageToPdf';
+import { RotatePdf } from './components/RotatePdf';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Zap, Sliders, Files, Scissors } from 'lucide-react';
+import { ShieldCheck, Zap, Sliders, Files, Scissors, Image as ImageIcon, RotateCw } from 'lucide-react';
 
 export default function App() {
-  const [activeTool, setActiveTool] = useState<'compress' | 'merge' | 'split'>('compress');
+  const [activeTool, setActiveTool] = useState<'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate'>('compress');
   
   // Shared state: files stay loaded across tab changes
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
@@ -54,10 +56,10 @@ export default function App() {
         </p>
 
         {/* Tool Navigation */}
-        <div className="inline-flex p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8">
+        <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8">
           <button
             onClick={() => setActiveTool('compress')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'compress'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -68,7 +70,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('merge')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'merge'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -79,7 +81,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('split')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'split'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -87,6 +89,28 @@ export default function App() {
           >
             <Scissors className="w-4 h-4" />
             Split
+          </button>
+          <button
+            onClick={() => setActiveTool('image-to-pdf')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'image-to-pdf'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <ImageIcon className="w-4 h-4" />
+            Image to PDF
+          </button>
+          <button
+            onClick={() => setActiveTool('rotate')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'rotate'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <RotateCw className="w-4 h-4" />
+            Rotate
           </button>
         </div>
 
@@ -99,6 +123,12 @@ export default function App() {
         )}
         {activeTool === 'split' && (
           <Splitter file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'image-to-pdf' && (
+          <ImageToPdf />
+        )}
+        {activeTool === 'rotate' && (
+          <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
         )}
 
         <MonetizationCard />
