@@ -2,8 +2,12 @@ import React, { useState, useRef } from 'react';
 import { Upload, Files, Download, Loader2, CheckCircle2, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { mergePDFs } from '../utils/pdfEngine';
 
-export const Merger: React.FC = () => {
-  const [files, setFiles] = useState<File[]>([]);
+interface MergerProps {
+  files: File[];
+  onFilesChange: (files: File[]) => void;
+}
+
+export const Merger: React.FC<MergerProps> = ({ files, onFilesChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -11,12 +15,12 @@ export const Merger: React.FC = () => {
   const handleFilesSelect = (newFiles: FileList | null) => {
     if (!newFiles) return;
     const pdfOnly = Array.from(newFiles).filter((f) => f.type === 'application/pdf');
-    setFiles((prev) => [...prev, ...pdfOnly]);
+    onFilesChange([...files, ...pdfOnly]);
     setDownloadUrl(null);
   };
 
   const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+    onFilesChange(files.filter((_, i) => i !== index));
     setDownloadUrl(null);
   };
 
@@ -27,7 +31,7 @@ export const Merger: React.FC = () => {
     const temp = updated[index];
     updated[index] = updated[targetIndex];
     updated[targetIndex] = temp;
-    setFiles(updated);
+    onFilesChange(updated);
     setDownloadUrl(null);
   };
 
@@ -37,8 +41,7 @@ export const Merger: React.FC = () => {
     try {
       const mergedBytes = await mergePDFs(files);
       const blob = new Blob([mergedBytes as unknown as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      setDownloadUrl(URL.createObjectURL(blob));
     } catch (err) {
       console.error(err);
     } finally {
@@ -58,7 +61,7 @@ export const Merger: React.FC = () => {
         className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40 mb-6"
       >
         <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
-        <p className="text-sm font-semibold text-zinc-200">Drop multiple PDFs here to combine</p>
+        <p className="text-sm font-semibold text-zinc-200">Drop PDFs here to combine</p>
         <p className="text-xs text-zinc-500 mt-1">Unlimited files • Processed 100% in your browser</p>
         <input
           ref={fileInputRef}

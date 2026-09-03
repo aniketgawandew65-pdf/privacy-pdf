@@ -1,9 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Sliders, Download, Loader2, CheckCircle2, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, Sliders, Download, Loader2, CheckCircle2, FileText, X } from 'lucide-react';
 import { compressPDFToTarget, type CompressionProgress } from '../utils/pdfEngine';
 
-export const Compressor: React.FC = () => {
-  const [file, setFile] = useState<File | null>(null);
+interface CompressorProps {
+  file: File | null;
+  onFileChange: (file: File | null) => void;
+}
+
+export const Compressor: React.FC<CompressorProps> = ({ file, onFileChange }) => {
   const [targetSizeKB, setTargetSizeKB] = useState<number>(200);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<CompressionProgress | null>(null);
@@ -13,13 +17,18 @@ export const Compressor: React.FC = () => {
 
   const originalSizeKB = file ? Math.round(file.size / 1024) : 0;
 
+  useEffect(() => {
+    if (file) {
+      const initial = Math.max(50, Math.round((file.size / 1024) * 0.5));
+      setTargetSizeKB(initial);
+      setDownloadUrl(null);
+      setCompressedSize(null);
+    }
+  }, [file]);
+
   const handleFileSelect = (selectedFile: File) => {
     if (selectedFile.type !== 'application/pdf') return;
-    setFile(selectedFile);
-    setDownloadUrl(null);
-    setCompressedSize(null);
-    const initialTarget = Math.max(50, Math.round((selectedFile.size / 1024) * 0.5));
-    setTargetSizeKB(initialTarget);
+    onFileChange(selectedFile);
   };
 
   const handleCompress = async () => {
@@ -70,7 +79,7 @@ export const Compressor: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-6 text-left">
-          {/* File Meta */}
+          {/* File Card with Clear (X) Icon */}
           <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -80,17 +89,15 @@ export const Compressor: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => {
-                setFile(null);
-                setDownloadUrl(null);
-              }}
-              className="text-xs text-zinc-400 hover:text-red-400 transition-colors ml-3"
+              onClick={() => onFileChange(null)}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              title="Remove file"
             >
-              Remove
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Compress-to-Target Slider */}
+          {/* Slider */}
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2 text-zinc-300 font-medium">
@@ -103,7 +110,7 @@ export const Compressor: React.FC = () => {
             <input
               type="range"
               min={30}
-              max={originalSizeKB}
+              max={originalSizeKB || 500}
               value={targetSizeKB}
               disabled={isProcessing}
               onChange={(e) => setTargetSizeKB(Number(e.target.value))}
@@ -115,7 +122,7 @@ export const Compressor: React.FC = () => {
             </div>
           </div>
 
-          {/* Action Button */}
+          {/* Action */}
           {!downloadUrl ? (
             <button
               onClick={handleCompress}

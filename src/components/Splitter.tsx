@@ -1,9 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Scissors, Download, Loader2, CheckCircle2, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, Scissors, Download, Loader2, CheckCircle2, FileText, X } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 
-export const Splitter: React.FC = () => {
-  const [file, setFile] = useState<File | null>(null);
+interface SplitterProps {
+  file: File | null;
+  onFileChange: (file: File | null) => void;
+}
+
+export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [pageRange, setPageRange] = useState<string>('1');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -11,23 +15,35 @@ export const Splitter: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = async (selectedFile: File) => {
-    if (selectedFile.type !== 'application/pdf') return;
-    setError(null);
-    setDownloadUrl(null);
-
-    try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const pdf = await PDFDocument.load(arrayBuffer);
-      const count = pdf.getPageCount();
-
-      setFile(selectedFile);
-      setTotalPages(count);
-      setPageRange(count > 1 ? `1-${Math.min(count, 2)}` : '1');
-    } catch {
-      setError('Unable to parse this PDF locally.');
+  useEffect(() => {
+    if (!file) {
+      setTotalPages(0);
+      setPageRange('1');
+      setDownloadUrl(null);
+      setError(null);
+      return;
     }
-  };
+
+    let isCurrent = true;
+    file.arrayBuffer().then(async (buf) => {
+      try {
+        const pdf = await PDFDocument.load(buf);
+        const count = pdf.getPageCount();
+        if (isCurrent) {
+          setTotalPages(count);
+          setPageRange(count > 1 ? `1-${Math.min(count, 2)}` : '1');
+          setDownloadUrl(null);
+          setError(null);
+        }
+      } catch {
+        if (isCurrent) setError('Unable to parse this PDF locally.');
+      }
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [file]);
 
   const parsePageNumbers = (rangeStr: string, maxPages: number): number[] => {
     const pages = new Set<number>();
@@ -89,7 +105,9 @@ export const Splitter: React.FC = () => {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
+            if (e.dataTransfer.files[0]?.type === 'application/pdf') {
+              onFileChange(e.dataTransfer.files[0]);
+            }
           }}
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
@@ -101,11 +119,16 @@ export const Splitter: React.FC = () => {
             type="file"
             accept="application/pdf"
             className="hidden"
-            onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+            onChange={(e) => {
+              if (e.target.files?.[0]?.type === 'application/pdf') {
+                onFileChange(e.target.files[0]);
+              }
+            }}
           />
         </div>
       ) : (
         <div className="space-y-6 text-left">
+          {/* File Card with Clear (X) Icon */}
           <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -115,13 +138,11 @@ export const Splitter: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => {
-                setFile(null);
-                setDownloadUrl(null);
-              }}
-              className="text-xs text-zinc-400 hover:text-red-400 transition-colors ml-3"
+              onClick={() => onFileChange(null)}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              title="Remove file"
             >
-              Remove
+              <X className="w-4 h-4" />
             </button>
           </div>
 
