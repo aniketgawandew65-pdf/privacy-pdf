@@ -178,9 +178,31 @@ export async function pdfToImages(file: File): Promise<string[]> {
       viewport: viewport,
       canvas: canvas,
     }).promise;
-    
+
     imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
   }
 
   return imageUrls;
+}
+export async function removePagesFromPDF(file: File, pageNumbersToRemove: number[]): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  
+  // Sort page indices in descending order so removal doesn't shift upcoming indices
+  const sortedIndices = [...pageNumbersToRemove]
+    .map((num) => num - 1)
+    .sort((a, b) => b - a);
+
+  for (const pageIndex of sortedIndices) {
+    if (pageIndex >= 0 && pageIndex < pdfDoc.getPageCount()) {
+      pdfDoc.removePage(pageIndex);
+    }
+  }
+
+  return await pdfDoc.save();
+}
+export async function getPDFPageCount(file: File): Promise<number> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  return pdfDoc.getPageCount();
 }

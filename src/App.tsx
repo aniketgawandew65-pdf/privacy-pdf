@@ -6,8 +6,9 @@ import { Splitter } from './components/Splitter';
 import { ImageToPdf } from './components/ImageToPdf';
 import { RotatePdf } from './components/RotatePdf';
 import { PdfToImages } from './components/PdfToImages';
+import { RemovePages } from './components/RemovePages';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage } from 'lucide-react';
+import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -16,7 +17,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function App() {
   const [activeTool, setActiveTool] = useState<
-    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images'
+    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -152,6 +153,17 @@ export default function App() {
             PDF to JPG
           </button>
           <button
+            onClick={() => setActiveTool('remove-pages')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'remove-pages'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Trash2 className="w-4 h-4" />
+            Remove Pages
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'rotate'
@@ -179,6 +191,9 @@ export default function App() {
         )}
         {activeTool === 'pdf-to-images' && (
           <PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'remove-pages' && (
+          <RemovePages file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
