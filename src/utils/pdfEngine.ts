@@ -396,3 +396,62 @@ export async function encryptPDF(
   if (!doc) throw new Error('Failed to generate encrypted PDF');
   return new Uint8Array(doc.output('arraybuffer'));
 }
+export async function unlockPDF(
+  file: File,
+  password: string,
+  onProgress?: (progress: number) => void
+): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: arrayBuffer,
+    password: password,
+  });
+
+  const pdf = await loadingTask.promise;
+  const numPages = pdf.numPages;
+
+  let doc: jsPDF | null = null;
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+    const renderViewport = page.getViewport({ scale: 2.0 });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = renderViewport.width;
+    canvas.height = renderViewport.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+
+    await page.render({
+      canvasContext: ctx,
+      viewport: renderViewport,
+      canvas: canvas,
+    }).promise;
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pageWidth = unscaledViewport.width;
+    const pageHeight = unscaledViewport.height;
+    const orientation = pageWidth > pageHeight ? 'landscape' : 'portrait';
+
+    if (i === 1) {
+      doc = new jsPDF({
+        orientation,
+        unit: 'pt',
+        format: [pageWidth, pageHeight],
+      });
+      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+    } else if (doc) {
+      doc.addPage([pageWidth, pageHeight], orientation);
+      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+    }
+
+    if (onProgress) {
+      onProgress(Math.round((i / numPages) * 100));
+    }
+  }
+
+  if (!doc) throw new Error('Failed to generate unlocked PDF');
+  return new Uint8Array(doc.output('arraybuffer'));
+}

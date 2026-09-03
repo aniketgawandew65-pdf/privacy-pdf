@@ -13,6 +13,7 @@ import { PdfToText } from './components/PdfToText';
 import { EditMetadata } from './components/EditMetadata';
 import { SignPdf } from './components/SignPdf';
 import { ProtectPdf } from './components/ProtectPdf';
+import { UnlockPdf } from './components/UnlockPdf';
 import { MonetizationCard } from './components/MonetizationCard';
 import {
   ShieldCheck,
@@ -30,6 +31,7 @@ import {
   Tag,
   PenTool,
   Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -52,6 +54,7 @@ export default function App() {
     | 'edit-metadata'
     | 'sign'
     | 'protect'
+    | 'unlock'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -253,6 +256,17 @@ export default function App() {
             Protect
           </button>
           <button
+            onClick={() => setActiveTool('unlock')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              activeTool === 'unlock'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Unlock className="w-4 h-4" />
+            Unlock
+          </button>
+          <button
             onClick={() => setActiveTool('edit-metadata')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'edit-metadata'
@@ -309,6 +323,9 @@ export default function App() {
         )}
         {activeTool === 'protect' && (
           <ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'unlock' && (
+          <UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'edit-metadata' && (
           <EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />
