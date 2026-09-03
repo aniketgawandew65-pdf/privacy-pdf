@@ -12,6 +12,7 @@ import { PageNumbers } from './components/PageNumbers';
 import { PdfToText } from './components/PdfToText';
 import { EditMetadata } from './components/EditMetadata';
 import { SignPdf } from './components/SignPdf';
+import { ProtectPdf } from './components/ProtectPdf';
 import { MonetizationCard } from './components/MonetizationCard';
 import {
   ShieldCheck,
@@ -28,6 +29,7 @@ import {
   AlignLeft,
   Tag,
   PenTool,
+  Lock,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -49,6 +51,7 @@ export default function App() {
     | 'pdf-to-text'
     | 'edit-metadata'
     | 'sign'
+    | 'protect'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -239,6 +242,17 @@ export default function App() {
             Sign
           </button>
           <button
+            onClick={() => setActiveTool('protect')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              activeTool === 'protect'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Lock className="w-4 h-4" />
+            Protect
+          </button>
+          <button
             onClick={() => setActiveTool('edit-metadata')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'edit-metadata'
@@ -292,6 +306,9 @@ export default function App() {
         )}
         {activeTool === 'sign' && (
           <SignPdf file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'protect' && (
+          <ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'edit-metadata' && (
           <EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />
