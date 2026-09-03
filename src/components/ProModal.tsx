@@ -1,18 +1,17 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { X, Sparkles, Check, Key, ShieldCheck } from 'lucide-react';
 import { getLicenseStatus, activateLicenseKey, deactivateLicense, openCheckout } from '../utils/license';
 
 interface ProModalProps {
   isOpen: boolean;
   onClose: () => void;
-  // Replace with your real Lemon Squeezy checkout URL when generated
   checkoutUrl?: string;
 }
 
 export function ProModal({
   isOpen,
   onClose,
-  checkoutUrl = 'https://1into1.lemonsqueezy.com/buy/your-product-id?embed=1',
+  checkoutUrl = 'https://purple1into1.lemonsqueezy.com/checkout/buy/a7d4dced-b466-44c8-ad32-70aa434f2206?embed=1',
 }: ProModalProps) {
   const [licenseInput, setLicenseInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -82,7 +81,7 @@ export function ProModal({
           </li>
           <li className="flex items-center gap-2">
             <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>100% offline standalone license — lifetime validity</span>
+            <span>100% offline standalone license</span>
           </li>
           <li className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -108,7 +107,7 @@ export function ProModal({
               onClick={() => openCheckout(checkoutUrl)}
               className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold transition shadow-lg shadow-emerald-500/20 mb-4"
             >
-              Get Lifetime Access — $19
+              Get Pro Access — $19
             </button>
 
             {/* License Input Form */}
