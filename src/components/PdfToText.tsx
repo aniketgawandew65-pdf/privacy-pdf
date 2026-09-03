@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { createWorker } from 'tesseract.js';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   Upload,
   FileText,
@@ -10,12 +11,11 @@ import {
   CheckCircle2,
   ScanText,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 
-// Configure pdfjs worker if not already globally set
-if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-}
+// Bundle the PDF.js worker locally to ensure zero external CDN network requests
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 interface PdfToTextProps {
   file: File | null;
@@ -73,7 +73,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
 
       if (!ctx) continue;
 
-      // Render PDF page to canvas with explicit any casting to satisfy TypeScript
+      // Render PDF page to canvas with type-casting for pdfjs compatibility
       await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
 
       // Run Tesseract recognition on the rendered canvas
@@ -174,9 +174,10 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
               onFileChange(null);
               setExtractedText('');
             }}
-            className="text-xs text-zinc-400 hover:text-red-400 transition shrink-0"
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-400 transition shrink-0"
           >
-            Change
+            <Trash2 className="w-3.5 h-3.5" />
+            Remove
           </button>
         </div>
       )}

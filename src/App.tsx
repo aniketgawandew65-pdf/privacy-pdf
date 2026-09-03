@@ -1,3 +1,5 @@
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { Terms } from './components/Terms';
 import { useState, useEffect } from 'react';
 import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
 import { TrustBadge } from './components/TrustBadge';
@@ -16,7 +18,6 @@ import { SignPdf } from './components/SignPdf';
 import { ProtectPdf } from './components/ProtectPdf';
 import { UnlockPdf } from './components/UnlockPdf';
 import { HeicToJpg } from './components/HeicToJpg';
-import { MonetizationCard } from './components/MonetizationCard';
 import { ProModal } from './components/ProModal';
 import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
@@ -157,14 +158,18 @@ export default function App() {
       <main className="w-full max-w-4xl my-auto text-center py-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 mb-6">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          Zero uploads • Zero tracking • Works in Airplane Mode
+          Zero uploads • Turn off Wi-Fi to test • 100% Private
         </div>
 
         <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
-          {currentMeta.heading.replace('Zero Server Cost', '')}
-          {currentMeta.heading.includes('Zero Server Cost') ? (
-            <span className="text-emerald-400">Zero Server Cost</span>
-          ) : null}
+          {currentMeta.heading.includes('Never Upload Your Files') ? (
+            <>
+              Free PDF Tools That{' '}
+              <span className="text-emerald-400">Never Upload Your Files</span>
+            </>
+          ) : (
+            currentMeta.heading
+          )}
         </h2>
         <p className="text-zinc-400 text-base max-w-lg mx-auto mb-6">
           {currentMeta.subheading}
@@ -236,6 +241,8 @@ export default function App() {
 
         {/* Route Definitions */}
         <Routes>
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<Terms />} />
           <Route path="/" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="/compress-pdf" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="/merge-pdf" element={<Merger files={sharedFiles} onFilesChange={setSharedFiles} />} />
@@ -254,12 +261,23 @@ export default function App() {
           <Route path="/rotate-pdf" element={<RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-
-        <MonetizationCard />
       </main>
 
-      <footer className="w-full max-w-5xl text-center py-4 border-t border-zinc-900 text-xs text-zinc-600">
-        All calculations run locally via WebAssembly and Web Workers.
+    <footer className="w-full max-w-5xl py-6 border-t border-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
+        <div>
+          <span>100% In-Browser. Powered by </span>
+          <span className="text-zinc-400">pdf-lib</span> &{' '}
+          <span className="text-zinc-400">Tesseract.js</span>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <NavLink to="/privacy" className="hover:text-zinc-300 transition">
+            Privacy Policy
+          </NavLink>
+          <NavLink to="/terms" className="hover:text-zinc-300 transition">
+            Terms of Service
+          </NavLink>
+        </div>
       </footer>
 
       {/* Pro Modal */}

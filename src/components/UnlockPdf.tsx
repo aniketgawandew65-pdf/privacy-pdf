@@ -177,7 +177,10 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Unlocked PDF</span>
-              </a>
+            </a>
+            <p className="text-[11px] text-zinc-500 text-center mt-3">
+                  Notice: This tool is strictly intended for documents you are legally authorized to access and decrypt.
+                </p>
             </div>
           )}
         </div>

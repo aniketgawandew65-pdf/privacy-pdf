@@ -9,10 +9,10 @@ export interface ToolMeta {
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
   '/': {
     path: '/',
-    title: '1into1 PDF — 100% Private In-Browser PDF Suite',
-    description: 'Compress, merge, split, sign, and protect PDF files directly in your browser. Zero uploads, works in Airplane Mode.',
-    heading: 'PDF Tools with Zero Server Cost',
-    subheading: 'Your files never leave your computer. All operations run directly in your browser.',
+    title: '1into1 PDF — Free, Private PDF & Image Tools (Zero Uploads)',
+    description: 'Compress, merge, split, OCR, and convert PDFs and HEIC images 100% locally in your browser. Disconnect your internet and test—files never leave your device.',
+    heading: 'Free PDF Tools That Never Upload Your Files',
+    subheading: 'Local-first processing powered by your browser memory. Turn off your Wi-Fi and everything still works.',
   },
   '/compress-pdf': {
     path: '/compress-pdf',
@@ -48,6 +48,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     description: 'Render and extract high-resolution JPG images from any PDF file locally.',
     heading: 'PDF to High-Res JPG',
     subheading: 'Export each PDF page as an image directly in your browser session.',
+  },
+  '/heic-to-jpg': {
+    path: '/heic-to-jpg',
+    title: 'HEIC to JPG Converter Online & Private (EXIF Stripped) | 1into1',
+    description: 'Convert iPhone HEIC/HEIF photos to JPG locally in your browser. Automatically strip GPS location and private camera EXIF data with zero server uploads.',
+    heading: 'Convert HEIC to JPG & Strip EXIF',
+    subheading: 'Convert Apple photos to standard JPG and remove sensitive GPS metadata locally.',
   },
   '/remove-pages': {
     path: '/remove-pages',
@@ -111,12 +118,5 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     description: 'Rotate PDF pages permanently by 90, 180, or 270 degrees without server uploads.',
     heading: 'Rotate PDF Pages',
     subheading: 'Reorient landscape and portrait pages directly in local memory.',
-  },
-  '/heic-to-jpg': {
-    path: '/heic-to-jpg',
-    title: 'HEIC to JPG Converter Online & Private (EXIF Stripped) | 1into1',
-    description: 'Convert iPhone HEIC/HEIF photos to JPG locally in your browser. Automatically strip GPS location and private camera EXIF data with zero server uploads.',
-    heading: 'Convert HEIC to JPG & Strip EXIF',
-    subheading: 'Convert Apple photos to standard JPG and remove sensitive GPS metadata locally.',
   },
 };

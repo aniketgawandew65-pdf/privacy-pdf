@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { PDFDocument } from 'pdf-lib';
-import { Upload, Loader2, Download, Sliders, CheckCircle, FileText, Lock } from 'lucide-react';
+import { Upload, Loader2, Download, Sliders, CheckCircle, FileText, Lock, Trash2 } from 'lucide-react';
 import { getLicenseStatus } from '../utils/license';
 import { ProModal } from './ProModal';
 
@@ -108,9 +108,10 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               setDownloadUrl(null);
               setCompressedSize(null);
             }}
-            className="text-xs text-zinc-500 hover:text-red-400 transition ml-3"
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-400 transition ml-3 shrink-0"
           >
-            Change
+            <Trash2 className="w-3.5 h-3.5" />
+            Remove
           </button>
         </div>
       )}
