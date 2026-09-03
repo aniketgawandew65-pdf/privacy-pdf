@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Trash2 } from 'lucide-react';
 import { removePagesFromPDF, getPDFPageCount } from '../utils/pdfEngine';
+import { useObjectUrl } from '../utils/useObjectUrl';
 
 interface RemovePagesProps {
   file: File | null;
@@ -11,16 +12,18 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
   const [totalPages, setTotalPages] = useState<number>(0);
   const [pagesInput, setPagesInput] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Managed Object URL lifecycle to prevent memory leaks on mobile
+  const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
   useEffect(() => {
+    revokeDownloadUrl();
     if (file) {
       getPDFPageCount(file).then((count) => {
         setTotalPages(count);
         setPagesInput('');
-        setDownloadUrl(null);
         setError(null);
       }).catch(() => {
         setError('Failed to read PDF pages.');
@@ -28,10 +31,9 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
     } else {
       setTotalPages(0);
       setPagesInput('');
-      setDownloadUrl(null);
       setError(null);
     }
-  }, [file]);
+  }, [file, revokeDownloadUrl]);
 
   const parsePageNumbers = (input: string, max: number): number[] => {
     const pages = new Set<number>();
@@ -72,11 +74,12 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
     }
 
     setIsProcessing(true);
+    revokeDownloadUrl();
+
     try {
       const outputBytes = await removePagesFromPDF(file, pagesToRemove);
       const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      createUrl(blob);
     } catch (err) {
       console.error(err);
       setError('Failed to process PDF.');
@@ -87,7 +90,7 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
 
   const handleClear = () => {
     onFileChange(null);
-    setDownloadUrl(null);
+    revokeDownloadUrl();
     setPagesInput('');
     setError(null);
   };
@@ -96,15 +99,30 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Upload PDF to remove pages"
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files[0]?.type === 'application/pdf') {
-              onFileChange(e.dataTransfer.files[0]);
+            const dropped = e.dataTransfer.files[0];
+            if (dropped) {
+              if (dropped.type === 'application/pdf' || dropped.name.toLowerCase().endsWith('.pdf')) {
+                onFileChange(dropped);
+                setError(null);
+              } else {
+                setError('Please upload a valid PDF file.');
+              }
             }
           }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to remove pages</p>
@@ -115,9 +133,16 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
             accept="application/pdf"
             className="hidden"
             onChange={(e) => {
-              if (e.target.files?.[0]?.type === 'application/pdf') {
-                onFileChange(e.target.files[0]);
+              const selected = e.target.files?.[0];
+              if (selected) {
+                if (selected.type === 'application/pdf' || selected.name.toLowerCase().endsWith('.pdf')) {
+                  onFileChange(selected);
+                  setError(null);
+                } else {
+                  setError('Please select a valid PDF file.');
+                }
               }
+              e.target.value = ''; // Clears input buffer to allow selecting the same file consecutively
             }}
           />
         </div>
@@ -158,7 +183,7 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
+            <p role="alert" className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
               {error}
             </p>
           )}
@@ -189,7 +214,7 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
               </div>
               <a
                 href={downloadUrl}
-                download={`${file.name.replace('.pdf', '')}_modified.pdf`}
+                download={`${file.name.replace(/\.pdf$/i, '')}_modified.pdf`}
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />

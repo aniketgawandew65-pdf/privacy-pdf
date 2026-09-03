@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { Upload, Loader2, Download, Sliders, CheckCircle, FileText, Lock, Trash2 } from 'lucide-react';
 import { getLicenseStatus } from '../utils/license';
+import { useObjectUrl } from '../utils/useObjectUrl';
 import { ProModal } from './ProModal';
 
 interface CompressorProps {
@@ -15,16 +16,22 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const [level, setLevel] = useState<CompressionLevel>('recommended');
   const [targetKb, setTargetKb] = useState(200);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Managed Object URL lifecycle to prevent memory leaks on mobile
+  const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
   useEffect(() => {
-    const handleStorage = () => setIsPro(getLicenseStatus().isPro);
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
+    const handleSync = () => setIsPro(getLicenseStatus().isPro);
+    window.addEventListener('storage', handleSync);
+    document.addEventListener('visibilitychange', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      document.removeEventListener('visibilitychange', handleSync);
+    };
   }, []);
 
   const handleSelectLevel = (selected: CompressionLevel) => {
@@ -44,7 +51,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     }
 
     setIsCompressing(true);
-    setDownloadUrl(null);
+    revokeDownloadUrl();
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -58,14 +65,19 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
 
       const blob = new Blob([compressedBytes as any], { type: 'application/pdf' });
       setCompressedSize(blob.size);
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      createUrl(blob);
     } catch (err) {
       console.error('Compression error:', err);
       alert('Failed to compress PDF. The file may be password protected or corrupted.');
     } finally {
       setIsCompressing(false);
     }
+  };
+
+  const handleClearFile = () => {
+    onFileChange(null);
+    revokeDownloadUrl();
+    setCompressedSize(null);
   };
 
   return (
@@ -78,16 +90,25 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         onChange={(e) => {
           const selected = e.target.files?.[0] || null;
           onFileChange(selected);
-          setDownloadUrl(null);
+          revokeDownloadUrl();
           setCompressedSize(null);
+          e.target.value = ''; // Resets file input buffer to allow selecting the same file consecutively
         }}
       />
 
       {/* Upload Zone */}
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
           onClick={() => fileInputRef.current?.click()}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 rounded-xl p-8 text-center transition-all bg-zinc-950/40 hover:bg-zinc-950/80 mb-6"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none rounded-xl p-8 text-center transition-all bg-zinc-950/40 hover:bg-zinc-950/80 mb-6"
         >
           <Upload className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
           <p className="text-sm font-medium text-zinc-200">Click or drop a PDF to compress</p>
@@ -103,11 +124,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             </div>
           </div>
           <button
-            onClick={() => {
-              onFileChange(null);
-              setDownloadUrl(null);
-              setCompressedSize(null);
-            }}
+            onClick={handleClearFile}
             className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-400 transition ml-3 shrink-0"
           >
             <Trash2 className="w-3.5 h-3.5" />

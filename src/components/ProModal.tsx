@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Sparkles, Check, Key, ShieldCheck } from 'lucide-react';
 import { getLicenseStatus, activateLicenseKey, deactivateLicense, openCheckout } from '../utils/license';
 
@@ -6,6 +6,24 @@ interface ProModalProps {
   isOpen: boolean;
   onClose: () => void;
   checkoutUrl?: string;
+}
+
+// Dynamically injects lemon.js only when the modal is accessed
+function loadLemonScript(): Promise<void> {
+  return new Promise((resolve) => {
+    if (document.querySelector('script[src*="lemon.js"]')) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://assets.lemonsqueezy.com/lemon.js';
+    script.async = true;
+    script.onload = () => {
+      (window as any).createLemonSqueezy?.();
+      resolve();
+    };
+    document.body.appendChild(script);
+  });
 }
 
 export function ProModal({
@@ -17,6 +35,12 @@ export function ProModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const { isPro, licenseKey } = getLicenseStatus();
+
+  useEffect(() => {
+    if (isOpen) {
+      loadLemonScript();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -45,6 +69,11 @@ export function ProModal({
   const handleDeactivate = () => {
     deactivateLicense();
     setSuccessMsg('License deactivated.');
+  };
+
+  const handleCheckout = async () => {
+    await loadLemonScript();
+    openCheckout(checkoutUrl);
   };
 
   return (
@@ -104,7 +133,7 @@ export function ProModal({
           <>
             {/* Purchase CTA */}
             <button
-              onClick={() => openCheckout(checkoutUrl)}
+              onClick={handleCheckout}
               className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold transition shadow-lg shadow-emerald-500/20 mb-4"
             >
               Get Pro Access — $19/year
