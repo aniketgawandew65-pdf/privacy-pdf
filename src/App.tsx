@@ -10,6 +10,7 @@ import { RemovePages } from './components/RemovePages';
 import { Watermark } from './components/Watermark';
 import { PageNumbers } from './components/PageNumbers';
 import { PdfToText } from './components/PdfToText';
+import { EditMetadata } from './components/EditMetadata';
 import { MonetizationCard } from './components/MonetizationCard';
 import {
   ShieldCheck,
@@ -24,6 +25,7 @@ import {
   Stamp,
   Hash,
   AlignLeft,
+  Tag,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -43,6 +45,7 @@ export default function App() {
     | 'watermark'
     | 'page-numbers'
     | 'pdf-to-text'
+    | 'edit-metadata'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -222,6 +225,17 @@ export default function App() {
             Extract Text
           </button>
           <button
+            onClick={() => setActiveTool('edit-metadata')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              activeTool === 'edit-metadata'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Tag className="w-4 h-4" />
+            Metadata
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'rotate'
@@ -261,6 +275,9 @@ export default function App() {
         )}
         {activeTool === 'pdf-to-text' && (
           <PdfToText file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'edit-metadata' && (
+          <EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />

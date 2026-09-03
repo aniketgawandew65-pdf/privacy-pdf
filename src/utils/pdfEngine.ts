@@ -271,3 +271,39 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
   return fullText.trim();
 }
+export interface PDFMetadata {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string;
+}
+
+export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  return {
+    title: pdfDoc.getTitle() || '',
+    author: pdfDoc.getAuthor() || '',
+    subject: pdfDoc.getSubject() || '',
+    keywords: pdfDoc.getKeywords() || '',
+  };
+}
+
+export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+
+  if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
+  if (metadata.author !== undefined) pdfDoc.setAuthor(metadata.author);
+  if (metadata.subject !== undefined) pdfDoc.setSubject(metadata.subject);
+  if (metadata.keywords !== undefined) {
+    pdfDoc.setKeywords(
+      metadata.keywords
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean)
+    );
+  }
+
+  return await pdfDoc.save();
+}
