@@ -1,173 +1,260 @@
-import React, { useState, useRef } from 'react';
-import { Upload, FileText, Download, Loader2, CheckCircle2, X, Copy, Check } from 'lucide-react';
-import { extractTextFromPDF } from '../utils/pdfEngine';
+import { useState, useRef } from 'react';
+import { createWorker } from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist';
+import {
+  Upload,
+  FileText,
+  Copy,
+  Download,
+  Loader2,
+  CheckCircle2,
+  ScanText,
+  Sparkles,
+} from 'lucide-react';
+
+// Configure pdfjs worker if not already globally set
+if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+}
 
 interface PdfToTextProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
 }
 
-export const PdfToText: React.FC<PdfToTextProps> = ({ file, onFileChange }) => {
+export function PdfToText({ file, onFileChange }: PdfToTextProps) {
+  const [extractedText, setExtractedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [extractedText, setExtractedText] = useState<string>('');
+  const [progressMsg, setProgressMsg] = useState('');
   const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [useOcr, setUseOcr] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleExtract = async () => {
+  // Fast digital extraction from embedded PDF text layers
+  const extractDigitalText = async (fileData: File): Promise<string> => {
+    const arrayBuffer = await fileData.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      setProgressMsg(`Reading digital layer: page ${i} of ${pdf.numPages}...`);
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items
+        .map((item: any) => item.str || '')
+        .filter(Boolean);
+
+      if (strings.length > 0) {
+        fullText += `--- Page ${i} ---\n` + strings.join(' ') + '\n\n';
+      }
+    }
+
+    return fullText.trim();
+  };
+
+  // Optical Character Recognition for scanned pages via Tesseract.js
+  const extractOcrText = async (fileData: File): Promise<string> => {
+    const arrayBuffer = await fileData.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+
+    setProgressMsg('Initializing local OCR engine...');
+    const worker = await createWorker('eng');
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      setProgressMsg(`Rendering page ${i} for OCR...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) continue;
+
+      // Render PDF page to canvas with explicit any casting to satisfy TypeScript
+      await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+
+      // Run Tesseract recognition on the rendered canvas
+      setProgressMsg(`Recognizing scanned text on page ${i} of ${pdf.numPages}...`);
+      const { data } = await worker.recognize(canvas);
+
+      if (data.text.trim()) {
+        fullText += `--- Page ${i} (OCR) ---\n` + data.text.trim() + '\n\n';
+      }
+    }
+
+    await worker.terminate();
+    return fullText.trim();
+  };
+
+  const handleProcess = async () => {
     if (!file) return;
     setIsProcessing(true);
-    setError(null);
+    setProgressMsg('Analyzing document...');
+    setExtractedText('');
 
     try {
-      const text = await extractTextFromPDF(file);
-      if (!text.trim()) {
-        setError('No extractable text found in this PDF (it might consist solely of scanned images).');
+      let result = '';
+      if (useOcr) {
+        result = await extractOcrText(file);
       } else {
-        setExtractedText(text);
+        result = await extractDigitalText(file);
+        // Fallback to OCR if digital layer has no text
+        if (!result) {
+          setProgressMsg('No digital text layer found. Running Tesseract OCR fallback...');
+          result = await extractOcrText(file);
+        }
       }
+
+      setExtractedText(result || 'No readable text could be identified in this document.');
     } catch (err) {
-      console.error(err);
-      setError('Failed to extract text from PDF.');
+      console.error('Text extraction failed:', err);
+      setProgressMsg('Error extracting text. Document may be encrypted or corrupted.');
     } finally {
       setIsProcessing(false);
+      setProgressMsg('');
     }
   };
 
-  const handleCopy = async () => {
-    if (!extractedText) return;
-    await navigator.clipboard.writeText(extractedText);
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(extractedText);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleClear = () => {
-    onFileChange(null);
-    setExtractedText('');
-    setError(null);
-    setCopied(false);
-  };
-
-  const downloadTxt = () => {
-    if (!extractedText || !file) return;
+  const downloadTextFile = () => {
     const blob = new Blob([extractedText], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${file.name.replace('.pdf', '')}_extracted.txt`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${file?.name.replace(/\.[^/.]+$/, '') || 'extracted'}-text.txt`;
+    a.click();
     URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div className="w-full max-w-xl mx-auto p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 shadow-xl text-left">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={(e) => {
+          const selected = e.target.files?.[0] || null;
+          onFileChange(selected);
+          setExtractedText('');
+        }}
+      />
+
+      {/* Upload Zone */}
       {!file ? (
         <div
           onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            if (e.dataTransfer.files[0]?.type === 'application/pdf') {
-              onFileChange(e.dataTransfer.files[0]);
-              setExtractedText('');
-            }
-          }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 rounded-xl p-8 text-center transition-all bg-zinc-950/40 hover:bg-zinc-950/80 mb-6"
         >
-          <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
-          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to extract text</p>
-          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your machine</p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.[0]?.type === 'application/pdf') {
-                onFileChange(e.target.files[0]);
-                setExtractedText('');
-              }
-            }}
-          />
+          <Upload className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
+          <p className="text-sm font-medium text-zinc-200">Click or drop a PDF to extract text</p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Supports native digital text and scanned OCR documents
+          </p>
         </div>
       ) : (
-        <div className="space-y-6 text-left">
-          {/* File Card */}
-          <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
-            <div className="flex items-center gap-3 truncate">
-              <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
-              <div className="truncate">
-                <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
-                <p className="text-xs text-zinc-500">{Math.round(file.size / 1024)} KB</p>
-              </div>
+        <div className="flex items-center justify-between p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 mb-6">
+          <div className="flex items-center gap-3 truncate pr-2">
+            <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div className="truncate">
+              <p className="text-xs font-semibold text-zinc-200 truncate">{file.name}</p>
+              <p className="text-[11px] text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
             </div>
-            <button
-              onClick={handleClear}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
-              title="Remove file"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
+          <button
+            onClick={() => {
+              onFileChange(null);
+              setExtractedText('');
+            }}
+            className="text-xs text-zinc-400 hover:text-red-400 transition shrink-0"
+          >
+            Change
+          </button>
+        </div>
+      )}
 
-          {error && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
-              {error}
+      {/* OCR Toggle */}
+      <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800 mb-6">
+        <div className="flex items-center gap-2">
+          <ScanText className="w-4 h-4 text-emerald-400" />
+          <div>
+            <p className="text-xs font-medium text-zinc-200">Force Deep OCR (Scanned Paper)</p>
+            <p className="text-[10px] text-zinc-500">
+              Uses Tesseract WebAssembly to read physical document scans
             </p>
-          )}
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={useOcr}
+          onChange={(e) => setUseOcr(e.target.checked)}
+          className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+        />
+      </div>
 
-          {!extractedText ? (
-            <button
-              onClick={handleExtract}
-              disabled={isProcessing}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Extracting text...</span>
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  <span>Extract All Text</span>
-                </>
-              )}
-            </button>
+      {/* Action Button */}
+      {file && !extractedText && (
+        <button
+          onClick={handleProcess}
+          disabled={isProcessing}
+          className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-xs font-semibold flex items-center justify-center gap-2 transition shadow-md shadow-emerald-500/20"
+        >
+          {isProcessing ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>{progressMsg || 'Processing...'}</span>
+            </>
           ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>Text extracted successfully!</span>
-                </div>
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 px-2.5 py-1.5 rounded-lg transition-colors"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied!' : 'Copy'}</span>
-                </button>
-              </div>
+            <>
+              <Sparkles className="w-4 h-4" />
+              <span>Extract Text</span>
+            </>
+          )}
+        </button>
+      )}
 
-              <textarea
-                readOnly
-                value={extractedText}
-                rows={8}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-300 font-mono resize-none focus:outline-none focus:border-zinc-700"
-              />
-
+      {/* Extracted Output */}
+      {extractedText && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-zinc-400">
+            <span>Extracted Content</span>
+            <div className="flex items-center gap-2">
               <button
-                onClick={downloadTxt}
-                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                onClick={copyToClipboard}
+                className="flex items-center gap-1 text-zinc-300 hover:text-white transition"
               >
-                <Download className="w-4 h-4 stroke-[2.5]" />
-                <span>Download as .TXT</span>
+                {copied ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                onClick={downloadTextFile}
+                className="flex items-center gap-1 text-zinc-300 hover:text-white transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download .txt</span>
               </button>
             </div>
-          )}
+          </div>
+
+          <textarea
+            readOnly
+            value={extractedText}
+            className="w-full h-48 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 focus:outline-none resize-none"
+          />
         </div>
       )}
     </div>
   );
-};
+}
