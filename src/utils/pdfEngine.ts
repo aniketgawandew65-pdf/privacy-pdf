@@ -307,3 +307,33 @@ export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Prom
 
   return await pdfDoc.save();
 }
+export async function signPDF(
+  file: File,
+  signaturePngDataUrl: string,
+  pageIndex: number = 0,
+  xPercent: number = 0.6,
+  yPercent: number = 0.1,
+  width: number = 150,
+  height: number = 60
+): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  const pages = pdfDoc.getPages();
+
+  const targetPage = pages[pageIndex] || pages[0];
+  const { width: pageWidth, height: pageHeight } = targetPage.getSize();
+
+  // Strip data url prefix and embed PNG
+  const base64Data = signaturePngDataUrl.split(',')[1];
+  const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+  const embeddedImage = await pdfDoc.embedPng(imageBytes);
+
+  targetPage.drawImage(embeddedImage, {
+    x: pageWidth * xPercent,
+    y: pageHeight * yPercent,
+    width,
+    height,
+  });
+
+  return await pdfDoc.save();
+}

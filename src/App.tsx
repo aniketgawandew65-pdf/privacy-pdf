@@ -11,6 +11,7 @@ import { Watermark } from './components/Watermark';
 import { PageNumbers } from './components/PageNumbers';
 import { PdfToText } from './components/PdfToText';
 import { EditMetadata } from './components/EditMetadata';
+import { SignPdf } from './components/SignPdf';
 import { MonetizationCard } from './components/MonetizationCard';
 import {
   ShieldCheck,
@@ -26,6 +27,7 @@ import {
   Hash,
   AlignLeft,
   Tag,
+  PenTool,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -46,6 +48,7 @@ export default function App() {
     | 'page-numbers'
     | 'pdf-to-text'
     | 'edit-metadata'
+    | 'sign'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -225,6 +228,17 @@ export default function App() {
             Extract Text
           </button>
           <button
+            onClick={() => setActiveTool('sign')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              activeTool === 'sign'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <PenTool className="w-4 h-4" />
+            Sign
+          </button>
+          <button
             onClick={() => setActiveTool('edit-metadata')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'edit-metadata'
@@ -275,6 +289,9 @@ export default function App() {
         )}
         {activeTool === 'pdf-to-text' && (
           <PdfToText file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'sign' && (
+          <SignPdf file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'edit-metadata' && (
           <EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />
