@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TrustBadge } from './components/TrustBadge';
 import { Compressor } from './components/Compressor';
 import { Merger } from './components/Merger';
@@ -6,13 +6,37 @@ import { Splitter } from './components/Splitter';
 import { ImageToPdf } from './components/ImageToPdf';
 import { RotatePdf } from './components/RotatePdf';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Zap, Sliders, Files, Scissors, Image as ImageIcon, RotateCw } from 'lucide-react';
+import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download } from 'lucide-react';
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
 
 export default function App() {
   const [activeTool, setActiveTool] = useState<'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate'>('compress');
-  
-  // Shared state: files stay loaded across tab changes
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+
+  // Capture desktop/mobile install trigger
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === 'accepted') {
+      setInstallPrompt(null);
+    }
+  };
 
   const activeFile = sharedFiles[0] || null;
 
@@ -28,17 +52,30 @@ export default function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-6 selection:bg-emerald-500 selection:text-black">
       {/* Header */}
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-b border-zinc-800/80">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">
-            <Zap className="w-5 h-5" />
-          </div>
+        <div className="flex items-center gap-3">
+          <img
+            src="/logo.png"
+            alt="1into1 Logo"
+            className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800"
+          />
           <div>
             <h1 className="text-lg font-bold tracking-tight">1into1 PDF</h1>
             <p className="text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
           </div>
         </div>
 
-        <TrustBadge />
+        <div className="flex items-center gap-3">
+          {installPrompt && (
+            <button
+              onClick={handleInstallApp}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-all shadow-md shadow-emerald-500/20"
+            >
+              <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+              Install App
+            </button>
+          )}
+          <TrustBadge />
+        </div>
       </header>
 
       {/* Main Container */}
