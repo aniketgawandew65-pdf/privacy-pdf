@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['logo.png', 'favicon.ico'],
+      includeAssets: ['logo.png'],
       manifest: {
         name: '1into1 PDF - Offline Privacy Suite',
         short_name: '1into1 PDF',
@@ -30,8 +30,11 @@ export default defineConfig({
         ],
       },
       workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,mjs}'],
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024, // 15MB limit for large WASM/worker bundles
+        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
       },
     }),
   ],

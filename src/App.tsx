@@ -94,10 +94,12 @@ export default function App() {
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-b border-zinc-800/80">
         <div className="flex items-center gap-3">
           <img
-            src="/logo.png"
-            alt="1into1 Logo"
-            className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800"
-          />
+             src="/logo.png"
+             alt="1into1 Logo"
+             width="40"
+             height="40"
+             className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
+             />
           <div>
             <h1 className="text-lg font-bold tracking-tight">1into1 PDF</h1>
             <p className="text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
