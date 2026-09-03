@@ -112,4 +112,11 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Rotate PDF Pages',
     subheading: 'Reorient landscape and portrait pages directly in local memory.',
   },
+  '/heic-to-jpg': {
+    path: '/heic-to-jpg',
+    title: 'HEIC to JPG Converter Online & Private (EXIF Stripped) | 1into1',
+    description: 'Convert iPhone HEIC/HEIF photos to JPG locally in your browser. Automatically strip GPS location and private camera EXIF data with zero server uploads.',
+    heading: 'Convert HEIC to JPG & Strip EXIF',
+    subheading: 'Convert Apple photos to standard JPG and remove sensitive GPS metadata locally.',
+  },
 };

@@ -15,6 +15,7 @@ import { EditMetadata } from './components/EditMetadata';
 import { SignPdf } from './components/SignPdf';
 import { ProtectPdf } from './components/ProtectPdf';
 import { UnlockPdf } from './components/UnlockPdf';
+import { HeicToJpg } from './components/HeicToJpg';
 import { MonetizationCard } from './components/MonetizationCard';
 import { ProModal } from './components/ProModal';
 import { getLicenseStatus } from './utils/license';
@@ -37,6 +38,7 @@ import {
   Lock,
   Unlock,
   Sparkles,
+  Camera,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -169,7 +171,7 @@ export default function App() {
         </p>
 
         {/* SEO Navigation Bar */}
-        <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8 max-w-3xl">
+        <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8 max-w-4xl">
           <NavLink to="/compress-pdf" className={navClass}>
             <Sliders className="w-4 h-4" />
             Compress
@@ -189,6 +191,10 @@ export default function App() {
           <NavLink to="/pdf-to-jpg" className={navClass}>
             <FileImage className="w-4 h-4" />
             PDF to JPG
+          </NavLink>
+          <NavLink to="/heic-to-jpg" className={navClass}>
+            <Camera className="w-4 h-4" />
+            HEIC to JPG
           </NavLink>
           <NavLink to="/remove-pages" className={navClass}>
             <Trash2 className="w-4 h-4" />
@@ -236,6 +242,7 @@ export default function App() {
           <Route path="/split-pdf" element={<Splitter file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="/image-to-pdf" element={<ImageToPdf />} />
           <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
+          <Route path="/heic-to-jpg" element={<HeicToJpg />} />
           <Route path="/remove-pages" element={<RemovePages file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="/watermark-pdf" element={<Watermark file={activeFile} onFileChange={handleSingleFileChange} />} />
           <Route path="/page-numbers" element={<PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />} />
