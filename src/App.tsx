@@ -9,8 +9,22 @@ import { PdfToImages } from './components/PdfToImages';
 import { RemovePages } from './components/RemovePages';
 import { Watermark } from './components/Watermark';
 import { PageNumbers } from './components/PageNumbers';
+import { PdfToText } from './components/PdfToText';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2, Stamp, Hash } from 'lucide-react';
+import {
+  ShieldCheck,
+  Sliders,
+  Files,
+  Scissors,
+  Image as ImageIcon,
+  RotateCw,
+  Download,
+  FileImage,
+  Trash2,
+  Stamp,
+  Hash,
+  AlignLeft,
+} from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -19,7 +33,16 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function App() {
   const [activeTool, setActiveTool] = useState<
-    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages' | 'watermark' | 'page-numbers'
+    | 'compress'
+    | 'merge'
+    | 'split'
+    | 'image-to-pdf'
+    | 'rotate'
+    | 'pdf-to-images'
+    | 'remove-pages'
+    | 'watermark'
+    | 'page-numbers'
+    | 'pdf-to-text'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -84,7 +107,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="w-full max-w-3xl my-auto text-center py-8">
+      <main className="w-full max-w-4xl my-auto text-center py-8">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 mb-6">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           Zero uploads • Zero tracking • Works in Airplane Mode
@@ -98,10 +121,10 @@ export default function App() {
         </p>
 
         {/* Tool Navigation */}
-        <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8">
+        <div className="inline-flex flex-wrap justify-center gap-1 p-1 rounded-xl bg-zinc-900/80 border border-zinc-800 mb-8 max-w-3xl">
           <button
             onClick={() => setActiveTool('compress')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'compress'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -112,7 +135,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('merge')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'merge'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -123,7 +146,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('split')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'split'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -134,7 +157,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('image-to-pdf')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'image-to-pdf'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -145,7 +168,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('pdf-to-images')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'pdf-to-images'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -156,7 +179,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('remove-pages')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'remove-pages'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -167,7 +190,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('watermark')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'watermark'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -178,7 +201,7 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTool('page-numbers')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'page-numbers'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -188,8 +211,19 @@ export default function App() {
             Page Numbers
           </button>
           <button
+            onClick={() => setActiveTool('pdf-to-text')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+              activeTool === 'pdf-to-text'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <AlignLeft className="w-4 h-4" />
+            Extract Text
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
               activeTool === 'rotate'
                 ? 'bg-zinc-800 text-emerald-400 shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200'
@@ -224,6 +258,9 @@ export default function App() {
         )}
         {activeTool === 'page-numbers' && (
           <PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'pdf-to-text' && (
+          <PdfToText file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />
