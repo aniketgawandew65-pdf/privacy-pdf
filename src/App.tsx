@@ -16,6 +16,8 @@ import { SignPdf } from './components/SignPdf';
 import { ProtectPdf } from './components/ProtectPdf';
 import { UnlockPdf } from './components/UnlockPdf';
 import { MonetizationCard } from './components/MonetizationCard';
+import { ProModal } from './components/ProModal';
+import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
 import {
   ShieldCheck,
@@ -34,6 +36,7 @@ import {
   PenTool,
   Lock,
   Unlock,
+  Sparkles,
 } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -45,6 +48,15 @@ export default function App() {
   const location = useLocation();
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isProModalOpen, setIsProModalOpen] = useState(false);
+  const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
+
+  // Synchronize Pro status on license changes
+  useEffect(() => {
+    const handleStorage = () => setIsPro(getLicenseStatus().isPro);
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   // Dynamic SEO title & description updates
   useEffect(() => {
@@ -111,7 +123,20 @@ export default function App() {
           </div>
         </NavLink>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {/* Pro Status / Upgrade Trigger */}
+          <button
+            onClick={() => setIsProModalOpen(true)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+              isPro
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                : 'bg-zinc-900 hover:bg-zinc-800 text-amber-300 border-amber-500/30 shadow-sm'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {isPro ? 'Pro Active' : 'Upgrade Pro'}
+          </button>
+
           {installPrompt && (
             <button
               onClick={handleInstallApp}
@@ -121,6 +146,7 @@ export default function App() {
               Install App
             </button>
           )}
+
           <TrustBadge />
         </div>
       </header>
@@ -228,6 +254,9 @@ export default function App() {
       <footer className="w-full max-w-5xl text-center py-4 border-t border-zinc-900 text-xs text-zinc-600">
         All calculations run locally via WebAssembly and Web Workers.
       </footer>
+
+      {/* Pro Modal */}
+      <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
     </div>
   );
 }
