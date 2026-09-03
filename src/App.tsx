@@ -7,8 +7,9 @@ import { ImageToPdf } from './components/ImageToPdf';
 import { RotatePdf } from './components/RotatePdf';
 import { PdfToImages } from './components/PdfToImages';
 import { RemovePages } from './components/RemovePages';
+import { Watermark } from './components/Watermark';
 import { MonetizationCard } from './components/MonetizationCard';
-import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2 } from 'lucide-react';
+import { ShieldCheck, Sliders, Files, Scissors, Image as ImageIcon, RotateCw, Download, FileImage, Trash2, Stamp } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -17,7 +18,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 export default function App() {
   const [activeTool, setActiveTool] = useState<
-    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages'
+    'compress' | 'merge' | 'split' | 'image-to-pdf' | 'rotate' | 'pdf-to-images' | 'remove-pages' | 'watermark'
   >('compress');
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -164,6 +165,17 @@ export default function App() {
             Remove Pages
           </button>
           <button
+            onClick={() => setActiveTool('watermark')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTool === 'watermark'
+                ? 'bg-zinc-800 text-emerald-400 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Stamp className="w-4 h-4" />
+            Watermark
+          </button>
+          <button
             onClick={() => setActiveTool('rotate')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTool === 'rotate'
@@ -194,6 +206,9 @@ export default function App() {
         )}
         {activeTool === 'remove-pages' && (
           <RemovePages file={activeFile} onFileChange={handleSingleFileChange} />
+        )}
+        {activeTool === 'watermark' && (
+          <Watermark file={activeFile} onFileChange={handleSingleFileChange} />
         )}
         {activeTool === 'rotate' && (
           <RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />

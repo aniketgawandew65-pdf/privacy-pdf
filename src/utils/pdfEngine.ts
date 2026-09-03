@@ -206,3 +206,21 @@ export async function getPDFPageCount(file: File): Promise<number> {
   const pdfDoc = await PDFDocument.load(bytes);
   return pdfDoc.getPageCount();
 }
+export async function addWatermarkToPDF(file: File, watermarkText: string): Promise<Uint8Array> {
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(bytes);
+  const pages = pdfDoc.getPages();
+
+  for (const page of pages) {
+    const { width, height } = page.getSize();
+    page.drawText(watermarkText, {
+      x: width * 0.2,
+      y: height * 0.4,
+      size: 42,
+      opacity: 0.25,
+      rotate: degrees(45),
+    });
+  }
+
+  return await pdfDoc.save();
+}
