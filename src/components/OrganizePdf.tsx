@@ -9,6 +9,8 @@ import {
   RotateCw,
   Trash2,
   GripVertical,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { reorderAndProcessPDF, type PageConfig } from '../utils/pdfEngine';
@@ -27,6 +29,7 @@ interface PageThumbnail {
 
 export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) => {
   const [pages, setPages] = useState<PageThumbnail[]>([]);
+  const [cardZoom, setCardZoom] = useState<number>(1.0);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -38,6 +41,7 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
   useEffect(() => {
     if (!file) {
       setPages([]);
+      setCardZoom(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
       return;
@@ -55,7 +59,6 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
         const total = pdf.numPages;
         const thumbs: PageThumbnail[] = [];
 
-        // Retina 2.0x High-DPI Rendering for sharp text
         const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
 
         for (let i = 1; i <= total; i++) {
@@ -207,59 +210,96 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
             </button>
           </div>
 
-          {isLoadingPages ? (
-            <div className="py-16 flex flex-col items-center justify-center gap-3 text-zinc-400">
-              <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
-              <span className="text-xs">Rendering high-resolution previews...</span>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-h-[560px] overflow-y-auto p-2">
-              {pages.map((p, idx) => (
-                <div
-                  key={idx}
-                  draggable
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragOver={(e) => handleDragOver(e, idx)}
-                  className="group relative bg-zinc-950 border border-zinc-800 hover:border-emerald-500/60 rounded-xl p-2 transition flex flex-col items-center cursor-grab active:cursor-grabbing"
+          {/* Page Grid Container with Floating Bottom-Right Zoom */}
+          <div className="relative">
+            {isLoadingPages ? (
+              <div className="py-16 flex flex-col items-center justify-center gap-3 text-zinc-400">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+                <span className="text-xs">Rendering high-resolution previews...</span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(auto-fill, minmax(${Math.round(140 * cardZoom)}px, 1fr))`,
+                  gap: '1rem',
+                }}
+                className="max-h-[560px] overflow-y-auto p-2 pb-14"
+              >
+                {pages.map((p, idx) => (
+                  <div
+                    key={idx}
+                    draggable
+                    onDragStart={() => handleDragStart(idx)}
+                    onDragOver={(e) => handleDragOver(e, idx)}
+                    className="group relative bg-zinc-950 border border-zinc-800 hover:border-emerald-500/60 rounded-xl p-2 transition flex flex-col items-center cursor-grab active:cursor-grabbing"
+                  >
+                    <div className="w-full flex items-center justify-between text-[11px] text-zinc-500 mb-1 px-1">
+                      <span className="flex items-center gap-1 font-mono text-zinc-400">
+                        <GripVertical className="w-3 h-3 text-zinc-600" /> #{idx + 1}
+                      </span>
+                      <span>Orig: p.{p.originalIndex + 1}</span>
+                    </div>
+
+                    <div className="w-full aspect-[1/1.414] bg-zinc-900 rounded-lg overflow-hidden flex items-center justify-center p-1">
+                      <img
+                        src={p.dataUrl}
+                        alt={`Page ${idx + 1}`}
+                        style={{ transform: `rotate(${p.rotation}deg)` }}
+                        className="w-full h-full object-contain rounded transition-transform duration-200"
+                      />
+                    </div>
+
+                    <div className="w-full flex items-center justify-between mt-2 pt-1 border-t border-zinc-900">
+                      <button
+                        type="button"
+                        onClick={() => handleRotatePage(idx)}
+                        className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-900 transition"
+                        title="Rotate Page"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePage(idx)}
+                        className="p-1 rounded text-zinc-400 hover:text-red-400 hover:bg-zinc-900 transition"
+                        title="Delete Page"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Bottom-Right Floating Zoom Controls */}
+            {!isLoadingPages && pages.length > 0 && (
+              <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-lg z-20">
+                <button
+                  type="button"
+                  onClick={() => setCardZoom((z) => Math.max(0.7, parseFloat((z - 0.2).toFixed(1))))}
+                  disabled={cardZoom <= 0.7}
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                  title="Smaller Cards"
                 >
-                  <div className="w-full flex items-center justify-between text-[11px] text-zinc-500 mb-1 px-1">
-                    <span className="flex items-center gap-1 font-mono text-zinc-400">
-                      <GripVertical className="w-3 h-3 text-zinc-600" /> #{idx + 1}
-                    </span>
-                    <span>Orig: p.{p.originalIndex + 1}</span>
-                  </div>
-
-                  <div className="w-full aspect-[1/1.414] bg-zinc-900 rounded-lg overflow-hidden flex items-center justify-center p-1">
-                    <img
-                      src={p.dataUrl}
-                      alt={`Page ${idx + 1}`}
-                      style={{ transform: `rotate(${p.rotation}deg)` }}
-                      className="w-full h-full object-contain rounded transition-transform duration-200"
-                    />
-                  </div>
-
-                  <div className="w-full flex items-center justify-between mt-2 pt-1 border-t border-zinc-900">
-                    <button
-                      type="button"
-                      onClick={() => handleRotatePage(idx)}
-                      className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-900 transition"
-                      title="Rotate Page"
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeletePage(idx)}
-                      className="p-1 rounded text-zinc-400 hover:text-red-400 hover:bg-zinc-900 transition"
-                      title="Delete Page"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[10px] font-mono text-zinc-300 min-w-[36px] text-center">
+                  {Math.round(cardZoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCardZoom((z) => Math.min(2.2, parseFloat((z + 0.2).toFixed(1))))}
+                  disabled={cardZoom >= 2.2}
+                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                  title="Larger Cards"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
 
           {errorMessage && (
             <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">

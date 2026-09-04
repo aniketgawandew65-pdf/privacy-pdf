@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
@@ -24,6 +26,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageRedactions, setPageRedactions] = useState<Record<number, RedactionRect[]>>({});
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
@@ -47,6 +50,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       setTotalPages(0);
       setCurrentPage(1);
       setPageRedactions({});
+      setZoomLevel(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
       pdfDocRef.current = null;
@@ -80,7 +84,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  // High-DPI 2.0x Retina rendering so fine text/numbers can be read clearly
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
@@ -92,7 +95,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
       const targetWidth = overlayRef.current?.parentElement?.clientWidth ? overlayRef.current.parentElement.clientWidth - 32 : 560;
       const targetHeight = 560;
-      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height) * dpr;
+      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height) * dpr * zoomLevel;
       const viewport = page.getViewport({ scale });
 
       const canvas = canvasRef.current;
@@ -108,13 +111,13 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     } finally {
       setIsLoadingPage(false);
     }
-  }, [currentPage]);
+  }, [currentPage, zoomLevel]);
 
   useEffect(() => {
     if (totalPages > 0) {
       renderCurrentPage();
     }
-  }, [currentPage, totalPages, renderCurrentPage]);
+  }, [currentPage, totalPages, zoomLevel, renderCurrentPage]);
 
   const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
@@ -283,15 +286,15 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             )}
           </div>
 
-          {/* High-DPI Canvas & Redaction Overlay */}
-          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center p-2 overflow-hidden min-h-[300px]">
+          {/* High-DPI Canvas & Redaction Viewport with Bottom-Right Zoom */}
+          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center p-4 overflow-auto min-h-[340px] max-h-[580px]">
             {isLoadingPage && (
               <div className="absolute inset-0 bg-zinc-950/60 z-20 flex items-center justify-center backdrop-blur-xs">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            <div className="relative inline-block leading-none">
+            <div className="relative inline-block leading-none my-auto">
               <canvas ref={canvasRef} className="block rounded shadow-md max-h-[520px] w-auto h-auto object-contain pointer-events-none" />
 
               <div
@@ -326,6 +329,31 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                   />
                 )}
               </div>
+            </div>
+
+            {/* Bottom-Right Floating Zoom Controls */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-lg z-30">
+              <button
+                type="button"
+                onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
+                disabled={zoomLevel <= 0.75}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[10px] font-mono text-zinc-300 min-w-[36px] text-center">
+                {Math.round(zoomLevel * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomLevel((z) => Math.min(2.5, parseFloat((z + 0.25).toFixed(2))))}
+                disabled={zoomLevel >= 2.5}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 

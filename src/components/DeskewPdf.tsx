@@ -8,6 +8,8 @@ import {
   AlertCircle,
   Compass,
   Sparkles,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { deskewPDF, estimateSkewAngle } from '../utils/pdfEngine';
@@ -20,6 +22,7 @@ interface DeskewPdfProps {
 
 export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
   const [angle, setAngle] = useState<number>(0);
+  const [zoom, setZoom] = useState<number>(1.0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isEstimating, setIsEstimating] = useState(false);
@@ -33,6 +36,7 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
     if (!file) {
       setPreviewUrl(null);
       setAngle(0);
+      setZoom(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
       return;
@@ -49,7 +53,6 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer).slice() }).promise;
         const page = await pdf.getPage(1);
 
-        // High-DPI 2.0x Retina scale for crisp lines & text
         const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
         const unscaled = page.getViewport({ scale: 1.0 });
         const scale = (520 / Math.max(unscaled.width, unscaled.height)) * dpr;
@@ -184,21 +187,50 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
             </button>
           </div>
 
-          {/* High-DPI Live Deskew Preview */}
-          <div className="relative w-full h-[340px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-hidden p-4">
+          {/* High-DPI Live Deskew Preview with Corner Zoom Widget */}
+          <div className="relative w-full h-[360px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-auto p-4 select-none">
             {isLoadingPreview ? (
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
             ) : previewUrl ? (
-              <div className="relative flex items-center justify-center w-full h-full">
+              <div className="relative flex items-center justify-center min-w-full min-h-full p-8">
                 <img
                   src={previewUrl}
                   alt="Deskew Preview"
-                  style={{ transform: `rotate(${angle}deg)` }}
-                  className="max-h-[280px] max-w-[280px] object-contain rounded shadow-2xl transition-transform duration-100 ease-out"
+                  style={{
+                    transform: `rotate(${angle}deg) scale(${zoom})`,
+                    transformOrigin: 'center center',
+                  }}
+                  className="max-h-[260px] max-w-[260px] object-contain rounded shadow-2xl transition-transform duration-100 ease-out pointer-events-none"
                 />
               </div>
             ) : null}
-            <span className="absolute bottom-2 text-[10px] text-zinc-500">Live Page 1 Straighten Preview</span>
+
+            <span className="absolute bottom-3 left-4 text-[10px] text-zinc-500">Live Page 1 Straighten Preview</span>
+
+            {/* Bottom-Right Floating Zoom Controls */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-lg z-20">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(0.6, parseFloat((z - 0.2).toFixed(1))))}
+                disabled={zoom <= 0.6}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[10px] font-mono text-zinc-300 min-w-[36px] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(3.0, parseFloat((z + 0.2).toFixed(1))))}
+                disabled={zoom >= 3.0}
+                className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-2">
