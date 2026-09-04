@@ -25,6 +25,8 @@ import {
   Sparkles,
   Camera,
   Loader2,
+  LayoutGrid,
+  EyeOff,
 } from 'lucide-react';
 
 // Code-split all tool components to minimize initial bundle size
@@ -46,7 +48,8 @@ const HeicToJpg = lazy(() => import('./components/HeicToJpg').then((m) => ({ def
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) => ({ default: m.PrivacyPolicy })));
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
-
+const OrganizePdf = lazy(() => import('./components/OrganizePdf').then((m) => ({ default: m.OrganizePdf })));
+const SanitizePdf = lazy(() => import('./components/SanitizePdf').then((m) => ({ default: m.SanitizePdf })));
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -214,13 +217,17 @@ export default function App() {
             <Sliders className="w-4 h-4" />
             Compress
           </NavLink>
-          <NavLink to="/merge-pdf" className={navClass}>
+         <NavLink to="/merge-pdf" className={navClass}>
             <Files className="w-4 h-4" />
             Merge
           </NavLink>
           <NavLink to="/split-pdf" className={navClass}>
             <Scissors className="w-4 h-4" />
             Split
+          </NavLink>
+          <NavLink to="/organize-pdf" className={navClass}>
+            <LayoutGrid className="w-4 h-4" />
+            Organize
           </NavLink>
           <NavLink to="/image-to-pdf" className={navClass}>
             <ImageIcon className="w-4 h-4" />
@@ -266,6 +273,10 @@ export default function App() {
             <Tag className="w-4 h-4" />
             Metadata
           </NavLink>
+          <NavLink to="/sanitize-pdf" className={navClass}>
+          <EyeOff className="w-4 h-4" />
+           Sanitize
+          </NavLink>
           <NavLink to="/rotate-pdf" className={navClass}>
             <RotateCw className="w-4 h-4" />
             Rotate
@@ -282,6 +293,7 @@ export default function App() {
               <Route path="/compress-pdf" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/merge-pdf" element={<Merger files={sharedFiles} onFilesChange={setSharedFiles} />} />
               <Route path="/split-pdf" element={<Splitter file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/organize-pdf" element={<OrganizePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/image-to-pdf" element={<ImageToPdf />} />
               <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/heic-to-jpg" element={<HeicToJpg />} />
@@ -294,6 +306,7 @@ export default function App() {
               <Route path="/unlock-pdf" element={<UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/edit-metadata" element={<EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/rotate-pdf" element={<RotatePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/sanitize-pdf" element={<SanitizePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

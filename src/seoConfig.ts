@@ -119,4 +119,18 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Rotate PDF Pages',
     subheading: 'Reorient landscape and portrait pages directly in local memory.',
   },
+  '/organize-pdf': {
+    path: '/organize-pdf',
+    title: 'Organize PDF Pages — Reorder, Rotate & Delete Pages Free',
+    description: 'Visually organize, reorder, rotate, and delete pages from PDF documents locally in your browser. 100% private, zero server uploads.',
+    heading: 'Organize PDF Pages',
+    subheading: 'Drag and drop page thumbnails to reorder, rotate, or delete pages in memory.',
+  },
+  '/sanitize-pdf': {
+    path: '/sanitize-pdf',
+    title: 'Sanitize PDF — Strip Hidden Metadata & Tracking Tags',
+    description: 'Remove author, creation dates, software fingerprints, and XMP metadata from PDF files in your browser. 100% private and offline.',
+    heading: 'Sanitize PDF Metadata',
+    subheading: 'Wipe hidden tracking identifiers, hardware signatures, and author data before sharing.',
+  },
 };

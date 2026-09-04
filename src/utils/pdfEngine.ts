@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
-import { PDFDocument, degrees, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, degrees, StandardFonts, rgb, PDFName, PDFDict } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
+import JSZip from 'jszip';
 
 // Configure offline worker for 100% local processing (works in Airplane Mode)
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -476,6 +477,7 @@ export async function unlockPDF(
   if (!doc) throw new Error('Failed to generate unlocked PDF');
   return new Uint8Array(doc.output('arraybuffer'));
 }
+
 export async function compressPDF(
   file: File,
   options: CompressOptions
@@ -576,4 +578,88 @@ export async function compressPDF(
   }
 
   return await newPdfDoc.save({ useObjectStreams: true });
+}
+
+export interface PageConfig {
+  originalIndex: number; // 0-indexed
+  rotation: number;      // 0, 90, 180, 270
+}
+
+/**
+ * Reorders, rotates, and cherry-picks pages into a new PDF
+ */
+export async function reorderAndProcessPDF(
+  file: File,
+  pages: PageConfig[]
+): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const outputDoc = await PDFDocument.create();
+
+  const indicesToCopy = pages.map((p) => p.originalIndex);
+  const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
+
+  copiedPages.forEach((page, idx) => {
+    const desiredRotation = pages[idx].rotation;
+    const currentRotation = page.getRotation().angle;
+    page.setRotation(degrees((currentRotation + desiredRotation) % 360));
+    outputDoc.addPage(page);
+  });
+
+  return await outputDoc.save({ useObjectStreams: true });
+}
+
+/**
+ * Bursts a multi-page PDF into separate 1-page PDFs packaged into a ZIP
+ */
+export async function splitPdfToZip(
+  file: File,
+  onProgress?: (current: number, total: number) => void
+): Promise<Blob> {
+  const arrayBuffer = await file.arrayBuffer();
+  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const totalPages = sourceDoc.getPageCount();
+  const zip = new JSZip();
+
+  const baseName = file.name.replace(/\.[^/.]+$/, '');
+
+  for (let i = 0; i < totalPages; i++) {
+    onProgress?.(i + 1, totalPages);
+    const singleDoc = await PDFDocument.create();
+    const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
+    singleDoc.addPage(copiedPage);
+
+    const pdfBytes = await singleDoc.save({ useObjectStreams: true });
+    const paddedIndex = String(i + 1).padStart(2, '0');
+    zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+  }
+
+  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+}
+
+/**
+ * 1-click sanitization: Strips XMP metadata, author, creator, producer, and date tags
+ */
+export async function sanitizePDF(file: File): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+
+  // Strip standard metadata
+  pdfDoc.setTitle('');
+  pdfDoc.setAuthor('');
+  pdfDoc.setSubject('');
+  pdfDoc.setKeywords([]);
+  pdfDoc.setProducer('1into1 PDF (Privacy Sanitized)');
+  pdfDoc.setCreator('');
+  pdfDoc.setCreationDate(new Date(0));
+  pdfDoc.setModificationDate(new Date(0));
+
+  // Remove low-level XMP Metadata catalog if present
+  const catalog = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Root);
+  if (catalog instanceof PDFDict) {
+    catalog.delete(PDFName.of('Metadata'));
+    catalog.delete(PDFName.of('PieceInfo'));
+  }
+
+  return await pdfDoc.save({ useObjectStreams: true });
 }
