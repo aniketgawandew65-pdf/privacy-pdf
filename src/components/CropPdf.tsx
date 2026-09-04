@@ -12,6 +12,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+
 import { cropPDF, type CropBox } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -96,7 +97,11 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
       const page = await pdfDocRef.current.getPage(currentPage);
       const containerWidth = overlayRef.current?.parentElement?.clientWidth || 600;
       const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const scale = Math.min(1.5, Math.max(0.6, (containerWidth - 32) / unscaledViewport.width));
+
+      // Scale to fit BOTH width and a maximum height of 520px so full page is visible
+      const targetHeight = 520;
+      const targetWidth = Math.max(300, containerWidth - 32);
+      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
       const viewport = page.getViewport({ scale });
 
       const canvas = canvasRef.current;
@@ -357,7 +362,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
               onMouseUp={handleMouseUp}
               className="relative cursor-crosshair inline-block"
             >
-              <canvas ref={canvasRef} className="block rounded shadow-md" />
+              <canvas ref={canvasRef} className="block rounded shadow-md max-h-[520px] w-auto h-auto object-contain" />
 
               {/* Visual Crop Box Overlay */}
               {currentBox && (

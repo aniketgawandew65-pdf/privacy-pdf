@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Upload, RotateCw, Download, Loader2, CheckCircle2, FileText, X, AlertCircle } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
 import { rotatePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -10,11 +11,54 @@ interface RotatePdfProps {
 
 export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
   const [angle, setAngle] = useState<number>(90);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      revokeDownloadUrl();
+      setErrorMessage(null);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingPreview(true);
+
+    (async () => {
+      try {
+        const buffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 0.8 });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await page.render({ canvasContext: ctx as any, viewport } as any).promise;
+          if (isMounted) {
+            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.85));
+          }
+        }
+      } catch (err) {
+        console.error('Preview render error:', err);
+      } finally {
+        if (isMounted) setIsLoadingPreview(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [file]);
 
   const handleRotate = async () => {
     if (!file) return;
@@ -26,9 +70,9 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
       const outputBytes = await rotatePDF(file, angle);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Rotation error:', err);
-      setErrorMessage('Failed to rotate PDF. The file may be damaged, corrupted, or password-protected.');
+      setErrorMessage(err.message || 'Failed to rotate PDF.');
     } finally {
       setIsProcessing(false);
     }
@@ -36,6 +80,7 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
 
   const handleClearFile = () => {
     onFileChange(null);
+    setPreviewUrl(null);
     revokeDownloadUrl();
     setErrorMessage(null);
   };
@@ -59,8 +104,6 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
             if (dropped && dropped.type === 'application/pdf') {
-              setErrorMessage(null);
-              revokeDownloadUrl();
               onFileChange(dropped);
             }
           }}
@@ -77,8 +120,6 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             onChange={(e) => {
               const selected = e.target.files?.[0];
               if (selected && selected.type === 'application/pdf') {
-                setErrorMessage(null);
-                revokeDownloadUrl();
                 onFileChange(selected);
               }
               e.target.value = '';
@@ -87,7 +128,6 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
         </div>
       ) : (
         <div className="space-y-6 text-left">
-          {/* File Card with Clear */}
           <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -105,13 +145,24 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             </button>
           </div>
 
-          {/* Error Banner */}
-          {errorMessage && (
-            <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
+          {/* Live Rotating Preview */}
+          <div className="p-4 bg-zinc-950/80 rounded-xl border border-zinc-800 flex flex-col items-center justify-center min-h-[260px] overflow-hidden">
+            {isLoadingPreview ? (
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+            ) : previewUrl ? (
+              <div className="w-48 h-60 flex items-center justify-center">
+                <img
+                  src={previewUrl}
+                  alt="Page 1 Preview"
+                  className="max-w-full max-h-full object-contain rounded shadow-lg transition-transform duration-300 ease-out border border-zinc-700"
+                  style={{ transform: `rotate(${angle}deg)` }}
+                />
+              </div>
+            ) : (
+              <span className="text-xs text-zinc-500">Preview not available</span>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-3">Live Page 1 Rotation Preview</p>
+          </div>
 
           {/* Angle Selector */}
           <div className="space-y-2">
@@ -124,7 +175,6 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
                   onClick={() => {
                     setAngle(deg);
                     revokeDownloadUrl();
-                    setErrorMessage(null);
                   }}
                   className={`py-2.5 rounded-xl border text-sm font-medium transition-all ${
                     angle === deg
@@ -137,6 +187,13 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
               ))}
             </div>
           </div>
+
+          {errorMessage && (
+            <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
 
           {!downloadUrl ? (
             <button

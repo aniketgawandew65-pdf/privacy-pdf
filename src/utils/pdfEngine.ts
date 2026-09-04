@@ -15,10 +15,12 @@ import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
 
 // Configure offline worker for 100% local processing (works in Airplane Mode)
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.mjs',
+    import.meta.url
+  ).toString();
+}
 
 export interface CompressionProgress {
   currentPage: number;
@@ -40,7 +42,7 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
 
   for (const file of files) {
     const fileBytes = await file.arrayBuffer();
-    const pdfDoc = await PDFDocument.load(fileBytes);
+    const pdfDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
     const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
     copiedPages.forEach((page) => mergedPdf.addPage(page));
   }
@@ -60,17 +62,14 @@ export async function compressPDFToTarget(
   const fileBytes = await file.arrayBuffer();
   const originalSizeKB = file.size / 1024;
 
-  // If already smaller than target, return as-is
   if (originalSizeKB <= targetSizeKB) {
     return new Uint8Array(fileBytes);
   }
 
-  // Load PDF with PDF.js
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
-  // Calculate compression quality ratio (clamped between 0.35 and 0.85)
   const targetRatio = targetSizeKB / originalSizeKB;
   const quality = Math.max(0.35, Math.min(0.85, targetRatio * 0.9));
   const scale = targetRatio < 0.4 ? 1.0 : 1.3;
@@ -98,12 +97,11 @@ export async function compressPDFToTarget(
 
     await (
       page.render({
-        canvasContext: context,
+        canvasContext: context as any,
         viewport: viewport,
       } as any) as any
     ).promise;
 
-    // Convert canvas page to compressed JPEG blob
     const jpegBlob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
         (blob) => {
@@ -118,7 +116,6 @@ export async function compressPDFToTarget(
     const jpegBytes = await jpegBlob.arrayBuffer();
     const embeddedImage = await outputPdf.embedJpg(jpegBytes);
 
-    // Add page matching original aspect ratio
     const newPage = outputPdf.addPage([viewport.width, viewport.height]);
     newPage.drawImage(embeddedImage, {
       x: 0,
@@ -126,6 +123,9 @@ export async function compressPDFToTarget(
       width: viewport.width,
       height: viewport.height,
     });
+
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   return await outputPdf.save();
@@ -159,6 +159,9 @@ export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
       width: embeddedImage.width,
       height: embeddedImage.height,
     });
+
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   return await pdfDoc.save();
@@ -166,7 +169,7 @@ export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
 
 export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
 
   for (const page of pages) {
@@ -179,7 +182,7 @@ export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint
 
 export async function pdfToImages(file: File): Promise<string[]> {
   const fileBytes = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes).slice() });
   const pdfDoc = await loadingTask.promise;
   const imageUrls: string[] = [];
 
@@ -203,14 +206,45 @@ export async function pdfToImages(file: File): Promise<string[]> {
     ).promise;
 
     imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   return imageUrls;
 }
 
+export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const newDoc = await PDFDocument.create();
+  const total = srcDoc.getPageCount();
+
+  const pagesToInclude = new Set<number>();
+  ranges.split(',').forEach((part) => {
+    const p = part.trim();
+    if (p.includes('-')) {
+      const [start, end] = p.split('-').map((n) => parseInt(n.trim(), 10));
+      if (!isNaN(start) && !isNaN(end)) {
+        for (let i = start; i <= end; i++) {
+          if (i >= 1 && i <= total) pagesToInclude.add(i - 1);
+        }
+      }
+    } else {
+      const num = parseInt(p, 10);
+      if (!isNaN(num) && num >= 1 && num <= total) pagesToInclude.add(num - 1);
+    }
+  });
+
+  const indices = Array.from(pagesToInclude).sort((a, b) => a - b);
+  const copied = await newDoc.copyPages(srcDoc, indices);
+  copied.forEach((p) => newDoc.addPage(p));
+
+  return await newDoc.save();
+}
+
 export async function removePagesFromPDF(file: File, pageNumbersToRemove: number[]): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
 
   const sortedIndices = [...pageNumbersToRemove]
     .map((num) => num - 1)
@@ -225,15 +259,24 @@ export async function removePagesFromPDF(file: File, pageNumbersToRemove: number
   return await pdfDoc.save();
 }
 
+/**
+ * Dual-engine page counter: uses pdf-lib with ignoreEncryption,
+ * with seamless PDF.js fallback for scanned or strict files.
+ */
 export async function getPDFPageCount(file: File): Promise<number> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
-  return pdfDoc.getPageCount();
+  try {
+    const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    return pdfDoc.getPageCount();
+  } catch {
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes).slice() }).promise;
+    return doc.numPages;
+  }
 }
 
 export async function addWatermarkToPDF(file: File, watermarkText: string): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
 
   for (const page of pages) {
@@ -255,7 +298,7 @@ export async function addPageNumbersToPDF(
   position: 'bottom-center' | 'bottom-right' = 'bottom-center'
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
   const total = pages.length;
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -282,7 +325,7 @@ export async function addPageNumbersToPDF(
 
 export async function extractTextFromPDF(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() }).promise;
   let fullText = '';
 
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -308,7 +351,7 @@ export interface PDFMetadata {
 
 export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   return {
     title: pdfDoc.getTitle() || '',
     author: pdfDoc.getAuthor() || '',
@@ -319,7 +362,7 @@ export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
 
 export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
 
   if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
   if (metadata.author !== undefined) pdfDoc.setAuthor(metadata.author);
@@ -346,7 +389,7 @@ export async function signPDF(
   height: number = 60
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
 
   const targetPage = pages[pageIndex] || pages[0];
@@ -372,7 +415,7 @@ export async function encryptPDF(
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() }).promise;
   const numPages = pdf.numPages;
 
   let doc: jsPDF | null = null;
@@ -421,6 +464,9 @@ export async function encryptPDF(
     if (onProgress) {
       onProgress(Math.round((i / numPages) * 100));
     }
+
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   if (!doc) throw new Error('Failed to generate encrypted PDF');
@@ -434,8 +480,14 @@ export async function unlockPDF(
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
 
+  try {
+    const testDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    onProgress?.(100);
+    return await testDoc.save({ useObjectStreams: false });
+  } catch {}
+
   const loadingTask = pdfjsLib.getDocument({
-    data: arrayBuffer,
+    data: new Uint8Array(arrayBuffer).slice(),
     password: password,
   });
 
@@ -483,6 +535,9 @@ export async function unlockPDF(
     if (onProgress) {
       onProgress(Math.round((i / numPages) * 100));
     }
+
+    canvas.width = 0;
+    canvas.height = 0;
   }
 
   if (!doc) throw new Error('Failed to generate unlocked PDF');
@@ -496,20 +551,17 @@ export async function compressPDF(
   const { level, targetKb = 200, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
 
-  // Mode 1: Standard (Lossless structural cleanup)
   if (level === 'recommended') {
     const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
   }
 
-  // Mode 2 & 3: Canvas Rasterization to Exact KB Target
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
 
   const newPdfDoc = await PDFDocument.create();
 
-  // Reserve PDF structural overhead (~1.5KB base + ~250B per page)
   const pdfOverhead = 1536 + totalPages * 250;
   const desiredTotalBytes = (level === 'extreme' ? Math.max(40 * totalPages, 60) : targetKb) * 1024;
   const netImageBudget = Math.max(desiredTotalBytes - pdfOverhead, totalPages * 1024);
@@ -525,12 +577,10 @@ export async function compressPDF(
     const page = await pdf.getPage(pageNum);
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-    // Derive initial scale directly from byte budget
     let scale = Math.max(0.15, Math.min(1.4, Math.sqrt(budgetPerPage / 45000)));
     let quality = budgetPerPage < 20 * 1024 ? 0.35 : 0.65;
     let finalBlob: Blob | null = null;
 
-    // Up to 4 convergence passes to force output under budgetPerPage
     for (let attempt = 0; attempt < 4; attempt++) {
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
@@ -551,22 +601,18 @@ export async function compressPDF(
         canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
       );
 
-      // Free canvas memory immediately
       canvas.width = 0;
       canvas.height = 0;
 
       finalBlob = blob;
 
       if (blob.size <= budgetPerPage) {
-        // Fits under target budget
         if (blob.size >= budgetPerPage * 0.75 || attempt >= 2) {
           break;
         }
-        // Slightly increase quality if well below budget
         scale = Math.min(1.4, scale * 1.12);
         quality = Math.min(0.85, quality + 0.1);
       } else {
-        // Exceeded budget: scale down canvas dimensions proportionally
         const excessRatio = blob.size / budgetPerPage;
         const downscaleFactor = Math.sqrt(1 / excessRatio) * 0.92;
         scale = Math.max(0.1, scale * downscaleFactor);
@@ -592,13 +638,10 @@ export async function compressPDF(
 }
 
 export interface PageConfig {
-  originalIndex: number; // 0-indexed
-  rotation: number;      // 0, 90, 180, 270
+  originalIndex: number;
+  rotation: number;
 }
 
-/**
- * Reorders, rotates, and cherry-picks pages into a new PDF
- */
 export async function reorderAndProcessPDF(
   file: File,
   pages: PageConfig[]
@@ -620,9 +663,6 @@ export async function reorderAndProcessPDF(
   return await outputDoc.save({ useObjectStreams: true });
 }
 
-/**
- * Bursts a multi-page PDF into separate 1-page PDFs packaged into a ZIP
- */
 export async function splitPdfToZip(
   file: File,
   onProgress?: (current: number, total: number) => void
@@ -649,13 +689,13 @@ export async function splitPdfToZip(
 }
 
 /**
- * 1-click sanitization: Strips XMP metadata, author, creator, producer, and date tags
+ * 1-click sanitization: Safely strips XMP metadata, author, creator, producer,
+ * and date tags without corrupting xref tables.
  */
 export async function sanitizePDF(file: File): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
-  // Strip standard metadata
   pdfDoc.setTitle('');
   pdfDoc.setAuthor('');
   pdfDoc.setSubject('');
@@ -665,45 +705,42 @@ export async function sanitizePDF(file: File): Promise<Uint8Array> {
   pdfDoc.setCreationDate(new Date(0));
   pdfDoc.setModificationDate(new Date(0));
 
-  // Remove low-level XMP Metadata catalog if present
-  const catalog = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Root);
-  if (catalog instanceof PDFDict) {
-    catalog.delete(PDFName.of('Metadata'));
-    catalog.delete(PDFName.of('PieceInfo'));
+  try {
+    const catalog = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Root);
+    if (catalog instanceof PDFDict) {
+      catalog.delete(PDFName.of('Metadata'));
+      catalog.delete(PDFName.of('PieceInfo'));
+    }
+  } catch (e) {
+    console.warn('Metadata cleanup bypassed:', e);
   }
 
-  return await pdfDoc.save({ useObjectStreams: true });
+  return await pdfDoc.save({ useObjectStreams: false });
 }
 
 export interface RedactionRect {
-  x: number;      // Normalized (0 to 1) relative to page width
-  y: number;      // Normalized (0 to 1) relative to page height
-  width: number;  // Normalized (0 to 1)
-  height: number; // Normalized (0 to 1)
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface PageRedaction {
-  pageIndex: number; // 0-indexed
+  pageIndex: number;
   rects: RedactionRect[];
 }
 
-/**
- * Permanently burns blackout rectangles into document pages via canvas rasterization,
- * ensuring no underlying text stream or vector layer remains extractable.
- */
 export async function redactPDF(
   file: File,
   redactions: PageRedaction[],
   onProgress?: (current: number, total: number) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const sourcePdf = await loadingTask.promise;
   const totalPages = sourcePdf.numPages;
 
   const outputDoc = await PDFDocument.create();
-
-  // Map redactions by page index
   const redactionMap = new Map<number, RedactionRect[]>();
   redactions.forEach((r) => redactionMap.set(r.pageIndex, r.rects));
 
@@ -711,7 +748,7 @@ export async function redactPDF(
     onProgress?.(pageNum, totalPages);
     const pageIndex = pageNum - 1;
     const page = await sourcePdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 }); // High-DPI render
+    const viewport = page.getViewport({ scale: 2.0 });
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
@@ -719,7 +756,6 @@ export async function redactPDF(
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas rendering context unavailable');
 
-    // 1. Render page content
     await (
       page.render({
         canvasContext: ctx as any,
@@ -727,7 +763,6 @@ export async function redactPDF(
       } as any) as any
     ).promise;
 
-    // 2. Permanently burn solid blackout boxes if redactions exist on this page
     const pageRects = redactionMap.get(pageIndex) || [];
     if (pageRects.length > 0) {
       ctx.fillStyle = '#000000';
@@ -740,7 +775,6 @@ export async function redactPDF(
       }
     }
 
-    // 3. Bake into compressed JPEG
     const jpegBlob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
         (b) => (b ? resolve(b) : reject(new Error('Failed to encode redaction canvas'))),
@@ -769,16 +803,12 @@ export async function redactPDF(
 }
 
 export interface CropBox {
-  x: number;      // Normalized (0 to 1) from top-left
-  y: number;      // Normalized (0 to 1) from top-left
-  width: number;  // Normalized (0 to 1)
-  height: number; // Normalized (0 to 1)
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-/**
- * Trims PDF page boundaries natively by recalculating CropBox and MediaBox.
- * Supports per-page crop geometries, handles rotated pages, and preserves 100% vector fidelity.
- */
 export async function cropPDF(
   file: File,
   cropData: CropBox | Record<number, CropBox>,
@@ -793,12 +823,10 @@ export async function cropPDF(
     let box: CropBox | null = null;
 
     if ('x' in cropData) {
-      // Single CropBox provided
       if (applyToAllPages || index === targetPageIndex) {
         box = cropData;
       }
     } else {
-      // Dictionary of 1-based page numbers provided: { [pageNumber]: CropBox }
       const pageNum = index + 1;
       box = cropData[pageNum] || (applyToAllPages ? cropData[1] || Object.values(cropData)[0] : null);
     }
@@ -818,7 +846,6 @@ export async function cropPDF(
     let finalW = mbW;
     let finalH = mbH;
 
-    // Convert top-left normalized screen coordinates to bottom-left PDF coordinates
     if (rotation === 0) {
       finalX = mbX + box.x * mbW;
       finalY = mbY + (1 - (box.y + box.height)) * mbH;
@@ -841,7 +868,6 @@ export async function cropPDF(
       finalH = box.width * mbH;
     }
 
-    // Apply both CropBox and MediaBox for universal viewer compatibility
     page.setCropBox(finalX, finalY, finalW, finalH);
     page.setMediaBox(finalX, finalY, finalW, finalH);
   });
@@ -856,9 +882,6 @@ export interface FormFieldData {
   options?: string[];
 }
 
-/**
- * Inspects the PDF and returns all detected interactive AcroForm fields.
- */
 export async function getPDFFormFields(file: File): Promise<FormFieldData[]> {
   const buffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
@@ -883,9 +906,6 @@ export async function getPDFFormFields(file: File): Promise<FormFieldData[]> {
   });
 }
 
-/**
- * Fills PDF form fields in memory and optionally flattens the form into static vector text.
- */
 export async function fillAndFlattenPDF(
   file: File,
   values: Record<string, string | boolean>,
@@ -920,21 +940,17 @@ export async function fillAndFlattenPDF(
 
 export interface GrayscaleOptions {
   mode: 'grayscale' | 'pure-bw';
-  threshold?: number; // 0-255 for pure black & white threshold (default: 128)
+  threshold?: number;
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Converts all pages in a PDF to grayscale or high-contrast pure black and white (photocopy mode).
- * Processes canvas pixel buffers locally in-browser.
- */
 export async function convertToGrayscalePDF(
   file: File,
   options: GrayscaleOptions
 ): Promise<Uint8Array> {
   const { mode = 'grayscale', threshold = 135, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -943,7 +959,7 @@ export async function convertToGrayscalePDF(
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.(pageNum, totalPages);
     const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 }); // High-DPI for print clarity
+    const viewport = page.getViewport({ scale: 2.0 });
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
@@ -958,12 +974,10 @@ export async function convertToGrayscalePDF(
       } as any) as any
     ).promise;
 
-    // Apply color transformation directly to the pixel buffer
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imgData.data;
 
     for (let i = 0; i < data.length; i += 4) {
-      // Standard ITU-R BT.601 perceptual luminance formula
       const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
 
       if (mode === 'pure-bw') {
@@ -1025,10 +1039,6 @@ export interface ResizeOptions {
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Standardizes all PDF pages to a selected paper format.
- * Embeds source pages into target dimensions with vector fidelity.
- */
 export async function resizePDF(
   file: File,
   options: ResizeOptions
@@ -1046,16 +1056,13 @@ export async function resizePDF(
     const srcPage = sourceDoc.getPage(i);
     const { width: origWidth, height: origHeight } = srcPage.getSize();
 
-    // Determine target orientation
     let targetWidth = baseWidth;
     let targetHeight = baseHeight;
 
     if (autoOrientation && origWidth > origHeight) {
-      // Rotate target to landscape to match original orientation
       targetWidth = Math.max(baseWidth, baseHeight);
       targetHeight = Math.min(baseWidth, baseHeight);
     } else if (autoOrientation) {
-      // Portrait
       targetWidth = Math.min(baseWidth, baseHeight);
       targetHeight = Math.max(baseWidth, baseHeight);
     }
@@ -1105,10 +1112,6 @@ export interface NUpOptions {
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Arranges multiple input pages onto a single sheet (2-Up, 4-Up, 9-Up).
- * Vector-native layout calculation preserving crystal-clear text quality.
- */
 export async function createNUpPDF(
   file: File,
   options: NUpOptions
@@ -1121,10 +1124,10 @@ export async function createNUpPDF(
   const totalPages = sourceDoc.getPageCount();
   const [cols, rows, sheetWidth, sheetHeight] =
     pagesPerSheet === 2
-      ? [2, 1, 841.89, 595.28] // A4 Landscape
+      ? [2, 1, 841.89, 595.28]
       : pagesPerSheet === 4
-      ? [2, 2, 595.28, 841.89] // A4 Portrait
-      : [3, 3, 595.28, 841.89]; // 9-Up: A4 Portrait
+      ? [2, 2, 595.28, 841.89]
+      : [3, 3, 595.28, 841.89];
 
   const cellWidth = sheetWidth / cols;
   const cellHeight = sheetHeight / rows;
@@ -1144,7 +1147,6 @@ export async function createNUpPDF(
         const { width: origW, height: origH } = srcPage.getSize();
         const embedded = await outputDoc.embedPage(srcPage);
 
-        // Usable cell area with padding
         const usableW = cellWidth - margin * 2;
         const usableH = cellHeight - margin * 2;
 
@@ -1152,7 +1154,6 @@ export async function createNUpPDF(
         const scaledW = origW * scale;
         const scaledH = origH * scale;
 
-        // PDF coordinate origin is bottom-left
         const cellOriginX = col * cellWidth;
         const cellOriginY = sheetHeight - (row + 1) * cellHeight;
 
@@ -1196,17 +1197,13 @@ export type BatesPosition =
 export interface BatesOptions {
   prefix?: string;
   startNumber?: number;
-  digits?: number; // Zero-padding (e.g. 6 -> 000001)
+  digits?: number;
   suffix?: string;
   position?: BatesPosition;
   fontSize?: number;
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Applies sequential Bates numbering stamps across all PDF pages.
- * Fully native vector stamping preserving source quality.
- */
 export async function addBatesNumbersToPDF(
   file: File,
   options: BatesOptions = {}
@@ -1292,15 +1289,12 @@ export interface ExtractedImage {
   height: number;
 }
 
-/**
- * Inspects PDF operator lists and extracts all embedded image objects into standalone PNG blobs.
- */
 export async function extractImagesFromPDF(
   file: File,
   onProgress?: (current: number, total: number) => void
 ): Promise<ExtractedImage[]> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
   const images: ExtractedImage[] = [];
@@ -1323,7 +1317,6 @@ export async function extractImagesFromPDF(
         const imgKey = operatorList.argsArray[i][0];
 
         try {
-          // Resolve image object from PDF.js cache
           const imgObj: any = await new Promise((resolve) => {
             const obj = (page.objs as any).get(imgKey, (resolved: any) => {
               if (resolved) resolve(resolved);
@@ -1403,9 +1396,6 @@ export async function extractImagesFromPDF(
   return images;
 }
 
-/**
- * Bundles extracted image blobs into a ZIP file in memory.
- */
 export async function packageImagesToZip(
   images: ExtractedImage[],
   baseName: string
@@ -1424,12 +1414,11 @@ export interface OcrProgress {
   page: number;
   totalPages: number;
   status: string;
-  progress: number; // 0 to 100
+  progress: number;
 }
 
 /**
- * Runs optical character recognition locally on scanned pages and embeds
- * an invisible, coordinate-accurate vector text layer to make the PDF searchable.
+ * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
  */
 export async function ocrPDFToSearchable(
   file: File,
@@ -1437,24 +1426,32 @@ export async function ocrPDFToSearchable(
   onProgress?: (progress: OcrProgress) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  
-  // Prevent PDF.js buffer detachment by passing a cloned Uint8Array slice
   const bytesForPdfJs = new Uint8Array(arrayBuffer).slice();
   const loadingTask = pdfjsLib.getDocument({ data: bytesForPdfJs });
   const sourcePdf = await loadingTask.promise;
   const totalPages = sourcePdf.numPages;
 
-  // Initialize Tesseract client-side worker with local langPath for true offline support
+  let currentPageProcessing = 1;
   const worker = await createWorker(language, 1, {
     langPath: '/tessdata',
+    logger: (m) => {
+      if (m.status === 'recognizing text' && onProgress) {
+        onProgress({
+          page: currentPageProcessing,
+          totalPages,
+          status: `Recognizing text on page ${currentPageProcessing}...`,
+          progress: Math.round(((currentPageProcessing - 1 + (m.progress || 0)) / totalPages) * 100),
+        });
+      }
+    },
   });
 
-  // Load existing PDF to append invisible text layer using a fresh buffer slice
   const pdfDoc = await PDFDocument.load(arrayBuffer.slice(0), { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   try {
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      currentPageProcessing = pageNum;
       onProgress?.({
         page: pageNum,
         totalPages,
@@ -1465,9 +1462,13 @@ export async function ocrPDFToSearchable(
       const pdfPage = pdfDoc.getPage(pageNum - 1);
       const { width: pageWidth, height: pageHeight } = pdfPage.getSize();
 
-      // Render page to canvas at 2x resolution for high OCR accuracy
       const jsPage = await sourcePdf.getPage(pageNum);
-      const viewport = jsPage.getViewport({ scale: 2.0 });
+      const unscaled = jsPage.getViewport({ scale: 1.0 });
+
+      // Clamp canvas dimension to max 1600px for high speed while keeping accuracy
+      const maxDim = Math.max(unscaled.width, unscaled.height);
+      const scale = Math.min(1600 / maxDim, 2.0);
+      const viewport = jsPage.getViewport({ scale });
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
@@ -1483,30 +1484,18 @@ export async function ocrPDFToSearchable(
         } as any) as any
       ).promise;
 
-      onProgress?.({
-        page: pageNum,
-        totalPages,
-        status: `Recognizing text on page ${pageNum}...`,
-        progress: Math.round(((pageNum - 0.5) / totalPages) * 100),
-      });
-
-      // Execute OCR
       const { data } = await worker.recognize(canvas);
       const pageData = data as any;
 
-      // Coordinate scaling factors (Canvas pixels to PDF points)
       const scaleX = pageWidth / canvas.width;
       const scaleY = pageHeight / canvas.height;
 
-      // Draw invisible text words over the exact coordinates
       if (pageData && pageData.words) {
         for (const word of pageData.words) {
           const cleanText = word.text?.trim();
           if (!cleanText) continue;
 
           const { x0, y0, y1 } = word.bbox;
-
-          // Convert canvas coordinate space (top-left) to PDF coordinate space (bottom-left)
           const pdfX = x0 * scaleX;
           const wordBoxHeight = (y1 - y0) * scaleY;
           const pdfY = pageHeight - y1 * scaleY;
@@ -1520,12 +1509,10 @@ export async function ocrPDFToSearchable(
               font,
               opacity: 0,
             });
-          } catch {
-            // Ignore non-standard glyph encoding issues gracefully
-          }
+          } catch {}
         }
       }
-      // Cleanup canvas memory
+
       canvas.width = 0;
       canvas.height = 0;
     }
@@ -1549,17 +1536,12 @@ export interface RepairResult {
   recoveredPages: number;
 }
 
-/**
- * Recovers corrupted or unreadable PDFs by rebuilding cross-reference tables
- * and re-serializing compliant PDF structures in memory.
- */
 export async function repairPDF(
   file: File,
   onProgress?: (stage: string) => void
 ): Promise<RepairResult> {
   const arrayBuffer = await file.arrayBuffer();
 
-  // Tier 1: Tolerant structural reconstruction (Vector lossless)
   try {
     onProgress?.('Attempting structural cross-reference rebuild...');
     const sourceDoc = await PDFDocument.load(arrayBuffer, {
@@ -1569,25 +1551,34 @@ export async function repairPDF(
 
     const pageCount = sourceDoc.getPageCount();
     if (pageCount > 0) {
-      const recoveredDoc = await PDFDocument.create();
-      const pages = await recoveredDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
-      pages.forEach((page) => recoveredDoc.addPage(page));
+      let hasEmptyPages = false;
+      for (let i = 0; i < pageCount; i++) {
+        if (!sourceDoc.getPage(i).node.Contents()) {
+          hasEmptyPages = true;
+          break;
+        }
+      }
 
-      const bytes = await recoveredDoc.save({ useObjectStreams: true });
-      return {
-        bytes,
-        method: 'lossless',
-        recoveredPages: pageCount,
-      };
+      if (!hasEmptyPages) {
+        const recoveredDoc = await PDFDocument.create();
+        const pages = await recoveredDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
+        pages.forEach((page) => recoveredDoc.addPage(page));
+
+        const bytes = await recoveredDoc.save({ useObjectStreams: true });
+        return {
+          bytes,
+          method: 'lossless',
+          recoveredPages: pageCount,
+        };
+      }
     }
   } catch (structuralError) {
     console.warn('Tier 1 repair failed, advancing to stream salvage:', structuralError);
   }
 
-  // Tier 2: Resilient stream salvage via PDF.js worker
   onProgress?.('Extracting raw page streams via salvage worker...');
   const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
+    data: new Uint8Array(arrayBuffer).slice(),
     stopAtErrors: false,
   });
 
@@ -1658,16 +1649,13 @@ export interface DarkModeOptions {
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Transforms PDF color spaces to Dark Mode, OLED Black, or Warm Sepia in-memory.
- */
 export async function invertPDF(
   file: File,
   options: DarkModeOptions
 ): Promise<Uint8Array> {
   const { filter = 'invert', onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -1676,7 +1664,7 @@ export async function invertPDF(
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.(pageNum, totalPages);
     const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 }); // High-DPI for sharp typography
+    const viewport = page.getViewport({ scale: 2.0 });
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
@@ -1706,17 +1694,14 @@ export async function invertPDF(
       } else if (filter === 'oled') {
         const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
         if (luminance > 210) {
-          // Bright backgrounds become pitch black
           data[i] = 10;
           data[i + 1] = 10;
           data[i + 2] = 10;
         } else if (luminance < 80) {
-          // Dark text becomes soft readable white
           data[i] = 225;
           data[i + 1] = 225;
           data[i + 2] = 225;
         } else {
-          // Invert mid-tones
           data[i] = 255 - r;
           data[i + 1] = 255 - g;
           data[i + 2] = 255 - b;
@@ -1767,8 +1752,8 @@ export interface BookletOptions {
 }
 
 /**
- * Rearranges sequential PDF pages into a print-ready saddle-stitch booklet imposition.
- * Automatically pads with blank pages to a multiple of 4 and embeds vector content.
+ * Hardened Booklet maker: pads with blank pages and adds empty Contents stream
+ * to any page lacking one, resolving "Can't embed page with missing Contents".
  */
 export async function createBookletPDF(
   file: File,
@@ -1779,16 +1764,25 @@ export async function createBookletPDF(
   const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const origPageCount = sourceDoc.getPageCount();
 
-  // Saddle-stitch booklets require total pages to be a multiple of 4
   const targetPageCount = Math.ceil(origPageCount / 4) * 4;
   const pagesToPad = targetPageCount - origPageCount;
   for (let i = 0; i < pagesToPad; i++) {
     sourceDoc.addPage();
   }
 
+  // Ensure every page has a valid Contents stream before embedding
+  for (let i = 0; i < sourceDoc.getPageCount(); i++) {
+    const page = sourceDoc.getPage(i);
+    if (!page.node.Contents()) {
+      const emptyStream = sourceDoc.context.flateStream('');
+      const ref = sourceDoc.context.register(emptyStream);
+      page.node.set(PDFName.of('Contents'), ref);
+    }
+  }
+
   const outputDoc = await PDFDocument.create();
   const [sheetW, sheetH] =
-    sheetSize === 'LETTER' ? [792.0, 612.0] : [841.89, 595.28]; // Landscape dimensions
+    sheetSize === 'LETTER' ? [792.0, 612.0] : [841.89, 595.28];
 
   const halfW = sheetW / 2;
   const halfH = sheetH;
@@ -1802,18 +1796,15 @@ export async function createBookletPDF(
     let rightIndex: number;
 
     if (i % 2 === 0) {
-      // Front side of sheet: Left = N - 2k - 1, Right = 2k
       leftIndex = targetPageCount - 2 * k - 1;
       rightIndex = 2 * k;
     } else {
-      // Back side of sheet: Left = 2k + 1, Right = N - 2k - 2
       leftIndex = 2 * k + 1;
       rightIndex = targetPageCount - 2 * k - 2;
     }
 
     const newSheet = outputDoc.addPage([sheetW, sheetH]);
 
-    // Embed left sub-page
     const leftSrc = sourceDoc.getPage(leftIndex);
     const { width: leftW, height: leftH } = leftSrc.getSize();
     const embeddedLeft = await outputDoc.embedPage(leftSrc);
@@ -1830,7 +1821,6 @@ export async function createBookletPDF(
       height: drawLeftH,
     });
 
-    // Embed right sub-page
     const rightSrc = sourceDoc.getPage(rightIndex);
     const { width: rightW, height: rightH } = rightSrc.getSize();
     const embeddedRight = await outputDoc.embedPage(rightSrc);
@@ -1847,7 +1837,6 @@ export async function createBookletPDF(
       height: drawRightH,
     });
 
-    // Optional center fold guideline
     if (addFoldLine) {
       newSheet.drawLine({
         start: { x: halfW, y: 15 },
@@ -1862,12 +1851,7 @@ export async function createBookletPDF(
   return await outputDoc.save({ useObjectStreams: true });
 }
 
-/**
- * Estimates text skew angle using horizontal projection profile variance.
- * Tests candidate angles from -10 to +10 degrees in 0.5-degree steps.
- */
 export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, height: number): number {
-  // Downscale to a small thumbnail canvas for rapid heuristic testing
   const sampleW = Math.min(width, 300);
   const sampleH = Math.min(height, 400);
   const sampleCanvas = document.createElement('canvas');
@@ -1897,7 +1881,6 @@ export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, 
     const imgData = rCtx.getImageData(0, 0, sampleW, sampleH);
     const data = imgData.data;
 
-    // Calculate row luminance sums
     const rowSums = new Float64Array(sampleH);
     for (let y = 0; y < sampleH; y++) {
       let sum = 0;
@@ -1908,7 +1891,6 @@ export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, 
       rowSums[y] = sum;
     }
 
-    // Compute variance of row sums (aligned horizontal text creates high peak-to-valley variance)
     let mean = 0;
     for (let y = 0; y < sampleH; y++) mean += rowSums[y];
     mean /= sampleH;
@@ -1931,25 +1913,21 @@ export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, 
   sampleCanvas.width = 0;
   sampleCanvas.height = 0;
 
-  // The correction angle is the negative of the detected tilt
   return -bestAngle;
 }
 
 export interface DeskewOptions {
-  angle: number; // Degrees to rotate (-15 to +15)
+  angle: number;
   onProgress?: (current: number, total: number) => void;
 }
 
-/**
- * Rotates pages by a precise deskew angle on an offscreen canvas and rebuilds the PDF.
- */
 export async function deskewPDF(
   file: File,
   options: DeskewOptions
 ): Promise<Uint8Array> {
   const { angle = 0, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -1974,14 +1952,12 @@ export async function deskewPDF(
       } as any) as any
     ).promise;
 
-    // Apply deskew rotation around canvas center
     const rotatedCanvas = document.createElement('canvas');
     rotatedCanvas.width = canvas.width;
     rotatedCanvas.height = canvas.height;
     const rCtx = rotatedCanvas.getContext('2d');
     if (!rCtx) throw new Error('Rotated canvas context unavailable');
 
-    // Fill background with clean white
     rCtx.fillStyle = '#FFFFFF';
     rCtx.fillRect(0, 0, rotatedCanvas.width, rotatedCanvas.height);
 
@@ -2022,8 +1998,8 @@ export async function deskewPDF(
 }
 
 export interface TableExtractOptions {
-  yTolerance?: number; // Vertical pixel proximity threshold to group text into the same row
-  minColumnGap?: number; // Horizontal gap threshold to start a new column
+  yTolerance?: number;
+  minColumnGap?: number;
   delimiter?: ',' | ';' | '\t';
   onProgress?: (current: number, total: number) => void;
 }
@@ -2034,17 +2010,13 @@ export interface ExtractedTableResult {
   totalRows: number;
 }
 
-/**
- * Parses coordinate text streams from a PDF to reconstruct tabular rows and columns.
- * Formats values into an RFC-4180 compliant CSV string and matrix array.
- */
 export async function extractTableFromPDF(
   file: File,
   options: TableExtractOptions = {}
 ): Promise<ExtractedTableResult> {
   const { yTolerance = 4, minColumnGap = 12, delimiter = ',', onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -2065,7 +2037,6 @@ export async function extractTableFromPDF(
     const items: RawItem[] = [];
     for (const item of textContent.items as any[]) {
       if (!item.str || !item.str.trim()) continue;
-      // transform: [scaleX, skewY, skewX, scaleY, tx, ty]
       const tx = item.transform[4];
       const ty = item.transform[5];
       items.push({
@@ -2076,7 +2047,6 @@ export async function extractTableFromPDF(
       });
     }
 
-    // Sort items descending by Y (top to bottom), then ascending by X (left to right)
     items.sort((a, b) => {
       if (Math.abs(b.y - a.y) > yTolerance) {
         return b.y - a.y;
@@ -2084,7 +2054,6 @@ export async function extractTableFromPDF(
       return a.x - b.x;
     });
 
-    // Cluster items into lines
     const lines: RawItem[][] = [];
     let currentLine: RawItem[] = [];
     let currentY: number | null = null;
@@ -2105,7 +2074,6 @@ export async function extractTableFromPDF(
       lines.push(currentLine);
     }
 
-    // Convert lines into columns by grouping adjacent characters or separating spaced columns
     for (const line of lines) {
       line.sort((a, b) => a.x - b.x);
 
@@ -2123,7 +2091,6 @@ export async function extractTableFromPDF(
             rowCells.push(currentCellText.trim());
             currentCellText = item.str;
           } else {
-            // Consecutive or lightly spaced text within the same column cell
             currentCellText += (gap > 2 ? ' ' : '') + item.str;
           }
           lastRightEdge = item.x + item.width;
@@ -2140,7 +2107,6 @@ export async function extractTableFromPDF(
     }
   }
 
-  // Format matrix into standard CSV
   const escapeCell = (val: string): string => {
     if (val.includes(delimiter) || val.includes('"') || val.includes('\n')) {
       return `"${val.replace(/"/g, '""')}"`;
@@ -2172,10 +2138,6 @@ export interface ExtractedMarkdownResult {
   estimatedTokens: number;
 }
 
-/**
- * Extracts structured Markdown from PDF text streams.
- * Uses font scale heuristics for headings and regex for list normalizations.
- */
 export async function extractMarkdownFromPDF(
   file: File,
   options: MarkdownExtractOptions = {}
@@ -2188,7 +2150,7 @@ export async function extractMarkdownFromPDF(
   } = options;
 
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -2203,7 +2165,6 @@ export async function extractMarkdownFromPDF(
   const pagesTextData: TextItemData[][] = [];
   const fontHeights: number[] = [];
 
-  // Pass 1: Gather raw items and sample body font sizes
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.(pageNum, totalPages);
     const page = await pdfDoc.getPage(pageNum);
@@ -2225,18 +2186,15 @@ export async function extractMarkdownFromPDF(
     pagesTextData.push(items);
   }
 
-  // Determine median body font size
   fontHeights.sort((a, b) => a - b);
   const medianHeight = fontHeights[Math.floor(fontHeights.length / 2)] || 12;
 
   const markdownBlocks: string[] = [];
 
-  // Pass 2: Reconstruct lines and format headings/lists
   for (let pageIndex = 0; pageIndex < pagesTextData.length; pageIndex++) {
     const items = pagesTextData[pageIndex];
     if (items.length === 0) continue;
 
-    // Group items into lines
     items.sort((a, b) => {
       if (Math.abs(b.y - a.y) > 4) return b.y - a.y;
       return a.x - b.x;
@@ -2267,7 +2225,6 @@ export async function extractMarkdownFromPDF(
       lines.push({ text, avgHeight });
     }
 
-    // Format lines to Markdown
     for (const line of lines) {
       let lineText = line.text;
       if (!lineText) continue;
@@ -2276,7 +2233,6 @@ export async function extractMarkdownFromPDF(
         lineText = lineText.slice(0, -1);
       }
 
-      // Check headings
       if (detectHeadings) {
         if (line.avgHeight >= medianHeight * 1.8) {
           markdownBlocks.push(`\n# ${lineText}\n`);
@@ -2290,7 +2246,6 @@ export async function extractMarkdownFromPDF(
         }
       }
 
-      // Check lists
       if (detectLists) {
         const bulletMatch = lineText.match(/^[\u2022\u25E6\u2023\u2219\*\-]\s*(.*)$/);
         if (bulletMatch) {

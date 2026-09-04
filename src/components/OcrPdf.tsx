@@ -23,7 +23,7 @@ interface OcrPdfProps {
 }
 
 const SUPPORTED_LANGUAGES = [
-  { code: 'eng', label: 'English' },
+  { code: 'eng', label: 'English (Installed Offline)' },
   { code: 'spa', label: 'Spanish' },
   { code: 'fra', label: 'French' },
   { code: 'deu', label: 'German' },
@@ -92,6 +92,7 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   };
 
   const handleClear = () => {
+    if (isProcessing) return;
     onFileChange(null);
     revokeDownloadUrl();
     setErrorMessage(null);
@@ -155,7 +156,8 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
             </div>
             <button
               onClick={handleClear}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              disabled={isProcessing}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               title="Remove file"
             >
               <X className="w-4 h-4" />
@@ -175,7 +177,7 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
                 setLanguage(e.target.value);
                 revokeDownloadUrl();
               }}
-              className="w-full px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+              className="w-full px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
             >
               {SUPPORTED_LANGUAGES.map((l) => (
                 <option key={l.code} value={l.code}>
@@ -222,7 +224,7 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
             <button
               onClick={handleRunOcr}
               disabled={isProcessing || pageCount === 0}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
             >
               {isProcessing ? (
                 <>

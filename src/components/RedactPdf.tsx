@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
+  Undo2,
   SquareSlash,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -89,7 +90,11 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       const page = await pdfDocRef.current.getPage(currentPage);
       const containerWidth = overlayRef.current?.parentElement?.clientWidth || 600;
       const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const scale = Math.min(1.5, Math.max(0.6, (containerWidth - 32) / unscaledViewport.width));
+
+      // Scale to fit BOTH width and maximum height of 520px
+      const targetHeight = 520;
+      const targetWidth = Math.max(300, containerWidth - 32);
+      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
       const viewport = page.getViewport({ scale });
 
       const canvas = canvasRef.current;
@@ -116,8 +121,8 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     }
   }, [currentPage, totalPages, renderCurrentPage]);
 
-  // Mouse interaction for drawing blackout rectangles
-  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Coordinate capture
+  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
     const rect = overlayRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -144,26 +149,40 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     setCurrentDragRect({ x, y, width, height });
   };
 
-  const handleMouseUp = () => {
-    if (!isDrawing || !currentDragRect) {
-      setIsDrawing(false);
-      setDrawStart(null);
-      setCurrentDragRect(null);
-      return;
-    }
-
-    // Only commit if the box has meaningful dimensions (avoid tiny clicks)
-    if (currentDragRect.width > 0.01 && currentDragRect.height > 0.01) {
+  const commitDragRect = useCallback(() => {
+    if (currentDragRect && currentDragRect.width > 0.01 && currentDragRect.height > 0.01) {
       const pageIndex = currentPage - 1;
       setRedactions((prev) => ({
         ...prev,
         [pageIndex]: [...(prev[pageIndex] || []), currentDragRect],
       }));
     }
-
     setIsDrawing(false);
     setDrawStart(null);
     setCurrentDragRect(null);
+  }, [currentDragRect, currentPage]);
+
+  // Global mouseup listener so dragging outside the canvas commits cleanly
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDrawing) {
+        commitDragRect();
+      }
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [isDrawing, commitDragRect]);
+
+  const undoLastRedaction = () => {
+    const pageIndex = currentPage - 1;
+    setRedactions((prev) => {
+      const currentList = prev[pageIndex] || [];
+      if (currentList.length === 0) return prev;
+      return {
+        ...prev,
+        [pageIndex]: currentList.slice(0, -1),
+      };
+    });
   };
 
   const clearCurrentPageRedactions = () => {
@@ -263,7 +282,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
                 <p className="text-xs text-zinc-500">
                   {totalPages > 0 ? `${totalPages} Pages • ` : ''}
-                  {totalRedactionCount} total redaction{totalRedactionCount === 1 ? '' : 's'}
+                  {totalRedactionCount} total blackout box{totalRedactionCount === 1 ? '' : 'es'}
                 </p>
               </div>
             </div>
@@ -305,11 +324,21 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={undoLastRedaction}
+                disabled={currentPageRedactions.length === 0}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-30 transition"
+                title="Undo last box on this page"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                <span>Undo</span>
+              </button>
+              <button
+                type="button"
                 onClick={clearCurrentPageRedactions}
                 disabled={currentPageRedactions.length === 0}
                 className="flex items-center gap-1 px-2.5 py-1 text-xs text-zinc-400 hover:text-red-400 disabled:opacity-30 transition"
               >
-                <RotateCcw className="w-3 h-3" />
+                <RotateCcw className="w-3.5 h-3.5" />
                 <span>Clear Page</span>
               </button>
             </div>
@@ -327,16 +356,15 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               ref={overlayRef}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
               className="relative cursor-crosshair inline-block"
             >
-              <canvas ref={canvasRef} className="block rounded shadow-md" />
+              <canvas ref={canvasRef} className="block rounded shadow-md max-h-[520px] w-auto h-auto object-contain" />
 
               {/* Persisted Blackout Rectangles for Current Page */}
               {currentPageRedactions.map((rect, idx) => (
                 <div
                   key={idx}
-                  className="absolute bg-black pointer-events-none border border-red-500/40"
+                  className="absolute bg-black pointer-events-none border border-emerald-500/50 shadow-sm"
                   style={{
                     left: `${rect.x * 100}%`,
                     top: `${rect.y * 100}%`,
@@ -349,7 +377,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               {/* Active Drawing Drag Rectangle */}
               {currentDragRect && (
                 <div
-                  className="absolute bg-black/80 border border-emerald-400 pointer-events-none"
+                  className="absolute bg-black/85 border border-emerald-400 pointer-events-none shadow-lg"
                   style={{
                     left: `${currentDragRect.x * 100}%`,
                     top: `${currentDragRect.y * 100}%`,
@@ -362,7 +390,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           <p className="text-[11px] text-zinc-500 text-center">
-            Click & drag over text or numbers to draw a blackout box. Applied boxes are rasterized directly into the bitmap image layer.
+            Click & drag over text or numbers to draw a blackout box. Applied boxes are permanently burned into the underlying raster layer.
           </p>
 
           {/* Error Banner */}
