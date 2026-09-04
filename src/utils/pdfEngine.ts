@@ -1437,15 +1437,20 @@ export async function ocrPDFToSearchable(
   onProgress?: (progress: OcrProgress) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  
+  // Prevent PDF.js buffer detachment by passing a cloned Uint8Array slice
+  const bytesForPdfJs = new Uint8Array(arrayBuffer).slice();
+  const loadingTask = pdfjsLib.getDocument({ data: bytesForPdfJs });
   const sourcePdf = await loadingTask.promise;
   const totalPages = sourcePdf.numPages;
 
-  // Initialize Tesseract client-side worker
-  const worker = await createWorker(language);
+  // Initialize Tesseract client-side worker with local langPath for true offline support
+  const worker = await createWorker(language, 1, {
+    langPath: '/tessdata',
+  });
 
-  // Load existing PDF to append invisible text layer
-  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  // Load existing PDF to append invisible text layer using a fresh buffer slice
+  const pdfDoc = await PDFDocument.load(arrayBuffer.slice(0), { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   try {
