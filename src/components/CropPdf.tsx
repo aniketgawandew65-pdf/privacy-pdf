@@ -152,7 +152,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
 
     if (toolMode === 'pan') {
-      // Initiate Pan mode
       if (containerRef.current) {
         isPanningRef.current = true;
         panStartRef.current = {
@@ -467,68 +466,70 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             </div>
           </div>
 
-          {/* Canvas & Interactive Crop Overlay with Pan/Grab Support */}
+          {/* Canvas & Interactive Crop Overlay with Edge-to-Edge Scrolling Workspace */}
           <div
             ref={containerRef}
-            className={`relative w-full flex justify-center bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto max-h-[600px] select-none ${
+            className={`relative w-full bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-auto max-h-[600px] select-none ${
               toolMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : ''
             }`}
             onMouseDown={(e) => handleMouseDown(e, 'draw')}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
           >
-            {isLoadingPage && (
-              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60 backdrop-blur-xs z-20">
-                <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
-              </div>
-            )}
-
-            <div ref={overlayRef} className={`relative inline-block ${toolMode === 'crop' ? 'cursor-crosshair' : ''}`}>
-              <canvas ref={canvasRef} className="block rounded shadow-md w-auto h-auto object-contain pointer-events-none" />
-
-              {/* Visual Crop Box Overlay with 8-way adjustable handles */}
-              {currentBox && (
-                <>
-                  <div
-                    className="absolute inset-0 bg-black/50 pointer-events-none"
-                    style={{
-                      clipPath: `polygon(
-                        0% 0%, 100% 0%, 100% 100%, 0% 100%,
-                        0% ${currentBox.y * 100}%,
-                        ${currentBox.x * 100}% ${currentBox.y * 100}%,
-                        ${currentBox.x * 100}% ${(currentBox.y + currentBox.height) * 100}%,
-                        ${(currentBox.x + currentBox.width) * 100}% ${(currentBox.y + currentBox.height) * 100}%,
-                        ${(currentBox.x + currentBox.width) * 100}% ${currentBox.y * 100}%,
-                        0% ${currentBox.y * 100}%
-                      )`,
-                    }}
-                  />
-                  <div
-                    onMouseDown={(e) => {
-                      if (toolMode === 'pan') return;
-                      handleMouseDown(e, 'move');
-                    }}
-                    className="absolute border-2 border-emerald-400 shadow-lg cursor-move pointer-events-auto"
-                    style={{
-                      left: `${currentBox.x * 100}%`,
-                      top: `${currentBox.y * 100}%`,
-                      width: `${currentBox.width * 100}%`,
-                      height: `${currentBox.height * 100}%`,
-                      backgroundColor: 'rgba(16, 185, 129, 0.05)',
-                    }}
-                  >
-                    {/* 8-way resize grips */}
-                    <div onMouseDown={(e) => handleMouseDown(e, 'nw')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-nw-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'n')} className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-n-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'ne')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-ne-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'e')} className="absolute top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-e-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'se')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-se-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 's')} className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-s-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'sw')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-sw-resize" />
-                    <div onMouseDown={(e) => handleMouseDown(e, 'w')} className="absolute top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-w-resize" />
-                  </div>
-                </>
+            <div className="min-w-full min-h-full flex items-center justify-center p-16 sm:p-24">
+              {isLoadingPage && (
+                <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60 backdrop-blur-xs z-20">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                </div>
               )}
+
+              <div ref={overlayRef} className={`relative inline-block ${toolMode === 'crop' ? 'cursor-crosshair' : ''}`}>
+                <canvas ref={canvasRef} className="block rounded shadow-2xl w-auto h-auto object-contain pointer-events-none" />
+
+                {/* Visual Crop Box Overlay with 8-way adjustable handles */}
+                {currentBox && (
+                  <>
+                    <div
+                      className="absolute inset-0 bg-black/50 pointer-events-none"
+                      style={{
+                        clipPath: `polygon(
+                          0% 0%, 100% 0%, 100% 100%, 0% 100%,
+                          0% ${currentBox.y * 100}%,
+                          ${currentBox.x * 100}% ${currentBox.y * 100}%,
+                          ${currentBox.x * 100}% ${(currentBox.y + currentBox.height) * 100}%,
+                          ${(currentBox.x + currentBox.width) * 100}% ${(currentBox.y + currentBox.height) * 100}%,
+                          ${(currentBox.x + currentBox.width) * 100}% ${currentBox.y * 100}%,
+                          0% ${currentBox.y * 100}%
+                        )`,
+                      }}
+                    />
+                    <div
+                      onMouseDown={(e) => {
+                        if (toolMode === 'pan') return;
+                        handleMouseDown(e, 'move');
+                      }}
+                      className="absolute border-2 border-emerald-400 shadow-lg cursor-move pointer-events-auto"
+                      style={{
+                        left: `${currentBox.x * 100}%`,
+                        top: `${currentBox.y * 100}%`,
+                        width: `${currentBox.width * 100}%`,
+                        height: `${currentBox.height * 100}%`,
+                        backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                      }}
+                    >
+                      {/* 8-way resize grips */}
+                      <div onMouseDown={(e) => handleMouseDown(e, 'nw')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-nw-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'n')} className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-n-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'ne')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-ne-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'e')} className="absolute top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-e-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'se')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-se-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 's')} className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-s-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'sw')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-sw-resize" />
+                      <div onMouseDown={(e) => handleMouseDown(e, 'w')} className="absolute top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-w-resize" />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
