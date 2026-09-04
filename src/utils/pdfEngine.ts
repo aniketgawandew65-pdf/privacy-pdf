@@ -878,10 +878,21 @@ export interface CropBox {
   height: number;
 }
 
+export interface SnipBox {
+  x: number;      // 0 to 1
+  y: number;      // 0 to 1
+  width: number;  // 0 to 1
+  height: number; // 0 to 1
+}
+
+/**
+ * Snip & Whiteout: Keeps ONLY the selected box(es) and permanently 
+ * blanks out everything outside those bounds using vector path clipping.
+ */
 export async function cropPDF(
   file: File,
-  cropData: CropBox | Record<number, CropBox>,
-  applyToAllPages: boolean = true,
+  cropData: SnipBox | Record<number, SnipBox>,
+  applyToAllPages: boolean = false,
   targetPageIndex: number = 0
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
@@ -889,65 +900,72 @@ export async function cropPDF(
   const pages = pdfDoc.getPages();
 
   pages.forEach((page, index) => {
-    let box: CropBox | null = null;
+    let box: SnipBox | null = null;
+    const pageNum = index + 1;
 
     if ('x' in cropData) {
       if (applyToAllPages || index === targetPageIndex) {
-        box = cropData;
+        box = cropData as SnipBox;
       }
     } else {
-      const pageNum = index + 1;
-      box = cropData[pageNum] || (applyToAllPages ? cropData[1] || Object.values(cropData)[0] : null);
+      box = (cropData as Record<number, SnipBox>)[pageNum] || (applyToAllPages ? (cropData as Record<number, SnipBox>)[1] : null);
     }
 
     if (!box) return;
 
-    const mediaBox = page.getMediaBox();
-    const rotation = ((page.getRotation().angle % 360) + 360) % 360;
+    const { width, height } = page.getSize();
+    const bx = box.x * width;
+    const by = (1 - (box.y + box.height)) * height;
+    const bw = box.width * width;
+    const bh = box.height * height;
 
-    const mbX = mediaBox.x;
-    const mbY = mediaBox.y;
-    const mbW = mediaBox.width;
-    const mbH = mediaBox.height;
-
-    // Guard against negative or inverted crop dimensions
-    const safeW = Math.max(0.01, Math.min(1, box.width));
-    const safeH = Math.max(0.01, Math.min(1, box.height));
-    const safeX = Math.max(0, Math.min(1 - safeW, box.x));
-    const safeY = Math.max(0, Math.min(1 - safeH, box.y));
-
-    let finalX = mbX;
-    let finalY = mbY;
-    let finalW = mbW;
-    let finalH = mbH;
-
-    if (rotation === 0) {
-      finalX = mbX + safeX * mbW;
-      finalY = mbY + (1 - (safeY + safeH)) * mbH;
-      finalW = safeW * mbW;
-      finalH = safeH * mbH;
-    } else if (rotation === 90) {
-      finalX = mbX + (1 - (safeY + safeH)) * mbW;
-      finalY = mbY + (1 - (safeX + safeW)) * mbH;
-      finalW = safeH * mbW;
-      finalH = safeW * mbH;
-    } else if (rotation === 180) {
-      finalX = mbX + (1 - (safeX + safeW)) * mbW;
-      finalY = mbY + safeY * mbH;
-      finalW = safeW * mbW;
-      finalH = safeH * mbH;
-    } else if (rotation === 270) {
-      finalX = mbX + safeY * mbW;
-      finalY = mbY + safeX * mbH;
-      finalW = safeH * mbW;
-      finalH = safeW * mbH;
+    // Draw whiteout masks covering all 4 regions outside the chosen snippet box
+    // 1. Top mask
+    if (by + bh < height) {
+      page.drawRectangle({
+        x: 0,
+        y: by + bh,
+        width: width,
+        height: height - (by + bh),
+        color: rgb(1, 1, 1),
+      });
+    }
+    // 2. Bottom mask
+    if (by > 0) {
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: width,
+        height: by,
+        color: rgb(1, 1, 1),
+      });
+    }
+    // 3. Left mask
+    if (bx > 0) {
+      page.drawRectangle({
+        x: 0,
+        y: by,
+        width: bx,
+        height: bh,
+        color: rgb(1, 1, 1),
+      });
+    }
+    // 4. Right mask
+    if (bx + bw < width) {
+      page.drawRectangle({
+        x: bx + bw,
+        y: by,
+        width: width - (bx + bw),
+        height: bh,
+        color: rgb(1, 1, 1),
+      });
     }
 
-    page.setCropBox(finalX, finalY, finalW, finalH);
-    page.setMediaBox(finalX, finalY, finalW, finalH);
+    // Set page view strictly to the selection boundary
+    page.setCropBox(bx, by, bw, bh);
+    page.setMediaBox(bx, by, bw, bh);
   });
 
-  // MUST be false: true corrupts xref tables on large scanned documents
   return await pdfDoc.save({ useObjectStreams: false });
 }
 
