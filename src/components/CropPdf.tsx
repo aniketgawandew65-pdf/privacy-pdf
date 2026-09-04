@@ -11,6 +11,7 @@ import {
   ChevronRight,
   RotateCcw,
   ZoomIn,
+  Move,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -23,16 +24,27 @@ interface CropPdfProps {
 }
 
 type DragMode = 'draw' | 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | null;
+type ToolMode = 'crop' | 'pan';
 
 export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageBoxes, setPageBoxes] = useState<Record<number, CropBox>>({});
   const [applyToAll, setApplyToAll] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState<number>(1.0); // 1.0 to 3.0 zoom slider
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const [toolMode, setToolMode] = useState<ToolMode>('crop');
 
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; box?: CropBox } | null>(null);
+
+  // Pan state
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number }>({
+    x: 0,
+    y: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+  });
 
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -41,6 +53,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const pdfDocRef = useRef<any>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
@@ -55,6 +68,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
       setCurrentPage(1);
       setPageBoxes({});
       setZoomLevel(1.0);
+      setToolMode('crop');
       revokeDownloadUrl();
       setErrorMessage(null);
       pdfDocRef.current = null;
@@ -90,7 +104,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  // High-DPI crystal clear rendering matched to original document quality + Zoom multiplier
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
@@ -99,7 +112,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
       const page = await pdfDocRef.current.getPage(currentPage);
       const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-      // High-DPI retina multiplier (2.0x base + user zoom slider) so text is 100% sharp
       const dpr = window.devicePixelRatio || 1;
       const scale = (600 / unscaledViewport.width) * dpr * zoomLevel;
       const viewport = page.getViewport({ scale });
@@ -138,6 +150,21 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>, mode: DragMode = 'draw') => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
+
+    if (toolMode === 'pan') {
+      // Initiate Pan mode
+      if (containerRef.current) {
+        isPanningRef.current = true;
+        panStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          scrollLeft: containerRef.current.scrollLeft,
+          scrollTop: containerRef.current.scrollTop,
+        };
+      }
+      return;
+    }
+
     e.stopPropagation();
     const coords = getNormalizedCoords(e);
     setDragMode(mode);
@@ -156,6 +183,16 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (toolMode === 'pan') {
+      if (isPanningRef.current && containerRef.current) {
+        const dx = e.clientX - panStartRef.current.x;
+        const dy = e.clientY - panStartRef.current.y;
+        containerRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+        containerRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+      }
+      return;
+    }
+
     if (!dragMode || !dragStart) return;
     const current = getNormalizedCoords(e);
     const dx = current.x - dragStart.x;
@@ -212,6 +249,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   };
 
   const handleMouseUp = () => {
+    isPanningRef.current = false;
     setDragMode(null);
     setDragStart(null);
     if (currentBox && (currentBox.width < 0.03 || currentBox.height < 0.03)) {
@@ -260,6 +298,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     onFileChange(null);
     setPageBoxes({});
     setZoomLevel(1.0);
+    setToolMode('crop');
     revokeDownloadUrl();
     setErrorMessage(null);
   };
@@ -356,19 +395,44 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
               </button>
             </div>
 
-            {/* Zoom Slider */}
-            <div className="flex items-center gap-2">
-              <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px] text-zinc-400">Zoom: {zoomLevel.toFixed(1)}x</span>
-              <input
-                type="range"
-                min="1.0"
-                max="3.0"
-                step="0.2"
-                value={zoomLevel}
-                onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                className="w-24 accent-emerald-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
-              />
+            {/* Mode Toggle & Zoom Slider */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setToolMode('crop')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                    toolMode === 'crop' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Crop className="w-3.5 h-3.5" />
+                  <span>Crop</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setToolMode('pan')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                    toolMode === 'pan' ? 'bg-emerald-500 text-black' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Move className="w-3.5 h-3.5" />
+                  <span>Pan</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-[11px] text-zinc-400">{zoomLevel.toFixed(1)}x</span>
+                <input
+                  type="range"
+                  min="1.0"
+                  max="3.0"
+                  step="0.2"
+                  value={zoomLevel}
+                  onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                  className="w-20 accent-emerald-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
+                />
+              </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -403,21 +467,23 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             </div>
           </div>
 
-          {/* Canvas & Interactive Crop Overlay with Scrollable Viewport */}
-          <div className="relative w-full flex justify-center bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto max-h-[600px] select-none">
+          {/* Canvas & Interactive Crop Overlay with Pan/Grab Support */}
+          <div
+            ref={containerRef}
+            className={`relative w-full flex justify-center bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto max-h-[600px] select-none ${
+              toolMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : ''
+            }`}
+            onMouseDown={(e) => handleMouseDown(e, 'draw')}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+          >
             {isLoadingPage && (
               <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60 backdrop-blur-xs z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            <div
-              ref={overlayRef}
-              onMouseDown={(e) => handleMouseDown(e, 'draw')}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              className="relative cursor-crosshair inline-block"
-            >
+            <div ref={overlayRef} className={`relative inline-block ${toolMode === 'crop' ? 'cursor-crosshair' : ''}`}>
               <canvas ref={canvasRef} className="block rounded shadow-md w-auto h-auto object-contain pointer-events-none" />
 
               {/* Visual Crop Box Overlay with 8-way adjustable handles */}
@@ -438,8 +504,11 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                     }}
                   />
                   <div
-                    onMouseDown={(e) => handleMouseDown(e, 'move')}
-                    className="absolute border-2 border-emerald-400 shadow-lg cursor-move"
+                    onMouseDown={(e) => {
+                      if (toolMode === 'pan') return;
+                      handleMouseDown(e, 'move');
+                    }}
+                    className="absolute border-2 border-emerald-400 shadow-lg cursor-move pointer-events-auto"
                     style={{
                       left: `${currentBox.x * 100}%`,
                       top: `${currentBox.y * 100}%`,
@@ -464,7 +533,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           <p className="text-[11px] text-zinc-500 text-center">
-            Use the zoom slider to inspect fine text, drag handles to resize, or drag inside the box to reposition.
+            {toolMode === 'pan'
+              ? 'Hand Pan Mode Active: Click and drag anywhere to slide the zoomed view.'
+              : 'Crop Mode Active: Click and drag to draw a box, or use handles to resize.'}
           </p>
 
           {/* Error Banner */}
