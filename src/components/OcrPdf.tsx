@@ -24,12 +24,6 @@ interface OcrPdfProps {
 
 const SUPPORTED_LANGUAGES = [
   { code: 'eng', label: 'English (Installed Offline)' },
-  { code: 'spa', label: 'Spanish' },
-  { code: 'fra', label: 'French' },
-  { code: 'deu', label: 'German' },
-  { code: 'ita', label: 'Italian' },
-  { code: 'por', label: 'Portuguese' },
-  { code: 'hin', label: 'Hindi' },
 ];
 
 export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
