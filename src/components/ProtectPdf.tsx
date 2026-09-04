@@ -190,7 +190,7 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>PDF encrypted with standard AES/128-bit protection!</span>
+                <span>PDF encrypted with standard 128-bit password protection!</span>
               </div>
               <a
                 href={downloadUrl}

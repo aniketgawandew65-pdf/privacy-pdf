@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Upload, RotateCw, Download, Loader2, CheckCircle2, FileText, X } from 'lucide-react';
+import { Upload, RotateCw, Download, Loader2, CheckCircle2, FileText, X, AlertCircle } from 'lucide-react';
 import { rotatePDF } from '../utils/pdfEngine';
+import { useObjectUrl } from '../utils/useObjectUrl';
 
 interface RotatePdfProps {
   file: File | null;
@@ -10,36 +11,60 @@ interface RotatePdfProps {
 export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
   const [angle, setAngle] = useState<number>(90);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   const handleRotate = async () => {
     if (!file) return;
     setIsProcessing(true);
+    setErrorMessage(null);
+    revokeDownloadUrl();
+
     try {
       const outputBytes = await rotatePDF(file, angle);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      setDownloadUrl(URL.createObjectURL(blob));
+      createUrl(blob);
     } catch (err) {
-      console.error(err);
+      console.error('Rotation error:', err);
+      setErrorMessage('Failed to rotate PDF. The file may be damaged, corrupted, or password-protected.');
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleClearFile = () => {
+    onFileChange(null);
+    revokeDownloadUrl();
+    setErrorMessage(null);
   };
 
   return (
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Drop a PDF here to rotate pages"
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files[0]?.type === 'application/pdf') {
-              onFileChange(e.dataTransfer.files[0]);
+            const dropped = e.dataTransfer.files?.[0];
+            if (dropped && dropped.type === 'application/pdf') {
+              setErrorMessage(null);
+              revokeDownloadUrl();
+              onFileChange(dropped);
             }
           }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to rotate pages</p>
@@ -50,15 +75,19 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             accept="application/pdf"
             className="hidden"
             onChange={(e) => {
-              if (e.target.files?.[0]?.type === 'application/pdf') {
-                onFileChange(e.target.files[0]);
+              const selected = e.target.files?.[0];
+              if (selected && selected.type === 'application/pdf') {
+                setErrorMessage(null);
+                revokeDownloadUrl();
+                onFileChange(selected);
               }
+              e.target.value = '';
             }}
           />
         </div>
       ) : (
         <div className="space-y-6 text-left">
-          {/* File Card with Clear (X) */}
+          {/* File Card with Clear */}
           <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -68,13 +97,21 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
               </div>
             </div>
             <button
-              onClick={() => onFileChange(null)}
+              onClick={handleClearFile}
               className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
               title="Remove file"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
 
           {/* Angle Selector */}
           <div className="space-y-2">
@@ -86,7 +123,8 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
                   type="button"
                   onClick={() => {
                     setAngle(deg);
-                    setDownloadUrl(null);
+                    revokeDownloadUrl();
+                    setErrorMessage(null);
                   }}
                   className={`py-2.5 rounded-xl border text-sm font-medium transition-all ${
                     angle === deg

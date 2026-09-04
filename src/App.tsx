@@ -79,7 +79,7 @@ export default function App() {
     };
   }, []);
 
-  // Dynamic SEO title & description updates
+  // Dynamic SEO title, description, and per-route canonical URL updates
   useEffect(() => {
     const meta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
     document.title = meta.title;
@@ -87,6 +87,16 @@ export default function App() {
     if (descMeta) {
       descMeta.setAttribute('content', meta.description);
     }
+
+    // Dynamic canonical tag management per route
+    let canonicalLink = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonicalLink) {
+      canonicalLink = document.createElement('link');
+      canonicalLink.rel = 'canonical';
+      document.head.appendChild(canonicalLink);
+    }
+    const cleanPath = location.pathname === '/' ? '' : location.pathname;
+    canonicalLink.href = `https://www.1into1.com${cleanPath}`;
   }, [location.pathname]);
 
   // PWA install handler
