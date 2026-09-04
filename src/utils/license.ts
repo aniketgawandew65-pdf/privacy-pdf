@@ -49,6 +49,6 @@ export function openCheckout(checkoutUrl: string): void {
     window.LemonSqueezy.Url.Open(checkoutUrl);
   } else {
     // Fallback if overlay hasn't loaded: open in a new tab
-    window.open(checkoutUrl, '_blank');
+    window.open(checkoutUrl, '_blank', 'noopener,noreferrer');
   }
 }
