@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, RotateCw, Download, Loader2, CheckCircle2, FileText, X, AlertCircle } from 'lucide-react';
+import {
+  Download,
+  Loader2,
+  CheckCircle2,
+  FileText,
+  X,
+  AlertCircle,
+  RotateCw,
+} from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { rotatePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
@@ -10,18 +18,18 @@ interface RotatePdfProps {
 }
 
 export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
-  const [angle, setAngle] = useState<number>(90);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [rotationAngle, setRotationAngle] = useState<number>(90);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   useEffect(() => {
     if (!file) {
-      setPreviewUrl(null);
+      setPreviewDataUrl(null);
       revokeDownloadUrl();
       setErrorMessage(null);
       return;
@@ -29,13 +37,20 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
 
     let isMounted = true;
     setIsLoadingPreview(true);
+    setErrorMessage(null);
+    revokeDownloadUrl();
 
     (async () => {
       try {
         const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer).slice() }).promise;
         const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 0.8 });
+
+        // High-DPI Retina scale (2.0x+) so text is crystal clear
+        const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
+        const unscaled = page.getViewport({ scale: 1.0 });
+        const scale = (520 / Math.max(unscaled.width, unscaled.height)) * dpr;
+        const viewport = page.getViewport({ scale });
 
         const canvas = document.createElement('canvas');
         canvas.width = Math.floor(viewport.width);
@@ -44,12 +59,13 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
 
         if (ctx) {
           await page.render({ canvasContext: ctx as any, viewport } as any).promise;
-          if (isMounted) {
-            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.85));
-          }
+          if (isMounted) setPreviewDataUrl(canvas.toDataURL('image/jpeg', 0.95));
         }
+        canvas.width = 0;
+        canvas.height = 0;
       } catch (err) {
-        console.error('Preview render error:', err);
+        console.error('Rotate preview error:', err);
+        if (isMounted) setErrorMessage('Failed to generate high-resolution page preview.');
       } finally {
         if (isMounted) setIsLoadingPreview(false);
       }
@@ -67,22 +83,15 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
     revokeDownloadUrl();
 
     try {
-      const outputBytes = await rotatePDF(file, angle);
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
+      const bytes = await rotatePDF(file, rotationAngle);
+      const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
     } catch (err: any) {
-      console.error('Rotation error:', err);
+      console.error('Rotate error:', err);
       setErrorMessage(err.message || 'Failed to rotate PDF.');
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleClearFile = () => {
-    onFileChange(null);
-    setPreviewUrl(null);
-    revokeDownloadUrl();
-    setErrorMessage(null);
   };
 
   return (
@@ -91,7 +100,7 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
         <div
           role="button"
           tabIndex={0}
-          aria-label="Drop a PDF here to rotate pages"
+          aria-label="Drop a PDF to rotate"
           onClick={() => fileInputRef.current?.click()}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -103,15 +112,13 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
           onDrop={(e) => {
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
-            if (dropped && dropped.type === 'application/pdf') {
-              onFileChange(dropped);
-            }
+            if (dropped && dropped.type === 'application/pdf') onFileChange(dropped);
           }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
-          <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
-          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to rotate pages</p>
-          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your machine</p>
+          <RotateCw className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
+          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to rotate</p>
+          <p className="text-xs text-zinc-500 mt-1">Full Retina Preview • Permanent Vector Rotation</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -119,9 +126,7 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             className="hidden"
             onChange={(e) => {
               const selected = e.target.files?.[0];
-              if (selected && selected.type === 'application/pdf') {
-                onFileChange(selected);
-              }
+              if (selected && selected.type === 'application/pdf') onFileChange(selected);
               e.target.value = '';
             }}
           />
@@ -137,34 +142,34 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
               </div>
             </div>
             <button
-              onClick={handleClearFile}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              onClick={() => {
+                onFileChange(null);
+                revokeDownloadUrl();
+              }}
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition"
               title="Remove file"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Live Rotating Preview */}
-          <div className="p-4 bg-zinc-950/80 rounded-xl border border-zinc-800 flex flex-col items-center justify-center min-h-[260px] overflow-hidden">
+          {/* High-DPI Live Rotation Preview */}
+          <div className="relative w-full h-[340px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-hidden p-4">
             {isLoadingPreview ? (
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
-            ) : previewUrl ? (
-              <div className="w-48 h-60 flex items-center justify-center">
+            ) : previewDataUrl ? (
+              <div className="relative flex items-center justify-center w-full h-full">
                 <img
-                  src={previewUrl}
-                  alt="Page 1 Preview"
-                  className="max-w-full max-h-full object-contain rounded shadow-lg transition-transform duration-300 ease-out border border-zinc-700"
-                  style={{ transform: `rotate(${angle}deg)` }}
+                  src={previewDataUrl}
+                  alt="Rotation Preview"
+                  style={{ transform: `rotate(${rotationAngle}deg)` }}
+                  className="max-h-[280px] max-w-[280px] object-contain rounded shadow-2xl transition-transform duration-300 ease-out"
                 />
               </div>
-            ) : (
-              <span className="text-xs text-zinc-500">Preview not available</span>
-            )}
-            <p className="text-[11px] text-zinc-500 mt-3">Live Page 1 Rotation Preview</p>
+            ) : null}
+            <span className="absolute bottom-2 text-[10px] text-zinc-500">Live Page 1 Rotation Preview</span>
           </div>
 
-          {/* Angle Selector */}
           <div className="space-y-2">
             <label className="text-xs font-medium text-zinc-300">Choose Clockwise Rotation</label>
             <div className="grid grid-cols-3 gap-2">
@@ -172,14 +177,11 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
                 <button
                   key={deg}
                   type="button"
-                  onClick={() => {
-                    setAngle(deg);
-                    revokeDownloadUrl();
-                  }}
-                  className={`py-2.5 rounded-xl border text-sm font-medium transition-all ${
-                    angle === deg
-                      ? 'border-emerald-500 bg-emerald-950/40 text-emerald-400'
-                      : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700'
+                  onClick={() => setRotationAngle(deg)}
+                  className={`py-2 px-3 rounded-xl border text-xs font-medium transition cursor-pointer ${
+                    rotationAngle === deg
+                      ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400'
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   +{deg}°
@@ -199,31 +201,31 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
             <button
               onClick={handleRotate}
               disabled={isProcessing}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Rotating locally...</span>
+                  <span>Rotating PDF...</span>
                 </>
               ) : (
                 <>
-                  <RotateCw className="w-4 h-4" />
-                  <span>Rotate PDF +{angle}°</span>
+                  <RotateCw className="w-4 h-4 stroke-[2.5]" />
+                  <span>Rotate PDF +{rotationAngle}°</span>
                 </>
               )}
             </button>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
-                <CheckCircle2 className="w-4 h-4" /> Rotated {angle}° Successfully
+                <CheckCircle2 className="w-4 h-4" /> PDF Rotated Successfully
               </div>
               <a
                 href={downloadUrl}
                 download={`rotated_${file.name}`}
-                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20"
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Rotated PDF</span>
               </a>
             </div>
