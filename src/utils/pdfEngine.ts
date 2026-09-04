@@ -878,21 +878,14 @@ export interface CropBox {
   height: number;
 }
 
-export interface SnipBox {
-  x: number;      // 0 to 1
-  y: number;      // 0 to 1
-  width: number;  // 0 to 1
-  height: number; // 0 to 1
-}
-
 /**
- * Snip & Whiteout: Keeps ONLY the selected box(es) and permanently 
- * blanks out everything outside those bounds using vector path clipping.
+ * 100% Native Vector Crop: Zero quality loss, zero rasterization. 
+ * Instantly trims PDF page dimensions mathematically.
  */
 export async function cropPDF(
   file: File,
-  cropData: SnipBox | Record<number, SnipBox>,
-  applyToAllPages: boolean = false,
+  cropData: CropBox | Record<number, CropBox>,
+  applyToAllPages: boolean = true,
   targetPageIndex: number = 0
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
@@ -900,70 +893,61 @@ export async function cropPDF(
   const pages = pdfDoc.getPages();
 
   pages.forEach((page, index) => {
-    let box: SnipBox | null = null;
-    const pageNum = index + 1;
+    let box: CropBox | null = null;
 
     if ('x' in cropData) {
       if (applyToAllPages || index === targetPageIndex) {
-        box = cropData as SnipBox;
+        box = cropData;
       }
     } else {
-      box = (cropData as Record<number, SnipBox>)[pageNum] || (applyToAllPages ? (cropData as Record<number, SnipBox>)[1] : null);
+      const pageNum = index + 1;
+      box = cropData[pageNum] || (applyToAllPages ? cropData[1] || Object.values(cropData)[0] : null);
     }
 
     if (!box) return;
 
-    const { width, height } = page.getSize();
-    const bx = box.x * width;
-    const by = (1 - (box.y + box.height)) * height;
-    const bw = box.width * width;
-    const bh = box.height * height;
+    const mediaBox = page.getMediaBox();
+    const rotation = ((page.getRotation().angle % 360) + 360) % 360;
 
-    // Draw whiteout masks covering all 4 regions outside the chosen snippet box
-    // 1. Top mask
-    if (by + bh < height) {
-      page.drawRectangle({
-        x: 0,
-        y: by + bh,
-        width: width,
-        height: height - (by + bh),
-        color: rgb(1, 1, 1),
-      });
-    }
-    // 2. Bottom mask
-    if (by > 0) {
-      page.drawRectangle({
-        x: 0,
-        y: 0,
-        width: width,
-        height: by,
-        color: rgb(1, 1, 1),
-      });
-    }
-    // 3. Left mask
-    if (bx > 0) {
-      page.drawRectangle({
-        x: 0,
-        y: by,
-        width: bx,
-        height: bh,
-        color: rgb(1, 1, 1),
-      });
-    }
-    // 4. Right mask
-    if (bx + bw < width) {
-      page.drawRectangle({
-        x: bx + bw,
-        y: by,
-        width: width - (bx + bw),
-        height: bh,
-        color: rgb(1, 1, 1),
-      });
+    const mbX = mediaBox.x;
+    const mbY = mediaBox.y;
+    const mbW = mediaBox.width;
+    const mbH = mediaBox.height;
+
+    const safeW = Math.max(0.01, Math.min(1, box.width));
+    const safeH = Math.max(0.01, Math.min(1, box.height));
+    const safeX = Math.max(0, Math.min(1 - safeW, box.x));
+    const safeY = Math.max(0, Math.min(1 - safeH, box.y));
+
+    let finalX = mbX;
+    let finalY = mbY;
+    let finalW = mbW;
+    let finalH = mbH;
+
+    if (rotation === 0) {
+      finalX = mbX + safeX * mbW;
+      finalY = mbY + (1 - (safeY + safeH)) * mbH;
+      finalW = safeW * mbW;
+      finalH = safeH * mbH;
+    } else if (rotation === 90) {
+      finalX = mbX + (1 - (safeY + safeH)) * mbW;
+      finalY = mbY + (1 - (safeX + safeW)) * mbH;
+      finalW = safeH * mbW;
+      finalH = safeW * mbH;
+    } else if (rotation === 180) {
+      finalX = mbX + (1 - (safeX + safeW)) * mbW;
+      finalY = mbY + safeY * mbH;
+      finalW = safeW * mbW;
+      finalH = safeH * mbH;
+    } else if (rotation === 270) {
+      finalX = mbX + safeY * mbW;
+      finalY = mbY + safeX * mbH;
+      finalW = safeH * mbW;
+      finalH = safeW * mbH;
     }
 
-    // Set page view strictly to the selection boundary
-    page.setCropBox(bx, by, bw, bh);
-    page.setMediaBox(bx, by, bw, bh);
+    page.setCropBox(finalX, finalY, finalW, finalH);
+    page.setMediaBox(finalX, finalY, finalW, finalH);
   });
 
   return await pdfDoc.save({ useObjectStreams: false });
@@ -1514,6 +1498,9 @@ export interface OcrProgress {
 /**
  * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
  */
+/**
+ * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
+ */
 export async function ocrPDFToSearchable(
   file: File,
   language: string = 'eng',
@@ -1589,6 +1576,15 @@ export async function ocrPDFToSearchable(
           const cleanText = word.text?.trim();
           if (!cleanText) continue;
 
+          // Normalize smart quotes, em-dashes, and non-ASCII symbols so pdf-lib doesn't drop words
+          const safeText = cleanText
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2013\u2014]/g, '-')
+            .replace(/[^\x20-\x7E]/g, '');
+
+          if (!safeText) continue;
+
           const { x0, y0, y1 } = word.bbox;
           const pdfX = x0 * scaleX;
           const wordBoxHeight = (y1 - y0) * scaleY;
@@ -1596,7 +1592,7 @@ export async function ocrPDFToSearchable(
           const fontSize = Math.max(4, Math.min(72, wordBoxHeight * 0.85));
 
           try {
-            pdfPage.drawText(cleanText, {
+            pdfPage.drawText(safeText, {
               x: pdfX,
               y: pdfY,
               size: fontSize,
