@@ -841,38 +841,45 @@ export async function cropPDF(
     const mbW = mediaBox.width;
     const mbH = mediaBox.height;
 
+    // Guard against negative or inverted crop dimensions
+    const safeW = Math.max(0.01, Math.min(1, box.width));
+    const safeH = Math.max(0.01, Math.min(1, box.height));
+    const safeX = Math.max(0, Math.min(1 - safeW, box.x));
+    const safeY = Math.max(0, Math.min(1 - safeH, box.y));
+
     let finalX = mbX;
     let finalY = mbY;
     let finalW = mbW;
     let finalH = mbH;
 
     if (rotation === 0) {
-      finalX = mbX + box.x * mbW;
-      finalY = mbY + (1 - (box.y + box.height)) * mbH;
-      finalW = box.width * mbW;
-      finalH = box.height * mbH;
+      finalX = mbX + safeX * mbW;
+      finalY = mbY + (1 - (safeY + safeH)) * mbH;
+      finalW = safeW * mbW;
+      finalH = safeH * mbH;
     } else if (rotation === 90) {
-      finalX = mbX + (1 - (box.y + box.height)) * mbW;
-      finalY = mbY + (1 - (box.x + box.width)) * mbH;
-      finalW = box.height * mbW;
-      finalH = box.width * mbH;
+      finalX = mbX + (1 - (safeY + safeH)) * mbW;
+      finalY = mbY + (1 - (safeX + safeW)) * mbH;
+      finalW = safeH * mbW;
+      finalH = safeW * mbH;
     } else if (rotation === 180) {
-      finalX = mbX + (1 - (box.x + box.width)) * mbW;
-      finalY = mbY + box.y * mbH;
-      finalW = box.width * mbW;
-      finalH = box.height * mbH;
+      finalX = mbX + (1 - (safeX + safeW)) * mbW;
+      finalY = mbY + safeY * mbH;
+      finalW = safeW * mbW;
+      finalH = safeH * mbH;
     } else if (rotation === 270) {
-      finalX = mbX + box.y * mbW;
-      finalY = mbY + box.x * mbH;
-      finalW = box.height * mbW;
-      finalH = box.width * mbH;
+      finalX = mbX + safeY * mbW;
+      finalY = mbY + safeX * mbH;
+      finalW = safeH * mbW;
+      finalH = safeW * mbH;
     }
 
     page.setCropBox(finalX, finalY, finalW, finalH);
     page.setMediaBox(finalX, finalY, finalW, finalH);
   });
 
-  return await pdfDoc.save({ useObjectStreams: true });
+  // MUST be false: true corrupts xref tables on large scanned documents
+  return await pdfDoc.save({ useObjectStreams: false });
 }
 
 export interface FormFieldData {
