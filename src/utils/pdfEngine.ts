@@ -37,19 +37,88 @@ export interface CompressOptions {
 /**
  * Merges multiple PDF files into one single PDF document.
  */
+/**
+ * Merges multiple PDF files into one single PDF document.
+ * Includes automatic dual-engine fallback (pdf-lib -> pdfjs raster salvage)
+ * so non-standard, damaged, or scanned PDFs never fail to merge.
+ */
 export async function mergePDFs(files: File[]): Promise<Uint8Array> {
   const mergedPdf = await PDFDocument.create();
 
   for (const file of files) {
     const fileBytes = await file.arrayBuffer();
-    const pdfDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
-    const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
-    copiedPages.forEach((page) => mergedPdf.addPage(page));
+
+    try {
+      // 1. Primary Path: Lossless native vector copy
+      const pdfDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
+      const pageCount = pdfDoc.getPageCount();
+
+      // Ensure every page has a valid Contents stream to prevent copyPages crash
+      for (let i = 0; i < pageCount; i++) {
+        const page = pdfDoc.getPage(i);
+        if (!page.node.Contents()) {
+          const emptyStream = pdfDoc.context.flateStream('');
+          const ref = pdfDoc.context.register(emptyStream);
+          page.node.set(PDFName.of('Contents'), ref);
+        }
+      }
+
+      const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
+      copiedPages.forEach((page) => mergedPdf.addPage(page));
+    } catch (err) {
+      console.warn(`Native merge failed for "${file.name}". Activating fallback engine:`, err);
+
+      // 2. Resilient Fallback: PDF.js renderer salvages and embeds pages
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(fileBytes).slice(),
+        stopAtErrors: false,
+      });
+      const fallbackDoc = await loadingTask.promise;
+      const numPages = fallbackDoc.numPages;
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await fallbackDoc.getPage(pageNum);
+        const unscaledViewport = page.getViewport({ scale: 1.0 });
+        const renderViewport = page.getViewport({ scale: 2.0 }); // High-DPI for print clarity
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(renderViewport.width);
+        canvas.height = Math.floor(renderViewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await (
+            page.render({
+              canvasContext: ctx as any,
+              viewport: renderViewport,
+            } as any) as any
+          ).promise;
+
+          const jpegBlob = await new Promise<Blob>((resolve) =>
+            canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92)
+          );
+
+          canvas.width = 0;
+          canvas.height = 0;
+
+          const imgBytes = await jpegBlob.arrayBuffer();
+          const embeddedImage = await mergedPdf.embedJpg(imgBytes);
+
+          const newPage = mergedPdf.addPage([unscaledViewport.width, unscaledViewport.height]);
+          newPage.drawImage(embeddedImage, {
+            x: 0,
+            y: 0,
+            width: unscaledViewport.width,
+            height: unscaledViewport.height,
+          });
+        }
+      }
+    }
   }
 
-  return await mergedPdf.save();
+  // Save with useObjectStreams: false for universal viewer compatibility
+  return await mergedPdf.save({ useObjectStreams: false });
 }
-
 /**
  * Compresses a PDF to fit under a specific target size (in KB)
  * using client-side canvas rasterization and quality tuning.
