@@ -449,7 +449,12 @@ export default function App() {
               <Route path="/bank-statement-to-excel" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/offline-pdf-redaction" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/extract-pdf-for-llm" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
-
+              {/* Target-KB Programmatic Aliases */}
+              <Route path="/compress-pdf-to-100kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+            
+            
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
@@ -460,10 +465,31 @@ export default function App() {
       <footer className="w-full max-w-5xl py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
         {/* Popular Workflows & SEO Directory */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left pb-4 border-b border-zinc-900/60">
-          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">
+          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider shrink-0">
             Popular Workflows:
           </span>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <NavLink
+              to="/compress-pdf-to-100kb"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Compress to 100KB
+            </NavLink>
+            <span className="text-zinc-800">•</span>
+            <NavLink
+              to="/compress-pdf-to-200kb"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Compress to 200KB
+            </NavLink>
+            <span className="text-zinc-800">•</span>
+            <NavLink
+              to="/compress-pdf-to-500kb"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Compress to 500KB
+            </NavLink>
+            <span className="text-zinc-800">•</span>
             <NavLink
               to="/bank-statement-to-excel"
               className="text-zinc-400 hover:text-emerald-400 transition"

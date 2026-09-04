@@ -210,4 +210,20 @@
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
+  <!-- Target-KB Compression Aliases -->
+  <url>
+    <loc>https://www.1into1.com/compress-pdf-to-100kb</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.1into1.com/compress-pdf-to-200kb</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.1into1.com/compress-pdf-to-500kb</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
 </urlset>

@@ -259,4 +259,25 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'PDF to Markdown for LLM Ingestion',
     subheading: 'Reconstruct structured headings and lists locally without leaking internal documentation.',
   },
+  '/compress-pdf-to-100kb': {
+    path: '/compress-pdf-to-100kb',
+    title: 'Compress PDF to 100KB Online — 100% Free & Private',
+    description: 'Compress your PDF to under 100KB offline in browser memory. Ideal for government portals, job applications, and exam uploads.',
+    heading: 'Compress PDF Under 100KB',
+    subheading: 'Precision client-side compression targeting strictly under 100KB with zero server uploads.',
+  },
+  '/compress-pdf-to-200kb': {
+    path: '/compress-pdf-to-200kb',
+    title: 'Compress PDF to 200KB Online — Strict Target Size',
+    description: 'Reduce PDF file size to under 200KB directly in your browser. Fast, free, and completely offline.',
+    heading: 'Compress PDF Under 200KB',
+    subheading: 'Reduce PDF size to under 200KB with lossless structural tuning and dynamic raster scaling.',
+  },
+  '/compress-pdf-to-500kb': {
+    path: '/compress-pdf-to-500kb',
+    title: 'Compress PDF to 500KB Online — Free Offline Compression',
+    description: 'Fit large PDFs under 500KB without uploading sensitive documents to external servers.',
+    heading: 'Compress PDF Under 500KB',
+    subheading: 'Hit exact 500KB file thresholds reliably while preserving readable text.',
+  },
 };
