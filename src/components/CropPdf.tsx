@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
+  ZoomIn,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -26,9 +27,9 @@ type DragMode = 'draw' | 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | '
 export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  // Store crop boxes per page: { [pageNumber]: CropBox }
   const [pageBoxes, setPageBoxes] = useState<Record<number, CropBox>>({});
   const [applyToAll, setApplyToAll] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0); // 1.0 to 3.0 zoom slider
 
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number; box?: CropBox } | null>(null);
@@ -44,17 +45,16 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  // Active crop box for the current view
   const currentBox: CropBox | null = applyToAll
     ? pageBoxes[1] || pageBoxes[currentPage] || null
     : pageBoxes[currentPage] || null;
 
-  // Load document
   useEffect(() => {
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
       setPageBoxes({});
+      setZoomLevel(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
       pdfDocRef.current = null;
@@ -90,20 +90,18 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  // Render current page canvas (Original vector zoom/view preserved)
+  // High-DPI crystal clear rendering matched to original document quality + Zoom multiplier
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
 
     try {
       const page = await pdfDocRef.current.getPage(currentPage);
-      const containerWidth = overlayRef.current?.parentElement?.clientWidth || 600;
       const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-      // Scale to fit BOTH width and a maximum height of 520px so full page is visible
-      const targetHeight = 520;
-      const targetWidth = Math.max(300, containerWidth - 32);
-      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
+      // High-DPI retina multiplier (2.0x base + user zoom slider) so text is 100% sharp
+      const dpr = window.devicePixelRatio || 1;
+      const scale = (600 / unscaledViewport.width) * dpr * zoomLevel;
       const viewport = page.getViewport({ scale });
 
       const canvas = canvasRef.current;
@@ -122,15 +120,14 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     } finally {
       setIsLoadingPage(false);
     }
-  }, [currentPage]);
+  }, [currentPage, zoomLevel]);
 
   useEffect(() => {
     if (totalPages > 0) {
       renderCurrentPage();
     }
-  }, [currentPage, totalPages, renderCurrentPage]);
+  }, [currentPage, totalPages, zoomLevel, renderCurrentPage]);
 
-  // Coordinate capture
   const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
     const rect = overlayRef.current.getBoundingClientRect();
@@ -262,6 +259,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const handleClear = () => {
     onFileChange(null);
     setPageBoxes({});
+    setZoomLevel(1.0);
     revokeDownloadUrl();
     setErrorMessage(null);
   };
@@ -358,6 +356,21 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
               </button>
             </div>
 
+            {/* Zoom Slider */}
+            <div className="flex items-center gap-2">
+              <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[11px] text-zinc-400">Zoom: {zoomLevel.toFixed(1)}x</span>
+              <input
+                type="range"
+                min="1.0"
+                max="3.0"
+                step="0.2"
+                value={zoomLevel}
+                onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                className="w-24 accent-emerald-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
+              />
+            </div>
+
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
                 <input
@@ -390,8 +403,8 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             </div>
           </div>
 
-          {/* Canvas & Interactive Crop Overlay */}
-          <div className="relative w-full flex justify-center bg-zinc-950/80 rounded-xl border border-zinc-800 p-2 overflow-auto min-h-[350px]">
+          {/* Canvas & Interactive Crop Overlay with Scrollable Viewport */}
+          <div className="relative w-full flex justify-center bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto max-h-[600px] select-none">
             {isLoadingPage && (
               <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60 backdrop-blur-xs z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
@@ -405,9 +418,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
               onMouseUp={handleMouseUp}
               className="relative cursor-crosshair inline-block"
             >
-              <canvas ref={canvasRef} className="block rounded shadow-md max-h-[520px] w-auto h-auto object-contain pointer-events-none" />
+              <canvas ref={canvasRef} className="block rounded shadow-md w-auto h-auto object-contain pointer-events-none" />
 
-              {/* Visual Crop Box Overlay with 8-way adjustable handles (NO blocking text labels) */}
+              {/* Visual Crop Box Overlay with 8-way adjustable handles */}
               {currentBox && (
                 <>
                   <div
@@ -451,9 +464,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           <p className="text-[11px] text-zinc-500 text-center">
-            {applyToAll
-              ? 'Drawing a box will crop every page to these exact boundaries.'
-              : 'Drag handles to resize or drag inside the box to reposition.'}
+            Use the zoom slider to inspect fine text, drag handles to resize, or drag inside the box to reposition.
           </p>
 
           {/* Error Banner */}
@@ -490,7 +501,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
-                <CheckCircle2 className="w-4 h-4" /> PDF Cropped Successfully (Vector Quality Preserved)
+                <CheckCircle2 className="w-4 h-4" /> PDF Cropped Successfully (Original Quality Preserved)
               </div>
               <a
                 href={downloadUrl}
