@@ -37,4 +37,24 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('pdf-lib') || id.includes('pdfjs-dist')) {
+              return 'pdf-core';
+            }
+            if (id.includes('tesseract.js')) {
+              return 'tesseract-vendor';
+            }
+            if (id.includes('lucide-react')) {
+              return 'ui-icons';
+            }
+          }
+        },
+      },
+    },
+  },
 });

@@ -1,54 +1,86 @@
-// Global declaration for Lemon Squeezy SDK
-declare global {
-  interface Window {
-    createLemonSqueezy?: () => void;
-    LemonSqueezy?: {
-      Url: {
-        Open: (url: string) => void;
-        Close: () => void;
-      };
+import { verifyLicenseKey, type LicensePayload } from './cryptoLicense';
+
+const LICENSE_STORAGE_KEY = 'one_into_one_license';
+
+export interface StoredLicense {
+  key: string;
+  payload: LicensePayload;
+  verifiedAt: string;
+}
+
+export function getLicenseStatus(): {
+  isPro: boolean;
+  payload?: LicensePayload;
+  licenseKey?: string;
+} {
+  try {
+    const raw = localStorage.getItem(LICENSE_STORAGE_KEY);
+    if (!raw) return { isPro: false };
+
+    const parsed: StoredLicense = JSON.parse(raw);
+
+    if (parsed.payload?.expiresAt) {
+      if (new Date(parsed.payload.expiresAt) < new Date()) {
+        localStorage.removeItem(LICENSE_STORAGE_KEY);
+        return { isPro: false };
+      }
+    }
+
+    return {
+      isPro: true,
+      payload: parsed.payload,
+      licenseKey: parsed.key,
     };
+  } catch {
+    return { isPro: false };
   }
 }
 
-const LICENSE_STORAGE_KEY = '1into1_pdf_pro_license';
+export function openCheckout(checkoutUrl?: string): void {
+  const target =
+    checkoutUrl ||
+    'https://purple1into1.lemonsqueezy.com/checkout/buy/a7d4dced-b466-44c8-ad32-70aa434f2206?embed=1';
 
-export interface LicenseStatus {
-  isPro: boolean;
-  licenseKey: string | null;
+  if (typeof window !== 'undefined' && (window as any).LemonSqueezy) {
+    (window as any).LemonSqueezy.Url.Open(target);
+  } else {
+    window.open(target, '_blank');
+  }
 }
 
-// Check if user currently has an active Pro license
-export function getLicenseStatus(): LicenseStatus {
-  const key = localStorage.getItem(LICENSE_STORAGE_KEY);
+export async function activateLicenseKey(key: string): Promise<{ success: boolean; message: string }> {
+  const result = await verifyLicenseKey(key);
+
+  if (!result.valid || !result.payload) {
+    return {
+      success: false,
+      message: result.error || 'Invalid license key.',
+    };
+  }
+
+  const record: StoredLicense = {
+    key: key.trim(),
+    payload: result.payload,
+    verifiedAt: new Date().toISOString(),
+  };
+
+  localStorage.setItem(LICENSE_STORAGE_KEY, JSON.stringify(record));
+  window.dispatchEvent(new Event('storage'));
+
   return {
-    isPro: Boolean(key && key.trim().length > 5),
-    licenseKey: key,
+    success: true,
+    message: `License activated for ${result.payload.email} (${result.payload.type})`,
   };
 }
 
-// Save and activate a license key locally
-export function activateLicenseKey(key: string): boolean {
-  const cleanKey = key.trim();
-  if (cleanKey.length < 6) return false;
-
-  localStorage.setItem(LICENSE_STORAGE_KEY, cleanKey);
-  window.dispatchEvent(new Event('storage'));
-  return true;
-}
-
-// Remove license (deactivate)
 export function deactivateLicense(): void {
   localStorage.removeItem(LICENSE_STORAGE_KEY);
   window.dispatchEvent(new Event('storage'));
 }
 
-// Launch Lemon Squeezy overlay checkout modal
-export function openCheckout(checkoutUrl: string): void {
-  if (window.LemonSqueezy?.Url) {
-    window.LemonSqueezy.Url.Open(checkoutUrl);
-  } else {
-    // Fallback if overlay hasn't loaded: open in a new tab
-    window.open(checkoutUrl, '_blank', 'noopener,noreferrer');
-  }
+export function canPerformTask(): boolean {
+  if (getLicenseStatus().isPro) return true;
+  return true;
 }
+
+export function incrementTaskUsage(): void {}

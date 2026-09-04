@@ -5,6 +5,7 @@ import { ProModal } from './components/ProModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
+import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
 import {
   ShieldCheck,
   Sliders,
@@ -41,6 +42,8 @@ import {
   Moon,
   BookOpen,
   Bot,
+  Table,
+  FileCode,
 } from 'lucide-react';
 
 // Code-split all tool components to keep initial bundle tiny
@@ -81,6 +84,9 @@ const AiSummaryPdf = lazy(() => import('./components/AiSummaryPdf').then((m) => 
 
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) => ({ default: m.PrivacyPolicy })));
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
+const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
+const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
+
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
 
 interface BeforeInstallPromptEvent extends Event {
@@ -135,6 +141,8 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Extract Text', path: '/extract-text', category: 'convert', icon: AlignLeft },
   { name: 'Edit Metadata', path: '/edit-metadata', category: 'convert', icon: Tag },
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
+  { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
+  { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
 ];
 
 function ToolFallback() {
@@ -151,6 +159,7 @@ export default function App() {
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
+  const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
@@ -165,10 +174,11 @@ export default function App() {
     };
   }, []);
 
-  // Dynamic SEO title, description, and canonical updates
+  // Dynamic SEO title, description, canonical link, and JSON-LD schema injection
   useEffect(() => {
     const meta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
     document.title = meta.title;
+
     const descMeta = document.querySelector('meta[name="description"]');
     if (descMeta) {
       descMeta.setAttribute('content', meta.description);
@@ -181,7 +191,38 @@ export default function App() {
       document.head.appendChild(canonicalLink);
     }
     const cleanPath = location.pathname === '/' ? '' : location.pathname;
-    canonicalLink.href = `https://www.1into1.com${cleanPath}`;
+    const pageUrl = `https://www.1into1.com${cleanPath}`;
+    canonicalLink.href = pageUrl;
+
+    // Inject/Update dynamic Schema.org JSON-LD
+    let scriptTag = document.querySelector<HTMLScriptElement>('#schema-org-ld');
+    if (!scriptTag) {
+      scriptTag = document.createElement('script');
+      scriptTag.id = 'schema-org-ld';
+      scriptTag.type = 'application/ld+json';
+      document.head.appendChild(scriptTag);
+    }
+
+    scriptTag.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'WebApplication',
+      name: meta.title,
+      url: pageUrl,
+      description: meta.description,
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'Any',
+      browserRequirements: 'Requires HTML5 and WebAssembly support',
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'USD',
+      },
+      featureList: [
+        '100% Client-Side Processing',
+        'Zero Server Uploads',
+        'Fully Offline Compatible',
+      ],
+    });
   }, [location.pathname]);
 
   // Sync category view on direct URL navigation
@@ -270,16 +311,28 @@ export default function App() {
             </button>
           )}
 
-          <TrustBadge />
+          <button
+            type="button"
+            onClick={() => setIsAuditDrawerOpen(true)}
+            className="cursor-pointer transition hover:opacity-85 focus:outline-none"
+            title="Click to view real-time privacy & network telemetry audit"
+          >
+            <TrustBadge />
+          </button>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="w-full max-w-4xl my-auto text-center py-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 mb-6">
+        <button
+          type="button"
+          onClick={() => setIsAuditDrawerOpen(true)}
+          className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 mb-6 hover:border-zinc-700 hover:text-white transition cursor-pointer"
+          title="Click to inspect network telemetry"
+        >
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           Zero uploads • Turn off Wi-Fi to test • 100% Private
-        </div>
+        </button>
 
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
           {currentMeta.heading.includes('Never Upload Your Files') ? (
@@ -389,6 +442,13 @@ export default function App() {
               <Route path="/dark-mode-pdf" element={<DarkModePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/edit-metadata" element={<EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/page-numbers" element={<PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/pdf-to-csv" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/pdf-to-markdown" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
+
+              {/* Programmatic High-Intent Aliases */}
+              <Route path="/bank-statement-to-excel" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/offline-pdf-redaction" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/extract-pdf-for-llm" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>
@@ -397,24 +457,63 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full max-w-5xl py-6 border-t border-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500">
-        <div>
-          <span>100% In-Browser. Zero Server Processing. Powered by </span>
-          <span className="text-zinc-400">pdf-lib</span>, <span className="text-zinc-400">PDF.js</span> & <span className="text-zinc-400">Tesseract.js</span>
+      <footer className="w-full max-w-5xl py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
+        {/* Popular Workflows & SEO Directory */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left pb-4 border-b border-zinc-900/60">
+          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">
+            Popular Workflows:
+          </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <NavLink
+              to="/bank-statement-to-excel"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Bank Statement to Excel
+            </NavLink>
+            <span className="text-zinc-800">•</span>
+            <NavLink
+              to="/offline-pdf-redaction"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Offline PDF Redaction
+            </NavLink>
+            <span className="text-zinc-800">•</span>
+            <NavLink
+              to="/extract-pdf-for-llm"
+              className="text-zinc-400 hover:text-emerald-400 transition"
+            >
+              Extract PDF for LLMs
+            </NavLink>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <NavLink to="/privacy" className="hover:text-zinc-300 transition">
-            Privacy Policy
-          </NavLink>
-          <NavLink to="/terms" className="hover:text-zinc-300 transition">
-            Terms of Service
-          </NavLink>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div>
+            <span>100% In-Browser. Zero Server Processing. Powered by </span>
+            <span className="text-zinc-400">pdf-lib</span>,{' '}
+            <span className="text-zinc-400">PDF.js</span> &amp;{' '}
+            <span className="text-zinc-400">Tesseract.js</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <NavLink to="/privacy" className="hover:text-zinc-300 transition">
+              Privacy Policy
+            </NavLink>
+            <NavLink to="/terms" className="hover:text-zinc-300 transition">
+              Terms of Service
+            </NavLink>
+          </div>
         </div>
       </footer>
 
       {/* Pro Modal */}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
+
+      {/* Network Audit Drawer */}
+      <NetworkAuditDrawer
+        isOpen={isAuditDrawerOpen}
+        onClose={() => setIsAuditDrawerOpen(false)}
+      />
     </div>
   );
 }

@@ -23,8 +23,9 @@ interface CropPdfProps {
 export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [cropBox, setCropBox] = useState<CropBox | null>(null);
-  const [applyToAll, setApplyToAll] = useState(true);
+  // Store crop boxes per page: { [pageNumber]: CropBox }
+  const [pageBoxes, setPageBoxes] = useState<Record<number, CropBox>>({});
+  const [applyToAll, setApplyToAll] = useState(false);
 
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
@@ -40,12 +41,17 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
+  // Active crop box for the current view
+  const currentBox: CropBox | null = applyToAll
+    ? pageBoxes[1] || pageBoxes[currentPage] || null
+    : pageBoxes[currentPage] || null;
+
   // Load document
   useEffect(() => {
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
-      setCropBox(null);
+      setPageBoxes({});
       revokeDownloadUrl();
       setErrorMessage(null);
       pdfDocRef.current = null;
@@ -65,6 +71,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
         pdfDocRef.current = pdf;
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
+        setPageBoxes({});
       } catch (err) {
         console.error('Failed to load PDF for cropping:', err);
         if (isMounted) {
@@ -80,7 +87,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  // Render current page
+  // Render current page canvas
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
@@ -130,7 +137,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     const coords = getNormalizedCoords(e);
     setIsDragging(true);
     setDragStart(coords);
-    setCropBox(null);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -141,25 +147,60 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     const width = Math.abs(current.x - dragStart.x);
     const height = Math.abs(current.y - dragStart.y);
 
-    setCropBox({ x, y, width, height });
+    const newBox: CropBox = { x, y, width, height };
+
+    if (applyToAll) {
+      // Apply master box across all pages
+      const updated: Record<number, CropBox> = {};
+      for (let i = 1; i <= totalPages; i++) {
+        updated[i] = newBox;
+      }
+      setPageBoxes(updated);
+    } else {
+      // Save specifically to current page
+      setPageBoxes((prev) => ({
+        ...prev,
+        [currentPage]: newBox,
+      }));
+    }
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
     setDragStart(null);
-    if (cropBox && (cropBox.width < 0.05 || cropBox.height < 0.05)) {
-      setCropBox(null);
+    if (currentBox && (currentBox.width < 0.03 || currentBox.height < 0.03)) {
+      handleResetCurrent();
+    }
+  };
+
+  const handleResetCurrent = () => {
+    if (applyToAll) {
+      setPageBoxes({});
+    } else {
+      setPageBoxes((prev) => {
+        const next = { ...prev };
+        delete next[currentPage];
+        return next;
+      });
     }
   };
 
   const handleCrop = async () => {
-    if (!file || !cropBox) return;
+    if (!file) return;
+
+    // Check if any pages have crop boxes
+    const hasAnyBox = Object.keys(pageBoxes).length > 0;
+    if (!hasAnyBox) {
+      setErrorMessage('Please drag a box over at least one page to define a crop area.');
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
 
     try {
-      const bytes = await cropPDF(file, cropBox, applyToAll, currentPage - 1);
+      const bytes = await cropPDF(file, pageBoxes, applyToAll);
       const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
     } catch (err: any) {
@@ -172,10 +213,12 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
   const handleClear = () => {
     onFileChange(null);
-    setCropBox(null);
+    setPageBoxes({});
     revokeDownloadUrl();
     setErrorMessage(null);
   };
+
+  const configuredPagesCount = Object.keys(pageBoxes).length;
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
@@ -228,7 +271,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
                 <p className="text-xs text-zinc-500">
                   {totalPages > 0 ? `${totalPages} Pages • ` : ''}
-                  {cropBox ? 'Crop area selected' : 'Draw a box to crop'}
+                  {configuredPagesCount > 0
+                    ? `${configuredPagesCount} of ${totalPages} pages configured`
+                    : 'Draw a box to crop'}
                 </p>
               </div>
             </div>
@@ -270,20 +315,28 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                 <input
                   type="checkbox"
                   checked={applyToAll}
-                  onChange={(e) => setApplyToAll(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setApplyToAll(checked);
+                    if (checked && currentBox) {
+                      const updated: Record<number, CropBox> = {};
+                      for (let i = 1; i <= totalPages; i++) updated[i] = currentBox;
+                      setPageBoxes(updated);
+                    }
+                  }}
                   className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0"
                 />
                 Apply to all {totalPages} pages
               </label>
 
-              {cropBox && (
+              {currentBox && (
                 <button
                   type="button"
-                  onClick={() => setCropBox(null)}
+                  onClick={handleResetCurrent}
                   className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-red-400 transition"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>Reset Box</span>
+                  <span>{applyToAll ? 'Reset All' : 'Reset Box'}</span>
                 </button>
               )}
             </div>
@@ -306,34 +359,34 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             >
               <canvas ref={canvasRef} className="block rounded shadow-md" />
 
-              {/* Dimmed backdrop around crop */}
-              {cropBox && (
+              {/* Visual Crop Box Overlay */}
+              {currentBox && (
                 <>
                   <div
                     className="absolute inset-0 bg-black/50 pointer-events-none"
                     style={{
                       clipPath: `polygon(
                         0% 0%, 100% 0%, 100% 100%, 0% 100%,
-                        0% ${cropBox.y * 100}%,
-                        ${cropBox.x * 100}% ${cropBox.y * 100}%,
-                        ${cropBox.x * 100}% ${(cropBox.y + cropBox.height) * 100}%,
-                        ${(cropBox.x + cropBox.width) * 100}% ${(cropBox.y + cropBox.height) * 100}%,
-                        ${(cropBox.x + cropBox.width) * 100}% ${cropBox.y * 100}%,
-                        0% ${cropBox.y * 100}%
+                        0% ${currentBox.y * 100}%,
+                        ${currentBox.x * 100}% ${currentBox.y * 100}%,
+                        ${currentBox.x * 100}% ${(currentBox.y + currentBox.height) * 100}%,
+                        ${(currentBox.x + currentBox.width) * 100}% ${(currentBox.y + currentBox.height) * 100}%,
+                        ${(currentBox.x + currentBox.width) * 100}% ${currentBox.y * 100}%,
+                        0% ${currentBox.y * 100}%
                       )`,
                     }}
                   />
                   <div
                     className="absolute border-2 border-emerald-400 pointer-events-none shadow-lg"
                     style={{
-                      left: `${cropBox.x * 100}%`,
-                      top: `${cropBox.y * 100}%`,
-                      width: `${cropBox.width * 100}%`,
-                      height: `${cropBox.height * 100}%`,
+                      left: `${currentBox.x * 100}%`,
+                      top: `${currentBox.y * 100}%`,
+                      width: `${currentBox.width * 100}%`,
+                      height: `${currentBox.height * 100}%`,
                     }}
                   >
-                    <span className="absolute -top-6 left-0 bg-emerald-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded">
-                      Crop Area
+                    <span className="absolute -top-6 left-0 bg-emerald-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded shadow">
+                      Crop Area {applyToAll ? '(All Pages)' : `(Page ${currentPage})`}
                     </span>
                   </div>
                 </>
@@ -342,7 +395,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           <p className="text-[11px] text-zinc-500 text-center">
-            Click and drag over the page to define your crop boundary.
+            {applyToAll
+              ? 'Drawing a box will crop every page to these exact boundaries.'
+              : 'Each page maintains its own independent crop box. Flip pages to configure separately.'}
           </p>
 
           {/* Error Banner */}
@@ -357,7 +412,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           {!downloadUrl ? (
             <button
               onClick={handleCrop}
-              disabled={isProcessing || !cropBox}
+              disabled={isProcessing || configuredPagesCount === 0}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
             >
               {isProcessing ? (
@@ -368,7 +423,11 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
               ) : (
                 <>
                   <Crop className="w-4 h-4 stroke-[2.5]" />
-                  <span>{applyToAll ? `Crop All ${totalPages} Pages` : `Crop Page ${currentPage} Only`}</span>
+                  <span>
+                    {applyToAll
+                      ? `Crop All ${totalPages} Pages`
+                      : `Apply Crop (${configuredPagesCount} page${configuredPagesCount === 1 ? '' : 's'} configured)`}
+                  </span>
                 </>
               )}
             </button>

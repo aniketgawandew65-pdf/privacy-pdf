@@ -777,11 +777,11 @@ export interface CropBox {
 
 /**
  * Trims PDF page boundaries natively by recalculating CropBox and MediaBox.
- * Preserves 100% vector fidelity and searchable text with zero re-rasterization.
+ * Supports per-page crop geometries, handles rotated pages, and preserves 100% vector fidelity.
  */
 export async function cropPDF(
   file: File,
-  cropBox: CropBox,
+  cropData: CropBox | Record<number, CropBox>,
   applyToAllPages: boolean = true,
   targetPageIndex: number = 0
 ): Promise<Uint8Array> {
@@ -789,23 +789,62 @@ export async function cropPDF(
   const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
 
-  const pagesToCrop = applyToAllPages
-    ? pages
-    : [pages[targetPageIndex] || pages[0]];
+  pages.forEach((page, index) => {
+    let box: CropBox | null = null;
 
-  for (const page of pagesToCrop) {
-    const { width: origWidth, height: origHeight } = page.getSize();
+    if ('x' in cropData) {
+      // Single CropBox provided
+      if (applyToAllPages || index === targetPageIndex) {
+        box = cropData;
+      }
+    } else {
+      // Dictionary of 1-based page numbers provided: { [pageNumber]: CropBox }
+      const pageNum = index + 1;
+      box = cropData[pageNum] || (applyToAllPages ? cropData[1] || Object.values(cropData)[0] : null);
+    }
+
+    if (!box) return;
+
+    const mediaBox = page.getMediaBox();
+    const rotation = ((page.getRotation().angle % 360) + 360) % 360;
+
+    const mbX = mediaBox.x;
+    const mbY = mediaBox.y;
+    const mbW = mediaBox.width;
+    const mbH = mediaBox.height;
+
+    let finalX = mbX;
+    let finalY = mbY;
+    let finalW = mbW;
+    let finalH = mbH;
 
     // Convert top-left normalized screen coordinates to bottom-left PDF coordinates
-    const pdfX = cropBox.x * origWidth;
-    const pdfY = (1 - (cropBox.y + cropBox.height)) * origHeight;
-    const pdfWidth = cropBox.width * origWidth;
-    const pdfHeight = cropBox.height * origHeight;
+    if (rotation === 0) {
+      finalX = mbX + box.x * mbW;
+      finalY = mbY + (1 - (box.y + box.height)) * mbH;
+      finalW = box.width * mbW;
+      finalH = box.height * mbH;
+    } else if (rotation === 90) {
+      finalX = mbX + (1 - (box.y + box.height)) * mbW;
+      finalY = mbY + (1 - (box.x + box.width)) * mbH;
+      finalW = box.height * mbW;
+      finalH = box.width * mbH;
+    } else if (rotation === 180) {
+      finalX = mbX + (1 - (box.x + box.width)) * mbW;
+      finalY = mbY + box.y * mbH;
+      finalW = box.width * mbW;
+      finalH = box.height * mbH;
+    } else if (rotation === 270) {
+      finalX = mbX + box.y * mbW;
+      finalY = mbY + box.x * mbH;
+      finalW = box.height * mbW;
+      finalH = box.width * mbH;
+    }
 
     // Apply both CropBox and MediaBox for universal viewer compatibility
-    page.setCropBox(pdfX, pdfY, pdfWidth, pdfHeight);
-    page.setMediaBox(pdfX, pdfY, pdfWidth, pdfHeight);
-  }
+    page.setCropBox(finalX, finalY, finalW, finalH);
+    page.setMediaBox(finalX, finalY, finalW, finalH);
+  });
 
   return await pdfDoc.save({ useObjectStreams: true });
 }
@@ -878,6 +917,7 @@ export async function fillAndFlattenPDF(
 
   return await pdfDoc.save({ useObjectStreams: true });
 }
+
 export interface GrayscaleOptions {
   mode: 'grayscale' | 'pure-bw';
   threshold?: number; // 0-255 for pure black & white threshold (default: 128)
@@ -966,6 +1006,7 @@ export async function convertToGrayscalePDF(
 
   return await outputDoc.save({ useObjectStreams: true });
 }
+
 export type PageSizePreset = 'A4' | 'LETTER' | 'LEGAL' | 'A3' | 'A5';
 export type ResizeFitMode = 'fit' | 'stretch' | 'center';
 
@@ -1055,6 +1096,7 @@ export async function resizePDF(
 
   return await outputDoc.save({ useObjectStreams: true });
 }
+
 export type NUpLayout = 2 | 4 | 9;
 
 export interface NUpOptions {
@@ -1142,6 +1184,7 @@ export async function createNUpPDF(
 
   return await outputDoc.save({ useObjectStreams: true });
 }
+
 export type BatesPosition =
   | 'top-left'
   | 'top-center'
@@ -1239,6 +1282,7 @@ export async function addBatesNumbersToPDF(
 
   return await pdfDoc.save({ useObjectStreams: true });
 }
+
 export interface ExtractedImage {
   id: string;
   name: string;
@@ -1375,6 +1419,7 @@ export async function packageImagesToZip(
 
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
+
 export interface OcrProgress {
   page: number;
   totalPages: number;
@@ -1441,7 +1486,6 @@ export async function ocrPDFToSearchable(
       });
 
       // Execute OCR
-      // Execute OCR
       const { data } = await worker.recognize(canvas);
       const pageData = data as any;
 
@@ -1493,6 +1537,7 @@ export async function ocrPDFToSearchable(
 
   return await pdfDoc.save({ useObjectStreams: true });
 }
+
 export interface RepairResult {
   bytes: Uint8Array;
   method: 'lossless' | 'stream-salvage';
@@ -1600,6 +1645,7 @@ export async function repairPDF(
     recoveredPages: totalPages,
   };
 }
+
 export type DarkModeFilter = 'invert' | 'oled' | 'sepia';
 
 export interface DarkModeOptions {
@@ -1708,6 +1754,7 @@ export async function invertPDF(
 
   return await outputDoc.save({ useObjectStreams: true });
 }
+
 export interface BookletOptions {
   sheetSize?: 'A4' | 'LETTER';
   addFoldLine?: boolean;
@@ -1809,6 +1856,7 @@ export async function createBookletPDF(
 
   return await outputDoc.save({ useObjectStreams: true });
 }
+
 /**
  * Estimates text skew angle using horizontal projection profile variance.
  * Tests candidate angles from -10 to +10 degrees in 0.5-degree steps.
@@ -1966,4 +2014,313 @@ export async function deskewPDF(
   }
 
   return await outputDoc.save({ useObjectStreams: true });
+}
+
+export interface TableExtractOptions {
+  yTolerance?: number; // Vertical pixel proximity threshold to group text into the same row
+  minColumnGap?: number; // Horizontal gap threshold to start a new column
+  delimiter?: ',' | ';' | '\t';
+  onProgress?: (current: number, total: number) => void;
+}
+
+export interface ExtractedTableResult {
+  csv: string;
+  rows: string[][];
+  totalRows: number;
+}
+
+/**
+ * Parses coordinate text streams from a PDF to reconstruct tabular rows and columns.
+ * Formats values into an RFC-4180 compliant CSV string and matrix array.
+ */
+export async function extractTableFromPDF(
+  file: File,
+  options: TableExtractOptions = {}
+): Promise<ExtractedTableResult> {
+  const { yTolerance = 4, minColumnGap = 12, delimiter = ',', onProgress } = options;
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdfDoc = await loadingTask.promise;
+  const totalPages = pdfDoc.numPages;
+
+  const allRows: string[][] = [];
+
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    onProgress?.(pageNum, totalPages);
+    const page = await pdfDoc.getPage(pageNum);
+    const textContent = await page.getTextContent();
+
+    interface RawItem {
+      str: string;
+      x: number;
+      y: number;
+      width: number;
+    }
+
+    const items: RawItem[] = [];
+    for (const item of textContent.items as any[]) {
+      if (!item.str || !item.str.trim()) continue;
+      // transform: [scaleX, skewY, skewX, scaleY, tx, ty]
+      const tx = item.transform[4];
+      const ty = item.transform[5];
+      items.push({
+        str: item.str,
+        x: tx,
+        y: ty,
+        width: item.width || 0,
+      });
+    }
+
+    // Sort items descending by Y (top to bottom), then ascending by X (left to right)
+    items.sort((a, b) => {
+      if (Math.abs(b.y - a.y) > yTolerance) {
+        return b.y - a.y;
+      }
+      return a.x - b.x;
+    });
+
+    // Cluster items into lines
+    const lines: RawItem[][] = [];
+    let currentLine: RawItem[] = [];
+    let currentY: number | null = null;
+
+    for (const item of items) {
+      if (currentY === null || Math.abs(item.y - currentY) <= yTolerance) {
+        currentLine.push(item);
+        currentY = item.y;
+      } else {
+        if (currentLine.length > 0) {
+          lines.push(currentLine);
+        }
+        currentLine = [item];
+        currentY = item.y;
+      }
+    }
+    if (currentLine.length > 0) {
+      lines.push(currentLine);
+    }
+
+    // Convert lines into columns by grouping adjacent characters or separating spaced columns
+    for (const line of lines) {
+      line.sort((a, b) => a.x - b.x);
+
+      const rowCells: string[] = [];
+      let currentCellText = '';
+      let lastRightEdge = -1;
+
+      for (const item of line) {
+        if (lastRightEdge === -1) {
+          currentCellText = item.str;
+          lastRightEdge = item.x + item.width;
+        } else {
+          const gap = item.x - lastRightEdge;
+          if (gap > minColumnGap) {
+            rowCells.push(currentCellText.trim());
+            currentCellText = item.str;
+          } else {
+            // Consecutive or lightly spaced text within the same column cell
+            currentCellText += (gap > 2 ? ' ' : '') + item.str;
+          }
+          lastRightEdge = item.x + item.width;
+        }
+      }
+
+      if (currentCellText.trim()) {
+        rowCells.push(currentCellText.trim());
+      }
+
+      if (rowCells.length > 0) {
+        allRows.push(rowCells);
+      }
+    }
+  }
+
+  // Format matrix into standard CSV
+  const escapeCell = (val: string): string => {
+    if (val.includes(delimiter) || val.includes('"') || val.includes('\n')) {
+      return `"${val.replace(/"/g, '""')}"`;
+    }
+    return val;
+  };
+
+  const csvLines = allRows.map((row) => row.map(escapeCell).join(delimiter));
+  const csv = csvLines.join('\r\n');
+
+  return {
+    csv,
+    rows: allRows,
+    totalRows: allRows.length,
+  };
+}
+
+export interface MarkdownExtractOptions {
+  detectHeadings?: boolean;
+  detectLists?: boolean;
+  joinHyphenatedWords?: boolean;
+  onProgress?: (current: number, total: number) => void;
+}
+
+export interface ExtractedMarkdownResult {
+  markdown: string;
+  charCount: number;
+  wordCount: number;
+  estimatedTokens: number;
+}
+
+/**
+ * Extracts structured Markdown from PDF text streams.
+ * Uses font scale heuristics for headings and regex for list normalizations.
+ */
+export async function extractMarkdownFromPDF(
+  file: File,
+  options: MarkdownExtractOptions = {}
+): Promise<ExtractedMarkdownResult> {
+  const {
+    detectHeadings = true,
+    detectLists = true,
+    joinHyphenatedWords = true,
+    onProgress,
+  } = options;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdfDoc = await loadingTask.promise;
+  const totalPages = pdfDoc.numPages;
+
+  interface TextItemData {
+    str: string;
+    x: number;
+    y: number;
+    height: number;
+    width: number;
+  }
+
+  const pagesTextData: TextItemData[][] = [];
+  const fontHeights: number[] = [];
+
+  // Pass 1: Gather raw items and sample body font sizes
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    onProgress?.(pageNum, totalPages);
+    const page = await pdfDoc.getPage(pageNum);
+    const content = await page.getTextContent();
+
+    const items: TextItemData[] = [];
+    for (const item of content.items as any[]) {
+      if (!item.str || !item.str.trim()) continue;
+      const height = Math.abs(item.transform[3]) || Math.abs(item.transform[0]) || 12;
+      fontHeights.push(height);
+      items.push({
+        str: item.str,
+        x: item.transform[4],
+        y: item.transform[5],
+        height,
+        width: item.width || 0,
+      });
+    }
+    pagesTextData.push(items);
+  }
+
+  // Determine median body font size
+  fontHeights.sort((a, b) => a - b);
+  const medianHeight = fontHeights[Math.floor(fontHeights.length / 2)] || 12;
+
+  const markdownBlocks: string[] = [];
+
+  // Pass 2: Reconstruct lines and format headings/lists
+  for (let pageIndex = 0; pageIndex < pagesTextData.length; pageIndex++) {
+    const items = pagesTextData[pageIndex];
+    if (items.length === 0) continue;
+
+    // Group items into lines
+    items.sort((a, b) => {
+      if (Math.abs(b.y - a.y) > 4) return b.y - a.y;
+      return a.x - b.x;
+    });
+
+    const lines: { text: string; avgHeight: number }[] = [];
+    let currentLineItems: TextItemData[] = [];
+    let currentY: number | null = null;
+
+    for (const item of items) {
+      if (currentY === null || Math.abs(item.y - currentY) <= 4) {
+        currentLineItems.push(item);
+        currentY = item.y;
+      } else {
+        if (currentLineItems.length > 0) {
+          const text = currentLineItems.map((i) => i.str).join(' ').trim();
+          const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
+          lines.push({ text, avgHeight });
+        }
+        currentLineItems = [item];
+        currentY = item.y;
+      }
+    }
+
+    if (currentLineItems.length > 0) {
+      const text = currentLineItems.map((i) => i.str).join(' ').trim();
+      const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
+      lines.push({ text, avgHeight });
+    }
+
+    // Format lines to Markdown
+    for (const line of lines) {
+      let lineText = line.text;
+      if (!lineText) continue;
+
+      if (joinHyphenatedWords && lineText.endsWith('-')) {
+        lineText = lineText.slice(0, -1);
+      }
+
+      // Check headings
+      if (detectHeadings) {
+        if (line.avgHeight >= medianHeight * 1.8) {
+          markdownBlocks.push(`\n# ${lineText}\n`);
+          continue;
+        } else if (line.avgHeight >= medianHeight * 1.35) {
+          markdownBlocks.push(`\n## ${lineText}\n`);
+          continue;
+        } else if (line.avgHeight >= medianHeight * 1.15 && lineText.length < 80) {
+          markdownBlocks.push(`\n### ${lineText}\n`);
+          continue;
+        }
+      }
+
+      // Check lists
+      if (detectLists) {
+        const bulletMatch = lineText.match(/^[\u2022\u25E6\u2023\u2219\*\-]\s*(.*)$/);
+        if (bulletMatch) {
+          markdownBlocks.push(`- ${bulletMatch[1]}`);
+          continue;
+        }
+
+        const numberedMatch = lineText.match(/^(\d+[\.\)])\s*(.*)$/);
+        if (numberedMatch) {
+          markdownBlocks.push(`${numberedMatch[1]} ${numberedMatch[2]}`);
+          continue;
+        }
+      }
+
+      markdownBlocks.push(lineText);
+    }
+
+    if (pageIndex < pagesTextData.length - 1) {
+      markdownBlocks.push('\n---\n');
+    }
+  }
+
+  const markdown = markdownBlocks
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const charCount = markdown.length;
+  const wordCount = markdown.trim() ? markdown.trim().split(/\s+/).length : 0;
+  const estimatedTokens = Math.round(charCount / 4);
+
+  return {
+    markdown,
+    charCount,
+    wordCount,
+    estimatedTokens,
+  };
 }

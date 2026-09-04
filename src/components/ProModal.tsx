@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { X, Sparkles, Check, Key, ShieldCheck } from 'lucide-react';
 import { getLicenseStatus, activateLicenseKey, deactivateLicense, openCheckout } from '../utils/license';
 
@@ -44,7 +44,7 @@ export function ProModal({
 
   if (!isOpen) return null;
 
-  const handleActivate = (e: React.FormEvent) => {
+  const handleActivate = async (e: FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -54,15 +54,16 @@ export function ProModal({
       return;
     }
 
-    const success = activateLicenseKey(licenseInput);
-    if (success) {
-      setSuccessMsg('Pro license activated successfully!');
+    const result = await activateLicenseKey(licenseInput);
+
+    if (result.success) {
+      setSuccessMsg(result.message || 'Pro license activated successfully!');
       setLicenseInput('');
       setTimeout(() => {
         onClose();
       }, 1200);
     } else {
-      setErrorMsg('Invalid license key format.');
+      setErrorMsg(result.message || 'Invalid license key.');
     }
   };
 
