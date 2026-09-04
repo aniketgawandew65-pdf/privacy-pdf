@@ -8,10 +8,10 @@ interface ProModalProps {
   checkoutUrl?: string;
 }
 
-// Dynamically injects lemon.js only when the modal is accessed
+// Dynamically injects lemon.js with error fallback to prevent freezing when offline
 function loadLemonScript(): Promise<void> {
   return new Promise((resolve) => {
-    if (document.querySelector('script[src*="lemon.js"]')) {
+    if (document.querySelector('script[src*="lemon.js"]') || (window as any).createLemonSqueezy) {
       resolve();
       return;
     }
@@ -20,6 +20,11 @@ function loadLemonScript(): Promise<void> {
     script.async = true;
     script.onload = () => {
       (window as any).createLemonSqueezy?.();
+      resolve();
+    };
+    // Fall back gracefully if offline or blocked
+    script.onerror = () => {
+      console.warn('Lemon.js blocked or offline. Falling back to direct window checkout.');
       resolve();
     };
     document.body.appendChild(script);
@@ -34,12 +39,24 @@ export function ProModal({
   const [licenseInput, setLicenseInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const { isPro, licenseKey } = getLicenseStatus();
+  const [isPro, setIsPro] = useState(false);
+  const [licenseKey, setLicenseKey] = useState('');
+
+  // Sync state reactively
+  const syncLicense = () => {
+    const status = getLicenseStatus();
+    setIsPro(status.isPro);
+    setLicenseKey(status.licenseKey || '');
+  };
 
   useEffect(() => {
     if (isOpen) {
+      syncLicense();
       loadLemonScript();
     }
+
+    window.addEventListener('storage', syncLicense);
+    return () => window.removeEventListener('storage', syncLicense);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -59,6 +76,7 @@ export function ProModal({
     if (result.success) {
       setSuccessMsg(result.message || 'Pro license activated successfully!');
       setLicenseInput('');
+      syncLicense();
       setTimeout(() => {
         onClose();
       }, 1200);
@@ -69,10 +87,16 @@ export function ProModal({
 
   const handleDeactivate = () => {
     deactivateLicense();
+    syncLicense();
     setSuccessMsg('License deactivated.');
   };
 
   const handleCheckout = async () => {
+    setErrorMsg('');
+   if (!navigator.onLine) {
+  setErrorMsg('An active internet connection is required to communicate with OpenAI/Groq.');
+  return;
+}
     await loadLemonScript();
     openCheckout(checkoutUrl);
   };
@@ -125,7 +149,7 @@ export function ProModal({
             <p className="text-[11px] text-zinc-400 mt-0.5 truncate">Key: {licenseKey}</p>
             <button
               onClick={handleDeactivate}
-              className="mt-3 text-xs text-red-400 hover:underline"
+              className="mt-3 text-xs text-red-400 hover:underline cursor-pointer"
             >
               Deactivate License
             </button>
@@ -135,7 +159,7 @@ export function ProModal({
             {/* Purchase CTA */}
             <button
               onClick={handleCheckout}
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold transition shadow-lg shadow-emerald-500/20 mb-4"
+              className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold transition shadow-lg shadow-emerald-500/20 mb-4 cursor-pointer"
             >
               Get Pro Access — $19/year
             </button>
@@ -156,7 +180,7 @@ export function ProModal({
                 />
                 <button
                   type="submit"
-                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white transition"
+                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white transition cursor-pointer"
                 >
                   Activate
                 </button>

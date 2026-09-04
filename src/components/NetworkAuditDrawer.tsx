@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ShieldCheck, WifiOff, HardDrive, Cpu, X, Lock } from 'lucide-react';
+import { networkAuditor } from '../utils/networkAuditor';
 
 interface NetworkAuditDrawerProps {
   isOpen: boolean;
@@ -8,29 +9,53 @@ interface NetworkAuditDrawerProps {
 
 export function NetworkAuditDrawer({ isOpen, onClose }: NetworkAuditDrawerProps) {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [bytesSent, setBytesSent] = useState<number>(0);
   const [memoryUsage, setMemoryUsage] = useState<string>('N/A');
   const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
 
   useEffect(() => {
+    // 1. Initialize & subscribe to live network interception
+    networkAuditor.init();
+    const unsubscribe = networkAuditor.subscribe((sent) => {
+      setBytesSent(sent);
+    });
+
+    // 2. Online / offline state listeners
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Chrome memory API check (if supported)
-    if ((performance as any).memory) {
-      const usedBytes = (performance as any).memory.usedJSHeapSize;
-      setMemoryUsage(`${(usedBytes / (1024 * 1024)).toFixed(1)} MB`);
-    }
+    // 3. Dynamic Heap Memory Polling (updates every 2s while open)
+    const updateMemory = () => {
+      if ((performance as any).memory) {
+        const usedBytes = (performance as any).memory.usedJSHeapSize;
+        setMemoryUsage(`${(usedBytes / (1024 * 1024)).toFixed(1)} MB`);
+      } else {
+        setMemoryUsage('Sandboxed');
+      }
+    };
+
+    updateMemory();
+    const memoryInterval = setInterval(updateMemory, 2000);
 
     return () => {
+      unsubscribe();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      clearInterval(memoryInterval);
     };
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  // Format bytes dynamically
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    if (bytes < 1024) return `${bytes} B`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
@@ -50,12 +75,15 @@ export function NetworkAuditDrawer({ isOpen, onClose }: NetworkAuditDrawerProps)
 
         {/* Audit Metrics */}
         <div className="grid grid-cols-2 gap-3 text-xs">
+          {/* Real Outbound Telemetry from NetworkAuditor */}
           <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
             <div className="flex items-center gap-1.5 text-zinc-400">
               <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
               <span>Outbound Telemetry</span>
             </div>
-            <p className="text-base font-bold font-mono text-emerald-400">0 Bytes</p>
+            <p className="text-base font-bold font-mono text-emerald-400">
+              {formatBytes(bytesSent)}
+            </p>
             <p className="text-[10px] text-zinc-500">No tracking or analytics scripts</p>
           </div>
 
@@ -79,6 +107,7 @@ export function NetworkAuditDrawer({ isOpen, onClose }: NetworkAuditDrawerProps)
             <p className="text-[10px] text-zinc-500">Isolated in Web Workers</p>
           </div>
 
+          {/* Dynamic Polling Heap Allocation */}
           <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 space-y-1">
             <div className="flex items-center gap-1.5 text-zinc-400">
               <Lock className="w-3.5 h-3.5 text-emerald-400" />

@@ -461,77 +461,78 @@ export default function App() {
         </ErrorBoundary>
       </main>
 
-      {/* Footer */}
-      <footer className="w-full max-w-5xl py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
+    {/* Footer */}
+      <footer className="w-full max-w-5xl mx-auto mt-16 sm:mt-20 px-4 sm:px-6 py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
         {/* Popular Workflows & SEO Directory */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left pb-4 border-b border-zinc-900/60">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-6 border-b border-zinc-900/60">
           <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider shrink-0">
             Popular Workflows:
           </span>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
             <NavLink
               to="/compress-pdf-to-100kb"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Compress to 100KB
             </NavLink>
-            <span className="text-zinc-800">•</span>
+            <span className="text-zinc-800 select-none">•</span>
             <NavLink
               to="/compress-pdf-to-200kb"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Compress to 200KB
             </NavLink>
-            <span className="text-zinc-800">•</span>
+            <span className="text-zinc-800 select-none">•</span>
             <NavLink
               to="/compress-pdf-to-500kb"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Compress to 500KB
             </NavLink>
-            <span className="text-zinc-800">•</span>
+            <span className="text-zinc-800 select-none">•</span>
             <NavLink
               to="/bank-statement-to-excel"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Bank Statement to Excel
             </NavLink>
-            <span className="text-zinc-800">•</span>
+            <span className="text-zinc-800 select-none">•</span>
             <NavLink
               to="/offline-pdf-redaction"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Offline PDF Redaction
             </NavLink>
-            <span className="text-zinc-800">•</span>
+            <span className="text-zinc-800 select-none">•</span>
             <NavLink
               to="/extract-pdf-for-llm"
-              className="text-zinc-400 hover:text-emerald-400 transition"
+              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
             >
               Extract PDF for LLMs
             </NavLink>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+          <div className="leading-relaxed text-[11px]">
             <span>100% In-Browser. Zero Server Processing. Powered by </span>
             <span className="text-zinc-400">pdf-lib</span>,{' '}
             <span className="text-zinc-400">PDF.js</span> &amp;{' '}
             <span className="text-zinc-400">Tesseract.js</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <NavLink to="/privacy" className="hover:text-zinc-300 transition">
+          <div className="flex items-center gap-4 shrink-0 text-[11px]">
+            <NavLink to="/privacy" className="hover:text-zinc-300 transition-colors">
               Privacy Policy
             </NavLink>
-            <NavLink to="/terms" className="hover:text-zinc-300 transition">
+            <span className="text-zinc-800 select-none">•</span>
+            <NavLink to="/terms" className="hover:text-zinc-300 transition-colors">
               Terms of Service
             </NavLink>
           </div>
         </div>
       </footer>
-
+      
       {/* Pro Modal */}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
 

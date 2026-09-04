@@ -233,8 +233,8 @@ ${contextText}`;
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Bot className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
-          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to summarize & chat</p>
-          <p className="text-xs text-zinc-500 mt-1">100% Client-Side • Bring Your Own Key • Zero Server Egress</p>
+          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to summarize &amp; chat</p>
+          <p className="text-xs text-zinc-500 mt-1"> Direct Client-to-Provider Streaming • No 1into1 Intermediate Servers • BYO Key </p>
           <input
             ref={fileInputRef}
             type="file"
