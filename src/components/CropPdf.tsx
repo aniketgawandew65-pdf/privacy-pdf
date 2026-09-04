@@ -466,7 +466,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             </div>
           </div>
 
-          {/* Canvas & Interactive Crop Overlay with Edge-to-Edge Scrolling Workspace */}
+          {/* Canvas & Interactive Crop Overlay with 360-Degree Panning Workspace */}
           <div
             ref={containerRef}
             className={`relative w-full bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-auto max-h-[600px] select-none ${
@@ -476,7 +476,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
           >
-            <div className="min-w-full min-h-full flex items-center justify-center p-16 sm:p-24">
+            <div className="inline-block p-20 sm:p-32 min-w-full min-h-full">
               {isLoadingPage && (
                 <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60 backdrop-blur-xs z-20">
                   <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
@@ -535,7 +535,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
           <p className="text-[11px] text-zinc-500 text-center">
             {toolMode === 'pan'
-              ? 'Hand Pan Mode Active: Click and drag anywhere to slide the zoomed view.'
+              ? 'Hand Pan Mode Active: Click and drag anywhere to slide the zoomed view in any direction.'
               : 'Crop Mode Active: Click and drag to draw a box, or use handles to resize.'}
           </p>
 
