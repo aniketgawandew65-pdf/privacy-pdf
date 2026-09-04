@@ -14,6 +14,12 @@ export interface CompressionProgress {
   stage: string;
 }
 
+export interface CompressOptions {
+  level: 'recommended' | 'extreme' | 'target';
+  targetKb?: number;
+  onProgress?: (progress: CompressionProgress) => void;
+}
+
 /**
  * Merges multiple PDF files into one single PDF document.
  */
@@ -112,16 +118,16 @@ export async function compressPDFToTarget(
 
   return await outputPdf.save();
 }
+
 export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
 
   for (const file of imageFiles) {
-    // Convert any image format (JPG, PNG, WEBP) to JPEG bytes via canvas
     const imgBitmap = await createImageBitmap(file);
     const canvas = document.createElement('canvas');
     canvas.width = imgBitmap.width;
     canvas.height = imgBitmap.height;
-    
+
     const ctx = canvas.getContext('2d');
     if (!ctx) continue;
     ctx.drawImage(imgBitmap, 0, 0);
@@ -145,6 +151,7 @@ export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
 
   return await pdfDoc.save();
 }
+
 export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
@@ -157,6 +164,7 @@ export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint
 
   return await pdfDoc.save();
 }
+
 export async function pdfToImages(file: File): Promise<string[]> {
   const fileBytes = await file.arrayBuffer();
   const loadingTask = pdfjsLib.getDocument({ data: fileBytes });
@@ -174,22 +182,24 @@ export async function pdfToImages(file: File): Promise<string[]> {
 
     if (!ctx) continue;
 
-  await page.render({
-      canvasContext: ctx,
-      viewport: viewport,
-      canvas: canvas,
-    }).promise;
+    await (
+      page.render({
+        canvasContext: ctx as any,
+        viewport: viewport,
+        canvas: canvas,
+      } as any) as any
+    ).promise;
 
     imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
   }
 
   return imageUrls;
 }
+
 export async function removePagesFromPDF(file: File, pageNumbersToRemove: number[]): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
-  
-  // Sort page indices in descending order so removal doesn't shift upcoming indices
+
   const sortedIndices = [...pageNumbersToRemove]
     .map((num) => num - 1)
     .sort((a, b) => b - a);
@@ -202,11 +212,13 @@ export async function removePagesFromPDF(file: File, pageNumbersToRemove: number
 
   return await pdfDoc.save();
 }
+
 export async function getPDFPageCount(file: File): Promise<number> {
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
   return pdfDoc.getPageCount();
 }
+
 export async function addWatermarkToPDF(file: File, watermarkText: string): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes);
@@ -225,6 +237,7 @@ export async function addWatermarkToPDF(file: File, watermarkText: string): Prom
 
   return await pdfDoc.save();
 }
+
 export async function addPageNumbersToPDF(
   file: File,
   position: 'bottom-center' | 'bottom-right' = 'bottom-center'
@@ -254,6 +267,7 @@ export async function addPageNumbersToPDF(
 
   return await pdfDoc.save();
 }
+
 export async function extractTextFromPDF(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -272,6 +286,7 @@ export async function extractTextFromPDF(file: File): Promise<string> {
 
   return fullText.trim();
 }
+
 export interface PDFMetadata {
   title?: string;
   author?: string;
@@ -308,6 +323,7 @@ export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Prom
 
   return await pdfDoc.save();
 }
+
 export async function signPDF(
   file: File,
   signaturePngDataUrl: string,
@@ -324,7 +340,6 @@ export async function signPDF(
   const targetPage = pages[pageIndex] || pages[0];
   const { width: pageWidth, height: pageHeight } = targetPage.getSize();
 
-  // Strip data url prefix and embed PNG
   const base64Data = signaturePngDataUrl.split(',')[1];
   const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
   const embeddedImage = await pdfDoc.embedPng(imageBytes);
@@ -338,6 +353,7 @@ export async function signPDF(
 
   return await pdfDoc.save();
 }
+
 export async function encryptPDF(
   file: File,
   userPassword: string,
@@ -360,11 +376,13 @@ export async function encryptPDF(
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas context unavailable');
 
-    await page.render({
-      canvasContext: ctx,
-      viewport: renderViewport,
-      canvas: canvas,
-    }).promise;
+    await (
+      page.render({
+        canvasContext: ctx as any,
+        viewport: renderViewport,
+        canvas: canvas,
+      } as any) as any
+    ).promise;
 
     const imgData = canvas.toDataURL('image/jpeg', 0.92);
     const pageWidth = unscaledViewport.width;
@@ -396,6 +414,7 @@ export async function encryptPDF(
   if (!doc) throw new Error('Failed to generate encrypted PDF');
   return new Uint8Array(doc.output('arraybuffer'));
 }
+
 export async function unlockPDF(
   file: File,
   password: string,
@@ -424,11 +443,13 @@ export async function unlockPDF(
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas context unavailable');
 
-    await page.render({
-      canvasContext: ctx,
-      viewport: renderViewport,
-      canvas: canvas,
-    }).promise;
+    await (
+      page.render({
+        canvasContext: ctx as any,
+        viewport: renderViewport,
+        canvas: canvas,
+      } as any) as any
+    ).promise;
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pageWidth = unscaledViewport.width;
@@ -454,4 +475,105 @@ export async function unlockPDF(
 
   if (!doc) throw new Error('Failed to generate unlocked PDF');
   return new Uint8Array(doc.output('arraybuffer'));
+}
+export async function compressPDF(
+  file: File,
+  options: CompressOptions
+): Promise<Uint8Array> {
+  const { level, targetKb = 200, onProgress } = options;
+  const arrayBuffer = await file.arrayBuffer();
+
+  // Mode 1: Standard (Lossless structural cleanup)
+  if (level === 'recommended') {
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+  }
+
+  // Mode 2 & 3: Canvas Rasterization to Exact KB Target
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdf = await loadingTask.promise;
+  const totalPages = pdf.numPages;
+
+  const newPdfDoc = await PDFDocument.create();
+
+  // Reserve PDF structural overhead (~1.5KB base + ~250B per page)
+  const pdfOverhead = 1536 + totalPages * 250;
+  const desiredTotalBytes = (level === 'extreme' ? Math.max(40 * totalPages, 60) : targetKb) * 1024;
+  const netImageBudget = Math.max(desiredTotalBytes - pdfOverhead, totalPages * 1024);
+  const budgetPerPage = Math.floor(netImageBudget / totalPages);
+
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    onProgress?.({
+      currentPage: pageNum,
+      totalPages,
+      stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
+    });
+
+    const page = await pdf.getPage(pageNum);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+
+    // Derive initial scale directly from byte budget
+    let scale = Math.max(0.15, Math.min(1.4, Math.sqrt(budgetPerPage / 45000)));
+    let quality = budgetPerPage < 20 * 1024 ? 0.35 : 0.65;
+    let finalBlob: Blob | null = null;
+
+    // Up to 4 convergence passes to force output under budgetPerPage
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (!ctx) break;
+
+      await (
+        page.render({
+          canvasContext: ctx as any,
+          viewport,
+        } as any) as any
+      ).promise;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
+      );
+
+      // Free canvas memory immediately
+      canvas.width = 0;
+      canvas.height = 0;
+
+      finalBlob = blob;
+
+      if (blob.size <= budgetPerPage) {
+        // Fits under target budget
+        if (blob.size >= budgetPerPage * 0.75 || attempt >= 2) {
+          break;
+        }
+        // Slightly increase quality if well below budget
+        scale = Math.min(1.4, scale * 1.12);
+        quality = Math.min(0.85, quality + 0.1);
+      } else {
+        // Exceeded budget: scale down canvas dimensions proportionally
+        const excessRatio = blob.size / budgetPerPage;
+        const downscaleFactor = Math.sqrt(1 / excessRatio) * 0.92;
+        scale = Math.max(0.1, scale * downscaleFactor);
+        quality = Math.max(0.12, quality * 0.85);
+      }
+    }
+
+    if (finalBlob) {
+      const imageBytes = await finalBlob.arrayBuffer();
+      const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
+
+      const newPage = newPdfDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+      newPage.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: unscaledViewport.width,
+        height: unscaledViewport.height,
+      });
+    }
+  }
+
+  return await newPdfDoc.save({ useObjectStreams: true });
 }
