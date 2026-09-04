@@ -272,6 +272,25 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-6 selection:bg-emerald-500 selection:text-black">
+      {/* Top Value / Announcement Banner */}
+      <div className="w-full max-w-5xl mb-2 py-2 px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[11px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        <span className="text-zinc-300 font-medium">
+          4 Free Tasks/Day (25MB) • No Signup • Works Offline • Zero Data Saved
+        </span>
+        <span className="text-zinc-700 hidden sm:inline">—</span>
+        {isPro ? (
+          <span className="text-emerald-400 font-semibold">Pro License Active (Unlimited Batching &amp; 150MB)</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsProModalOpen(true)}
+            className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition-colors cursor-pointer"
+          >
+            Unlock Unlimited Batching &amp; 150MB Files for $19/Year →
+          </button>
+        )}
+      </div>
+
       {/* Header */}
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-b border-zinc-800/80">
         <NavLink to="/" className="flex items-center gap-3 text-left">
@@ -454,14 +473,13 @@ export default function App() {
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
             
-            
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
         </ErrorBoundary>
       </main>
 
-    {/* Footer */}
+      {/* Footer */}
       <footer className="w-full max-w-5xl mx-auto mt-16 sm:mt-20 px-4 sm:px-6 py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
         {/* Popular Workflows & SEO Directory */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-6 border-b border-zinc-900/60">
