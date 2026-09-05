@@ -2623,19 +2623,21 @@ export interface VisualOverlayItem {
   id: string;
   type: 'whiteout' | 'text';
   pageIndex: number;
-  x: number; // Normalized 0 to 1
-  y: number; // Normalized 0 to 1
-  width: number; // Normalized 0 to 1
-  height: number; // Normalized 0 to 1
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   text?: string;
+  fontFamily?: 'helvetica' | 'times' | 'courier';
   fontSize?: number;
   color?: string;
-  hasBackground?: boolean; // Erases underneath
-  fitMode?: 'wrap' | 'autofit'; // Both Wrap and Auto-scale modes supported
+  hasBackground?: boolean;
+  fitMode?: 'wrap' | 'autofit';
 }
 
 /**
- * 8-Point Visual Overlay & Whiteout Engine with auto-fit and word-wrap scaling.
+ * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
+ * precision size scaling, auto-fit, and word wrap.
  */
 export async function applyVisualOverlays(
   file: File,
@@ -2643,10 +2645,13 @@ export async function applyVisualOverlays(
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const timesFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+  const courierFont = await pdfDoc.embedFont(StandardFonts.Courier);
+
   const totalPages = pdfDoc.getPageCount();
 
-  // Whiteout masks render first, text elements second
   const sortedOverlays = [...overlays].sort((a, b) => {
     if (a.type === 'whiteout' && b.type === 'text') return -1;
     if (a.type === 'text' && b.type === 'whiteout') return 1;
@@ -2658,13 +2663,13 @@ export async function applyVisualOverlays(
     const page = pdfDoc.getPage(item.pageIndex);
     const { width: pageWidth, height: pageHeight } = page.getSize();
 
-    const boxWidth = Math.max(4, item.width * pageWidth);
-    const boxHeight = Math.max(4, item.height * pageHeight);
+    const boxWidth = Math.max(2, item.width * pageWidth);
+    const boxHeight = Math.max(2, item.height * pageHeight);
     const boxX = item.x * pageWidth;
     const boxY = pageHeight - item.y * pageHeight - boxHeight;
 
-    // Draw opaque whiteout mask (standalone or behind text)
-    if (item.type === 'whiteout' || (item.type === 'text' && item.hasBackground)) {
+    // Draw opaque white mask
+    if (item.type === 'whiteout' || item.hasBackground !== false) {
       page.drawRectangle({
         x: boxX,
         y: boxY,
@@ -2674,8 +2679,12 @@ export async function applyVisualOverlays(
       });
     }
 
+    // Draw text layer
     if (item.type === 'text' && item.text?.trim()) {
-      // Sanitize non-ASCII characters to avoid WinAnsi encoding crashes
+      let font = helveticaFont;
+      if (item.fontFamily === 'times') font = timesFont;
+      if (item.fontFamily === 'courier') font = courierFont;
+
       const safeText = item.text
         .replace(/[\u2018\u2019]/g, "'")
         .replace(/[\u201C\u201D]/g, '"')
@@ -2695,7 +2704,6 @@ export async function applyVisualOverlays(
       const textColor = rgb(r, g, b);
 
       if (item.fitMode === 'autofit') {
-        // Auto-fit mode: calculate maximum font size fitting both width and height
         const unitWidth = font.widthOfTextAtSize(safeText, 1);
         const maxFittingWidth = unitWidth > 0 ? (boxWidth - 6) / unitWidth : 12;
         const maxFittingHeight = boxHeight * 0.75;
@@ -2710,7 +2718,6 @@ export async function applyVisualOverlays(
           color: textColor,
         });
       } else {
-        // Wrap mode: wrap text lines at user's fixed font size
         const fSize = item.fontSize || 12;
         const lineHeight = fSize * 1.25;
         const words = safeText.split(' ');
