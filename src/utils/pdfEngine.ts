@@ -1002,12 +1002,12 @@ export async function reorderAndProcessPDF(
       data: new Uint8Array(arrayBuffer).slice(),
       stopAtErrors: false,
     });
-    const fallbackDoc = await loadingTask.promise;
+      const fallbackDoc = await loadingTask.promise;
 
     for (let idx = 0; idx < pages.length; idx++) {
       const pageConfig = pages[idx];
-      const pageNum = pageConfig.originalIndex + 1;
-      const page = await fallbackDoc.getPage(pageNum);
+       const pageNum = pageConfig.originalIndex + 1;
+       const page = await fallbackDoc.getPage(pageNum); // <-- Fixed
       const unscaledViewport = page.getViewport({ scale: 1.0 });
       const renderViewport = page.getViewport({ scale: 2.0 });
 
