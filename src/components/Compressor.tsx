@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type DragEvent } from 'react';
+import { useState, useEffect, useRef, useMemo, type DragEvent } from 'react';
 import {
   Upload,
   Loader2,
@@ -9,11 +9,14 @@ import {
   Trash2,
   AlertCircle,
   X,
+  Sparkles,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { getLicenseStatus } from '../utils/license';
 import { useObjectUrl } from '../utils/useObjectUrl';
-import { compressPDF, type CompressionProgress } from '../utils/pdfEngine';
+import { compressPDF, getPDFPageCount, type CompressionProgress } from '../utils/pdfEngine';
 import { checkActionAllowed, recordActionExecution, getDailyUsage } from '../utils/usageTracker';
 import { ProModal } from './ProModal';
 import { useBatchQueue } from '../utils/useBatchQueue';
@@ -33,6 +36,7 @@ const MAX_PRO_BYTES = 150 * 1024 * 1024; // 150 MB
 export function Compressor({ file, onFileChange }: CompressorProps) {
   const [level, setLevel] = useState<CompressionLevel>('target');
   const [targetKb, setTargetKb] = useState(100);
+  const [totalPages, setTotalPages] = useState<number>(1);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [progressStatus, setProgressStatus] = useState<string>('');
@@ -65,6 +69,81 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       document.removeEventListener('visibilitychange', syncState);
     };
   }, []);
+
+  // Dynamically inspect page count whenever a single file is selected
+  useEffect(() => {
+    if (!file) {
+      setTotalPages(1);
+      return;
+    }
+    let isMounted = true;
+    getPDFPageCount(file)
+      .then((count) => {
+        if (isMounted) {
+          const pages = Math.max(1, count);
+          setTotalPages(pages);
+          const origKb = Math.round(file.size / 1024);
+          // Default to a balanced ~75 KB per page, capped under the original file size
+          const balancedDefault = Math.min(
+            Math.max(50, Math.round(pages * 75)),
+            Math.max(50, Math.round(origKb * 0.85))
+          );
+          setTargetKb(balancedDefault);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setTotalPages(1);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [file]);
+
+  const originalSizeKb = useMemo(() => (file ? Math.round(file.size / 1024) : 0), [file]);
+
+  // Adaptive slider boundaries
+  const minSliderKb = 50;
+  const maxSliderKb = useMemo(() => {
+    if (!file) return 1000;
+    // Scale up to 95% of original size or maximum 150 MB (153,600 KB)
+    return Math.max(100, Math.min(Math.floor(originalSizeKb * 0.95), 150 * 1024));
+  }, [file, originalSizeKb]);
+
+  // Readability threshold: ~75 KB per page for sharp document clarity
+  const recommendedReadableKb = useMemo(() => {
+    return Math.min(Math.max(80, Math.round(totalPages * 75)), maxSliderKb);
+  }, [totalPages, maxSliderKb]);
+
+  // Real-time clarity predictor
+  const clarityStatus = useMemo(() => {
+    const kbPerPage = targetKb / totalPages;
+    if (kbPerPage < 35) {
+      return {
+        level: 'low',
+        badge: '🔴 Heavy Blur Warning',
+        desc: `~${kbPerPage.toFixed(1)} KB/page. Strict upload mode; fine text and table rows will be blurry.`,
+        color: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
+      };
+    } else if (kbPerPage < 80) {
+      return {
+        level: 'medium',
+        badge: '🟡 Balanced Clarity',
+        desc: `~${kbPerPage.toFixed(1)} KB/page. Fully legible text with moderate graphic compression.`,
+        color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+      };
+    }
+    return {
+      level: 'high',
+      badge: '🟢 Sharp Clarity',
+      desc: `~${kbPerPage.toFixed(1)} KB/page. Crisp text, official stamps, and high graphical detail.`,
+      color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+    };
+  }, [targetKb, totalPages]);
+
+  const formatSize = (kb: number): string => {
+    if (kb >= 1024) return `${(kb / 1024).toFixed(1)} MB`;
+    return `${Math.round(kb)} KB`;
+  };
 
   const validateFiles = (files: File[]): boolean => {
     if (files.length === 0) return false;
@@ -318,7 +397,9 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
             <div className="truncate">
               <p className="text-xs font-medium text-zinc-200 truncate">{file.name}</p>
-              <p className="text-[11px] text-zinc-500">{(file.size / 1024).toFixed(0)} KB</p>
+              <p className="text-[11px] text-zinc-500">
+                {formatSize(originalSizeKb)} • {totalPages} page{totalPages > 1 ? 's' : ''}
+              </p>
             </div>
           </div>
           <button
@@ -331,7 +412,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Settings (visible when single file is loaded or ready for settings) */}
+      {/* Settings */}
       <div className="space-y-3 mb-6">
         <label className="text-xs font-semibold text-zinc-400 flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5" />
@@ -379,25 +460,48 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
           </button>
         </div>
 
-        {/* Target Slider */}
+        {/* Adaptive Target Slider & Clarity Indicator */}
         {level === 'target' && (
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 mt-3">
-            <div className="flex justify-between text-xs text-zinc-300 mb-2">
-              <span>Target Output Size:</span>
-              <span className="font-semibold text-emerald-400">{targetKb} KB</span>
+            <div className="flex justify-between items-center text-xs text-zinc-300 mb-2">
+              <span className="font-medium">Target Output Size:</span>
+              <span className="font-bold text-emerald-400 text-sm">{formatSize(targetKb)}</span>
             </div>
+
             <input
               type="range"
-              min="50"
-              max="1000"
-              step="25"
+              min={minSliderKb}
+              max={maxSliderKb}
+              step={maxSliderKb > 10000 ? 50 : 10}
               value={targetKb}
               onChange={(e) => setTargetKb(Number(e.target.value))}
-              className="w-full accent-emerald-500 cursor-pointer"
+              className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             />
-            <p className="text-[10px] text-zinc-500 mt-1">
-              Engine will tune quality and DPI to fit within ~{targetKb} KB.
-            </p>
+
+            <div className="flex justify-between text-[10px] text-zinc-500 mt-1.5">
+              <span>Min: {formatSize(minSliderKb)}</span>
+              <span>Max: {formatSize(maxSliderKb)}</span>
+            </div>
+
+            {/* Live Clarity Predictor */}
+            <div className={`mt-3 p-2.5 rounded-lg border flex items-start gap-2 ${clarityStatus.color}`}>
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="text-[11px] leading-relaxed">
+                <span className="font-semibold">{clarityStatus.badge}:</span> {clarityStatus.desc}
+              </div>
+            </div>
+
+            {/* Auto-set to sharp readability preset */}
+            {targetKb < recommendedReadableKb && (
+              <button
+                type="button"
+                onClick={() => setTargetKb(recommendedReadableKb)}
+                className="mt-2.5 w-full py-1.5 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 flex items-center justify-center gap-1.5 text-xs font-medium transition"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Auto-Set to Sharp Readability ({formatSize(recommendedReadableKb)})
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -407,7 +511,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         <button
           disabled={isCompressing}
           onClick={handleCompress}
-          className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black text-sm font-semibold transition flex flex-col items-center justify-center gap-0.5 shadow-lg shadow-emerald-500/20"
+          className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black text-sm font-semibold transition flex flex-col items-center justify-center gap-0.5 shadow-lg shadow-emerald-500/20"
         >
           {isCompressing ? (
             <div className="flex items-center gap-2">
@@ -427,10 +531,14 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             <p className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
               <CheckCircle className="w-4 h-4" /> Compression Complete
             </p>
-            <p className="text-[11px] text-zinc-400 mt-0.5">
-              Original: {(file.size / 1024).toFixed(0)} KB → Result: {(compressedSize / 1024).toFixed(0)} KB (
-              {Math.round(((file.size - compressedSize) / file.size) * 100)}% reduction)
-            </p>
+            <div className="text-[11px] text-zinc-400 flex items-center gap-1.5 mt-0.5">
+              <span>{formatSize(originalSizeKb)}</span>
+              <ArrowRight className="w-3 h-3 text-zinc-500" />
+              <span className="text-emerald-400 font-bold">{formatSize(Math.round(compressedSize / 1024))}</span>
+              <span>
+                ({Math.max(0, Math.round(((file.size - compressedSize) / file.size) * 100))}% reduction)
+              </span>
+            </div>
           </div>
           <a
             href={downloadUrl}
