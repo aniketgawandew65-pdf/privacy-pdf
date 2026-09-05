@@ -2802,3 +2802,199 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
+export interface CodeToPdfOptions {
+  code: string;
+  title?: string;
+  theme?: 'dark' | 'light';
+  showLineNumbers?: boolean;
+  fontSize?: number;
+  pageSize?: 'a4' | 'letter';
+  orientation?: 'portrait' | 'landscape';
+}
+
+interface SyntaxToken {
+  text: string;
+  color: [number, number, number]; // RGB
+}
+
+/**
+ * 100% Client-side vector Code to PDF generator with syntax highlighting,
+ * line numbers, and clean multi-page pagination.
+ */
+export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8Array> {
+  const {
+    code,
+    title = '',
+    theme = 'dark',
+    showLineNumbers = true,
+    fontSize = 8.5,
+    pageSize = 'a4',
+    orientation = 'portrait',
+  } = options;
+
+  if (!code.trim()) {
+    throw new Error('No source code detected to convert.');
+  }
+
+  const doc = new jsPDF({
+    orientation,
+    unit: 'pt',
+    format: pageSize,
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 32;
+  const bottomThreshold = pageHeight - margin;
+
+  // Theme palettes
+  const isDark = theme === 'dark';
+  const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255]; // Slate 900 vs Pure White
+  const defaultTextColor: [number, number, number] = isDark ? [226, 232, 240] : [30, 41, 59];
+  const gutterBg: [number, number, number] = isDark ? [30, 41, 59] : [241, 245, 249];
+  const gutterText: [number, number, number] = isDark ? [100, 116, 139] : [148, 163, 184];
+  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [192, 38, 211]; // Rose 500 vs Fuchsia 600
+  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136]; // Emerald 400 vs Teal 600
+  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139]; // Slate 500
+  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [217, 119, 6]; // Orange 400 vs Amber 600
+
+  const drawPageBackground = () => {
+    if (isDark) {
+      doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
+      doc.rect(0, 0, pageWidth, pageHeight, 'F');
+    }
+  };
+
+  drawPageBackground();
+
+  let cursorY = margin;
+
+  // Optional Header / File Title Banner
+  if (title.trim()) {
+    doc.setFont('courier', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(isDark ? 56 : 15, isDark ? 189 : 23, isDark ? 248 : 42);
+    doc.text(`// ${title.trim()}`, margin, cursorY + 6);
+    cursorY += 24;
+  }
+
+  const rawLines = code.replace(/\t/g, '  ').split(/\r?\n/);
+  const totalLines = rawLines.length;
+  const gutterDigits = Math.max(2, String(totalLines).length);
+  const charWidth = fontSize * 0.6; // Constant width for Courier monospace font
+  const gutterWidth = showLineNumbers ? (gutterDigits + 2) * charWidth + 12 : 0;
+  const codeAreaWidth = pageWidth - margin * 2 - gutterWidth;
+  const maxCharsPerLine = Math.floor(codeAreaWidth / charWidth);
+  const lineHeight = fontSize * 1.45;
+
+  // Keywords list covering JS, TS, Python, SQL, Java, C++, Rust, Go
+  const KEYWORD_REGEX =
+    /\b(const|let|var|function|return|import|from|export|default|class|extends|if|else|switch|case|break|for|while|do|try|catch|finally|throw|new|typeof|instanceof|async|await|def|elif|lambda|self|echo|select|from|where|insert|into|update|delete|public|private|protected|static|void|int|float|double|bool|struct|impl|fn|pub|type|interface)\b/;
+
+  // Lightweight regex tokenizer
+  const tokenizeLine = (text: string): SyntaxToken[] => {
+    const tokens: SyntaxToken[] = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+      // Single-line comment
+      if (remaining.startsWith('//') || remaining.startsWith('#')) {
+        tokens.push({ text: remaining, color: commentColor });
+        break;
+      }
+
+      // Strings (double quotes, single quotes, backticks)
+      const strMatch = remaining.match(/^("[^"]*"|'[^']*'|`[^`]*`)/);
+      if (strMatch) {
+        tokens.push({ text: strMatch[0], color: stringColor });
+        remaining = remaining.slice(strMatch[0].length);
+        continue;
+      }
+
+      // Numbers
+      const numMatch = remaining.match(/^\b\d+(\.\d+)?\b/);
+      if (numMatch) {
+        tokens.push({ text: numMatch[0], color: numberColor });
+        remaining = remaining.slice(numMatch[0].length);
+        continue;
+      }
+
+      // Keywords
+      const kwMatch = remaining.match(KEYWORD_REGEX);
+      if (kwMatch && remaining.startsWith(kwMatch[0])) {
+        tokens.push({ text: kwMatch[0], color: keywordColor });
+        remaining = remaining.slice(kwMatch[0].length);
+        continue;
+      }
+
+      // Standard identifiers / symbols
+      const plainMatch = remaining.match(/^[^"'`#/\d\w]+|^\w+/);
+      if (plainMatch) {
+        tokens.push({ text: plainMatch[0], color: defaultTextColor });
+        remaining = remaining.slice(plainMatch[0].length);
+      } else {
+        tokens.push({ text: remaining[0], color: defaultTextColor });
+        remaining = remaining.slice(1);
+      }
+    }
+
+    return tokens;
+  };
+
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(fontSize);
+
+  for (let lineIdx = 0; lineIdx < rawLines.length; lineIdx++) {
+    const lineNumStr = String(lineIdx + 1).padStart(gutterDigits, ' ');
+    const lineContent = rawLines[lineIdx];
+
+    // Wrap long lines
+    const wrappedChunks: string[] = [];
+    if (lineContent.length <= maxCharsPerLine) {
+      wrappedChunks.push(lineContent);
+    } else {
+      for (let i = 0; i < lineContent.length; i += maxCharsPerLine) {
+        wrappedChunks.push(lineContent.slice(i, i + maxCharsPerLine));
+      }
+    }
+
+    for (let chunkIdx = 0; chunkIdx < wrappedChunks.length; chunkIdx++) {
+      if (cursorY + lineHeight > bottomThreshold) {
+        doc.addPage();
+        drawPageBackground();
+        cursorY = margin;
+      }
+
+      // Draw line number gutter
+      if (showLineNumbers) {
+        doc.setFillColor(gutterBg[0], gutterBg[1], gutterBg[2]);
+        doc.rect(margin, cursorY - fontSize * 0.85, gutterWidth - 6, lineHeight, 'F');
+
+        doc.setTextColor(gutterText[0], gutterText[1], gutterText[2]);
+        if (chunkIdx === 0) {
+          doc.text(lineNumStr, margin + 4, cursorY);
+        } else {
+          // Wrapped continuation marker
+          doc.text('·'.padStart(gutterDigits, ' '), margin + 4, cursorY);
+        }
+      }
+
+      // Draw highlighted code tokens
+      const chunkText = wrappedChunks[chunkIdx];
+      const tokens = tokenizeLine(chunkText);
+      let tokenCursorX = margin + gutterWidth;
+
+      for (const token of tokens) {
+        doc.setTextColor(token.color[0], token.color[1], token.color[2]);
+        // ASCII sanitize to prevent WinAnsi exceptions
+        const safeToken = token.text.replace(/[^\x20-\x7E]/g, ' ');
+        doc.text(safeToken, tokenCursorX, cursorY);
+        tokenCursorX += safeToken.length * charWidth;
+      }
+
+      cursorY += lineHeight;
+    }
+  }
+
+  return new Uint8Array(doc.output('arraybuffer'));
+}
