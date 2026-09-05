@@ -920,26 +920,34 @@ export async function compressPDF(
 
   const newPdfDoc = await PDFDocument.create();
 
-  const pdfOverhead = 1536 + totalPages * 250;
-  const desiredTotalBytes = (level === 'extreme' ? Math.max(40 * totalPages, 60) : targetKb) * 1024;
-  const netImageBudget = Math.max(desiredTotalBytes - pdfOverhead, totalPages * 1024);
+  // 1. Calculate realistic structural PDF metadata overhead (~180 bytes per page + header/xref)
+  const pdfOverhead = 800 + totalPages * 180;
+  const desiredTotalBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
+
+  // 2. Strict net byte budget dedicated to page images
+  const netImageBudget = Math.max(desiredTotalBytes - pdfOverhead, totalPages * 250);
   const budgetPerPage = Math.floor(netImageBudget / totalPages);
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.({
       currentPage: pageNum,
       totalPages,
-      stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
+      stage: `Compressing page ${pageNum} of ${totalPages} to target size...`,
     });
 
     const page = await pdf.getPage(pageNum);
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-    let scale = Math.max(0.15, Math.min(1.4, Math.sqrt(budgetPerPage / 45000)));
-    let quality = budgetPerPage < 20 * 1024 ? 0.35 : 0.65;
+    // 3. Mathematical scale estimation based on target bytes per page
+    const origPixelCount = unscaledViewport.width * unscaledViewport.height;
+    const maxEstimatedPixels = Math.max(budgetPerPage / 0.04, 900);
+    let scale = Math.min(1.2, Math.sqrt(maxEstimatedPixels / origPixelCount));
+    let quality = Math.max(0.08, Math.min(0.75, budgetPerPage / 20000));
+
     let finalBlob: Blob | null = null;
 
-    for (let attempt = 0; attempt < 4; attempt++) {
+    // 4. Convergence loop: up to 6 iterations to force output below or equal to budget
+    for (let attempt = 0; attempt < 6; attempt++) {
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
@@ -947,6 +955,9 @@ export async function compressPDF(
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       if (!ctx) break;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       await (
         page.render({
@@ -966,16 +977,16 @@ export async function compressPDF(
       finalBlob = blob;
 
       if (blob.size <= budgetPerPage) {
-        if (blob.size >= budgetPerPage * 0.75 || attempt >= 2) {
+        if (blob.size >= budgetPerPage * 0.82 || attempt >= 4) {
           break;
         }
-        scale = Math.min(1.4, scale * 1.12);
-        quality = Math.min(0.85, quality + 0.1);
+        scale = Math.min(1.3, scale * 1.06);
+        quality = Math.min(0.85, quality + 0.06);
       } else {
         const excessRatio = blob.size / budgetPerPage;
-        const downscaleFactor = Math.sqrt(1 / excessRatio) * 0.92;
-        scale = Math.max(0.1, scale * downscaleFactor);
-        quality = Math.max(0.12, quality * 0.85);
+        const downscaleFactor = Math.sqrt(1 / excessRatio) * 0.85;
+        scale = Math.max(0.02, scale * downscaleFactor);
+        quality = Math.max(0.05, quality * Math.pow(1 / excessRatio, 0.45));
       }
     }
 
@@ -993,6 +1004,7 @@ export async function compressPDF(
     }
   }
 
+  // Packs xref tables and streams tightly
   return await newPdfDoc.save({ useObjectStreams: true });
 }
 
