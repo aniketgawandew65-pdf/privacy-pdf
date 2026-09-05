@@ -290,11 +290,14 @@ export async function pdfToImages(file: File): Promise<string[]> {
   return imageUrls;
 }
 
+/**
+ * Splits a PDF document by page ranges (e.g. "1-3, 5").
+ * Automatically decrypts owner-restricted bank statements and protected PDFs
+ * with high-resolution fallback to prevent blank output pages.
+ */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const newDoc = await PDFDocument.create();
-  const total = srcDoc.getPageCount();
+  const pageCount = await getPDFPageCount(file);
 
   const pagesToInclude = new Set<number>();
   ranges.split(',').forEach((part) => {
@@ -303,39 +306,196 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
       const [start, end] = p.split('-').map((n) => parseInt(n.trim(), 10));
       if (!isNaN(start) && !isNaN(end)) {
         for (let i = start; i <= end; i++) {
-          if (i >= 1 && i <= total) pagesToInclude.add(i - 1);
+          if (i >= 1 && i <= pageCount) pagesToInclude.add(i - 1);
         }
       }
     } else {
       const num = parseInt(p, 10);
-      if (!isNaN(num) && num >= 1 && num <= total) pagesToInclude.add(num - 1);
+      if (!isNaN(num) && num >= 1 && num <= pageCount) pagesToInclude.add(num - 1);
     }
   });
 
   const indices = Array.from(pagesToInclude).sort((a, b) => a - b);
-  const copied = await newDoc.copyPages(srcDoc, indices);
-  copied.forEach((p) => newDoc.addPage(p));
+  if (indices.length === 0) {
+    throw new Error('No valid pages specified for extraction.');
+  }
 
-  return await newDoc.save();
+  const newDoc = await PDFDocument.create();
+
+  try {
+    const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+
+    // Bank e-statements have owner encryption: vector copying copies encrypted bytes that render blank
+    if (srcDoc.isEncrypted) {
+      throw new Error('Document has owner permissions encryption; switching to high-res rendering pipeline.');
+    }
+
+    // Ensure all target pages have valid Contents streams
+    for (const idx of indices) {
+      const page = srcDoc.getPage(idx);
+      if (!page.node.Contents()) {
+        const emptyStream = srcDoc.context.flateStream('');
+        const ref = srcDoc.context.register(emptyStream);
+        page.node.set(PDFName.of('Contents'), ref);
+      }
+    }
+
+    const copied = await newDoc.copyPages(srcDoc, indices);
+    copied.forEach((p) => newDoc.addPage(p));
+    return await newDoc.save({ useObjectStreams: false });
+  } catch (err) {
+    console.warn(`Native vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer).slice(),
+      stopAtErrors: false,
+    });
+    const fallbackDoc = await loadingTask.promise;
+
+    for (const idx of indices) {
+      const pageNum = idx + 1;
+      const page = await fallbackDoc.getPage(pageNum);
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const renderViewport = page.getViewport({ scale: 2.0 }); // 2.0x Retina clarity
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport: renderViewport,
+          } as any) as any
+        ).promise;
+
+        const jpegBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
+        );
+
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await jpegBlob.arrayBuffer();
+        const embeddedImage = await newDoc.embedJpg(imgBytes);
+
+        const newPage = newDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+        newPage.drawImage(embeddedImage, {
+          x: 0,
+          y: 0,
+          width: unscaledViewport.width,
+          height: unscaledViewport.height,
+        });
+      }
+    }
+
+    return await newDoc.save({ useObjectStreams: false });
+  }
 }
 
-export async function removePagesFromPDF(file: File, pageNumbersToRemove: number[]): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+/**
+ * Splits all pages of a PDF into separate files packaged into a ZIP archive.
+ * Supports protected/bank statements with automated rendering salvage.
+ */
+export async function splitPdfToZip(
+  file: File,
+  onProgress?: (current: number, total: number) => void
+): Promise<Blob> {
+  const arrayBuffer = await file.arrayBuffer();
+  const totalPages = await getPDFPageCount(file);
+  const zip = new JSZip();
+  const baseName = file.name.replace(/\.[^/.]+$/, '');
 
-  const sortedIndices = [...pageNumbersToRemove]
-    .map((num) => num - 1)
-    .sort((a, b) => b - a);
+  try {
+    const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
-  for (const pageIndex of sortedIndices) {
-    if (pageIndex >= 0 && pageIndex < pdfDoc.getPageCount()) {
-      pdfDoc.removePage(pageIndex);
+    if (sourceDoc.isEncrypted) {
+      throw new Error('Encrypted document; routing to fallback renderer');
+    }
+
+    for (let i = 0; i < totalPages; i++) {
+      onProgress?.(i + 1, totalPages);
+      const singleDoc = await PDFDocument.create();
+
+      const page = sourceDoc.getPage(i);
+      if (!page.node.Contents()) {
+        const emptyStream = sourceDoc.context.flateStream('');
+        const ref = sourceDoc.context.register(emptyStream);
+        page.node.set(PDFName.of('Contents'), ref);
+      }
+
+      const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
+      singleDoc.addPage(copiedPage);
+
+      const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+      const paddedIndex = String(i + 1).padStart(2, '0');
+      zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+    }
+  } catch (err) {
+    console.warn(`Native vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer).slice(),
+      stopAtErrors: false,
+    });
+    const fallbackDoc = await loadingTask.promise;
+
+    for (let i = 0; i < totalPages; i++) {
+      onProgress?.(i + 1, totalPages);
+      const pageNum = i + 1;
+      const page = await fallbackDoc.getPage(pageNum);
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const renderViewport = page.getViewport({ scale: 2.0 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport: renderViewport,
+          } as any) as any
+        ).promise;
+
+        const jpegBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
+        );
+
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await jpegBlob.arrayBuffer();
+        const singleDoc = await PDFDocument.create();
+        const embeddedImage = await singleDoc.embedJpg(imgBytes);
+
+        const newPage = singleDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+        newPage.drawImage(embeddedImage, {
+          x: 0,
+          y: 0,
+          width: unscaledViewport.width,
+          height: unscaledViewport.height,
+        });
+
+        const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+        const paddedIndex = String(i + 1).padStart(2, '0');
+        zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+      }
     }
   }
 
-  return await pdfDoc.save();
+  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
-
 /**
  * Dual-engine page counter: uses pdf-lib with ignoreEncryption,
  * with seamless PDF.js fallback for scanned or strict files.
@@ -740,30 +900,6 @@ export async function reorderAndProcessPDF(
   return await outputDoc.save({ useObjectStreams: true });
 }
 
-export async function splitPdfToZip(
-  file: File,
-  onProgress?: (current: number, total: number) => void
-): Promise<Blob> {
-  const arrayBuffer = await file.arrayBuffer();
-  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const totalPages = sourceDoc.getPageCount();
-  const zip = new JSZip();
-
-  const baseName = file.name.replace(/\.[^/.]+$/, '');
-
-  for (let i = 0; i < totalPages; i++) {
-    onProgress?.(i + 1, totalPages);
-    const singleDoc = await PDFDocument.create();
-    const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
-    singleDoc.addPage(copiedPage);
-
-    const pdfBytes = await singleDoc.save({ useObjectStreams: true });
-    const paddedIndex = String(i + 1).padStart(2, '0');
-    zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
-  }
-
-  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-}
 
 /**
  * 1-click sanitization: Safely strips XMP metadata, author, creator, producer,
