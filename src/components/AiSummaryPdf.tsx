@@ -30,7 +30,7 @@ interface ProviderOption {
   id: string;
   name: string;
   endpoint: string;
-  defaultModel: string;
+  candidateModels: string[];
   placeholder: string;
 }
 
@@ -39,36 +39,49 @@ const PROVIDERS: ProviderOption[] = [
     id: 'groq',
     name: 'Groq (Free / Ultra-Fast)',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    defaultModel: 'llama-3.1-8b-instant',
+    candidateModels: [
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+      'llama3-8b-8192',
+      'llama3-70b-8192',
+      'gemma2-9b-it',
+      'mixtral-8x7b-32768',
+      'deepseek-r1-distill-llama-70b',
+    ],
     placeholder: 'gsk_...',
   },
   {
     id: 'openai',
     name: 'OpenAI',
     endpoint: 'https://api.openai.com/v1/chat/completions',
-    defaultModel: 'gpt-4o-mini',
+    candidateModels: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'],
     placeholder: 'sk-proj-...',
   },
   {
     id: 'openrouter',
     name: 'OpenRouter (All Models)',
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'meta-llama/llama-3.1-8b-instruct:free',
+    candidateModels: [
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'meta-llama/llama-3.1-8b-instruct:free',
+      'google/gemini-2.0-flash-exp:free',
+      'mistralai/mistral-7b-instruct:free',
+    ],
     placeholder: 'sk-or-...',
   },
   {
     id: 'deepseek',
     name: 'DeepSeek',
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
-    defaultModel: 'deepseek-chat',
+    candidateModels: ['deepseek-chat', 'deepseek-reasoner'],
     placeholder: 'sk-...',
   },
   {
     id: 'custom',
     name: 'Custom / Local (Ollama, LM Studio)',
     endpoint: 'http://localhost:11434/v1/chat/completions',
-    defaultModel: 'llama3',
-    placeholder: 'API Key or token (optional for localhost)...',
+    candidateModels: ['llama3', 'mistral', 'llama2'],
+    placeholder: 'Optional API token...',
   },
 ];
 
@@ -77,8 +90,9 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
     return localStorage.getItem('1into1_user_ai_provider') || 'groq';
   });
+  const [activeWorkingModel, setActiveWorkingModel] = useState<string>('');
   const [customModel, setCustomModel] = useState<string>(() => {
-    return localStorage.getItem('1into1_user_ai_model') || 'llama-3.1-8b-instant';
+    return localStorage.getItem('1into1_user_ai_model') || '';
   });
   const [customEndpointUrl, setCustomEndpointUrl] = useState<string>(() => {
     return localStorage.getItem('1into1_user_ai_endpoint') || '';
@@ -97,11 +111,12 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-detect provider if user pastes a distinctive key
+  // Auto-detect provider prefix when user pastes key
   const handleKeyChange = (key: string) => {
     const trimmed = key.trim();
     setApiKey(trimmed);
     localStorage.setItem('1into1_user_ai_key', trimmed);
+    setErrorMessage(null);
 
     if (trimmed.startsWith('gsk_') && selectedProvider !== 'groq') {
       handleProviderChange('groq');
@@ -113,28 +128,15 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const handleProviderChange = (providerId: string) => {
     setSelectedProvider(providerId);
     localStorage.setItem('1into1_user_ai_provider', providerId);
+    setActiveWorkingModel('');
+    setErrorMessage(null);
 
     const prov = PROVIDERS.find((p) => p.id === providerId);
-    if (prov) {
-      setCustomModel(prov.defaultModel);
-      localStorage.setItem('1into1_user_ai_model', prov.defaultModel);
-      if (prov.id === 'custom' && !customEndpointUrl) {
-        setCustomEndpointUrl(prov.endpoint);
-      }
+    if (prov && prov.id === 'custom' && !customEndpointUrl) {
+      setCustomEndpointUrl(prov.endpoint);
     }
   };
 
-  const handleModelChange = (model: string) => {
-    setCustomModel(model);
-    localStorage.setItem('1into1_user_ai_model', model);
-  };
-
-  const handleEndpointChange = (endpoint: string) => {
-    setCustomEndpointUrl(endpoint);
-    localStorage.setItem('1into1_user_ai_endpoint', endpoint);
-  };
-
-  // Extract text on file select
   useEffect(() => {
     if (!file) {
       setExtractedText('');
@@ -181,7 +183,7 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
 
   const sendPrompt = async (userPrompt: string) => {
     if (!navigator.onLine) {
-      setErrorMessage('An active internet connection is required to communicate with AI providers.');
+      setErrorMessage('No internet connection. Please reconnect to communicate with the AI provider.');
       return;
     }
 
@@ -189,7 +191,7 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
     const isCustomLocal = providerConfig.id === 'custom';
 
     if (!apiKey.trim() && !isCustomLocal) {
-      setErrorMessage('Please enter your API Key below to start chatting.');
+      setErrorMessage('Please enter your API Key in the box above to begin.');
       return;
     }
     if (!extractedText) {
@@ -197,8 +199,19 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
       return;
     }
 
-    const endpoint = isCustomLocal ? customEndpointUrl.trim() || providerConfig.endpoint : providerConfig.endpoint;
-    const modelToUse = customModel.trim() || providerConfig.defaultModel;
+    const endpoint = isCustomLocal
+      ? customEndpointUrl.trim() || providerConfig.endpoint
+      : providerConfig.endpoint;
+
+    // Assemble model candidate list
+    const candidateList: string[] = [];
+    if (customModel.trim()) candidateList.push(customModel.trim());
+    if (activeWorkingModel && !candidateList.includes(activeWorkingModel)) {
+      candidateList.push(activeWorkingModel);
+    }
+    for (const m of providerConfig.candidateModels) {
+      if (!candidateList.includes(m)) candidateList.push(m);
+    }
 
     const newMessages: ChatMessage[] = [...messages, { role: 'user', content: userPrompt }];
     setMessages(newMessages);
@@ -207,45 +220,98 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
     setErrorMessage(null);
 
     const contextText = extractedText.slice(0, 45000);
-
     const systemPrompt = `You are a helpful, accurate document assistant analyzing a PDF client-side.
 Answer user questions strictly based on the provided document text below. If the answer is not in the document, explicitly say so.
 
 DOCUMENT TEXT:
 ${contextText}`;
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (apiKey.trim()) {
+      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    }
+    if (providerConfig.id === 'openrouter') {
+      headers['HTTP-Referer'] = window.location.origin;
+      headers['X-Title'] = '1into1 PDF Suite';
+    }
+
+    let activeResponse: Response | null = null;
+    let resolvedModel = '';
+    let fatalError = '';
+
+    // Auto-fallback waterfall loop
+    for (const modelToAttempt of candidateList) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: modelToAttempt,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...newMessages.slice(-6),
+            ],
+            stream: true,
+          }),
+        });
+
+        if (res.status === 401) {
+          fatalError = 'Invalid API Key. Please verify the key you copied.';
+          break;
+        }
+
+        if (res.status === 429) {
+          fatalError = 'API rate limit reached or token quota exhausted on this key. Please try again shortly.';
+          break;
+        }
+
+        if (res.status === 402) {
+          fatalError = 'Insufficient balance / credits on your API account.';
+          break;
+        }
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errText = (errData?.error?.message || res.statusText || '').toLowerCase();
+
+          // If model is missing, deprecated, or restricted, try next candidate
+          if (
+            res.status === 404 ||
+            errText.includes('does not exist') ||
+            errText.includes('not have access') ||
+            errText.includes('model_not_found') ||
+            errText.includes('decommissioned') ||
+            errText.includes('deprecated')
+          ) {
+            continue;
+          }
+
+          throw new Error(errData?.error?.message || `HTTP ${res.status}`);
+        }
+
+        // Successfully connected to an active model
+        activeResponse = res;
+        resolvedModel = modelToAttempt;
+        setActiveWorkingModel(modelToAttempt);
+        break;
+      } catch (err: any) {
+        if (fatalError) break;
+        fatalError = err.message || 'Network connection failure.';
+      }
+    }
+
+    if (!activeResponse) {
+      setIsStreaming(false);
+      setErrorMessage(
+        fatalError || 'Could not find an active model on this key. Please verify your account status.'
+      );
+      return;
+    }
+
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (apiKey.trim()) {
-        headers['Authorization'] = `Bearer ${apiKey.trim()}`;
-      }
-      if (providerConfig.id === 'openrouter') {
-        headers['HTTP-Referer'] = window.location.origin;
-        headers['X-Title'] = '1into1 PDF Suite';
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: modelToUse,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...newMessages.slice(-6),
-          ],
-          stream: true,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        const rawErr = errorBody?.error?.message || response.statusText || `HTTP ${response.status}`;
-        throw new Error(rawErr);
-      }
-
-      const reader = response.body?.getReader();
+      const reader = activeResponse.body?.getReader();
       if (!reader) throw new Error('Response stream not readable.');
 
       const decoder = new TextDecoder('utf-8');
@@ -283,15 +349,8 @@ ${contextText}`;
         }
       }
     } catch (err: any) {
-      console.error('AI streaming error:', err);
-      const msg = err.message || 'Failed to communicate with the AI provider.';
-      if (msg.includes('does not exist') || msg.includes('access')) {
-        setErrorMessage(
-          `${msg} — Try changing the model name to "${providerConfig.defaultModel}" or another model supported by your key.`
-        );
-      } else {
-        setErrorMessage(msg);
-      }
+      console.error('Streaming error:', err);
+      setErrorMessage(err.message || 'Stream connection interrupted.');
     } finally {
       setIsStreaming(false);
     }
@@ -344,7 +403,7 @@ ${contextText}`;
           <Bot className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to summarize &amp; chat</p>
           <p className="text-xs text-zinc-500 mt-1">
-            Direct Client-to-Provider Streaming • Any API Key or Model • Zero Server Storage
+            Auto-Detecting Models • Client-to-Provider Streaming • Zero Cloud Storage
           </p>
           <input
             ref={fileInputRef}
@@ -384,12 +443,17 @@ ${contextText}`;
             </button>
           </div>
 
-          {/* BYO-Key & Model Configuration Bar */}
+          {/* Key & Provider Configuration Tray */}
           <div className="p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
                 <Key className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Bring Your Own API Key</span>
+                <span>API Key</span>
+                {activeWorkingModel && (
+                  <span className="text-[10px] text-emerald-400 bg-emerald-950/50 border border-emerald-800/60 px-1.5 py-0.5 rounded font-mono">
+                    active: {activeWorkingModel}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -398,12 +462,12 @@ ${contextText}`;
                   className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-emerald-400 transition cursor-pointer"
                 >
                   <Settings2 className="w-3 h-3" />
-                  <span>{showAdvanced ? 'Hide Model Config' : 'Change Model'}</span>
+                  <span>{showAdvanced ? 'Hide Custom Model' : 'Custom Model (Optional)'}</span>
                 </button>
                 <span className="text-zinc-700">•</span>
                 <div className="flex items-center gap-1 text-[11px] text-zinc-500">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Saved in your browser only</span>
+                  <span>Saved locally in browser</span>
                 </div>
               </div>
             </div>
@@ -426,23 +490,26 @@ ${contextText}`;
                 type="password"
                 value={apiKey}
                 onChange={(e) => handleKeyChange(e.target.value)}
-                placeholder={currentProvider.placeholder}
+                placeholder={`Paste your ${currentProvider.name.split(' ')[0]} API Key (${currentProvider.placeholder})`}
                 className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
-            {/* Advanced Model Name & Endpoint Inputs */}
+            {/* Optional Custom Overrides */}
             {(showAdvanced || selectedProvider === 'custom') && (
               <div className="pt-2 border-t border-zinc-900 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs animate-in fade-in duration-150">
                 <div>
                   <label className="text-[11px] text-zinc-400 font-medium block mb-1">
-                    Model Identifier:
+                    Force Specific Model (Optional):
                   </label>
                   <input
                     type="text"
                     value={customModel}
-                    onChange={(e) => handleModelChange(e.target.value)}
-                    placeholder={`e.g. ${currentProvider.defaultModel}`}
+                    onChange={(e) => {
+                      setCustomModel(e.target.value);
+                      localStorage.setItem('1into1_user_ai_model', e.target.value);
+                    }}
+                    placeholder="Leave empty for auto-detection"
                     className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -455,7 +522,10 @@ ${contextText}`;
                     <input
                       type="text"
                       value={customEndpointUrl}
-                      onChange={(e) => handleEndpointChange(e.target.value)}
+                      onChange={(e) => {
+                        setCustomEndpointUrl(e.target.value);
+                        localStorage.setItem('1into1_user_ai_endpoint', e.target.value);
+                      }}
                       placeholder="http://localhost:11434/v1/chat/completions"
                       className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
                     />
@@ -465,7 +535,7 @@ ${contextText}`;
             )}
           </div>
 
-          {/* Quick Action Prompt Chips */}
+          {/* Quick Action Buttons */}
           <div className="flex flex-wrap gap-1.5">
             {[
               { label: 'Executive Summary', prompt: 'Provide a concise 3-paragraph executive summary of this document.' },
@@ -485,7 +555,7 @@ ${contextText}`;
             ))}
           </div>
 
-          {/* Chat Messages Log */}
+          {/* Chat Messages Screen */}
           <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 h-[320px] overflow-y-auto space-y-3.5 scrollbar-thin text-xs">
             {messages.map((msg, idx) => (
               <div
@@ -520,7 +590,7 @@ ${contextText}`;
             <div ref={chatEndRef} />
           </div>
 
-          {/* Error Banner */}
+          {/* Clean User Feedback Banner */}
           {errorMessage && (
             <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -528,7 +598,7 @@ ${contextText}`;
             </div>
           )}
 
-          {/* Chat Input Bar */}
+          {/* Prompt Input Form */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -543,7 +613,7 @@ ${contextText}`;
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               disabled={isStreaming || isExtracting || !extractedText}
-              placeholder={isExtracting ? 'Reading PDF...' : `Ask anything (using ${customModel || currentProvider.defaultModel})...`}
+              placeholder={isExtracting ? 'Reading PDF text...' : 'Ask anything about this document...'}
               className="flex-1 px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
             />
             {messages.length > 1 && (
@@ -576,3 +646,5 @@ ${contextText}`;
     </div>
   );
 };
+
+export default AiSummaryPdf;
