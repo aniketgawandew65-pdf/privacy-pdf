@@ -8,13 +8,13 @@ import {
   RotateCcw,
   ChevronLeft,
   ChevronRight,
-  Plus,
   Square,
   Type,
   X,
   FileEdit,
   CheckCircle2,
   AlertCircle,
+  Save,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
@@ -28,13 +28,14 @@ interface VisualEditorProps {
   onFileChange: (file: File | null) => void;
 }
 
+type ResizeHandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
 export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }) => {
   const [items, setItems] = useState<VisualOverlayItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
 
-  // Retina Preview & Zoom Controls
   const [zoom, setZoom] = useState<number>(1.0);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -45,7 +46,6 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  // Load document and render current page at 2.0x Retina scale
   useEffect(() => {
     if (!file) {
       setItems([]);
@@ -114,13 +114,15 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       id: `text-${Date.now()}`,
       type: 'text',
       pageIndex: currentPage - 1,
-      x: 0.2,
-      y: 0.3,
-      width: 0.3,
-      height: 0.06,
-      text: 'New Text',
+      x: 0.25,
+      y: 0.25,
+      width: 0.35,
+      height: 0.05,
+      text: 'Replace text here',
       fontSize: 12,
       color: '#000000',
+      hasBackground: true,
+      fitMode: 'wrap',
     };
     setItems((prev) => [...prev, newItem]);
     setSelectedId(newItem.id);
@@ -150,14 +152,90 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       createUrl(blob);
     } catch (err: any) {
       console.error('Export error:', err);
-      setErrorMessage(err.message || 'Failed to save overlay modifications.');
+      setErrorMessage(err.message || 'Failed to apply modifications.');
     } finally {
       setIsProcessing(false);
     }
   };
 
+  // 8-Directional Boundary Resize Handler
+  const handleResizePointerDown = (
+    e: React.PointerEvent,
+    item: VisualOverlayItem,
+    handle: ResizeHandleType
+  ) => {
+    e.stopPropagation();
+    setSelectedId(item.id);
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+
+    const rect = workspace.getBoundingClientRect();
+    const startX = (e.clientX - rect.left) / rect.width;
+    const startY = (e.clientY - rect.top) / rect.height;
+
+    const initialX = item.x;
+    const initialY = item.y;
+    const initialW = item.width;
+    const initialH = item.height;
+    const minW = 0.02;
+    const minH = 0.015;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const currentX = (moveEvent.clientX - rect.left) / rect.width;
+      const currentY = (moveEvent.clientY - rect.top) / rect.height;
+      const dx = currentX - startX;
+      const dy = currentY - startY;
+
+      let newX = initialX;
+      let newY = initialY;
+      let newW = initialW;
+      let newH = initialH;
+
+      // Handle East / West (Width & X)
+      if (handle.includes('e')) {
+        newW = Math.max(minW, Math.min(1 - initialX, initialW + dx));
+      }
+      if (handle.includes('w')) {
+        const right = initialX + initialW;
+        newX = Math.max(0, Math.min(right - minW, initialX + dx));
+        newW = right - newX;
+      }
+
+      // Handle South / North (Height & Y)
+      if (handle.includes('s')) {
+        newH = Math.max(minH, Math.min(1 - initialY, initialH + dy));
+      }
+      if (handle.includes('n')) {
+        const bottom = initialY + initialH;
+        newY = Math.max(0, Math.min(bottom - minH, initialY + dy));
+        newH = bottom - newY;
+      }
+
+      handleUpdateItem(item.id, { x: newX, y: newY, width: newW, height: newH });
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
   const currentPageItems = items.filter((item) => item.pageIndex === currentPage - 1);
   const activeItem = items.find((i) => i.id === selectedId);
+
+  const RESIZE_HANDLES: { type: ResizeHandleType; cursor: string; className: string }[] = [
+    { type: 'nw', cursor: 'nwse-resize', className: '-top-1 -left-1' },
+    { type: 'n', cursor: 'ns-resize', className: '-top-1 left-1/2 -translate-x-1/2' },
+    { type: 'ne', cursor: 'nesw-resize', className: '-top-1 -right-1' },
+    { type: 'e', cursor: 'ew-resize', className: 'top-1/2 -right-1 -translate-y-1/2' },
+    { type: 'se', cursor: 'nwse-resize', className: '-bottom-1 -right-1' },
+    { type: 's', cursor: 'ns-resize', className: '-bottom-1 left-1/2 -translate-x-1/2' },
+    { type: 'sw', cursor: 'nesw-resize', className: '-bottom-1 -left-1' },
+    { type: 'w', cursor: 'ew-resize', className: 'top-1/2 -left-1 -translate-y-1/2' },
+  ];
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 text-left">
@@ -176,7 +254,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         >
           <FileEdit className="w-10 h-10 text-emerald-400 mx-auto mb-3 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF to add text or whiteout</p>
-          <p className="text-xs text-zinc-500 mt-1">100% vector clarity • Zero server re-compression</p>
+          <p className="text-xs text-zinc-500 mt-1">Adjustable 8-point bounding box • 100% vector clarity</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -191,23 +269,22 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         </div>
       ) : (
         <>
-          {/* Top Control Bar */}
+          {/* Top Controls */}
           <div className="bg-zinc-900/70 border border-zinc-800/90 rounded-2xl p-3.5 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-xl">
-            {/* Tool Insertion Actions */}
             <div className="flex items-center gap-2">
               <button
-                onClick={handleAddWhiteout}
-                className="px-3 py-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                onClick={handleAddText}
+                className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
-                <Square className="w-3.5 h-3.5 text-zinc-400 fill-white" />
-                <span>+ Whiteout Box</span>
+                <Type className="w-3.5 h-3.5" />
+                <span>+ 2-in-1 Text &amp; Eraser Box</span>
               </button>
               <button
-                onClick={handleAddText}
-                className="px-3 py-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                onClick={handleAddWhiteout}
+                className="px-3 py-1.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
               >
-                <Type className="w-3.5 h-3.5 text-emerald-400" />
-                <span>+ Add Text</span>
+                <Square className="w-3.5 h-3.5 text-zinc-400 fill-white" />
+                <span>+ Blank Eraser Box</span>
               </button>
             </div>
 
@@ -234,7 +311,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               </button>
             </div>
 
-            {/* Export Actions */}
+            {/* Save Actions */}
             <div className="flex items-center gap-2">
               {!downloadUrl ? (
                 <button
@@ -245,11 +322,11 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                   {isProcessing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Burning modifications...</span>
+                      <span>Saving changes...</span>
                     </>
                   ) : (
                     <>
-                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <Save className="w-3.5 h-3.5 stroke-[2.5]" />
                       <span>Save Changes ({items.length})</span>
                     </>
                   )}
@@ -266,7 +343,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               )}
               <button
                 onClick={() => onFileChange(null)}
-                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-xl transition-colors"
+                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
                 title="Close file"
               >
                 <X className="w-4 h-4" />
@@ -277,7 +354,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
           {/* Active Item Configuration Tray */}
           {activeItem && (
             <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-3 flex-1 min-w-[280px]">
+              <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[300px]">
                 <span className="text-zinc-400 font-medium capitalize">{activeItem.type}:</span>
                 {activeItem.type === 'text' && (
                   <>
@@ -285,22 +362,62 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       type="text"
                       value={activeItem.text || ''}
                       onChange={(e) => handleUpdateItem(activeItem.id, { text: e.target.value })}
-                      placeholder="Enter text..."
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                      placeholder="Type text..."
+                      className="flex-1 min-w-[140px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-zinc-200 focus:outline-none focus:border-emerald-500"
                     />
-                    <div className="flex items-center gap-1 text-zinc-400">
-                      <span>Size:</span>
-                      <input
-                        type="number"
-                        min="8"
-                        max="72"
-                        value={activeItem.fontSize || 12}
-                        onChange={(e) =>
-                          handleUpdateItem(activeItem.id, { fontSize: Number(e.target.value) })
-                        }
-                        className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-zinc-200"
-                      />
+
+                    {/* Mode Switcher: Wrap vs Auto-fit */}
+                    <div className="flex items-center p-0.5 bg-zinc-950 border border-zinc-800 rounded-lg text-[11px]">
+                      <button
+                        onClick={() => handleUpdateItem(activeItem.id, { fitMode: 'wrap' })}
+                        className={`px-2 py-0.5 rounded transition-colors ${
+                          (activeItem.fitMode || 'wrap') === 'wrap'
+                            ? 'bg-zinc-800 text-emerald-400 font-semibold'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Wrap Text
+                      </button>
+                      <button
+                        onClick={() => handleUpdateItem(activeItem.id, { fitMode: 'autofit' })}
+                        className={`px-2 py-0.5 rounded transition-colors ${
+                          activeItem.fitMode === 'autofit'
+                            ? 'bg-zinc-800 text-emerald-400 font-semibold'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Auto-fit Size
+                      </button>
                     </div>
+
+                    {(activeItem.fitMode || 'wrap') === 'wrap' && (
+                      <div className="flex items-center gap-1 text-zinc-400">
+                        <span>Size:</span>
+                        <input
+                          type="number"
+                          min="8"
+                          max="72"
+                          value={activeItem.fontSize || 12}
+                          onChange={(e) =>
+                            handleUpdateItem(activeItem.id, { fontSize: Number(e.target.value) })
+                          }
+                          className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-zinc-200"
+                        />
+                      </div>
+                    )}
+
+                    <label className="flex items-center gap-1.5 text-zinc-300 cursor-pointer select-none bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
+                      <input
+                        type="checkbox"
+                        checked={activeItem.hasBackground ?? true}
+                        onChange={(e) =>
+                          handleUpdateItem(activeItem.id, { hasBackground: e.target.checked })
+                        }
+                        className="accent-emerald-500 rounded"
+                      />
+                      <span>Erase Background</span>
+                    </label>
+
                     <input
                       type="color"
                       value={activeItem.color || '#000000'}
@@ -312,7 +429,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 )}
                 {activeItem.type === 'whiteout' && (
                   <span className="text-zinc-400 text-[11px]">
-                    Drag to move • Drag bottom-right corner to resize
+                    Drag box to move • Adjust from any of the 8 border handles
                   </span>
                 )}
               </div>
@@ -326,7 +443,6 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
             </div>
           )}
 
-          {/* Error Message */}
           {errorMessage && (
             <div className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2 text-xs text-red-300">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -336,18 +452,17 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
           {downloadUrl && (
             <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-2.5 rounded-xl border border-emerald-800/30 font-medium">
-              <CheckCircle2 className="w-4 h-4" /> Vector Modifications Applied Successfully
+              <CheckCircle2 className="w-4 h-4" /> Modifications Saved Successfully
             </div>
           )}
 
-          {/* High-DPI Visual Canvas Workspace with Zoom */}
+          {/* Canvas Workspace */}
           <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl backdrop-blur-xl shadow-2xl h-[700px] overflow-hidden flex flex-col">
             <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/40">
               <span>Retina Vector Workspace (Page {currentPage})</span>
               <span className="text-zinc-500">{currentPageItems.length} active on this page</span>
             </div>
 
-            {/* Scrollable Viewport */}
             <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-zinc-950/60">
               <div
                 style={{
@@ -357,7 +472,6 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 }}
                 className="relative shadow-2xl rounded-sm border border-zinc-800/80 bg-white"
               >
-                {/* 2.0x Retina Base Canvas */}
                 <canvas
                   ref={canvasRef}
                   style={{
@@ -367,13 +481,26 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                   }}
                 />
 
-                {/* Interactive Placement Overlay */}
+                {/* Overlay Interactive Elements */}
                 <div
                   ref={workspaceRef}
                   className="absolute inset-0 select-none overflow-hidden"
                 >
                   {currentPageItems.map((item) => {
                     const isSelected = item.id === selectedId;
+                    const isText = item.type === 'text';
+
+                    // Dynamic font size for autofit preview mode
+                    const effectiveFontSize =
+                      isText && item.fitMode === 'autofit'
+                        ? Math.max(
+                            8,
+                            Math.min(
+                              item.height * 700 * 0.7,
+                              (item.width * 500) / Math.max(1, (item.text || 'Text').length * 0.58)
+                            )
+                          )
+                        : (item.fontSize || 12) * 0.9;
 
                     return (
                       <div
@@ -386,17 +513,17 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                           left: `${item.x * 100}%`,
                           top: `${item.y * 100}%`,
                           width: `${item.width * 100}%`,
-                          height:
-                            item.type === 'whiteout'
-                              ? `${item.height * 100}%`
-                              : 'auto',
+                          height: `${item.height * 100}%`,
+                          zIndex: isText ? 20 : 10,
                         }}
                         className={`absolute cursor-move transition-shadow ${
-                          item.type === 'whiteout' ? 'bg-white' : 'bg-transparent'
+                          !isText || (item.hasBackground ?? true)
+                            ? 'bg-white'
+                            : 'bg-transparent'
                         } ${
                           isSelected
-                            ? 'ring-2 ring-emerald-500 shadow-md'
-                            : 'ring-1 ring-zinc-400/40 hover:ring-zinc-400'
+                            ? 'ring-2 ring-emerald-500 shadow-lg'
+                            : 'ring-1 ring-zinc-300/80 hover:ring-zinc-400'
                         }`}
                         onPointerDown={(e) => {
                           e.stopPropagation();
@@ -430,56 +557,32 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                           window.addEventListener('pointerup', onPointerUp);
                         }}
                       >
-                        {item.type === 'text' && (
+                        {/* Text Container */}
+                        {isText && (
                           <div
                             style={{
-                              fontSize: `${(item.fontSize || 12) * 0.9}px`,
+                              fontSize: `${effectiveFontSize}px`,
                               color: item.color || '#000000',
                               lineHeight: 1.2,
-                              whiteSpace: 'nowrap',
+                              whiteSpace: item.fitMode === 'autofit' ? 'nowrap' : 'pre-wrap',
+                              wordBreak: 'break-word',
                             }}
-                            className="font-sans px-1 font-normal"
+                            className="w-full h-full flex items-center justify-start px-1 font-sans font-normal overflow-hidden select-none"
                           >
                             {item.text || 'Text'}
                           </div>
                         )}
 
-                        {/* Resize Corner Handle (Whiteout only) */}
-                        {item.type === 'whiteout' && isSelected && (
-                          <div
-                            className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 cursor-nwse-resize"
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              const workspace = workspaceRef.current;
-                              if (!workspace) return;
-
-                              const rect = workspace.getBoundingClientRect();
-                              const startX = (e.clientX - rect.left) / rect.width;
-                              const startY = (e.clientY - rect.top) / rect.height;
-                              const initialW = item.width;
-                              const initialH = item.height;
-
-                              const onResizeMove = (moveEvent: PointerEvent) => {
-                                const currentX = (moveEvent.clientX - rect.left) / rect.width;
-                                const currentY = (moveEvent.clientY - rect.top) / rect.height;
-                                const deltaW = currentX - startX;
-                                const deltaH = currentY - startY;
-
-                                const newW = Math.max(0.02, Math.min(1 - item.x, initialW + deltaW));
-                                const newH = Math.max(0.01, Math.min(1 - item.y, initialH + deltaH));
-                                handleUpdateItem(item.id, { width: newW, height: newH });
-                              };
-
-                              const onResizeUp = () => {
-                                window.removeEventListener('pointermove', onResizeMove);
-                                window.removeEventListener('pointerup', onResizeUp);
-                              };
-
-                              window.addEventListener('pointermove', onResizeMove);
-                              window.addEventListener('pointerup', onResizeUp);
-                            }}
-                          />
-                        )}
+                        {/* 8-Directional Handles */}
+                        {isSelected &&
+                          RESIZE_HANDLES.map((handle) => (
+                            <div
+                              key={handle.type}
+                              style={{ cursor: handle.cursor }}
+                              className={`absolute w-2.5 h-2.5 bg-white border-2 border-emerald-500 rounded-xs shadow-sm z-30 ${handle.className}`}
+                              onPointerDown={(e) => handleResizePointerDown(e, item, handle.type)}
+                            />
+                          ))}
                       </div>
                     );
                   })}
@@ -491,7 +594,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
             <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
               <button
                 onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.15).toFixed(2))))}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors"
+                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors cursor-pointer"
                 title="Zoom Out"
               >
                 <ZoomOut className="w-4 h-4" />
@@ -501,7 +604,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               </span>
               <button
                 onClick={() => setZoom((z) => Math.min(2.5, Number((z + 0.15).toFixed(2))))}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors"
+                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors cursor-pointer"
                 title="Zoom In"
               >
                 <ZoomIn className="w-4 h-4" />
@@ -509,7 +612,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
               <button
                 onClick={() => setZoom(1.0)}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-emerald-400 transition-colors"
+                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-emerald-400 transition-colors cursor-pointer"
                 title="Reset Zoom (100%)"
               >
                 <RotateCcw className="w-3.5 h-3.5" />

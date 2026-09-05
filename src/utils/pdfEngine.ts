@@ -2623,18 +2623,19 @@ export interface VisualOverlayItem {
   id: string;
   type: 'whiteout' | 'text';
   pageIndex: number;
-  x: number; // Normalized 0 to 1 relative to page width
-  y: number; // Normalized 0 to 1 relative to page height from top
+  x: number; // Normalized 0 to 1
+  y: number; // Normalized 0 to 1
   width: number; // Normalized 0 to 1
   height: number; // Normalized 0 to 1
   text?: string;
   fontSize?: number;
-  color?: string; // Hex color e.g. '#000000'
+  color?: string;
+  hasBackground?: boolean; // Erases underneath
+  fitMode?: 'wrap' | 'autofit'; // Both Wrap and Auto-scale modes supported
 }
 
 /**
- * Lossless Vector Overlay & Whiteout Engine: burns whiteout boxes and text annotations
- * directly into the PDF vector layer without rasterizing or degrading existing pages.
+ * 8-Point Visual Overlay & Whiteout Engine with auto-fit and word-wrap scaling.
  */
 export async function applyVisualOverlays(
   file: File,
@@ -2645,28 +2646,43 @@ export async function applyVisualOverlays(
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const totalPages = pdfDoc.getPageCount();
 
-  for (const item of overlays) {
+  // Whiteout masks render first, text elements second
+  const sortedOverlays = [...overlays].sort((a, b) => {
+    if (a.type === 'whiteout' && b.type === 'text') return -1;
+    if (a.type === 'text' && b.type === 'whiteout') return 1;
+    return 0;
+  });
+
+  for (const item of sortedOverlays) {
     if (item.pageIndex < 0 || item.pageIndex >= totalPages) continue;
     const page = pdfDoc.getPage(item.pageIndex);
     const { width: pageWidth, height: pageHeight } = page.getSize();
 
-    if (item.type === 'whiteout') {
-      const w = Math.max(2, item.width * pageWidth);
-      const h = Math.max(2, item.height * pageHeight);
-      const x = item.x * pageWidth;
-      const y = pageHeight - item.y * pageHeight - h;
+    const boxWidth = Math.max(4, item.width * pageWidth);
+    const boxHeight = Math.max(4, item.height * pageHeight);
+    const boxX = item.x * pageWidth;
+    const boxY = pageHeight - item.y * pageHeight - boxHeight;
 
+    // Draw opaque whiteout mask (standalone or behind text)
+    if (item.type === 'whiteout' || (item.type === 'text' && item.hasBackground)) {
       page.drawRectangle({
-        x,
-        y,
-        width: w,
-        height: h,
+        x: boxX,
+        y: boxY,
+        width: boxWidth,
+        height: boxHeight,
         color: rgb(1, 1, 1),
       });
-    } else if (item.type === 'text' && item.text?.trim()) {
-      const fSize = item.fontSize || 12;
-      const x = item.x * pageWidth;
-      const y = pageHeight - item.y * pageHeight - fSize * 0.85;
+    }
+
+    if (item.type === 'text' && item.text?.trim()) {
+      // Sanitize non-ASCII characters to avoid WinAnsi encoding crashes
+      const safeText = item.text
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2013\u2014]/g, '-')
+        .replace(/[^\x20-\x7E]/g, '');
+
+      if (!safeText) continue;
 
       let r = 0;
       let g = 0;
@@ -2676,22 +2692,55 @@ export async function applyVisualOverlays(
         g = parseInt(item.color.slice(3, 5), 16) / 255;
         b = parseInt(item.color.slice(5, 7), 16) / 255;
       }
+      const textColor = rgb(r, g, b);
 
-      // ASCII sanitize text to safeguard against WinAnsi encoding crashes
-      const safeText = item.text
-        .replace(/[\u2018\u2019]/g, "'")
-        .replace(/[\u201C\u201D]/g, '"')
-        .replace(/[\u2013\u2014]/g, '-')
-        .replace(/[^\x20-\x7E]/g, '');
+      if (item.fitMode === 'autofit') {
+        // Auto-fit mode: calculate maximum font size fitting both width and height
+        const unitWidth = font.widthOfTextAtSize(safeText, 1);
+        const maxFittingWidth = unitWidth > 0 ? (boxWidth - 6) / unitWidth : 12;
+        const maxFittingHeight = boxHeight * 0.75;
+        const autoSize = Math.max(4, Math.min(maxFittingWidth, maxFittingHeight, 120));
 
-      if (safeText) {
+        const textY = boxY + (boxHeight - autoSize * 0.85) / 2;
         page.drawText(safeText, {
-          x,
-          y,
-          size: fSize,
+          x: boxX + 3,
+          y: textY,
+          size: autoSize,
           font,
-          color: rgb(r, g, b),
+          color: textColor,
         });
+      } else {
+        // Wrap mode: wrap text lines at user's fixed font size
+        const fSize = item.fontSize || 12;
+        const lineHeight = fSize * 1.25;
+        const words = safeText.split(' ');
+        const lines: string[] = [];
+        let currentLine = '';
+
+        for (const word of words) {
+          const testLine = currentLine ? `${currentLine} ${word}` : word;
+          const lineWidth = font.widthOfTextAtSize(testLine, fSize);
+          if (lineWidth > boxWidth - 6 && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = testLine;
+          }
+        }
+        if (currentLine) lines.push(currentLine);
+
+        let lineY = boxY + boxHeight - fSize;
+        for (const line of lines) {
+          if (lineY < boxY) break;
+          page.drawText(line, {
+            x: boxX + 3,
+            y: lineY,
+            size: fSize,
+            font,
+            color: textColor,
+          });
+          lineY -= lineHeight;
+        }
       }
     }
   }
