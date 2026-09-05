@@ -45,6 +45,7 @@ import {
   Table,
   FileCode,
   Type,
+  FileEdit,
 } from 'lucide-react';
 
 // Code-split all tool components to keep initial bundle tiny
@@ -89,6 +90,8 @@ const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.
 const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m) => ({ default: m.CsvToPdf })));
+const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
+
 
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
 
@@ -148,6 +151,8 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
+  { name: 'Visual Editor', path: '/visual-editor', category: 'organize', icon: FileEdit },
+
 ];
 
 function ToolFallback() {
@@ -479,8 +484,8 @@ export default function App() {
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
+              <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
 
-              
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

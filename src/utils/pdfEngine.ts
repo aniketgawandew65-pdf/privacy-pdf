@@ -2619,3 +2619,82 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
+export interface VisualOverlayItem {
+  id: string;
+  type: 'whiteout' | 'text';
+  pageIndex: number;
+  x: number; // Normalized 0 to 1 relative to page width
+  y: number; // Normalized 0 to 1 relative to page height from top
+  width: number; // Normalized 0 to 1
+  height: number; // Normalized 0 to 1
+  text?: string;
+  fontSize?: number;
+  color?: string; // Hex color e.g. '#000000'
+}
+
+/**
+ * Lossless Vector Overlay & Whiteout Engine: burns whiteout boxes and text annotations
+ * directly into the PDF vector layer without rasterizing or degrading existing pages.
+ */
+export async function applyVisualOverlays(
+  file: File,
+  overlays: VisualOverlayItem[]
+): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const totalPages = pdfDoc.getPageCount();
+
+  for (const item of overlays) {
+    if (item.pageIndex < 0 || item.pageIndex >= totalPages) continue;
+    const page = pdfDoc.getPage(item.pageIndex);
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+
+    if (item.type === 'whiteout') {
+      const w = Math.max(2, item.width * pageWidth);
+      const h = Math.max(2, item.height * pageHeight);
+      const x = item.x * pageWidth;
+      const y = pageHeight - item.y * pageHeight - h;
+
+      page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        color: rgb(1, 1, 1),
+      });
+    } else if (item.type === 'text' && item.text?.trim()) {
+      const fSize = item.fontSize || 12;
+      const x = item.x * pageWidth;
+      const y = pageHeight - item.y * pageHeight - fSize * 0.85;
+
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      if (item.color && item.color.startsWith('#') && item.color.length === 7) {
+        r = parseInt(item.color.slice(1, 3), 16) / 255;
+        g = parseInt(item.color.slice(3, 5), 16) / 255;
+        b = parseInt(item.color.slice(5, 7), 16) / 255;
+      }
+
+      // ASCII sanitize text to safeguard against WinAnsi encoding crashes
+      const safeText = item.text
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2013\u2014]/g, '-')
+        .replace(/[^\x20-\x7E]/g, '');
+
+      if (safeText) {
+        page.drawText(safeText, {
+          x,
+          y,
+          size: fSize,
+          font,
+          color: rgb(r, g, b),
+        });
+      }
+    }
+  }
+
+  return await pdfDoc.save({ useObjectStreams: false });
+}
