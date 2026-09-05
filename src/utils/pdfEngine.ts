@@ -2496,55 +2496,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
-export interface CsvToPdfOptions {
-  rows: string[][];
-  title?: string;
-  orientation?: 'portrait' | 'landscape';
-  pageSize?: 'a4' | 'letter';
-  theme?: 'clean' | 'striped' | 'emerald';
-  fontSize?: number;
-}
-
-/**
- * High-speed vector CSV/Excel to PDF generator with auto-pagination and repeating headers.
- */
 export interface VisualOverlayItem {
-  id: string;
-  type: 'whiteout' | 'text';
-  pageIndex: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  text?: string;
-  fontFamily?: 'helvetica' | 'times' | 'courier';
-  fontSize?: number;
-  color?: string;
-  hasBackground?: boolean;
-  fitMode?: 'wrap' | 'autofit';
-}
-
-/**
- * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
-export interface VisualOverlayItem {
-  id: string;
-  type: 'whiteout' | 'text';
-  pageIndex: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  text?: string;
-  fontFamily?: 'helvetica' | 'times' | 'courier';
-  fontSize?: number;
-  color?: string;
-  hasBackground?: boolean;
-  fitMode?: 'wrap' | 'autofit';
-}
-
-/**
- * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
- export interface VisualOverlayItem {
   id: string;
   type: 'whiteout' | 'text';
   pageIndex: number;
@@ -2679,6 +2631,7 @@ export async function applyVisualOverlays(
 
   return await pdfDoc.save({ useObjectStreams: false });
 }
+
 export interface CsvToPdfOptions {
   rows: string[][];
   title?: string;
@@ -2802,6 +2755,7 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
+
 export interface CodeToPdfOptions {
   code: string;
   title?: string;
@@ -2814,7 +2768,7 @@ export interface CodeToPdfOptions {
 
 interface SyntaxToken {
   text: string;
-  color: [number, number, number]; // RGB
+  color: [number, number, number];
 }
 
 /**
@@ -2847,16 +2801,15 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   const margin = 32;
   const bottomThreshold = pageHeight - margin;
 
-  // Theme palettes
   const isDark = theme === 'dark';
-  const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255]; // Slate 900 vs Pure White
+  const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255];
   const defaultTextColor: [number, number, number] = isDark ? [226, 232, 240] : [30, 41, 59];
   const gutterBg: [number, number, number] = isDark ? [30, 41, 59] : [241, 245, 249];
   const gutterText: [number, number, number] = isDark ? [100, 116, 139] : [148, 163, 184];
-  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [192, 38, 211]; // Rose 500 vs Fuchsia 600
-  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136]; // Emerald 400 vs Teal 600
-  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139]; // Slate 500
-  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [217, 119, 6]; // Orange 400 vs Amber 600
+  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [192, 38, 211];
+  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136];
+  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139];
+  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [217, 119, 6];
 
   const drawPageBackground = () => {
     if (isDark) {
@@ -2869,7 +2822,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 
   let cursorY = margin;
 
-  // Optional Header / File Title Banner
   if (title.trim()) {
     doc.setFont('courier', 'bold');
     doc.setFontSize(12);
@@ -2881,29 +2833,25 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   const rawLines = code.replace(/\t/g, '  ').split(/\r?\n/);
   const totalLines = rawLines.length;
   const gutterDigits = Math.max(2, String(totalLines).length);
-  const charWidth = fontSize * 0.6; // Constant width for Courier monospace font
+  const charWidth = fontSize * 0.6;
   const gutterWidth = showLineNumbers ? (gutterDigits + 2) * charWidth + 12 : 0;
   const codeAreaWidth = pageWidth - margin * 2 - gutterWidth;
   const maxCharsPerLine = Math.floor(codeAreaWidth / charWidth);
   const lineHeight = fontSize * 1.45;
 
-  // Keywords list covering JS, TS, Python, SQL, Java, C++, Rust, Go
   const KEYWORD_REGEX =
     /\b(const|let|var|function|return|import|from|export|default|class|extends|if|else|switch|case|break|for|while|do|try|catch|finally|throw|new|typeof|instanceof|async|await|def|elif|lambda|self|echo|select|from|where|insert|into|update|delete|public|private|protected|static|void|int|float|double|bool|struct|impl|fn|pub|type|interface)\b/;
 
-  // Lightweight regex tokenizer
   const tokenizeLine = (text: string): SyntaxToken[] => {
     const tokens: SyntaxToken[] = [];
     let remaining = text;
 
     while (remaining.length > 0) {
-      // Single-line comment
       if (remaining.startsWith('//') || remaining.startsWith('#')) {
         tokens.push({ text: remaining, color: commentColor });
         break;
       }
 
-      // Strings (double quotes, single quotes, backticks)
       const strMatch = remaining.match(/^("[^"]*"|'[^']*'|`[^`]*`)/);
       if (strMatch) {
         tokens.push({ text: strMatch[0], color: stringColor });
@@ -2911,7 +2859,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         continue;
       }
 
-      // Numbers
       const numMatch = remaining.match(/^\b\d+(\.\d+)?\b/);
       if (numMatch) {
         tokens.push({ text: numMatch[0], color: numberColor });
@@ -2919,7 +2866,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         continue;
       }
 
-      // Keywords
       const kwMatch = remaining.match(KEYWORD_REGEX);
       if (kwMatch && remaining.startsWith(kwMatch[0])) {
         tokens.push({ text: kwMatch[0], color: keywordColor });
@@ -2927,7 +2873,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         continue;
       }
 
-      // Standard identifiers / symbols
       const plainMatch = remaining.match(/^[^"'`#/\d\w]+|^\w+/);
       if (plainMatch) {
         tokens.push({ text: plainMatch[0], color: defaultTextColor });
@@ -2948,7 +2893,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
     const lineNumStr = String(lineIdx + 1).padStart(gutterDigits, ' ');
     const lineContent = rawLines[lineIdx];
 
-    // Wrap long lines
     const wrappedChunks: string[] = [];
     if (lineContent.length <= maxCharsPerLine) {
       wrappedChunks.push(lineContent);
@@ -2965,7 +2909,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         cursorY = margin;
       }
 
-      // Draw line number gutter
       if (showLineNumbers) {
         doc.setFillColor(gutterBg[0], gutterBg[1], gutterBg[2]);
         doc.rect(margin, cursorY - fontSize * 0.85, gutterWidth - 6, lineHeight, 'F');
@@ -2974,19 +2917,16 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         if (chunkIdx === 0) {
           doc.text(lineNumStr, margin + 4, cursorY);
         } else {
-          // Wrapped continuation marker
           doc.text('·'.padStart(gutterDigits, ' '), margin + 4, cursorY);
         }
       }
 
-      // Draw highlighted code tokens
       const chunkText = wrappedChunks[chunkIdx];
       const tokens = tokenizeLine(chunkText);
       let tokenCursorX = margin + gutterWidth;
 
       for (const token of tokens) {
         doc.setTextColor(token.color[0], token.color[1], token.color[2]);
-        // ASCII sanitize to prevent WinAnsi exceptions
         const safeToken = token.text.replace(/[^\x20-\x7E]/g, ' ');
         doc.text(safeToken, tokenCursorX, cursorY);
         tokenCursorX += safeToken.length * charWidth;
@@ -2998,9 +2938,7 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
-export interface PdfToWordOptions {
-  onProgress?: (progress: number) => void;
-}
+
 export interface HtmlToPdfOptions {
   html: string;
   pageSize?: 'a4' | 'letter' | 'receipt';
@@ -3017,12 +2955,26 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     throw new Error('No HTML content provided to convert.');
   }
 
-  // Standard dimensions in points (pt)
   const isReceipt = pageSize === 'receipt';
-  const targetWidthPt = isReceipt ? 226.77 : pageSize === 'letter' ? (orientation === 'landscape' ? 792 : 612) : (orientation === 'landscape' ? 841.89 : 595.28);
-  const targetHeightPt = isReceipt ? 0 : pageSize === 'letter' ? (orientation === 'landscape' ? 612 : 792) : (orientation === 'landscape' ? 595.28 : 841.89);
+  const targetWidthPt = isReceipt
+    ? 226.77
+    : pageSize === 'letter'
+    ? orientation === 'landscape'
+      ? 792
+      : 612
+    : orientation === 'landscape'
+    ? 841.89
+    : 595.28;
+  const targetHeightPt = isReceipt
+    ? 0
+    : pageSize === 'letter'
+    ? orientation === 'landscape'
+      ? 612
+      : 792
+    : orientation === 'landscape'
+    ? 595.28
+    : 841.89;
 
-  // Render HTML in an isolated off-screen sandbox
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.left = '-9999px';
@@ -3064,13 +3016,11 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     `);
     doc.close();
 
-    // Wait briefly for CSS and layout to stabilize
     await new Promise((resolve) => setTimeout(resolve, 250));
 
     const contentHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
     const contentWidth = isReceipt ? 300 : 800;
 
-    // Capture DOM using SVG foreignObject to avoid external dependencies
     const serializedHtml = new XMLSerializer().serializeToString(doc.body);
     const svgData = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${contentWidth}" height="${contentHeight}">
@@ -3107,7 +3057,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       img.src = svgUrl;
     });
 
-    const scaleFactor = 2; // Retina sharpness
+    const scaleFactor = 2;
     const canvas = document.createElement('canvas');
     canvas.width = contentWidth * scaleFactor;
     canvas.height = contentHeight * scaleFactor;
@@ -3123,7 +3073,6 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
     if (isReceipt) {
-      // Continuous custom height for thermal receipts
       const receiptHeightPt = Math.max(120, (contentHeight / contentWidth) * targetWidthPt);
       const pdf = new jsPDF({
         orientation: 'portrait',
@@ -3134,7 +3083,6 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // Standard paginated A4 / Letter PDF
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
