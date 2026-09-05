@@ -2544,6 +2544,24 @@ export interface VisualOverlayItem {
 
 /**
  * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
+ export interface VisualOverlayItem {
+  id: string;
+  type: 'whiteout' | 'text';
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  fontFamily?: 'helvetica' | 'times' | 'courier';
+  fontSize?: number;
+  color?: string;
+  hasBackground?: boolean;
+  fitMode?: 'wrap' | 'autofit';
+}
+
+/**
+ * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
  * precision size scaling (1pt-72pt), auto-fit, and word wrap.
  */
 export async function applyVisualOverlays(

@@ -46,7 +46,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  // Keyboard Delete / Backspace listener
+  // Keyboard Delete & Arrow Key Nudging
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!selectedId) return;
@@ -55,9 +55,30 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         return;
       }
 
+      // Delete item
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         handleDeleteItem(selectedId);
+        return;
+      }
+
+      // Nudge position with arrow keys (Shift for 5x step)
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 0.01 : 0.002;
+        setItems((prev) =>
+          prev.map((item) => {
+            if (item.id !== selectedId) return item;
+            let newX = item.x;
+            let newY = item.y;
+            if (e.key === 'ArrowLeft') newX = Math.max(0, item.x - step);
+            if (e.key === 'ArrowRight') newX = Math.min(1 - item.width, item.x + step);
+            if (e.key === 'ArrowUp') newY = Math.max(0, item.y - step);
+            if (e.key === 'ArrowDown') newY = Math.min(1 - item.height, item.y + step);
+            return { ...item, x: newX, y: newY };
+          })
+        );
+        revokeDownloadUrl();
       }
     };
 
@@ -179,6 +200,53 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     }
   };
 
+  // Delta-based Zoom-Aware Drag Move
+  const handleDragPointerDown = (e: React.PointerEvent, item: VisualOverlayItem) => {
+    e.stopPropagation();
+    setSelectedId(item.id);
+
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture?.(e.pointerId);
+
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const rect = workspace.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      const dx = (moveEvent.clientX - lastX) / rect.width;
+      const dy = (moveEvent.clientY - lastY) / rect.height;
+      lastX = moveEvent.clientX;
+      lastY = moveEvent.clientY;
+
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== item.id) return it;
+          const newX = Math.max(0, Math.min(1 - it.width, it.x + dx));
+          const newY = Math.max(0, Math.min(1 - it.height, it.y + dy));
+          return { ...it, x: newX, y: newY };
+        })
+      );
+      revokeDownloadUrl();
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      try {
+        target.releasePointerCapture?.(upEvent.pointerId);
+      } catch {}
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp);
+  };
+
+  // Delta-based Zoom-Aware 8-Directional Resize
   const handleResizePointerDown = (
     e: React.PointerEvent,
     item: VisualOverlayItem,
@@ -186,57 +254,67 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   ) => {
     e.stopPropagation();
     setSelectedId(item.id);
+
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture?.(e.pointerId);
+
     const workspace = workspaceRef.current;
     if (!workspace) return;
-
     const rect = workspace.getBoundingClientRect();
-    const startX = (e.clientX - rect.left) / rect.width;
-    const startY = (e.clientY - rect.top) / rect.height;
+    if (!rect.width || !rect.height) return;
 
-    const initialX = item.x;
-    const initialY = item.y;
-    const initialW = item.width;
-    const initialH = item.height;
-    const minW = 0.015;
-    const minH = 0.012;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+    const minW = 0.01;
+    const minH = 0.008;
 
     const onPointerMove = (moveEvent: PointerEvent) => {
-      const currentX = (moveEvent.clientX - rect.left) / rect.width;
-      const currentY = (moveEvent.clientY - rect.top) / rect.height;
-      const dx = currentX - startX;
-      const dy = currentY - startY;
+      moveEvent.preventDefault();
+      const dx = (moveEvent.clientX - lastX) / rect.width;
+      const dy = (moveEvent.clientY - lastY) / rect.height;
+      lastX = moveEvent.clientX;
+      lastY = moveEvent.clientY;
 
-      let newX = initialX;
-      let newY = initialY;
-      let newW = initialW;
-      let newH = initialH;
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== item.id) return it;
+          let newX = it.x;
+          let newY = it.y;
+          let newW = it.width;
+          let newH = it.height;
 
-      if (handle.includes('e')) {
-        newW = Math.max(minW, Math.min(1 - initialX, initialW + dx));
-      }
-      if (handle.includes('w')) {
-        const right = initialX + initialW;
-        newX = Math.max(0, Math.min(right - minW, initialX + dx));
-        newW = right - newX;
-      }
-      if (handle.includes('s')) {
-        newH = Math.max(minH, Math.min(1 - initialY, initialH + dy));
-      }
-      if (handle.includes('n')) {
-        const bottom = initialY + initialH;
-        newY = Math.max(0, Math.min(bottom - minH, initialY + dy));
-        newH = bottom - newY;
-      }
+          if (handle.includes('e')) {
+            newW = Math.max(minW, Math.min(1 - it.x, it.width + dx));
+          }
+          if (handle.includes('w')) {
+            const right = it.x + it.width;
+            newX = Math.max(0, Math.min(right - minW, it.x + dx));
+            newW = right - newX;
+          }
+          if (handle.includes('s')) {
+            newH = Math.max(minH, Math.min(1 - it.y, it.height + dy));
+          }
+          if (handle.includes('n')) {
+            const bottom = it.y + it.height;
+            newY = Math.max(0, Math.min(bottom - minH, it.y + dy));
+            newH = bottom - newY;
+          }
 
-      handleUpdateItem(item.id, { x: newX, y: newY, width: newW, height: newH });
+          return { ...it, x: newX, y: newY, width: newW, height: newH };
+        })
+      );
+      revokeDownloadUrl();
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (upEvent: PointerEvent) => {
+      try {
+        target.releasePointerCapture?.(upEvent.pointerId);
+      } catch {}
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
     };
 
-    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp);
   };
 
@@ -271,7 +349,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         >
           <FileEdit className="w-10 h-10 text-emerald-400 mx-auto mb-3 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF to add text or whiteout</p>
-          <p className="text-xs text-zinc-500 mt-1">Seamless borderless eraser • 8-direction handles • Vector clarity</p>
+          <p className="text-xs text-zinc-500 mt-1">Seamless borderless eraser • 8-direction handles • Precision arrow nudging</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -305,7 +383,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               </button>
             </div>
 
-            {/* Pagination Controls */}
+            {/* Pagination */}
             <div className="flex items-center gap-2 bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-800 text-xs text-zinc-300">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -384,7 +462,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       className="flex-1 min-w-[150px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
                     />
 
-                    {/* Font Family Selector */}
+                    {/* Font Selector */}
                     <div className="bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
                       <select
                         value={activeItem.fontFamily || 'helvetica'}
@@ -403,7 +481,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                     <div className="flex items-center p-0.5 bg-zinc-950 border border-zinc-800 rounded-lg text-[11px]">
                       <button
                         onClick={() => handleUpdateItem(activeItem.id, { fitMode: 'wrap' })}
-                        className={`px-2 py-1 rounded transition-colors ${
+                        className={`px-2 py-0.5 rounded transition-colors ${
                           (activeItem.fitMode || 'wrap') === 'wrap'
                             ? 'bg-zinc-800 text-emerald-400 font-semibold'
                             : 'text-zinc-400 hover:text-zinc-200'
@@ -413,7 +491,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       </button>
                       <button
                         onClick={() => handleUpdateItem(activeItem.id, { fitMode: 'autofit' })}
-                        className={`px-2 py-1 rounded transition-colors ${
+                        className={`px-2 py-0.5 rounded transition-colors ${
                           activeItem.fitMode === 'autofit'
                             ? 'bg-zinc-800 text-emerald-400 font-semibold'
                             : 'text-zinc-400 hover:text-zinc-200'
@@ -423,21 +501,32 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       </button>
                     </div>
 
-                    {/* Font Size */}
+                    {/* Synchronized Slider & Numeric Input (1pt to 72pt) */}
                     {(activeItem.fitMode || 'wrap') === 'wrap' && (
-                      <div className="flex items-center gap-1.5 text-zinc-400">
+                      <div className="flex items-center gap-1.5 bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800 text-zinc-400">
                         <span>Size:</span>
                         <input
                           type="range"
-                          min="8"
-                          max="48"
+                          min="1"
+                          max="72"
                           value={activeItem.fontSize || 12}
                           onChange={(e) =>
                             handleUpdateItem(activeItem.id, { fontSize: Number(e.target.value) })
                           }
-                          className="w-16 accent-emerald-500 cursor-pointer"
+                          className="w-14 accent-emerald-500 cursor-pointer"
                         />
-                        <span className="font-mono text-emerald-400 w-5">{activeItem.fontSize || 12}</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="72"
+                          value={activeItem.fontSize || 12}
+                          onChange={(e) => {
+                            const val = Math.max(1, Math.min(72, Number(e.target.value) || 1));
+                            handleUpdateItem(activeItem.id, { fontSize: val });
+                          }}
+                          className="w-11 bg-zinc-900 border border-zinc-800 text-emerald-400 rounded px-1 py-0.5 font-mono text-center text-xs"
+                        />
+                        <span className="text-[10px] text-zinc-500">pt</span>
                       </div>
                     )}
 
@@ -465,7 +554,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
                 {activeItem.type === 'whiteout' && (
                   <span className="text-zinc-400 text-[11px]">
-                    Drag box to move • Adjust from 8 border handles • Press <b>Del</b> or <b>Backspace</b> to remove
+                    Drag to move • 8 border handles • Use <b>Arrow Keys</b> to nudge • <b>Del</b> to remove
                   </span>
                 )}
               </div>
@@ -501,7 +590,9 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
           >
             <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/40">
               <span>Retina Vector Workspace (Page {currentPage})</span>
-              <span className="text-zinc-500">{currentPageItems.length} active • Click anywhere outside to deselect</span>
+              <span className="text-zinc-500">
+                {currentPageItems.length} active • Use Arrow Keys to adjust position
+              </span>
             </div>
 
             <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-zinc-950/60">
@@ -538,7 +629,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                     const effectiveFontSize =
                       isText && item.fitMode === 'autofit'
                         ? Math.max(
-                            8,
+                            6,
                             Math.min(
                               item.height * 700 * 0.7,
                               (item.width * 500) / Math.max(1, (item.text || 'Text').length * 0.58)
@@ -559,6 +650,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                           width: `${item.width * 100}%`,
                           height: `${item.height * 100}%`,
                           zIndex: isText ? 20 : 10,
+                          touchAction: 'none',
                         }}
                         className={`absolute cursor-move select-none transition-shadow ${
                           !isText || (item.hasBackground ?? true)
@@ -569,37 +661,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                             ? 'ring-2 ring-emerald-500 shadow-md'
                             : 'border-none outline-none shadow-none'
                         }`}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          setSelectedId(item.id);
-                          const workspace = workspaceRef.current;
-                          if (!workspace) return;
-
-                          const rect = workspace.getBoundingClientRect();
-                          const startX = (e.clientX - rect.left) / rect.width;
-                          const startY = (e.clientY - rect.top) / rect.height;
-                          const initialItemX = item.x;
-                          const initialItemY = item.y;
-
-                          const onPointerMove = (moveEvent: PointerEvent) => {
-                            const currentX = (moveEvent.clientX - rect.left) / rect.width;
-                            const currentY = (moveEvent.clientY - rect.top) / rect.height;
-                            const deltaX = currentX - startX;
-                            const deltaY = currentY - startY;
-
-                            const newX = Math.max(0, Math.min(1 - item.width, initialItemX + deltaX));
-                            const newY = Math.max(0, Math.min(1 - item.height, initialItemY + deltaY));
-                            handleUpdateItem(item.id, { x: newX, y: newY });
-                          };
-
-                          const onPointerUp = () => {
-                            window.removeEventListener('pointermove', onPointerMove);
-                            window.removeEventListener('pointerup', onPointerUp);
-                          };
-
-                          window.addEventListener('pointermove', onPointerMove);
-                          window.addEventListener('pointerup', onPointerUp);
-                        }}
+                        onPointerDown={(e) => handleDragPointerDown(e, item)}
                       >
                         {/* Text Container */}
                         {isText && (
@@ -618,12 +680,12 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                           </div>
                         )}
 
-                        {/* 8-Directional Handles: Only visible when actively selected */}
+                        {/* 8-Directional Handles */}
                         {isSelected &&
                           RESIZE_HANDLES.map((handle) => (
                             <div
                               key={handle.type}
-                              style={{ cursor: handle.cursor }}
+                              style={{ cursor: handle.cursor, touchAction: 'none' }}
                               className={`absolute w-2.5 h-2.5 bg-white border-2 border-emerald-500 rounded-xs shadow-sm z-30 ${handle.className}`}
                               onPointerDown={(e) => handleResizePointerDown(e, item, handle.type)}
                             />
