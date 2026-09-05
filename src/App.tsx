@@ -44,6 +44,7 @@ import {
   Bot,
   Table,
   FileCode,
+  Type,
 } from 'lucide-react';
 
 // Code-split all tool components to keep initial bundle tiny
@@ -71,6 +72,7 @@ const RepairPdf = lazy(() => import('./components/RepairPdf').then((m) => ({ def
 
 const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({ default: m.FillFormPdf })));
 const ImageToPdf = lazy(() => import('./components/ImageToPdf').then((m) => ({ default: m.ImageToPdf })));
+const TextToPdf = lazy(() => import('./components/TextToPdf').then((m) => ({ default: m.TextToPdf })));
 const PdfToImages = lazy(() => import('./components/PdfToImages').then((m) => ({ default: m.PdfToImages })));
 const HeicToJpg = lazy(() => import('./components/HeicToJpg').then((m) => ({ default: m.HeicToJpg })));
 const ExtractImages = lazy(() => import('./components/ExtractImages').then((m) => ({ default: m.ExtractImages })));
@@ -86,6 +88,7 @@ const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) =
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
 const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
+const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m) => ({ default: m.CsvToPdf })));
 
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
 
@@ -129,6 +132,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Repair PDF', path: '/repair-pdf', category: 'security', icon: Wrench },
 
   // Convert, AI & Text
+  { name: 'Text to PDF', path: '/text-to-pdf', category: 'convert', icon: Type },
   { name: 'AI Summary & Chat', path: '/ai-summary-pdf', category: 'convert', icon: Bot },
   { name: 'OCR Searchable', path: '/ocr-pdf', category: 'convert', icon: ScanText },
   { name: 'Fill & Flatten', path: '/fill-pdf', category: 'convert', icon: FileCheck2 },
@@ -143,6 +147,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
   { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
+  { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
 ];
 
 function ToolFallback() {
@@ -449,6 +454,7 @@ export default function App() {
               <Route path="/repair-pdf" element={<RepairPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
 
               {/* Convert, AI & Text */}
+              <Route path="/text-to-pdf" element={<TextToPdf />} />
               <Route path="/ai-summary-pdf" element={<AiSummaryPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/ocr-pdf" element={<OcrPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/fill-pdf" element={<FillFormPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
@@ -472,7 +478,9 @@ export default function App() {
               <Route path="/compress-pdf-to-100kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
-            
+              <Route path="/csv-to-pdf" element={<CsvToPdf />} />
+
+              
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
