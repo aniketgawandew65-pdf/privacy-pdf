@@ -8,8 +8,6 @@ import {
   AlertCircle,
   Loader2,
   X,
-  Sliders,
-  Type,
 } from 'lucide-react';
 import { generateCsvPDF, type CsvToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
