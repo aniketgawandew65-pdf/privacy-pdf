@@ -46,13 +46,9 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
     const fileBytes = await file.arrayBuffer();
 
     try {
-      // 1. Primary Path: Lossless native vector copy
-      const pdfDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
-
-      // CRITICAL: If the document is owner-locked (like bank e-statements),
-      // vector copying copies raw encrypted cipher-text that renders BLANK.
-      // We immediately trigger the PDF.js salvage pipeline instead.
-      if (pdfDoc.isEncrypted) {
+      // 1. Primary Path: Lossless native vector copy (fails immediately on encrypted PDFs)
+      const pdfDoc = await PDFDocument.load(fileBytes);
+      if ((pdfDoc as any).context?.trailerInfo?.Encrypt) {
         throw new Error('Document has owner permissions encryption; routing to PDF.js engine');
       }
 
@@ -92,7 +88,6 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
         const ctx = canvas.getContext('2d');
 
         if (ctx) {
-          // Explicit white background prevents transparent bank statement backgrounds from turning black
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -127,6 +122,7 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
 
   return await mergedPdf.save({ useObjectStreams: false });
 }
+
 /**
  * Compresses a PDF to fit under a specific target size (in KB)
  * using client-side canvas rasterization and quality tuning.
@@ -323,14 +319,11 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
   const newDoc = await PDFDocument.create();
 
   try {
-    const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-
-    // Bank e-statements have owner encryption: vector copying copies encrypted bytes that render blank
-    if (srcDoc.isEncrypted) {
+    const srcDoc = await PDFDocument.load(arrayBuffer);
+    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
       throw new Error('Document has owner permissions encryption; switching to high-res rendering pipeline.');
     }
 
-    // Ensure all target pages have valid Contents streams
     for (const idx of indices) {
       const page = srcDoc.getPage(idx);
       if (!page.node.Contents()) {
@@ -356,7 +349,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
       const pageNum = idx + 1;
       const page = await fallbackDoc.getPage(pageNum);
       const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const renderViewport = page.getViewport({ scale: 2.0 }); // 2.0x Retina clarity
+      const renderViewport = page.getViewport({ scale: 2.0 });
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(renderViewport.width);
@@ -412,9 +405,8 @@ export async function splitPdfToZip(
   const baseName = file.name.replace(/\.[^/.]+$/, '');
 
   try {
-    const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-
-    if (sourceDoc.isEncrypted) {
+    const sourceDoc = await PDFDocument.load(arrayBuffer);
+    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
       throw new Error('Encrypted document; routing to fallback renderer');
     }
 
@@ -496,6 +488,7 @@ export async function splitPdfToZip(
 
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
+
 /**
  * Removes specified pages from a PDF document.
  * Includes dual-engine fallback to prevent blank pages on encrypted bank statements.
@@ -520,9 +513,8 @@ export async function removePagesFromPDF(
   }
 
   try {
-    const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-
-    if (srcDoc.isEncrypted) {
+    const srcDoc = await PDFDocument.load(arrayBuffer);
+    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
       throw new Error('Document has owner encryption; switching to high-res rendering engine.');
     }
 
@@ -595,6 +587,7 @@ export async function removePagesFromPDF(
     return await newDoc.save({ useObjectStreams: false });
   }
 }
+
 /**
  * Dual-engine page counter: uses pdf-lib with ignoreEncryption,
  * with seamless PDF.js fallback for scanned or strict files.
@@ -910,7 +903,7 @@ export async function compressPDF(
       stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
     });
 
-    const page = await pdf.getPage(pageNum);
+    const page = await pdfDoc.getPage(pageNum);
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
     let scale = Math.max(0.15, Math.min(1.4, Math.sqrt(budgetPerPage / 45000)));
@@ -983,22 +976,84 @@ export async function reorderAndProcessPDF(
   pages: PageConfig[]
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const outputDoc = await PDFDocument.create();
 
-  const indicesToCopy = pages.map((p) => p.originalIndex);
-  const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
+  try {
+    const sourceDoc = await PDFDocument.load(arrayBuffer);
+    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
+      throw new Error('Encrypted document');
+    }
 
-  copiedPages.forEach((page, idx) => {
-    const desiredRotation = pages[idx].rotation;
-    const currentRotation = page.getRotation().angle;
-    page.setRotation(degrees((currentRotation + desiredRotation) % 360));
-    outputDoc.addPage(page);
-  });
+    const indicesToCopy = pages.map((p) => p.originalIndex);
+    const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
 
-  return await outputDoc.save({ useObjectStreams: true });
+    copiedPages.forEach((page, idx) => {
+      const desiredRotation = pages[idx].rotation;
+      const currentRotation = page.getRotation().angle;
+      page.setRotation(degrees((currentRotation + desiredRotation) % 360));
+      outputDoc.addPage(page);
+    });
+
+    return await outputDoc.save({ useObjectStreams: false });
+  } catch (err) {
+    console.warn(`Native vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer).slice(),
+      stopAtErrors: false,
+    });
+    const fallbackDoc = await loadingTask.promise;
+
+    for (let idx = 0; idx < pages.length; idx++) {
+      const pageConfig = pages[idx];
+      const pageNum = pageConfig.originalIndex + 1;
+      const page = await fallbackDoc.getPage(pageNum);
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const renderViewport = page.getViewport({ scale: 2.0 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport: renderViewport,
+          } as any) as any
+        ).promise;
+
+        const jpegBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
+        );
+
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await jpegBlob.arrayBuffer();
+        const embeddedImage = await outputDoc.embedJpg(imgBytes);
+
+        const newPage = outputDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+        newPage.drawImage(embeddedImage, {
+          x: 0,
+          y: 0,
+          width: unscaledViewport.width,
+          height: unscaledViewport.height,
+        });
+
+        if (pageConfig.rotation !== 0) {
+          newPage.setRotation(degrees(pageConfig.rotation % 360));
+        }
+      }
+    }
+
+    return await outputDoc.save({ useObjectStreams: false });
+  }
 }
-
 
 /**
  * 1-click sanitization: Safely strips XMP metadata, author, creator, producer,
@@ -1741,9 +1796,6 @@ export interface OcrProgress {
 /**
  * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
  */
-/**
- * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
- */
 export async function ocrPDFToSearchable(
   file: File,
   language: string = 'eng',
@@ -1789,7 +1841,6 @@ export async function ocrPDFToSearchable(
       const jsPage = await sourcePdf.getPage(pageNum);
       const unscaled = jsPage.getViewport({ scale: 1.0 });
 
-      // Clamp canvas dimension to max 1600px for high speed while keeping accuracy
       const maxDim = Math.max(unscaled.width, unscaled.height);
       const scale = Math.min(1600 / maxDim, 2.0);
       const viewport = jsPage.getViewport({ scale });
@@ -1819,7 +1870,6 @@ export async function ocrPDFToSearchable(
           const cleanText = word.text?.trim();
           if (!cleanText) continue;
 
-          // Normalize smart quotes, em-dashes, and non-ASCII symbols so pdf-lib doesn't drop words
           const safeText = cleanText
             .replace(/[\u2018\u2019]/g, "'")
             .replace(/[\u201C\u201D]/g, '"')
@@ -2103,7 +2153,6 @@ export async function createBookletPDF(
     sourceDoc.addPage();
   }
 
-  // Ensure every page has a valid Contents stream before embedding
   for (let i = 0; i < sourceDoc.getPageCount(); i++) {
     const page = sourceDoc.getPage(i);
     if (!page.node.Contents()) {
@@ -2617,6 +2666,7 @@ export async function extractMarkdownFromPDF(
     estimatedTokens,
   };
 }
+
 export interface TextToPdfOptions {
   text: string;
   fontFamily?: 'helvetica' | 'times' | 'courier';
@@ -2657,7 +2707,6 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
 
-    // Markdown Heading 1: # Title
     if (rawLine.startsWith('# ')) {
       const h1Size = Math.round(fontSize * 1.6);
       doc.setFont(fontFamily, 'bold');
@@ -2676,7 +2725,6 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       continue;
     }
 
-    // Markdown Heading 2: ## Subtitle
     if (rawLine.startsWith('## ')) {
       const h2Size = Math.round(fontSize * 1.3);
       doc.setFont(fontFamily, 'bold');
@@ -2695,7 +2743,6 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       continue;
     }
 
-    // Markdown Bullet point: - list item
     if (rawLine.startsWith('- ') || rawLine.startsWith('* ')) {
       doc.setFont(fontFamily, 'normal');
       doc.setFontSize(fontSize);
@@ -2716,13 +2763,11 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       continue;
     }
 
-    // Blank line
     if (!rawLine.trim()) {
       cursorY += fontSize * 0.8;
       continue;
     }
 
-    // Normal paragraph text
     doc.setFont(fontFamily, 'normal');
     doc.setFontSize(fontSize);
     const splitLines = doc.splitTextToSize(rawLine, printableWidth);
@@ -2739,6 +2784,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
 
   return new Uint8Array(doc.output('arraybuffer'));
 }
+
 export interface VisualOverlayItem {
   id: string;
   type: 'whiteout' | 'text';
@@ -2788,7 +2834,6 @@ export async function applyVisualOverlays(
     const boxX = item.x * pageWidth;
     const boxY = pageHeight - item.y * pageHeight - boxHeight;
 
-    // Draw opaque white mask
     if (item.type === 'whiteout' || item.hasBackground !== false) {
       page.drawRectangle({
         x: boxX,
@@ -2799,7 +2844,6 @@ export async function applyVisualOverlays(
       });
     }
 
-    // Draw text layer
     if (item.type === 'text' && item.text?.trim()) {
       let font = helveticaFont;
       if (item.fontFamily === 'times') font = timesFont;
