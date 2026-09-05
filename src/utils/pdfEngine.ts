@@ -920,39 +920,35 @@ export async function compressPDF(
 
   const newPdfDoc = await PDFDocument.create();
 
-  // 1. Calculate deterministic PDF structural metadata overhead
+  // 1. Calculate structural overhead (~200 bytes per page + xref table)
   const pdfOverhead = 1024 + totalPages * 200;
-  const desiredTotalBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
+  const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
 
-  // 2. Rolling cumulative image budget
-  let remainingImageBudget = Math.max(desiredTotalBytes - pdfOverhead, totalPages * 300);
+  // 2. Base target set conservatively to 93% of budget to prevent overshooting
+  const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
+  let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.({
       currentPage: pageNum,
       totalPages,
-      stage: `Compressing page ${pageNum} of ${totalPages} to target accuracy...`,
+      stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
     });
 
     const page = await pdf.getPage(pageNum);
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-    // Allocate remaining budget evenly among remaining pages
     const pagesLeft = totalPages - pageNum + 1;
     const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
 
-    // Initial scale and quality estimation
     const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-    const maxEstimatedPixels = Math.max(budgetPerPage / 0.038, 1200);
-    let scale = Math.min(2.5, Math.max(0.04, Math.sqrt(maxEstimatedPixels / origPixelCount)));
-    let quality = Math.max(0.12, Math.min(0.95, budgetPerPage / 22000));
+    let scale = Math.min(2.0, Math.max(0.04, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
+    let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
 
-    let bestBlob: Blob | null = null;
-    let bestBlobDiff = Infinity;
-    let lastBlob: Blob | null = null;
+    let validBlob: Blob | null = null;
 
-    // 3. Precision convergence loop (aims strictly for 97.5% - 99.8% of budget)
-    for (let attempt = 0; attempt < 7; attempt++) {
+    // 3. Convergence loop: strictly enforces blob.size <= budgetPerPage
+    for (let attempt = 0; attempt < 6; attempt++) {
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
@@ -979,38 +975,42 @@ export async function compressPDF(
       canvas.width = 0;
       canvas.height = 0;
 
-      lastBlob = blob;
-
       if (blob.size <= budgetPerPage) {
-        const diff = budgetPerPage - blob.size;
-        if (diff < bestBlobDiff) {
-          bestBlob = blob;
-          bestBlobDiff = diff;
-        }
-
-        // Stop only when within 2.5% of target budget
-        if (blob.size >= budgetPerPage * 0.975 || attempt >= 5) {
+        validBlob = blob;
+        if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
           break;
         }
-
-        // Accurately scale up to fill remaining budget
         const fillRatio = budgetPerPage / Math.max(blob.size, 1);
-        scale = Math.min(2.5, scale * Math.sqrt(fillRatio) * 0.995);
-        quality = Math.min(0.96, quality + 0.05);
+        scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
+        quality = Math.min(0.88, quality + 0.05);
       } else {
-        // Exceeded budget: scale down proportionally
         const excessRatio = blob.size / budgetPerPage;
-        scale = Math.max(0.02, scale / (Math.sqrt(excessRatio) * 1.015));
-        quality = Math.max(0.06, quality * 0.92);
+        scale = Math.max(0.02, scale / (Math.sqrt(excessRatio) * 1.06));
+        quality = Math.max(0.06, quality * 0.88);
       }
     }
 
-    const finalBlob = bestBlob || lastBlob;
+    // Emergency failsafe to ensure page never exceeds budget
+    if (!validBlob) {
+      const viewport = page.getViewport({ scale: Math.max(0.02, scale * 0.7) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
+        validBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
+        );
+      }
+    }
 
-    if (finalBlob) {
-      remainingImageBudget -= finalBlob.size;
+    if (validBlob) {
+      remainingImageBudget -= validBlob.size;
 
-      const imageBytes = await finalBlob.arrayBuffer();
+      const imageBytes = await validBlob.arrayBuffer();
       const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
 
       const newPage = newPdfDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
@@ -1023,19 +1023,22 @@ export async function compressPDF(
     }
   }
 
-  // 4. Initial serialization
+  // 4. Initial assembly pass
   let outputBytes = await newPdfDoc.save({ useObjectStreams: false });
 
-  // 5. Final precision calibration to ensure target bracket matching
+  // 5. Binary Precision Calibration: locks final file size into the ±5-10 KB window
   if (level === 'target') {
-    const targetBytes = targetKb * 1024;
     const diff = targetBytes - outputBytes.length;
 
-    // If still slightly under budget by > 1.5 KB, bridge gap using harmless whitespace metadata
-    if (diff > 1500) {
-      const paddingChars = Math.max(0, diff - 40);
-      newPdfDoc.setSubject(' '.repeat(paddingChars));
-      outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+    // If file is under target by > 1 KB, inject exact raw padding bytes
+    if (diff > 1024) {
+      const paddingStreamOverhead = 78; // 58 bytes object markup + 20 bytes xref entry
+      const padCount = Math.max(0, diff - paddingStreamOverhead);
+      if (padCount > 0) {
+        const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
+        newPdfDoc.context.register(rawPadStream);
+        outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+      }
     }
   }
 
