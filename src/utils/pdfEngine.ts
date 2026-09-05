@@ -14,12 +14,58 @@ import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
 
-// Configure offline worker for 100% local processing (works in Airplane Mode)
+// Configure offline worker for 100% local processing
 if (typeof window !== 'undefined' && 'Worker' in window) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.mjs',
     import.meta.url
   ).toString();
+}
+
+/**
+ * Internal high-res renderer: decrypts and paints any complex, scanned, or owner-locked
+ * PDF page onto a clean white canvas at 2.0x Retina resolution.
+ */
+async function renderPageAsJpg(
+  page: any,
+  scale = 2.0
+): Promise<{ imgBytes: Uint8Array; width: number; height: number }> {
+  const unscaledViewport = page.getViewport({ scale: 1.0 });
+  const renderViewport = page.getViewport({ scale });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.floor(renderViewport.width);
+  canvas.height = Math.floor(renderViewport.height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Failed to acquire canvas rendering context');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  await (
+    page.render({
+      canvasContext: ctx as any,
+      viewport: renderViewport,
+      canvas,
+    } as any) as any
+  ).promise;
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+  canvas.width = 0;
+  canvas.height = 0;
+
+  const base64 = dataUrl.split(',')[1];
+  const binary = atob(base64);
+  const imgBytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    imgBytes[i] = binary.charCodeAt(i);
+  }
+
+  return {
+    imgBytes,
+    width: unscaledViewport.width,
+    height: unscaledViewport.height,
+  };
 }
 
 export interface CompressionProgress {
@@ -36,8 +82,7 @@ export interface CompressOptions {
 
 /**
  * Merges multiple PDF files into one single PDF document.
- * Automatically handles owner-encrypted bank statements, scanned files,
- * and standard documents with seamless high-res salvage fallback.
+ * Decrypts and embeds bank statements, government documents, and standard PDFs.
  */
 export async function mergePDFs(files: File[]): Promise<Uint8Array> {
   const mergedPdf = await PDFDocument.create();
@@ -46,15 +91,12 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
     const fileBytes = await file.arrayBuffer();
 
     try {
-      // 1. Primary Path: Lossless native vector copy (fails immediately on encrypted PDFs)
       const pdfDoc = await PDFDocument.load(fileBytes);
       if ((pdfDoc as any).context?.trailerInfo?.Encrypt) {
-        throw new Error('Document has owner permissions encryption; routing to PDF.js engine');
+        throw new Error('Encrypted document');
       }
 
       const pageCount = pdfDoc.getPageCount();
-
-      // Ensure every page has a valid Contents stream
       for (let i = 0; i < pageCount; i++) {
         const page = pdfDoc.getPage(i);
         if (!page.node.Contents()) {
@@ -67,9 +109,8 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
       const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
       copiedPages.forEach((page) => mergedPdf.addPage(page));
     } catch (err) {
-      console.warn(`Native vector copy bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+      console.warn(`Vector copy bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-      // 2. Resilient Fallback: PDF.js decrypts bank permissions and renders crisp 300-DPI pages
       const loadingTask = pdfjsLib.getDocument({
         data: new Uint8Array(fileBytes).slice(),
         stopAtErrors: false,
@@ -79,43 +120,11 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
 
       for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await fallbackDoc.getPage(pageNum);
-        const unscaledViewport = page.getViewport({ scale: 1.0 });
-        const renderViewport = page.getViewport({ scale: 2.0 }); // Crisp 2.0x Retina clarity
+        const { imgBytes, width, height } = await renderPageAsJpg(page);
+        const embeddedImage = await mergedPdf.embedJpg(imgBytes);
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(renderViewport.width);
-        canvas.height = Math.floor(renderViewport.height);
-        const ctx = canvas.getContext('2d');
-
-        if (ctx) {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          await (
-            page.render({
-              canvasContext: ctx as any,
-              viewport: renderViewport,
-            } as any) as any
-          ).promise;
-
-          const jpegBlob = await new Promise<Blob>((resolve) =>
-            canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
-          );
-
-          canvas.width = 0;
-          canvas.height = 0;
-
-          const imgBytes = await jpegBlob.arrayBuffer();
-          const embeddedImage = await mergedPdf.embedJpg(imgBytes);
-
-          const newPage = mergedPdf.addPage([unscaledViewport.width, unscaledViewport.height]);
-          newPage.drawImage(embeddedImage, {
-            x: 0,
-            y: 0,
-            width: unscaledViewport.width,
-            height: unscaledViewport.height,
-          });
-        }
+        const newPage = mergedPdf.addPage([width, height]);
+        newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
       }
     }
   }
@@ -124,8 +133,7 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
 }
 
 /**
- * Compresses a PDF to fit under a specific target size (in KB)
- * using client-side canvas rasterization and quality tuning.
+ * Compresses a PDF to fit under a specific target size (in KB).
  */
 export async function compressPDFToTarget(
   file: File,
@@ -171,7 +179,8 @@ export async function compressPDFToTarget(
     await (
       page.render({
         canvasContext: context as any,
-        viewport: viewport,
+        viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -273,8 +282,8 @@ export async function pdfToImages(file: File): Promise<string[]> {
     await (
       page.render({
         canvasContext: ctx as any,
-        viewport: viewport,
-        canvas: canvas,
+        viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -288,8 +297,6 @@ export async function pdfToImages(file: File): Promise<string[]> {
 
 /**
  * Splits a PDF document by page ranges (e.g. "1-3, 5").
- * Automatically decrypts owner-restricted bank statements and protected PDFs
- * with high-resolution fallback to prevent blank output pages.
  */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
@@ -321,7 +328,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
   try {
     const srcDoc = await PDFDocument.load(arrayBuffer);
     if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Document has owner permissions encryption; switching to high-res rendering pipeline.');
+      throw new Error('Encrypted document');
     }
 
     for (const idx of indices) {
@@ -337,7 +344,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
     copied.forEach((p) => newDoc.addPage(p));
     return await newDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn(`Native vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer).slice(),
@@ -348,43 +355,11 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
     for (const idx of indices) {
       const pageNum = idx + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const renderViewport = page.getViewport({ scale: 2.0 });
+      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const embeddedImage = await newDoc.embedJpg(imgBytes);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      const ctx = canvas.getContext('2d');
-
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        await (
-          page.render({
-            canvasContext: ctx as any,
-            viewport: renderViewport,
-          } as any) as any
-        ).promise;
-
-        const jpegBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
-        );
-
-        canvas.width = 0;
-        canvas.height = 0;
-
-        const imgBytes = await jpegBlob.arrayBuffer();
-        const embeddedImage = await newDoc.embedJpg(imgBytes);
-
-        const newPage = newDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-        newPage.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: unscaledViewport.width,
-          height: unscaledViewport.height,
-        });
-      }
+      const newPage = newDoc.addPage([width, height]);
+      newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
     }
 
     return await newDoc.save({ useObjectStreams: false });
@@ -392,8 +367,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
 }
 
 /**
- * Splits all pages of a PDF into separate files packaged into a ZIP archive.
- * Supports protected/bank statements with automated rendering salvage.
+ * Splits all pages into individual files in a ZIP archive.
  */
 export async function splitPdfToZip(
   file: File,
@@ -407,7 +381,7 @@ export async function splitPdfToZip(
   try {
     const sourceDoc = await PDFDocument.load(arrayBuffer);
     if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document; routing to fallback renderer');
+      throw new Error('Encrypted document');
     }
 
     for (let i = 0; i < totalPages; i++) {
@@ -429,7 +403,7 @@ export async function splitPdfToZip(
       zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
     }
   } catch (err) {
-    console.warn(`Native vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer).slice(),
@@ -441,48 +415,17 @@ export async function splitPdfToZip(
       onProgress?.(i + 1, totalPages);
       const pageNum = i + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const renderViewport = page.getViewport({ scale: 2.0 });
+      const { imgBytes, width, height } = await renderPageAsJpg(page);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      const ctx = canvas.getContext('2d');
+      const singleDoc = await PDFDocument.create();
+      const embeddedImage = await singleDoc.embedJpg(imgBytes);
 
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const newPage = singleDoc.addPage([width, height]);
+      newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
 
-        await (
-          page.render({
-            canvasContext: ctx as any,
-            viewport: renderViewport,
-          } as any) as any
-        ).promise;
-
-        const jpegBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
-        );
-
-        canvas.width = 0;
-        canvas.height = 0;
-
-        const imgBytes = await jpegBlob.arrayBuffer();
-        const singleDoc = await PDFDocument.create();
-        const embeddedImage = await singleDoc.embedJpg(imgBytes);
-
-        const newPage = singleDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-        newPage.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: unscaledViewport.width,
-          height: unscaledViewport.height,
-        });
-
-        const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-        const paddedIndex = String(i + 1).padStart(2, '0');
-        zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
-      }
+      const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+      const paddedIndex = String(i + 1).padStart(2, '0');
+      zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
     }
   }
 
@@ -491,7 +434,6 @@ export async function splitPdfToZip(
 
 /**
  * Removes specified pages from a PDF document.
- * Includes dual-engine fallback to prevent blank pages on encrypted bank statements.
  */
 export async function removePagesFromPDF(
   file: File,
@@ -515,7 +457,7 @@ export async function removePagesFromPDF(
   try {
     const srcDoc = await PDFDocument.load(arrayBuffer);
     if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Document has owner encryption; switching to high-res rendering engine.');
+      throw new Error('Encrypted document');
     }
 
     const newDoc = await PDFDocument.create();
@@ -533,7 +475,7 @@ export async function removePagesFromPDF(
     copied.forEach((p) => newDoc.addPage(p));
     return await newDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn(`Native removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer).slice(),
@@ -545,43 +487,11 @@ export async function removePagesFromPDF(
     for (const idx of indicesToKeep) {
       const pageNum = idx + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const renderViewport = page.getViewport({ scale: 2.0 });
+      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const embeddedImage = await newDoc.embedJpg(imgBytes);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      const ctx = canvas.getContext('2d');
-
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        await (
-          page.render({
-            canvasContext: ctx as any,
-            viewport: renderViewport,
-          } as any) as any
-        ).promise;
-
-        const jpegBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
-        );
-
-        canvas.width = 0;
-        canvas.height = 0;
-
-        const imgBytes = await jpegBlob.arrayBuffer();
-        const embeddedImage = await newDoc.embedJpg(imgBytes);
-
-        const newPage = newDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-        newPage.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: unscaledViewport.width,
-          height: unscaledViewport.height,
-        });
-      }
+      const newPage = newDoc.addPage([width, height]);
+      newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
     }
 
     return await newDoc.save({ useObjectStreams: false });
@@ -661,7 +571,6 @@ export async function extractTextFromPDF(file: File): Promise<string> {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const pageText = textContent.items
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((item: any) => ('str' in item ? item.str : ''))
       .join(' ');
 
@@ -764,7 +673,7 @@ export async function encryptPDF(
       page.render({
         canvasContext: ctx as any,
         viewport: renderViewport,
-        canvas: canvas,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -817,7 +726,7 @@ export async function unlockPDF(
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer).slice(),
-    password: password,
+    password,
   });
 
   const pdf = await loadingTask.promise;
@@ -840,7 +749,7 @@ export async function unlockPDF(
       page.render({
         canvasContext: ctx as any,
         viewport: renderViewport,
-        canvas: canvas,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -903,7 +812,7 @@ export async function compressPDF(
       stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
     });
 
-    const page = await pdfDoc.getPage(pageNum);
+    const page = await pdf.getPage(pageNum); // <-- Fixed (uses 'pdf')
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
     let scale = Math.max(0.15, Math.min(1.4, Math.sqrt(budgetPerPage / 45000)));
@@ -923,6 +832,7 @@ export async function compressPDF(
         page.render({
           canvasContext: ctx as any,
           viewport,
+          canvas,
         } as any) as any
       ).promise;
 
@@ -996,58 +906,27 @@ export async function reorderAndProcessPDF(
 
     return await outputDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn(`Native vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer).slice(),
       stopAtErrors: false,
     });
-      const fallbackDoc = await loadingTask.promise;
+    const fallbackDoc = await loadingTask.promise;
 
     for (let idx = 0; idx < pages.length; idx++) {
       const pageConfig = pages[idx];
-       const pageNum = pageConfig.originalIndex + 1;
-       const page = await fallbackDoc.getPage(pageNum); // <-- Fixed
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const renderViewport = page.getViewport({ scale: 2.0 });
+      const pageNum = pageConfig.originalIndex + 1;
+      const page = await fallbackDoc.getPage(pageNum);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      const ctx = canvas.getContext('2d');
+      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const embeddedImage = await outputDoc.embedJpg(imgBytes);
 
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const newPage = outputDoc.addPage([width, height]);
+      newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
 
-        await (
-          page.render({
-            canvasContext: ctx as any,
-            viewport: renderViewport,
-          } as any) as any
-        ).promise;
-
-        const jpegBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
-        );
-
-        canvas.width = 0;
-        canvas.height = 0;
-
-        const imgBytes = await jpegBlob.arrayBuffer();
-        const embeddedImage = await outputDoc.embedJpg(imgBytes);
-
-        const newPage = outputDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-        newPage.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: unscaledViewport.width,
-          height: unscaledViewport.height,
-        });
-
-        if (pageConfig.rotation !== 0) {
-          newPage.setRotation(degrees(pageConfig.rotation % 360));
-        }
+      if (pageConfig.rotation !== 0) {
+        newPage.setRotation(degrees(pageConfig.rotation % 360));
       }
     }
 
@@ -1127,6 +1006,7 @@ export async function redactPDF(
       page.render({
         canvasContext: ctx as any,
         viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -1347,6 +1227,7 @@ export async function convertToGrayscalePDF(
       page.render({
         canvasContext: ctx as any,
         viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -1794,7 +1675,7 @@ export interface OcrProgress {
 }
 
 /**
- * High-Speed OCR: clamps canvas to max 1600px (~150 DPI) so Tesseract runs in seconds instead of 5 minutes.
+ * High-Speed OCR: clamps canvas to max 1600px (~150 DPI).
  */
 export async function ocrPDFToSearchable(
   file: File,
@@ -1856,6 +1737,7 @@ export async function ocrPDFToSearchable(
         jsPage.render({
           canvasContext: ctx as any,
           viewport,
+          canvas,
         } as any) as any
       ).promise;
 
@@ -1990,6 +1872,7 @@ export async function repairPDF(
       page.render({
         canvasContext: ctx as any,
         viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -2059,6 +1942,7 @@ export async function invertPDF(
       page.render({
         canvasContext: ctx as any,
         viewport,
+        canvas,
       } as any) as any
     ).promise;
 
@@ -2331,6 +2215,7 @@ export async function deskewPDF(
       page.render({
         canvasContext: ctx as any,
         viewport,
+        canvas,
       } as any) as any
     ).promise;
 
