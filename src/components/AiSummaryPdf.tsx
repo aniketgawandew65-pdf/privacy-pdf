@@ -203,28 +203,11 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
       ? customEndpointUrl.trim() || providerConfig.endpoint
       : providerConfig.endpoint;
 
-    // Assemble model candidate list
-    const candidateList: string[] = [];
-    if (customModel.trim()) candidateList.push(customModel.trim());
-    if (activeWorkingModel && !candidateList.includes(activeWorkingModel)) {
-      candidateList.push(activeWorkingModel);
-    }
-    for (const m of providerConfig.candidateModels) {
-      if (!candidateList.includes(m)) candidateList.push(m);
-    }
-
     const newMessages: ChatMessage[] = [...messages, { role: 'user', content: userPrompt }];
     setMessages(newMessages);
     setInputValue('');
     setIsStreaming(true);
     setErrorMessage(null);
-
-    const contextText = extractedText.slice(0, 45000);
-    const systemPrompt = `You are a helpful, accurate document assistant analyzing a PDF client-side.
-Answer user questions strictly based on the provided document text below. If the answer is not in the document, explicitly say so.
-
-DOCUMENT TEXT:
-${contextText}`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -237,10 +220,55 @@ ${contextText}`;
       headers['X-Title'] = '1into1 PDF Suite';
     }
 
+    // 1. Resolve active models dynamically from the provider API
+    let candidateList: string[] = [];
+
+    if (customModel.trim()) {
+      candidateList.push(customModel.trim());
+    } else if (activeWorkingModel) {
+      candidateList.push(activeWorkingModel);
+    } else {
+      // Query provider's live models list using the user's key
+      try {
+        const modelsEndpoint = endpoint.replace('/chat/completions', '/models');
+        const modelRes = await fetch(modelsEndpoint, { headers });
+        if (modelRes.ok) {
+          const modelData = await modelRes.json();
+          if (Array.isArray(modelData.data)) {
+            // Filter out whisper/audio/embedding/vision-only models to prioritize chat models
+            const chatModels = modelData.data
+              .map((m: any) => m.id)
+              .filter(
+                (id: string) =>
+                  !id.includes('whisper') &&
+                  !id.includes('embed') &&
+                  !id.includes('tts') &&
+                  !id.includes('guard')
+              );
+            candidateList.push(...chatModels);
+          }
+        }
+      } catch (err) {
+        console.warn('Dynamic model fetch failed, falling back to static candidates:', err);
+      }
+    }
+
+    // Append fallback defaults if dynamic list was empty
+    for (const m of providerConfig.candidateModels) {
+      if (!candidateList.includes(m)) candidateList.push(m);
+    }
+
+    const contextText = extractedText.slice(0, 45000);
+    const systemPrompt = `You are a helpful, accurate document assistant analyzing a PDF client-side.
+Answer user questions strictly based on the provided document text below. If the answer is not in the document, explicitly say so.
+
+DOCUMENT TEXT:
+${contextText}`;
+
     let activeResponse: Response | null = null;
     let fatalError = '';
 
-    // Auto-fallback waterfall loop
+    // 2. Waterfall execution
     for (const modelToAttempt of candidateList) {
       try {
         const res = await fetch(endpoint, {
@@ -257,17 +285,17 @@ ${contextText}`;
         });
 
         if (res.status === 401) {
-          fatalError = 'Invalid API Key. Please verify the key you copied.';
+          fatalError = 'Invalid API Key. Please check the key in the input box.';
           break;
         }
 
         if (res.status === 429) {
-          fatalError = 'API rate limit reached or token quota exhausted on this key. Please try again shortly.';
+          fatalError = 'Rate limit reached or free quota tokens exhausted for this key. Please try again later.';
           break;
         }
 
         if (res.status === 402) {
-          fatalError = 'Insufficient balance / credits on your API account.';
+          fatalError = 'Insufficient balance or credits on your account.';
           break;
         }
 
@@ -275,7 +303,6 @@ ${contextText}`;
           const errData = await res.json().catch(() => ({}));
           const errText = (errData?.error?.message || res.statusText || '').toLowerCase();
 
-          // If model is missing, deprecated, or restricted, try next candidate
           if (
             res.status === 404 ||
             errText.includes('does not exist') ||
@@ -284,30 +311,30 @@ ${contextText}`;
             errText.includes('decommissioned') ||
             errText.includes('deprecated')
           ) {
-            continue;
+            continue; // Try next model in list
           }
 
           throw new Error(errData?.error?.message || `HTTP ${res.status}`);
         }
 
-        // Successfully connected to an active model
-       activeResponse = res;
-       setActiveWorkingModel(modelToAttempt);
+        activeResponse = res;
+        setActiveWorkingModel(modelToAttempt);
         break;
       } catch (err: any) {
         if (fatalError) break;
-        fatalError = err.message || 'Network connection failure.';
+        fatalError = err.message || 'Connection failed.';
       }
     }
 
     if (!activeResponse) {
       setIsStreaming(false);
       setErrorMessage(
-        fatalError || 'Could not find an active model on this key. Please verify your account status.'
+        fatalError || 'Unable to start chat. Your API key might not have active permissions or credits.'
       );
       return;
     }
 
+    // 3. Stream tokens to UI
     try {
       const reader = activeResponse.body?.getReader();
       if (!reader) throw new Error('Response stream not readable.');
@@ -341,7 +368,7 @@ ${contextText}`;
                 return updated;
               });
             } catch {
-              // Ignore partial stream chunks
+              // Ignore split stream boundaries
             }
           }
         }
