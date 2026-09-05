@@ -238,7 +238,6 @@ ${contextText}`;
     }
 
     let activeResponse: Response | null = null;
-    let resolvedModel = '';
     let fatalError = '';
 
     // Auto-fallback waterfall loop
@@ -292,9 +291,8 @@ ${contextText}`;
         }
 
         // Successfully connected to an active model
-        activeResponse = res;
-        resolvedModel = modelToAttempt;
-        setActiveWorkingModel(modelToAttempt);
+       activeResponse = res;
+       setActiveWorkingModel(modelToAttempt);
         break;
       } catch (err: any) {
         if (fatalError) break;
