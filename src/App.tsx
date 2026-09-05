@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { TrustBadge } from './components/TrustBadge';
 import { ProModal } from './components/ProModal';
@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   RotateCw,
   Download,
+  Upload,
   FileImage,
   Trash2,
   Stamp,
@@ -157,8 +158,6 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Visual Editor', path: '/visual-editor', category: 'organize', icon: FileEdit },
   { name: 'Code to PDF', path: '/code-to-pdf', category: 'convert', icon: Code2 },
   { name: 'HTML / Receipt to PDF', path: '/html-to-pdf', category: 'convert', icon: Receipt },
-
-
 ];
 
 function ToolFallback() {
@@ -178,6 +177,62 @@ export default function App() {
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
+
+  // Drag and drop state & depth tracker
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragCounter = useRef(0);
+
+  // Global window drag-and-drop listener
+  useEffect(() => {
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter.current += 1;
+      if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
+        setIsDraggingFile(true);
+      }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter.current -= 1;
+      if (dragCounter.current <= 0) {
+        setIsDraggingFile(false);
+        dragCounter.current = 0;
+      }
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingFile(false);
+      dragCounter.current = 0;
+
+      const droppedFiles = e.dataTransfer?.files;
+      if (droppedFiles && droppedFiles.length > 0) {
+        const filesArray = Array.from(droppedFiles);
+        setSharedFiles(filesArray);
+      }
+    };
+
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, []);
 
   // Synchronize Pro status across tabs
   useEffect(() => {
@@ -571,6 +626,19 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Global Drag-and-Drop Dropzone Overlay */}
+      {isDraggingFile && (
+        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-6 pointer-events-none select-none transition-all">
+          <div className="w-full max-w-lg p-12 rounded-3xl border-2 border-dashed border-emerald-500 bg-zinc-900/90 shadow-2xl flex flex-col items-center text-center animate-pulse">
+            <Upload className="w-14 h-14 text-emerald-400 mb-4 stroke-[1.75]" />
+            <p className="text-xl font-bold text-white mb-1.5">Drop your file anywhere</p>
+            <p className="text-xs text-zinc-400 max-w-xs">
+              Direct in-browser loading • Zero cloud transfer • 100% private
+            </p>
+          </div>
+        </div>
+      )}
       
       {/* Pro Modal */}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
