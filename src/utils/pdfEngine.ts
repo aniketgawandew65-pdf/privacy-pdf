@@ -22,6 +22,28 @@ if (typeof window !== 'undefined' && 'Worker' in window) {
   ).toString();
 }
 
+/**
+ * Fast binary scanner: detects whether a PDF has owner/permission locks or encryption.
+ */
+function isPdfEncrypted(bytes: Uint8Array): boolean {
+  const len = bytes.length;
+  for (let i = 0; i < len - 8; i++) {
+    if (
+      bytes[i] === 47 &&      // '/'
+      bytes[i + 1] === 69 &&  // 'E'
+      bytes[i + 2] === 110 && // 'n'
+      bytes[i + 3] === 99 &&  // 'c'
+      bytes[i + 4] === 114 && // 'r'
+      bytes[i + 5] === 121 && // 'y'
+      bytes[i + 6] === 112 && // 'p'
+      bytes[i + 7] === 116    // 't'
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface CompressionProgress {
   currentPage: number;
   totalPages: number;
@@ -44,17 +66,16 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
 
   for (const file of files) {
     const fileBytes = await file.arrayBuffer();
+    const uint8 = new Uint8Array(fileBytes);
 
     try {
-      // 1. Primary Path: Lossless native vector copy (throws immediately on encrypted PDFs)
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      if ((pdfDoc as any).context?.trailerInfo?.Encrypt) {
-        throw new Error('Document has owner permissions encryption; routing to PDF.js engine');
+      if (isPdfEncrypted(uint8)) {
+        throw new Error('Encrypted document; routing to high-res rendering pipeline');
       }
 
+      const pdfDoc = await PDFDocument.load(fileBytes);
       const pageCount = pdfDoc.getPageCount();
 
-      // Ensure every page has a valid Contents stream
       for (let i = 0; i < pageCount; i++) {
         const page = pdfDoc.getPage(i);
         if (!page.node.Contents()) {
@@ -67,11 +88,10 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
       const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
       copiedPages.forEach((page) => mergedPdf.addPage(page));
     } catch (err) {
-      console.warn(`Native vector copy bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+      console.warn(`Vector copy bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-      // 2. Resilient Fallback: PDF.js decrypts bank permissions and renders crisp pages
       const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(fileBytes).slice(),
+        data: uint8.slice(),
         stopAtErrors: false,
       });
       const fallbackDoc = await loadingTask.promise;
@@ -295,6 +315,7 @@ export async function pdfToImages(file: File): Promise<string[]> {
  */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
   const pageCount = await getPDFPageCount(file);
 
   const pagesToInclude = new Set<number>();
@@ -321,11 +342,11 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
   const newDoc = await PDFDocument.create();
 
   try {
-    // 1. Primary Vector Split (will throw on encrypted bank statements)
-    const srcDoc = await PDFDocument.load(arrayBuffer);
-    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
+    if (isPdfEncrypted(uint8)) {
       throw new Error('Document has owner permissions encryption; switching to high-res rendering pipeline.');
     }
+
+    const srcDoc = await PDFDocument.load(arrayBuffer);
 
     for (const idx of indices) {
       const page = srcDoc.getPage(idx);
@@ -342,9 +363,8 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
   } catch (err) {
     console.warn(`Native vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-    // 2. High-Res PDF.js Fallback for Bank Statements
     const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer).slice(),
+      data: uint8.slice(),
       stopAtErrors: false,
     });
     const fallbackDoc = await loadingTask.promise;
@@ -405,15 +425,17 @@ export async function splitPdfToZip(
   onProgress?: (current: number, total: number) => void
 ): Promise<Blob> {
   const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
   const totalPages = await getPDFPageCount(file);
   const zip = new JSZip();
   const baseName = file.name.replace(/\.[^/.]+$/, '');
 
   try {
-    const sourceDoc = await PDFDocument.load(arrayBuffer);
-    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
+    if (isPdfEncrypted(uint8)) {
       throw new Error('Encrypted document; routing to fallback renderer');
     }
+
+    const sourceDoc = await PDFDocument.load(arrayBuffer);
 
     for (let i = 0; i < totalPages; i++) {
       onProgress?.(i + 1, totalPages);
@@ -437,7 +459,7 @@ export async function splitPdfToZip(
     console.warn(`Native vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer).slice(),
+      data: uint8.slice(),
       stopAtErrors: false,
     });
     const fallbackDoc = await loadingTask.promise;
@@ -504,6 +526,7 @@ export async function removePagesFromPDF(
   pageNumbersToRemove: number[]
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
   const pageCount = await getPDFPageCount(file);
 
   const removeSet = new Set(pageNumbersToRemove.map((n) => n - 1));
@@ -519,11 +542,11 @@ export async function removePagesFromPDF(
   }
 
   try {
-    const srcDoc = await PDFDocument.load(arrayBuffer);
-    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
+    if (isPdfEncrypted(uint8)) {
       throw new Error('Document has owner encryption; switching to high-res rendering engine.');
     }
 
+    const srcDoc = await PDFDocument.load(arrayBuffer);
     const newDoc = await PDFDocument.create();
 
     for (const idx of indicesToKeep) {
@@ -542,7 +565,7 @@ export async function removePagesFromPDF(
     console.warn(`Native removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer).slice(),
+      data: uint8.slice(),
       stopAtErrors: false,
     });
     const fallbackDoc = await loadingTask.promise;
@@ -823,7 +846,7 @@ export async function unlockPDF(
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer).slice(),
-    password,
+    password: password,
   });
 
   const pdf = await loadingTask.promise;
@@ -983,13 +1006,15 @@ export async function reorderAndProcessPDF(
   pages: PageConfig[]
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
   const outputDoc = await PDFDocument.create();
 
   try {
-    const sourceDoc = await PDFDocument.load(arrayBuffer);
-    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document');
+    if (isPdfEncrypted(uint8)) {
+      throw new Error('Encrypted document; routing to fallback renderer');
     }
+
+    const sourceDoc = await PDFDocument.load(arrayBuffer);
 
     const indicesToCopy = pages.map((p) => p.originalIndex);
     const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
@@ -1006,7 +1031,7 @@ export async function reorderAndProcessPDF(
     console.warn(`Vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer).slice(),
+      data: uint8.slice(),
       stopAtErrors: false,
     });
     const fallbackDoc = await loadingTask.promise;
