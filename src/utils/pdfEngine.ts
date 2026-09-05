@@ -2508,117 +2508,6 @@ export interface CsvToPdfOptions {
 /**
  * High-speed vector CSV/Excel to PDF generator with auto-pagination and repeating headers.
  */
-export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Array> {
-  const {
-    rows,
-    title = '',
-    orientation = 'portrait',
-    pageSize = 'a4',
-    theme = 'striped',
-    fontSize = 9,
-  } = options;
-
-  if (!rows || rows.length === 0) {
-    throw new Error('No tabular data detected to convert.');
-  }
-
-  const doc = new jsPDF({
-    orientation,
-    unit: 'pt',
-    format: pageSize,
-  });
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 36;
-  const printableWidth = pageWidth - margin * 2;
-  const bottomThreshold = pageHeight - margin;
-
-  const colCount = Math.max(...rows.map((r) => r.length), 1);
-  const colWidth = printableWidth / colCount;
-  const rowHeight = Math.max(18, fontSize * 2.2);
-
-  let cursorY = margin;
-
-  if (title.trim()) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
-    doc.setTextColor(24, 24, 27);
-    doc.text(title.trim(), margin, cursorY + 12);
-    cursorY += 26;
-  }
-
-  const headerRow = rows[0] || [];
-  const dataRows = rows.slice(1);
-
-  const drawHeader = () => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(fontSize);
-
-    if (theme === 'emerald') {
-      doc.setFillColor(16, 185, 129);
-      doc.setTextColor(255, 255, 255);
-    } else {
-      doc.setFillColor(244, 244, 245);
-      doc.setTextColor(24, 24, 27);
-    }
-
-    doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
-    doc.setDrawColor(212, 212, 216);
-    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
-
-    for (let c = 0; c < colCount; c++) {
-      const cellText = (headerRow[c] || '').trim();
-      const cellX = margin + c * colWidth + 6;
-      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
-      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
-      doc.text(truncated, cellX, cellY);
-    }
-
-    cursorY += rowHeight;
-  };
-
-  drawHeader();
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(fontSize);
-
-  for (let r = 0; r < dataRows.length; r++) {
-    const row = dataRows[r];
-
-    if (cursorY + rowHeight > bottomThreshold) {
-      doc.addPage();
-      cursorY = margin;
-      drawHeader();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(fontSize);
-    }
-
-    if (theme === 'striped' && r % 2 === 1) {
-      doc.setFillColor(250, 250, 250);
-      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
-    } else {
-      doc.setFillColor(255, 255, 255);
-      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
-    }
-
-    doc.setDrawColor(228, 228, 231);
-    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
-
-    doc.setTextColor(63, 63, 70);
-    for (let c = 0; c < colCount; c++) {
-      const cellText = (row[c] || '').trim();
-      const cellX = margin + c * colWidth + 6;
-      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
-      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
-      doc.text(truncated, cellX, cellY);
-    }
-
-    cursorY += rowHeight;
-  }
-
-  return new Uint8Array(doc.output('arraybuffer'));
-}
 export interface VisualOverlayItem {
   id: string;
   type: 'whiteout' | 'text';
@@ -2637,7 +2526,25 @@ export interface VisualOverlayItem {
 
 /**
  * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
- * precision size scaling, auto-fit, and word wrap.
+export interface VisualOverlayItem {
+  id: string;
+  type: 'whiteout' | 'text';
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  fontFamily?: 'helvetica' | 'times' | 'courier';
+  fontSize?: number;
+  color?: string;
+  hasBackground?: boolean;
+  fitMode?: 'wrap' | 'autofit';
+}
+
+/**
+ * 8-Point Visual Overlay & Whiteout Engine with selectable standard fonts,
+ * precision size scaling (1pt-72pt), auto-fit, and word wrap.
  */
 export async function applyVisualOverlays(
   file: File,
@@ -2705,20 +2612,20 @@ export async function applyVisualOverlays(
 
       if (item.fitMode === 'autofit') {
         const unitWidth = font.widthOfTextAtSize(safeText, 1);
-        const maxFittingWidth = unitWidth > 0 ? (boxWidth - 6) / unitWidth : 12;
-        const maxFittingHeight = boxHeight * 0.75;
-        const autoSize = Math.max(4, Math.min(maxFittingWidth, maxFittingHeight, 120));
+        const maxFittingWidth = unitWidth > 0 ? (boxWidth - 4) / unitWidth : 12;
+        const maxFittingHeight = boxHeight * 0.8;
+        const autoSize = Math.max(1, Math.min(maxFittingWidth, maxFittingHeight, 120));
 
         const textY = boxY + (boxHeight - autoSize * 0.85) / 2;
         page.drawText(safeText, {
-          x: boxX + 3,
+          x: boxX + 2,
           y: textY,
           size: autoSize,
           font,
           color: textColor,
         });
       } else {
-        const fSize = item.fontSize || 12;
+        const fSize = Math.max(1, item.fontSize || 12);
         const lineHeight = fSize * 1.25;
         const words = safeText.split(' ');
         const lines: string[] = [];
@@ -2727,7 +2634,7 @@ export async function applyVisualOverlays(
         for (const word of words) {
           const testLine = currentLine ? `${currentLine} ${word}` : word;
           const lineWidth = font.widthOfTextAtSize(testLine, fSize);
-          if (lineWidth > boxWidth - 6 && currentLine) {
+          if (lineWidth > boxWidth - 4 && currentLine) {
             lines.push(currentLine);
             currentLine = word;
           } else {
@@ -2740,7 +2647,7 @@ export async function applyVisualOverlays(
         for (const line of lines) {
           if (lineY < boxY) break;
           page.drawText(line, {
-            x: boxX + 3,
+            x: boxX + 2,
             y: lineY,
             size: fSize,
             font,
