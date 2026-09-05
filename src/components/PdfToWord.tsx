@@ -57,9 +57,11 @@ export const PdfToWord: React.FC<PdfToWordProps> = ({ file, onFileChange }) => {
     setProgress(10);
 
     try {
-      const docxBlob = await convertPDFToWordDocx(file, (p) => {
-        setProgress(p);
-      });
+     const docxBlob = await convertPDFToWordDocx(file, {
+     onProgress: (p: number) => {
+    setProgress(p);
+     },
+    });
       createUrl(docxBlob);
     } catch (err: any) {
       console.error('Word Conversion Error:', err);
@@ -204,3 +206,4 @@ export const PdfToWord: React.FC<PdfToWordProps> = ({ file, onFileChange }) => {
     </div>
   );
 };
+export default PdfToWord;
