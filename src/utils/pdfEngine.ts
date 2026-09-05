@@ -497,6 +497,105 @@ export async function splitPdfToZip(
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
 /**
+ * Removes specified pages from a PDF document.
+ * Includes dual-engine fallback to prevent blank pages on encrypted bank statements.
+ */
+export async function removePagesFromPDF(
+  file: File,
+  pageNumbersToRemove: number[]
+): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pageCount = await getPDFPageCount(file);
+
+  const removeSet = new Set(pageNumbersToRemove.map((n) => n - 1));
+  const indicesToKeep: number[] = [];
+  for (let i = 0; i < pageCount; i++) {
+    if (!removeSet.has(i)) {
+      indicesToKeep.push(i);
+    }
+  }
+
+  if (indicesToKeep.length === 0) {
+    throw new Error('Cannot remove all pages from the document.');
+  }
+
+  try {
+    const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+
+    if (srcDoc.isEncrypted) {
+      throw new Error('Document has owner encryption; switching to high-res rendering engine.');
+    }
+
+    const newDoc = await PDFDocument.create();
+
+    for (const idx of indicesToKeep) {
+      const page = srcDoc.getPage(idx);
+      if (!page.node.Contents()) {
+        const emptyStream = srcDoc.context.flateStream('');
+        const ref = srcDoc.context.register(emptyStream);
+        page.node.set(PDFName.of('Contents'), ref);
+      }
+    }
+
+    const copied = await newDoc.copyPages(srcDoc, indicesToKeep);
+    copied.forEach((p) => newDoc.addPage(p));
+    return await newDoc.save({ useObjectStreams: false });
+  } catch (err) {
+    console.warn(`Native removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer).slice(),
+      stopAtErrors: false,
+    });
+    const fallbackDoc = await loadingTask.promise;
+    const newDoc = await PDFDocument.create();
+
+    for (const idx of indicesToKeep) {
+      const pageNum = idx + 1;
+      const page = await fallbackDoc.getPage(pageNum);
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const renderViewport = page.getViewport({ scale: 2.0 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport: renderViewport,
+          } as any) as any
+        ).promise;
+
+        const jpegBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
+        );
+
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await jpegBlob.arrayBuffer();
+        const embeddedImage = await newDoc.embedJpg(imgBytes);
+
+        const newPage = newDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+        newPage.drawImage(embeddedImage, {
+          x: 0,
+          y: 0,
+          width: unscaledViewport.width,
+          height: unscaledViewport.height,
+        });
+      }
+    }
+
+    return await newDoc.save({ useObjectStreams: false });
+  }
+}
+/**
  * Dual-engine page counter: uses pdf-lib with ignoreEncryption,
  * with seamless PDF.js fallback for scanned or strict files.
  */
