@@ -47,7 +47,7 @@ import {
   Type,
   FileEdit,
   Code2,
-  FileText,
+  Receipt,
 } from 'lucide-react';
 
 // Code-split all tool components to keep initial bundle tiny
@@ -94,7 +94,7 @@ const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) =
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
 const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
 const CodeToPdf = lazy(() => import('./components/CodeToPdf').then((m) => ({ default: m.CodeToPdf })));
-
+const HtmlToPdf = lazy(() => import('./components/HtmlToPdf').then((m) => ({ default: m.HtmlToPdf })));
 
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
 
@@ -156,6 +156,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
   { name: 'Visual Editor', path: '/visual-editor', category: 'organize', icon: FileEdit },
   { name: 'Code to PDF', path: '/code-to-pdf', category: 'convert', icon: Code2 },
+  { name: 'HTML / Receipt to PDF', path: '/html-to-pdf', category: 'convert', icon: Receipt },
 
 
 ];
@@ -491,7 +492,7 @@ export default function App() {
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
               <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
-       
+              <Route path="/html-to-pdf" element={<HtmlToPdf />} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>

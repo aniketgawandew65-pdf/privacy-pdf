@@ -3001,8 +3001,162 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 export interface PdfToWordOptions {
   onProgress?: (progress: number) => void;
 }
+export interface HtmlToPdfOptions {
+  html: string;
+  pageSize?: 'a4' | 'letter' | 'receipt';
+  orientation?: 'portrait' | 'landscape';
+}
 
 /**
- * 100% Client-side PDF to Word (.docx) converter.
- * Extracts text lines and paragraphs, packages them into OpenXML, and builds a native .docx via JSZip.
+ * Client-side HTML / POS Receipt to PDF generator with auto-pagination and 80mm roll support.
  */
+export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8Array> {
+  const { html, pageSize = 'a4', orientation = 'portrait' } = options;
+
+  if (!html || !html.trim()) {
+    throw new Error('No HTML content provided to convert.');
+  }
+
+  // Standard dimensions in points (pt)
+  const isReceipt = pageSize === 'receipt';
+  const targetWidthPt = isReceipt ? 226.77 : pageSize === 'letter' ? (orientation === 'landscape' ? 792 : 612) : (orientation === 'landscape' ? 841.89 : 595.28);
+  const targetHeightPt = isReceipt ? 0 : pageSize === 'letter' ? (orientation === 'landscape' ? 612 : 792) : (orientation === 'landscape' ? 595.28 : 841.89);
+
+  // Render HTML in an isolated off-screen sandbox
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '0';
+  iframe.style.width = isReceipt ? '300px' : '800px';
+  iframe.style.height = '1000px';
+  iframe.style.border = 'none';
+  document.body.appendChild(iframe);
+
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) throw new Error('Failed to initialize rendering sandbox.');
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: ${isReceipt ? '12px' : '24px'};
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+              color: #18181b;
+              background: #ffffff;
+              font-size: ${isReceipt ? '11px' : '13px'};
+              line-height: 1.4;
+            }
+            table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+            th, td { padding: 4px 6px; text-align: left; }
+            th { border-bottom: 1px solid #18181b; }
+            hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
+          </style>
+        </head>
+        <body>${html}</body>
+      </html>
+    `);
+    doc.close();
+
+    // Wait briefly for CSS and layout to stabilize
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const contentHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+    const contentWidth = isReceipt ? 300 : 800;
+
+    // Capture DOM using SVG foreignObject to avoid external dependencies
+    const serializedHtml = new XMLSerializer().serializeToString(doc.body);
+    const svgData = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${contentWidth}" height="${contentHeight}">
+        <foreignObject width="100%" height="100%">
+          <div xmlns="http://www.w3.org/1999/xhtml">
+            <style>
+              * { box-sizing: border-box; }
+              body {
+                margin: 0;
+                padding: ${isReceipt ? '12px' : '24px'};
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                color: #18181b;
+                background: #ffffff;
+                font-size: ${isReceipt ? '11px' : '13px'};
+                line-height: 1.4;
+              }
+              table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+              th, td { padding: 4px 6px; text-align: left; }
+              th { border-bottom: 1px solid #18181b; }
+              hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
+            </style>
+            ${serializedHtml}
+          </div>
+        </foreignObject>
+      </svg>`;
+
+    const img = new Image();
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+
+    await new Promise((resolve, reject) => {
+      img.onload = () => resolve(true);
+      img.onerror = reject;
+      img.src = svgUrl;
+    });
+
+    const scaleFactor = 2; // Retina sharpness
+    const canvas = document.createElement('canvas');
+    canvas.width = contentWidth * scaleFactor;
+    canvas.height = contentHeight * scaleFactor;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context could not be acquired.');
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(scaleFactor, scaleFactor);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(svgUrl);
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+    if (isReceipt) {
+      // Continuous custom height for thermal receipts
+      const receiptHeightPt = Math.max(120, (contentHeight / contentWidth) * targetWidthPt);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: [targetWidthPt, receiptHeightPt],
+      });
+      pdf.addImage(imgData, 'JPEG', 0, 0, targetWidthPt, receiptHeightPt);
+      return new Uint8Array(pdf.output('arraybuffer'));
+    }
+
+    // Standard paginated A4 / Letter PDF
+    const pdf = new jsPDF({
+      orientation,
+      unit: 'pt',
+      format: pageSize,
+    });
+
+    const renderedHeightOnPage = (contentHeight / contentWidth) * targetWidthPt;
+    let heightRemaining = renderedHeightOnPage;
+    let positionY = 0;
+
+    pdf.addImage(imgData, 'JPEG', 0, positionY, targetWidthPt, renderedHeightOnPage);
+    heightRemaining -= targetHeightPt;
+
+    while (heightRemaining > 5) {
+      positionY -= targetHeightPt;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, positionY, targetWidthPt, renderedHeightOnPage);
+      heightRemaining -= targetHeightPt;
+    }
+
+    return new Uint8Array(pdf.output('arraybuffer'));
+  } finally {
+    document.body.removeChild(iframe);
+  }
+}
