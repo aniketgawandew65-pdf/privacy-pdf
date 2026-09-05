@@ -89,7 +89,7 @@ const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) =
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
 const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
-const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m) => ({ default: m.CsvToPdf })));
+const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
 const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
 
 
@@ -485,6 +485,7 @@ export default function App() {
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
               <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+               
 
               <Route path="*" element={<NotFound />} />
             </Routes>

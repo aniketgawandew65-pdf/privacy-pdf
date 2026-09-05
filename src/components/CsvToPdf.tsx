@@ -320,3 +320,4 @@ export const CsvToPdf: React.FC = () => {
     </div>
   );
 };
+export default CsvToPdf;

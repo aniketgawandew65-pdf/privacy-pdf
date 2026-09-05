@@ -2679,3 +2679,126 @@ export async function applyVisualOverlays(
 
   return await pdfDoc.save({ useObjectStreams: false });
 }
+export interface CsvToPdfOptions {
+  rows: string[][];
+  title?: string;
+  orientation?: 'portrait' | 'landscape';
+  pageSize?: 'a4' | 'letter';
+  theme?: 'clean' | 'striped' | 'emerald';
+  fontSize?: number;
+}
+
+/**
+ * Client-side vector CSV/Excel to PDF generator
+ */
+export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Array> {
+  const {
+    rows,
+    title = '',
+    orientation = 'portrait',
+    pageSize = 'a4',
+    theme = 'striped',
+    fontSize = 9,
+  } = options;
+
+  if (!rows || rows.length === 0) {
+    throw new Error('No tabular data detected to convert.');
+  }
+
+  const doc = new jsPDF({
+    orientation,
+    unit: 'pt',
+    format: pageSize,
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 36;
+  const printableWidth = pageWidth - margin * 2;
+  const bottomThreshold = pageHeight - margin;
+
+  const colCount = Math.max(...rows.map((r) => r.length), 1);
+  const colWidth = printableWidth / colCount;
+  const rowHeight = Math.max(18, fontSize * 2.2);
+
+  let cursorY = margin;
+
+  if (title.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(24, 24, 27);
+    doc.text(title.trim(), margin, cursorY + 12);
+    cursorY += 26;
+  }
+
+  const headerRow = rows[0] || [];
+  const dataRows = rows.slice(1);
+
+  const drawHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(fontSize);
+
+    if (theme === 'emerald') {
+      doc.setFillColor(16, 185, 129);
+      doc.setTextColor(255, 255, 255);
+    } else {
+      doc.setFillColor(244, 244, 245);
+      doc.setTextColor(24, 24, 27);
+    }
+
+    doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
+    doc.setDrawColor(212, 212, 216);
+    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
+
+    for (let c = 0; c < colCount; c++) {
+      const cellText = (headerRow[c] || '').trim();
+      const cellX = margin + c * colWidth + 6;
+      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
+      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
+      doc.text(truncated, cellX, cellY);
+    }
+
+    cursorY += rowHeight;
+  };
+
+  drawHeader();
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(fontSize);
+
+  for (let r = 0; r < dataRows.length; r++) {
+    const row = dataRows[r];
+
+    if (cursorY + rowHeight > bottomThreshold) {
+      doc.addPage();
+      cursorY = margin;
+      drawHeader();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(fontSize);
+    }
+
+    if (theme === 'striped' && r % 2 === 1) {
+      doc.setFillColor(250, 250, 250);
+      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
+    } else {
+      doc.setFillColor(255, 255, 255);
+      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
+    }
+
+    doc.setDrawColor(228, 228, 231);
+    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
+
+    doc.setTextColor(63, 63, 70);
+    for (let c = 0; c < colCount; c++) {
+      const cellText = (row[c] || '').trim();
+      const cellX = margin + c * colWidth + 6;
+      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
+      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
+      doc.text(truncated, cellX, cellY);
+    }
+
+    cursorY += rowHeight;
+  }
+
+  return new Uint8Array(doc.output('arraybuffer'));
+}
