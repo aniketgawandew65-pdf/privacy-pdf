@@ -182,20 +182,27 @@ export default function App() {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const dragCounter = useRef(0);
 
-  // Global window drag-and-drop listener
+  // Global window drag-and-drop listener (safeguarded against internal UI reordering)
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
+
+      // Only trigger for external operating-system files, NOT page thumbnail reordering
+      const isFileDrag = e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files');
+      if (!isFileDrag) return;
+
       dragCounter.current += 1;
-      if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
-        setIsDraggingFile(true);
-      }
+      setIsDraggingFile(true);
     };
 
     const handleDragLeave = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
+
+      const isFileDrag = e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files');
+      if (!isFileDrag) return;
+
       dragCounter.current -= 1;
       if (dragCounter.current <= 0) {
         setIsDraggingFile(false);
@@ -216,8 +223,12 @@ export default function App() {
 
       const droppedFiles = e.dataTransfer?.files;
       if (droppedFiles && droppedFiles.length > 0) {
-        const filesArray = Array.from(droppedFiles);
-        setSharedFiles(filesArray);
+        const filesArray = Array.from(droppedFiles).filter(
+          (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+        );
+        if (filesArray.length > 0) {
+          setSharedFiles(filesArray);
+        }
       }
     };
 
