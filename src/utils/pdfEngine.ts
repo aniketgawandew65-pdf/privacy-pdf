@@ -710,146 +710,150 @@ export async function addPageNumbersToPDF(
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
 
-  // Tier 1: Try fast native modification
+  // 1. Detect whether the file has encryption/permissions locks
+  let isEncrypted = false;
+  let pdfDoc: PDFDocument | null = null;
+
   try {
-    let pdfDoc: PDFDocument;
+    pdfDoc = await PDFDocument.load(arrayBuffer);
+    if (pdfDoc.isEncrypted) {
+      isEncrypted = true;
+    }
+  } catch {
+    // If PDFDocument.load throws an error, it is encrypted/locked
+    isEncrypted = true;
+  }
+
+  // =========================================================================
+  // PATH A: Standard Unencrypted PDFs (Fast Native Vector Stamping)
+  // =========================================================================
+  if (!isEncrypted && pdfDoc) {
     try {
-      pdfDoc = await PDFDocument.load(arrayBuffer);
-    } catch {
-      pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    }
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const pages = pdfDoc.getPages();
+      const totalPages = pages.length;
 
-    const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const pages = pdfDoc.getPages();
-    const totalPages = pages.length;
+      for (let i = 0; i < totalPages; i++) {
+        const page = pages[i];
+        const box = page.getCropBox() || page.getMediaBox();
+        const text = `${i + 1} of ${totalPages}`;
+        const size = 11;
+        const textWidth = helveticaFont.widthOfTextAtSize(text, size);
 
-    for (let i = 0; i < totalPages; i++) {
-      const page = pages[i];
-      const box = page.getCropBox() || page.getMediaBox();
-      const text = `${i + 1} of ${totalPages}`;
-      const size = 11;
-      const textWidth = helveticaFont.widthOfTextAtSize(text, size);
+        let xPos = box.x + (box.width / 2) - (textWidth / 2);
+        if (position === 'bottom-right') {
+          xPos = box.x + box.width - textWidth - 36;
+        }
+        const yPos = box.y + 28;
 
-      let xPos = box.x + (box.width / 2) - (textWidth / 2);
-      if (position === 'bottom-right') {
-        xPos = box.x + box.width - textWidth - 36;
-      }
-      const yPos = box.y + 28;
+        page.drawRectangle({
+          x: xPos - 6,
+          y: yPos - 3,
+          width: textWidth + 12,
+          height: size + 6,
+          color: rgb(1, 1, 1),
+          opacity: 0.9,
+        });
 
-      // Draw background badge so number is visible over footers and dark scans
-      page.drawRectangle({
-        x: xPos - 6,
-        y: yPos - 3,
-        width: textWidth + 12,
-        height: size + 6,
-        color: rgb(1, 1, 1),
-        opacity: 0.85,
-      });
-
-      page.drawText(text, {
-        x: xPos,
-        y: yPos,
-        size,
-        font: helveticaFont,
-        color: rgb(0, 0, 0),
-      });
-    }
-
-    return await pdfDoc.save({
-      useObjectStreams: false,
-      addDefaultPage: false,
-    });
-  } catch (tier1Error: any) {
-    console.warn(
-      'Tier 1 vector stamping failed due to scanner flate compression or locks. Falling back to universal high-res canvas reconstruction...',
-      tier1Error
-    );
-
-    // Tier 2: Universal Reconstruction via PDF.js (Handles any compression, JBIG2, scans, or bank locks)
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer.slice(0)),
-    });
-    const pdf = await loadingTask.promise;
-    const totalPages = pdf.numPages;
-
-    const reconstructedDoc = await PDFDocument.create();
-    const helvetica = await reconstructedDoc.embedFont(StandardFonts.HelveticaBold);
-
-    for (let i = 1; i <= totalPages; i++) {
-      const page = await pdf.getPage(i);
-      // Scale 2.0 ensures crisp high-resolution 150-200 DPI output without memory bloat
-      const viewport = page.getViewport({ scale: 2.0 });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        page.cleanup();
-        continue;
+        page.drawText(text, {
+          x: xPos,
+          y: yPos,
+          size,
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+        });
       }
 
-      await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+      return await pdfDoc.save({
+        useObjectStreams: false,
+        addDefaultPage: false,
+      });
+    } catch (e) {
+      console.warn('Path A failed, shifting to universal reconstruction...', e);
+    }
+  }
 
-      // Convert page canvas to standard high-quality JPEG
-      const imageBlob: Blob = await new Promise((resolve) =>
-        canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
-      );
-      const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
-      const embeddedImage = await reconstructedDoc.embedJpg(imageBytes);
+  // =========================================================================
+  // PATH B: Encrypted Bank Statements & Scanned Agreements (Universal Reconstruction)
+  // =========================================================================
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer.slice(0)),
+  });
+  const pdf = await loadingTask.promise;
+  const totalPages = pdf.numPages;
 
-      // Clean canvas memory immediately
-      canvas.width = 0;
-      canvas.height = 0;
+  const reconstructedDoc = await PDFDocument.create();
+  const helvetica = await reconstructedDoc.embedFont(StandardFonts.HelveticaBold);
+
+  for (let i = 1; i <= totalPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
       page.cleanup();
-
-      // Create new page with original unscaled dimensions
-      const originalWidth = viewport.width / 2.0;
-      const originalHeight = viewport.height / 2.0;
-      const newPage = reconstructedDoc.addPage([originalWidth, originalHeight]);
-
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width: originalWidth,
-        height: originalHeight,
-      });
-
-      // Overlay page number on top
-      const text = `${i} of ${totalPages}`;
-      const size = 11;
-      const textWidth = helvetica.widthOfTextAtSize(text, size);
-
-      let xPos = (originalWidth / 2) - (textWidth / 2);
-      if (position === 'bottom-right') {
-        xPos = originalWidth - textWidth - 36;
-      }
-      const yPos = 28;
-
-      newPage.drawRectangle({
-        x: xPos - 6,
-        y: yPos - 3,
-        width: textWidth + 12,
-        height: size + 6,
-        color: rgb(1, 1, 1),
-        opacity: 0.9,
-      });
-
-      newPage.drawText(text, {
-        x: xPos,
-        y: yPos,
-        size,
-        font: helvetica,
-        color: rgb(0, 0, 0),
-      });
+      continue;
     }
 
-    return await reconstructedDoc.save({
-      useObjectStreams: false,
-      addDefaultPage: false,
+    await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+
+    const imageBlob: Blob = await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
+    );
+    const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
+    const embeddedImage = await reconstructedDoc.embedJpg(imageBytes);
+
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+
+    const originalWidth = viewport.width / 2.0;
+    const originalHeight = viewport.height / 2.0;
+    const newPage = reconstructedDoc.addPage([originalWidth, originalHeight]);
+
+    newPage.drawImage(embeddedImage, {
+      x: 0,
+      y: 0,
+      width: originalWidth,
+      height: originalHeight,
+    });
+
+    const text = `${i} of ${totalPages}`;
+    const size = 11;
+    const textWidth = helvetica.widthOfTextAtSize(text, size);
+
+    let xPos = (originalWidth / 2) - (textWidth / 2);
+    if (position === 'bottom-right') {
+      xPos = originalWidth - textWidth - 36;
+    }
+    const yPos = 24;
+
+    newPage.drawRectangle({
+      x: xPos - 8,
+      y: yPos - 4,
+      width: textWidth + 16,
+      height: size + 8,
+      color: rgb(1, 1, 1),
+      opacity: 0.95,
+    });
+
+    newPage.drawText(text, {
+      x: xPos,
+      y: yPos,
+      size,
+      font: helvetica,
+      color: rgb(0, 0, 0),
     });
   }
+
+  return await reconstructedDoc.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+  });
 }
 
 export async function extractTextFromPDF(
