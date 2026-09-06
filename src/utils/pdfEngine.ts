@@ -714,36 +714,53 @@ export async function addPageNumbersToPDF(
   try {
     pdfDoc = await PDFDocument.load(arrayBuffer);
   } catch {
-    // Bypass permission locks on bank statements and legal agreements
     pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   }
 
-  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
   const totalPages = pages.length;
 
   for (let i = 0; i < totalPages; i++) {
     const page = pages[i];
-    const { width } = page.getSize();
+    
+    // Get actual visible viewport box (handles custom crop/bleed boxes in legal & bank docs)
+    const box = page.getCropBox() || page.getMediaBox();
     const pageNumberText = `${i + 1} of ${totalPages}`;
-    const textSize = 10;
+    const textSize = 11;
     const textWidth = helveticaFont.widthOfTextAtSize(pageNumberText, textSize);
 
-    let xPosition = width / 2 - textWidth / 2; // default: bottom-center
+    // Calculate relative coordinates within the real visible bounds
+    let xPosition = box.x + (box.width / 2) - (textWidth / 2);
     if (position === 'bottom-right') {
-      xPosition = width - textWidth - 36; // 36pt margin from right edge
+      xPosition = box.x + box.width - textWidth - 36;
     }
 
+    // Place text comfortably within visible margins (32 points above the bottom visible edge)
+    const yPosition = box.y + 32;
+
+    // Draw solid semi-transparent badge background so text is NEVER hidden behind scans or footers
+    const paddingX = 8;
+    const paddingY = 4;
+    page.drawRectangle({
+      x: xPosition - paddingX,
+      y: yPosition - paddingY,
+      width: textWidth + (paddingX * 2),
+      height: textSize + (paddingY * 2),
+      color: rgb(1, 1, 1),
+      opacity: 0.85,
+    });
+
+    // Draw bold black numbering on top of the badge
     page.drawText(pageNumberText, {
       x: xPosition,
-      y: 24, // 24pt margin from bottom edge
+      y: yPosition,
       size: textSize,
       font: helveticaFont,
-      color: rgb(0.3, 0.3, 0.3),
+      color: rgb(0, 0, 0),
     });
   }
 
-  // Save with traditional uncompressed Xref tables for WPS Office compatibility
   return await pdfDoc.save({
     useObjectStreams: false,
     addDefaultPage: false,
