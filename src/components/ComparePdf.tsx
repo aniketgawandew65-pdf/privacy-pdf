@@ -37,6 +37,7 @@ export const ComparePdf: React.FC = () => {
   const [viewMode, setViewMode] = useState<DiffViewMode>('overlay');
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
 
+  // Zoom controls state
   const [zoom, setZoom] = useState<number>(100);
 
   const [isRendering, setIsRendering] = useState(false);
@@ -410,40 +411,49 @@ export const ComparePdf: React.FC = () => {
             </div>
           )}
 
-          {/* Render Area with true 4-way panning and balanced padding */}
-          <div className="relative min-h-[480px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 p-6 overflow-auto">
+          {/* Render Area with 4-way panning and balanced padding */}
+          <div className="relative min-h-[450px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 overflow-auto p-4 sm:p-6">
             {isRendering && (
               <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-xs flex items-center justify-center z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            {/* Layout Zoom Wrapper: dynamically sizes container layout so scrollbars pan in all directions */}
+            {/* Dynamic spacer that guarantees positive scroll coordinates and equal padding on all sides */}
             <div
+              className="flex justify-center items-start min-w-full m-auto"
               style={{
-                zoom: zoom / 100,
+                width: zoom > 100 ? `${zoom}%` : '100%',
+                padding: '1.5rem',
               }}
-              className="min-w-fit w-full flex justify-center items-start mx-auto transition-all duration-150 ease-out"
             >
-              {viewMode === 'overlay' ? (
-                <div className="flex flex-col items-center gap-2">
-                  <canvas ref={canvasOverlayRef} className="rounded shadow-xl max-w-full border border-zinc-800" />
-                  <p className="text-[11px] text-zinc-500">
-                    Identical elements appear white/inverted; shifts, additions, and edits highlight in high-contrast color.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl">
+              <div
+                style={{
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: 'top center',
+                }}
+                className="transition-transform duration-150 ease-out w-full flex justify-center shrink-0"
+              >
+                {viewMode === 'overlay' ? (
                   <div className="flex flex-col items-center gap-2">
-                    <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
-                    <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                    <canvas ref={canvasOverlayRef} className="rounded shadow-xl max-w-full border border-zinc-800" />
+                    <p className="text-[11px] text-zinc-500">
+                      Identical elements appear white/inverted; shifts, additions, and edits highlight in high-contrast color.
+                    </p>
                   </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
-                    <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                    <div className="flex flex-col items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
+                      <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                    </div>
+                    <div className="flex flex-col items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
+                      <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
