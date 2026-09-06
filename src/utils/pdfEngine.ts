@@ -2261,7 +2261,6 @@ export async function ocrPDFToSearchable(
   language: string = 'eng',
   onProgress?: (p: OcrProgress) => void
 ): Promise<Uint8Array> {
-  // 1. Ensure PDF.js worker is loaded
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -2269,13 +2268,12 @@ export async function ocrPDFToSearchable(
         import.meta.url
       ).toString();
     } catch {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
     }
   }
 
-  onProgress?.({ status: 'Initializing OCR Engine...', progress: 8 });
+  onProgress?.({ status: 'Initializing Local OCR Engine...', progress: 10 });
 
-  // 2. Initialize Tesseract using 100% local assets from /public/tessdata
   const worker = await createWorker(language, 1, {
     workerPath: '/tessdata/worker.min.js',
     corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
@@ -2311,15 +2309,38 @@ export async function ocrPDFToSearchable(
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       if (!ctx) continue;
       await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
 
-      // Run OCR on the page canvas
+      // Dark Mode Detection & Inversion: Fixes Tesseract reading dark UIs/screenshots
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      let totalBrightness = 0;
+      const sampleStep = 16;
+      let sampleCount = 0;
+
+      for (let i = 0; i < d.length; i += 4 * sampleStep) {
+        totalBrightness += (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+        sampleCount++;
+      }
+
+      const avgBrightness = totalBrightness / sampleCount;
+
+      // If document background is dark (average luminance < 128), invert colors to black-on-white
+      if (avgBrightness < 128) {
+        for (let i = 0; i < d.length; i += 4) {
+          d[i] = 255 - d[i];         // R
+          d[i + 1] = 255 - d[i + 1]; // G
+          d[i + 2] = 255 - d[i + 2]; // B
+        }
+        ctx.putImageData(imgData, 0, 0);
+      }
+
+      // Run OCR on preprocessed canvas
       const { data } = await worker.recognize(canvas);
 
-      // Immediately release memory
       canvas.width = 0;
       canvas.height = 0;
 
@@ -2329,7 +2350,7 @@ export async function ocrPDFToSearchable(
       const scaleX = pageWidth / viewport.width;
       const scaleY = pageHeight / viewport.height;
 
-      // 3. Inject coordinate-accurate invisible text layer (opacity: 0)
+      // Inject selectable text layer compatible with WPS, Chrome, and Acrobat
       const words = (data as any)?.words;
       if (Array.isArray(words)) {
         for (const word of words) {
@@ -2341,12 +2362,14 @@ export async function ocrPDFToSearchable(
           const posY = pageHeight - (box.y1 * scaleY);
           const wordHeight = (box.y1 - box.y0) * scaleY;
 
+          // Using minimal opacity (0.01) rather than 0 prevents WPS from disabling selection
           pdfLibPage.drawText(clean, {
             x: Math.max(0, posX),
             y: Math.max(0, posY),
             size: Math.max(4, Math.round(wordHeight * 0.85)),
             font: helveticaFont,
-            opacity: 0,
+            color: rgb(0, 0, 0),
+            opacity: 0.01,
           });
         }
       }
