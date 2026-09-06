@@ -79,16 +79,18 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         keywords,
       });
 
-    const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      // Byte-slice buffer to prevent offset corruption in WPS Office
+    const safeBuffer = outputBytes.buffer.slice(
+      outputBytes.byteOffset,
+      outputBytes.byteOffset + outputBytes.byteLength
+    );
+    const blob = new Blob([safeBuffer as unknown as BlobPart], { type: 'application/pdf' });
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    const url = URL.createObjectURL(blob);
+    setDownloadUrl(url);
     } catch (err: any) {
       console.error(err);
-      setError(
-        err.message ||
-          'Failed to update PDF metadata. Document may be encrypted or corrupted.'
-      );
+      setError(err.message || 'Failed to update PDF metadata.');
     } finally {
       setIsProcessing(false);
     }
@@ -223,7 +225,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                       setKeywords(e.target.value);
                       setDownloadUrl(null);
                     }}
-                    placeholder="e.g. invoice, report, 2026 (comma separated)"
+                    placeholder="e.g. invoice, report, legal (comma separated)"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
@@ -266,7 +268,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                   </div>
                   <a
                     href={downloadUrl}
-                    download={`${file.name.replace('.pdf', '')}_updated.pdf`}
+                    download={`${file.name.replace(/\.[^/.]+$/, '')}_updated.pdf`}
                     className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
                   >
                     <Download className="w-4 h-4 stroke-[2.5]" />
