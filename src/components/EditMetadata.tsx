@@ -79,7 +79,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         keywords,
       });
 
-      const blob = new Blob([outputBytes], { type: 'application/pdf' });
+    const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
