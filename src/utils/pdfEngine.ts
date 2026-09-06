@@ -317,6 +317,10 @@ export async function pdfToImages(file: File): Promise<string[]> {
  * Splits a PDF document by page ranges (e.g. "1-3, 5").
  * Fully supports bank statements, legal agreements, government stamps, and signed forms.
  */
+/**
+ * Splits a PDF document by page ranges (e.g. "1-3, 5").
+ * Fully supports bank statements, legal agreements, government stamps, and signed forms.
+ */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
   const uint8 = new Uint8Array(arrayBuffer);
@@ -347,58 +351,58 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
     throw new Error('No valid pages specified for extraction.');
   }
 
-  try {
-    // Check for encryption, signatures, or forms
-    if (isComplexOrProtectedPdf(uint8)) {
-      throw new Error('Document contains protected or interactive layers; using rendering pipeline.');
-    }
+  // 1. Check if the PDF has complex layers (Bank statements, rent agreements, signed forms)
+  const isComplex = isComplexOrProtectedPdf(uint8);
 
-    // Load without ignoreEncryption
-    const srcDoc = await PDFDocument.load(arrayBuffer);
+  if (!isComplex) {
+    try {
+      const srcDoc = await PDFDocument.load(arrayBuffer);
+      let canUseVector = true;
 
-    // Verify all target pages contain vector contents
-    for (const idx of indices) {
-      const page = srcDoc.getPage(idx);
-      if (!page.node.Contents()) {
-        throw new Error('Missing Contents stream');
+      for (const idx of indices) {
+        const page = srcDoc.getPage(idx);
+        // If page has annotations, signatures, or empty contents, vector copy will render blank
+        if (!page.node.Contents() || page.node.Annots()) {
+          canUseVector = false;
+          break;
+        }
       }
-      if (page.node.Annots()) {
-        throw new Error('Page contains annotations or signatures');
+
+      if (canUseVector) {
+        const newDoc = await PDFDocument.create();
+        const copied = await newDoc.copyPages(srcDoc, indices);
+        copied.forEach((p) => newDoc.addPage(p));
+        return await newDoc.save({ useObjectStreams: false });
       }
+    } catch (err) {
+      console.warn('Native vector split unviable, switching to rendering engine:', err);
     }
-
-    const newDoc = await PDFDocument.create();
-    const copied = await newDoc.copyPages(srcDoc, indices);
-    copied.forEach((p) => newDoc.addPage(p));
-    return await newDoc.save({ useObjectStreams: false });
-  } catch (err) {
-    console.warn(`Vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
-
-    // High-resolution PDF.js fallback renders all layers, text, and signatures
-    const loadingTask = pdfjsLib.getDocument({
-      data: uint8.slice(),
-      stopAtErrors: false,
-    });
-    const fallbackDoc = await loadingTask.promise;
-    const salvageDoc = await PDFDocument.create();
-
-    for (const idx of indices) {
-      const pageNum = idx + 1;
-      const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-      const embeddedImage = await salvageDoc.embedJpg(imgBytes);
-
-      const newPage = salvageDoc.addPage([width, height]);
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width,
-        height,
-      });
-    }
-
-    return await salvageDoc.save({ useObjectStreams: false });
   }
+
+  // 2. High-Res Visual Engine (Same pipeline that works in Compressor)
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8.slice(),
+    stopAtErrors: false,
+  });
+  const fallbackDoc = await loadingTask.promise;
+  const salvageDoc = await PDFDocument.create();
+
+  for (const idx of indices) {
+    const pageNum = idx + 1;
+    const page = await fallbackDoc.getPage(pageNum);
+    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
+    const embeddedImage = await salvageDoc.embedJpg(imgBytes);
+
+    const newPage = salvageDoc.addPage([width, height]);
+    newPage.drawImage(embeddedImage, {
+      x: 0,
+      y: 0,
+      width,
+      height,
+    });
+  }
+
+  return await salvageDoc.save({ useObjectStreams: false });
 }
 
 /**
@@ -414,60 +418,66 @@ export async function splitPdfToZip(
   const zip = new JSZip();
   const baseName = file.name.replace(/\.[^/.]+$/, '');
 
-  try {
-    if (isComplexOrProtectedPdf(uint8)) {
-      throw new Error('Complex or protected document; switching to rendering pipeline');
-    }
+  const isComplex = isComplexOrProtectedPdf(uint8);
 
-    const sourceDoc = await PDFDocument.load(arrayBuffer);
+  if (!isComplex) {
+    try {
+      const sourceDoc = await PDFDocument.load(arrayBuffer);
+      let canUseVector = true;
 
-    for (let i = 0; i < totalPages; i++) {
-      const page = sourceDoc.getPage(i);
-      if (!page.node.Contents() || page.node.Annots()) {
-        throw new Error('Page missing Contents or has annotations');
+      for (let i = 0; i < totalPages; i++) {
+        const page = sourceDoc.getPage(i);
+        if (!page.node.Contents() || page.node.Annots()) {
+          canUseVector = false;
+          break;
+        }
       }
+
+      if (canUseVector) {
+        for (let i = 0; i < totalPages; i++) {
+          onProgress?.(i + 1, totalPages);
+          const singleDoc = await PDFDocument.create();
+          const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
+          singleDoc.addPage(copiedPage);
+
+          const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+          const paddedIndex = String(i + 1).padStart(2, '0');
+          zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+        }
+        return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      }
+    } catch (err) {
+      console.warn('Native ZIP split unviable, switching to rendering engine:', err);
     }
+  }
 
-    for (let i = 0; i < totalPages; i++) {
-      onProgress?.(i + 1, totalPages);
-      const singleDoc = await PDFDocument.create();
-      const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
-      singleDoc.addPage(copiedPage);
+  // Fallback: Visual Engine
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8.slice(),
+    stopAtErrors: false,
+  });
+  const fallbackDoc = await loadingTask.promise;
 
-      const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-      const paddedIndex = String(i + 1).padStart(2, '0');
-      zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
-    }
-  } catch (err) {
-    console.warn(`Vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+  for (let i = 0; i < totalPages; i++) {
+    onProgress?.(i + 1, totalPages);
+    const pageNum = i + 1;
+    const page = await fallbackDoc.getPage(pageNum);
+    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
 
-    const loadingTask = pdfjsLib.getDocument({
-      data: uint8.slice(),
-      stopAtErrors: false,
+    const singleDoc = await PDFDocument.create();
+    const embeddedImage = await singleDoc.embedJpg(imgBytes);
+
+    const newPage = singleDoc.addPage([width, height]);
+    newPage.drawImage(embeddedImage, {
+      x: 0,
+      y: 0,
+      width,
+      height,
     });
-    const fallbackDoc = await loadingTask.promise;
 
-    for (let i = 0; i < totalPages; i++) {
-      onProgress?.(i + 1, totalPages);
-      const pageNum = i + 1;
-      const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-
-      const singleDoc = await PDFDocument.create();
-      const embeddedImage = await singleDoc.embedJpg(imgBytes);
-
-      const newPage = singleDoc.addPage([width, height]);
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width,
-        height,
-      });
-
-      const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-      const paddedIndex = String(i + 1).padStart(2, '0');
-      zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
-    }
+    const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+    const paddedIndex = String(i + 1).padStart(2, '0');
+    zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
   }
 
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
