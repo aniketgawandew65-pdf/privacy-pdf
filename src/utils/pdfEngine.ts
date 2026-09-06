@@ -1955,8 +1955,8 @@ export async function addBatesNumberingToPDF(
     const stampText = `${prefix}${pageNumStr}${suffix}`;
 
     const page = await pdfDoc.getPage(i);
-    // Render at high-def 2.0 scale for crisp print quality
-    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
+    // Render at 3.0 scale for pristine, pin-sharp text and table lines on bank statements
+    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 3.0);
 
     const compositeCanvas = document.createElement('canvas');
     compositeCanvas.width = pWidth;
@@ -2001,21 +2001,22 @@ export async function addBatesNumberingToPDF(
         posY = marginY + textHeight;
       }
 
-      // Draw background pill for readability
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.fillRect(posX - 4, posY - textHeight - 2, textWidth + 8, textHeight + 4);
+      // Draw solid opaque background pill for readability
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fillRect(posX - 6, posY - textHeight - 4, textWidth + 12, textHeight + 8);
 
-      // Draw stamp text
+      // Draw crisp stamp text
       ctx.fillStyle = '#000000';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(stampText, posX, posY);
 
       ctx.restore();
 
-      const stampedJpg = compositeCanvas.toDataURL('image/jpeg', 0.95);
-      const b64 = stampedJpg.split(',')[1];
+      // Export as Lossless PNG to preserve original document pixels without compression blur
+      const stampedPng = compositeCanvas.toDataURL('image/png');
+      const b64 = stampedPng.split(',')[1];
       const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const finalPageImg = await newPdfDoc.embedJpg(stampedBytes);
+      const finalPageImg = await newPdfDoc.embedPng(stampedBytes);
 
       const newPage = newPdfDoc.addPage([pWidth, pHeight]);
       newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
