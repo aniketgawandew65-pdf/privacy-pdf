@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   AlertCircle,
   EyeOff,
+  Info,
 } from 'lucide-react';
 import { sanitizePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
@@ -114,7 +115,7 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
           </div>
 
           {/* Items Removed Breakdown */}
-          <div className="p-4 bg-zinc-950/50 rounded-xl border border-zinc-800/80 space-y-2.5">
+          <div className="p-4 bg-zinc-950/50 rounded-xl border border-zinc-800/80 space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <span>Sanitization removes the following hidden data:</span>
@@ -127,6 +128,14 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
               <li>PDF producer details</li>
               <li>Print & piece-info dictionaries</li>
             </ul>
+
+            {/* Clarification Notice */}
+            <div className="pt-2 border-t border-zinc-800/60 flex items-start gap-2 text-[11px] text-zinc-500">
+              <Info className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
+              <span>
+                Visible on-page text and numbers remain intact. To black out sensitive details on the page, use the <strong>Redact</strong> tool.
+              </span>
+            </div>
           </div>
 
           {/* Error Banner */}
