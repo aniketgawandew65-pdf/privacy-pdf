@@ -1908,21 +1908,23 @@ export async function createNUpPDF(
   return await outputDoc.save({ useObjectStreams: false });
 }
 
-export type BatesPosition =
-  | 'top-left'
-  | 'top-center'
-  | 'top-right'
-  | 'bottom-left'
-  | 'bottom-center'
+export type BatesPosition = 
+  | 'top-left' 
+  | 'top-center' 
+  | 'top-right' 
+  | 'bottom-left' 
+  | 'bottom-center' 
   | 'bottom-right';
 
 export interface BatesOptions {
   prefix?: string;
   suffix?: string;
   startNumber: number;
-  totalDigits: number;
-  fontSize: number;
-  position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+  digits?: number;
+  totalDigits?: number; // fallback support
+  fontSize?: number;
+  position?: BatesPosition;
+  onProgress?: (curr: number, total: number) => void;
 }
 
 export async function addBatesNumberingToPDF(
@@ -1940,11 +1942,15 @@ export async function addBatesNumberingToPDF(
   const prefix = options.prefix || '';
   const suffix = options.suffix || '';
   const startNum = options.startNumber || 1;
-  const digits = Math.max(1, options.totalDigits || 6);
+  const digits = Math.max(1, options.digits ?? options.totalDigits ?? 6);
   const fontSize = options.fontSize || 10;
   const position = options.position || 'bottom-right';
 
   for (let i = 1; i <= numPages; i++) {
+    if (options.onProgress) {
+      options.onProgress(i, numPages);
+    }
+
     const pageNumStr = String(startNum + (i - 1)).padStart(digits, '0');
     const stampText = `${prefix}${pageNumStr}${suffix}`;
 
@@ -1969,7 +1975,6 @@ export async function addBatesNumberingToPDF(
 
       ctx.save();
       
-      // Scale font size proportionally to high-def canvas resolution
       const scaleNormalization = pWidth / 540;
       const finalFontSize = fontSize * scaleNormalization;
 
@@ -1980,30 +1985,27 @@ export async function addBatesNumberingToPDF(
       const textWidth = metrics.width;
       const textHeight = finalFontSize;
 
-      // Margins from page edges
       const marginX = pWidth * 0.06;
       const marginY = pHeight * 0.05;
 
       let posX = marginX;
-      let posY = pHeight - marginY; // Default bottom-left canvas coordinates (Y inverted from top)
+      let posY = pHeight - marginY;
 
-      // Calculate X coordinate
       if (position.includes('center')) {
         posX = (pWidth - textWidth) / 2;
       } else if (position.includes('right')) {
         posX = pWidth - textWidth - marginX;
       }
 
-      // Calculate Y coordinate
       if (position.includes('top')) {
         posY = marginY + textHeight;
       }
 
-      // Draw solid white background pill behind stamp for readability over dark backgrounds
+      // Draw background pill for readability
       ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.fillRect(posX - 4, posY - textHeight - 2, textWidth + 8, textHeight + 4);
 
-      // Draw Bates text
+      // Draw stamp text
       ctx.fillStyle = '#000000';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(stampText, posX, posY);
