@@ -793,10 +793,10 @@ export async function unlockPDF(
   });
 
   // Handle wrong password immediately without stalling
-  loadingTask.onPassword = (_updateCallback: any, reason: number) => {
+  loadingTask.onPassword = () => {
     throw new Error('INCORRECT_PASSWORD');
   };
-
+  
   let pdfDoc;
   try {
     pdfDoc = await loadingTask.promise;
