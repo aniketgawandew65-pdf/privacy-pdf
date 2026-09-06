@@ -59,14 +59,15 @@ export const ComparePdf: React.FC = () => {
     let isMounted = true;
     (async () => {
       try {
+        setErrorMessage(null);
         const buffer = await fileA.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
         setPdfDocA(doc);
         setPageCountA(doc.numPages);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to load Document A:', err);
-        if (isMounted) setErrorMessage('Failed to open Document A.');
+        if (isMounted) setErrorMessage(err.message || 'Failed to open Document A.');
       }
     })();
 
@@ -86,14 +87,15 @@ export const ComparePdf: React.FC = () => {
     let isMounted = true;
     (async () => {
       try {
+        setErrorMessage(null);
         const buffer = await fileB.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
         setPdfDocB(doc);
         setPageCountB(doc.numPages);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to load Document B:', err);
-        if (isMounted) setErrorMessage('Failed to open Document B.');
+        if (isMounted) setErrorMessage(err.message || 'Failed to open Document B.');
       }
     })();
 
