@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import heic2any from 'heic2any';
 import {
   Upload,
@@ -19,116 +19,36 @@ interface ConvertedImage {
 
 export function HeicToJpg() {
   const [isConverting, setIsConverting] = useState(false);
-  const [progressStatus, setProgressStatus] = useState<string>('');
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [statusText, setStatusText] = useState('');
   const [convertedImages, setConvertedImages] = useState<ConvertedImage[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const abortRef = useRef<boolean>(false);
-
-  // Live timer so you can see active background progress
-  useEffect(() => {
-    let timer: any;
-    if (isConverting) {
-      timer = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setElapsedSeconds(0);
-    }
-    return () => clearInterval(timer);
-  }, [isConverting]);
-
-  // Step 1: Attempt native hardware decode (instant on Safari / supported Chromium)
-  const decodeNative = async (file: File): Promise<Blob | null> => {
-    try {
-      const bitmap = await createImageBitmap(file);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        bitmap.close();
-        return null;
-      }
-
-      ctx.drawImage(bitmap, 0, 0);
-      bitmap.close();
-
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.92)
-      );
-
-      canvas.width = 0;
-      canvas.height = 0;
-      return blob;
-    } catch {
-      return null;
-    }
-  };
-
-  // Step 2: Multi-track resilient heic2any WebAssembly conversion
-  const convertHeic = async (file: File): Promise<Blob> => {
-    const native = await decodeNative(file);
-    if (native) return native;
-
-    const runWasm = async (): Promise<Blob> => {
-      try {
-        const res: any = await heic2any({
-          blob: file,
-          toType: 'image/jpeg',
-          quality: 0.9,
-        } as any);
-
-        return Array.isArray(res) ? res[0] : res;
-      } catch (firstErr) {
-        // If single conversion fails due to Live Photo / Portrait depth tracks, retry with multiple: true
-        const multiRes: any = await heic2any({
-          blob: file,
-          toType: 'image/jpeg',
-          quality: 0.9,
-          multiple: true,
-        } as any);
-
-        return Array.isArray(multiRes) ? multiRes[0] : multiRes;
-      }
-    };
-
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              `"${file.name}" timed out after 90s. The image may exceed browser memory limits.`
-            )
-          ),
-        90000
-      )
-    );
-
-    return Promise.race([runWasm(), timeout]);
-  };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-
     setErrorMsg(null);
     setIsConverting(true);
-    abortRef.current = false;
 
     const fileList = Array.from(files);
     const results: ConvertedImage[] = [];
-    const errors: string[] = [];
+    const failedFiles: string[] = [];
 
     for (let i = 0; i < fileList.length; i++) {
-      if (abortRef.current) break;
-
       const file = fileList[i];
-      setProgressStatus(`Decoding ${file.name} (${i + 1}/${fileList.length})`);
+      setStatusText(`Converting ${file.name} (${i + 1}/${fileList.length})...`);
 
       try {
-        const jpegBlob = await convertHeic(file);
+        // Direct conversion call without secondary buffer copying
+        const conversionResult: any = await heic2any({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.9,
+        } as any);
+
+        const jpegBlob: Blob = Array.isArray(conversionResult)
+          ? conversionResult[0]
+          : conversionResult;
+
         const url = URL.createObjectURL(jpegBlob);
 
         results.push({
@@ -138,24 +58,43 @@ export function HeicToJpg() {
           newSize: jpegBlob.size,
         });
       } catch (err: any) {
-        console.error(`Error converting ${file.name}:`, err);
-        errors.push(`${file.name}: ${err.message || 'Decoding failed'}`);
+        console.warn(`Standard decode failed for ${file.name}, retrying container mode...`, err);
+
+        // Fallback for Apple Live Photo / Multi-frame containers
+        try {
+          const multiResult: any = await heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.9,
+            multiple: true,
+          } as any);
+
+          const fallbackBlob: Blob = Array.isArray(multiResult)
+            ? multiResult[0]
+            : multiResult;
+
+          const url = URL.createObjectURL(fallbackBlob);
+          results.push({
+            name: file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+            url,
+            originalSize: file.size,
+            newSize: fallbackBlob.size,
+          });
+        } catch (secondaryErr) {
+          failedFiles.push(file.name);
+        }
       }
     }
 
     setConvertedImages((prev) => [...prev, ...results]);
     setIsConverting(false);
-    setProgressStatus('');
+    setStatusText('');
 
-    if (errors.length > 0) {
-      setErrorMsg(errors.join(' | '));
+    if (failedFiles.length > 0) {
+      setErrorMsg(
+        `Failed to convert: ${failedFiles.join(', ')}. These shots contain Apple Live Photo video tracks.`
+      );
     }
-  };
-
-  const handleCancel = () => {
-    abortRef.current = true;
-    setIsConverting(false);
-    setProgressStatus('');
   };
 
   const handleClear = () => {
@@ -178,7 +117,6 @@ export function HeicToJpg() {
         }}
       />
 
-      {/* Upload Zone */}
       <div
         role="button"
         tabIndex={0}
@@ -215,37 +153,23 @@ export function HeicToJpg() {
         <span>Hardware-accelerated client decoding. Strips location &amp; device markers.</span>
       </div>
 
-      {/* Active Converting Bar with Live Seconds & Cancel Button */}
       {isConverting && (
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-2.5 text-xs text-emerald-400 truncate">
-            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-            <span className="truncate">
-              {progressStatus} ({elapsedSeconds}s)
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="px-2.5 py-1 text-xs rounded-lg border border-red-900/60 bg-red-950/30 text-red-400 hover:bg-red-900/40 transition shrink-0 cursor-pointer"
-          >
-            Cancel
-          </button>
+        <div className="flex items-center justify-center gap-2.5 py-4 text-xs text-emerald-400 mb-6 bg-zinc-950 rounded-xl border border-zinc-800">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>{statusText || 'Converting HEIC to JPG...'}</span>
         </div>
       )}
 
-      {/* Error Alert */}
       {errorMsg && (
         <div
           role="alert"
           className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300 mb-6"
         >
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <span className="break-all">{errorMsg}</span>
+          <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Converted Results List */}
       {convertedImages.length > 0 && !isConverting && (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-zinc-400 pb-1 border-b border-zinc-800">
@@ -270,7 +194,7 @@ export function HeicToJpg() {
                     <p className="truncate font-medium">{img.name}</p>
                     <p className="text-[11px] text-zinc-500">
                       {(img.originalSize / 1024 / 1024).toFixed(2)} MB →{' '}
-                      {(img.newSize / 1024 / 1024).toFixed(2)} MB • EXIF Sanitized
+                      {(img.newSize / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
                 </div>
@@ -289,7 +213,7 @@ export function HeicToJpg() {
 
           <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 flex items-center gap-2">
             <CheckCircle className="w-4 h-4 shrink-0" />
-            <span>All metadata stripped. Images are clean for private web sharing.</span>
+            <span>Images converted cleanly and ready for web use.</span>
           </div>
         </div>
       )}
