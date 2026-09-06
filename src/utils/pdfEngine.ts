@@ -23,30 +23,27 @@ if (typeof window !== 'undefined' && 'Worker' in window) {
 }
 
 /**
- * Fast binary scanner: detects whether a PDF has owner/permission locks or encryption.
+ * Fast scanner: detects whether a PDF contains encryption, digital signatures,
+ * form widgets, XFA layers, or annotation appearances.
  */
-function isPdfEncrypted(bytes: Uint8Array): boolean {
-  const len = bytes.length;
-  for (let i = 0; i < len - 8; i++) {
-    if (
-      bytes[i] === 0x2f && // '/'
-      (bytes[i + 1] === 0x45 || bytes[i + 1] === 0x65) && // 'E' or 'e'
-      (bytes[i + 2] === 0x6e || bytes[i + 2] === 0x4e) && // 'n' or 'N'
-      (bytes[i + 3] === 0x63 || bytes[i + 3] === 0x43) && // 'c' or 'C'
-      (bytes[i + 4] === 0x72 || bytes[i + 4] === 0x52) && // 'r' or 'R'
-      (bytes[i + 5] === 0x79 || bytes[i + 5] === 0x59) && // 'y' or 'Y'
-      (bytes[i + 6] === 0x70 || bytes[i + 6] === 0x50) && // 'p' or 'P'
-      (bytes[i + 7] === 0x74 || bytes[i + 7] === 0x54)    // 't' or 'T'
-    ) {
-      return true;
-    }
-  }
-  return false;
+function isComplexOrProtectedPdf(bytes: Uint8Array): boolean {
+  const headChunk = new TextDecoder('latin1').decode(bytes.slice(0, Math.min(bytes.length, 131072)));
+  const tailChunk = new TextDecoder('latin1').decode(bytes.slice(Math.max(0, bytes.length - 131072)));
+  const scanArea = headChunk + tailChunk;
+
+  return (
+    scanArea.includes('/Encrypt') ||
+    scanArea.includes('/encrypt') ||
+    scanArea.includes('/XFA') ||
+    scanArea.includes('/AcroForm') ||
+    scanArea.includes('/Sig') ||
+    scanArea.includes('/Widget')
+  );
 }
 
 /**
- * Internal high-res renderer: decrypts and paints any complex, scanned, or owner-locked
- * PDF page onto a clean white canvas at 2.0x Retina resolution.
+ * Internal high-res renderer: decrypts and paints complex, scanned, signed,
+ * or owner-locked PDF pages onto a clean white canvas at 2.0x Retina resolution.
  */
 async function renderPageAsJpg(
   page: any,
@@ -69,6 +66,7 @@ async function renderPageAsJpg(
       canvasContext: ctx as any,
       viewport: renderViewport,
       canvas,
+      annotationMode: (pdfjsLib as any).AnnotationMode?.ENABLE ?? 2,
     } as any) as any
   ).promise;
 
@@ -103,7 +101,6 @@ export interface CompressOptions {
 
 /**
  * Merges multiple PDF files into one single PDF document.
- * Decrypts and embeds bank statements, government documents, and standard PDFs.
  */
 export async function mergePDFs(files: File[]): Promise<Uint8Array> {
   const mergedPdf = await PDFDocument.create();
@@ -113,8 +110,8 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
     const uint8 = new Uint8Array(fileBytes);
 
     try {
-      if (isPdfEncrypted(uint8)) {
-        throw new Error('Encrypted document; routing to high-res rendering pipeline');
+      if (isComplexOrProtectedPdf(uint8)) {
+        throw new Error('Complex or protected document; switching to rendering pipeline');
       }
 
       const pdfDoc = await PDFDocument.load(fileBytes);
@@ -123,16 +120,14 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
       for (let i = 0; i < pageCount; i++) {
         const page = pdfDoc.getPage(i);
         if (!page.node.Contents()) {
-          const emptyStream = pdfDoc.context.flateStream('');
-          const ref = pdfDoc.context.register(emptyStream);
-          page.node.set(PDFName.of('Contents'), ref);
+          throw new Error('Missing Contents stream');
         }
       }
 
       const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
       copiedPages.forEach((page) => mergedPdf.addPage(page));
     } catch (err) {
-      console.warn(`Vector copy bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+      console.warn(`Vector merge bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
       const loadingTask = pdfjsLib.getDocument({
         data: uint8.slice(),
@@ -202,7 +197,7 @@ export async function compressPDFToTarget(
     await (
       page.render({
         canvasContext: context as any,
-        viewport: viewport,
+        viewport,
         canvas,
       } as any) as any
     ).promise;
@@ -305,7 +300,7 @@ export async function pdfToImages(file: File): Promise<string[]> {
     await (
       page.render({
         canvasContext: ctx as any,
-        viewport: viewport,
+        viewport,
         canvas,
       } as any) as any
     ).promise;
@@ -320,7 +315,7 @@ export async function pdfToImages(file: File): Promise<string[]> {
 
 /**
  * Splits a PDF document by page ranges (e.g. "1-3, 5").
- * Fully supports owner-restricted bank statements and legal documents.
+ * Fully supports bank statements, legal agreements, government stamps, and signed forms.
  */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
@@ -353,35 +348,33 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
   }
 
   try {
-    // 1. Check binary encryption indicator first
-    if (isPdfEncrypted(uint8)) {
-      throw new Error('Document has owner permissions encryption; switching to high-res rendering pipeline.');
+    // Check for encryption, signatures, or forms
+    if (isComplexOrProtectedPdf(uint8)) {
+      throw new Error('Document contains protected or interactive layers; using rendering pipeline.');
     }
 
-    // 2. Load without ignoreEncryption: throws automatically if locked/encrypted
+    // Load without ignoreEncryption
     const srcDoc = await PDFDocument.load(arrayBuffer);
-    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document');
-    }
 
-    const newDoc = await PDFDocument.create();
-
+    // Verify all target pages contain vector contents
     for (const idx of indices) {
       const page = srcDoc.getPage(idx);
       if (!page.node.Contents()) {
-        const emptyStream = srcDoc.context.flateStream('');
-        const ref = srcDoc.context.register(emptyStream);
-        page.node.set(PDFName.of('Contents'), ref);
+        throw new Error('Missing Contents stream');
+      }
+      if (page.node.Annots()) {
+        throw new Error('Page contains annotations or signatures');
       }
     }
 
+    const newDoc = await PDFDocument.create();
     const copied = await newDoc.copyPages(srcDoc, indices);
     copied.forEach((p) => newDoc.addPage(p));
     return await newDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn(`Native vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-    // 3. Fallback: High-resolution PDF.js rendering
+    // High-resolution PDF.js fallback renders all layers, text, and signatures
     const loadingTask = pdfjsLib.getDocument({
       data: uint8.slice(),
       stopAtErrors: false,
@@ -392,7 +385,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
     for (const idx of indices) {
       const pageNum = idx + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
       const embeddedImage = await salvageDoc.embedJpg(imgBytes);
 
       const newPage = salvageDoc.addPage([width, height]);
@@ -410,7 +403,6 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
 
 /**
  * Splits all pages of a PDF into separate files packaged into a ZIP archive.
- * Supports protected/bank statements with automated rendering salvage.
  */
 export async function splitPdfToZip(
   file: File,
@@ -423,26 +415,22 @@ export async function splitPdfToZip(
   const baseName = file.name.replace(/\.[^/.]+$/, '');
 
   try {
-    if (isPdfEncrypted(uint8)) {
-      throw new Error('Encrypted document; routing to fallback renderer');
+    if (isComplexOrProtectedPdf(uint8)) {
+      throw new Error('Complex or protected document; switching to rendering pipeline');
     }
 
     const sourceDoc = await PDFDocument.load(arrayBuffer);
-    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document');
+
+    for (let i = 0; i < totalPages; i++) {
+      const page = sourceDoc.getPage(i);
+      if (!page.node.Contents() || page.node.Annots()) {
+        throw new Error('Page missing Contents or has annotations');
+      }
     }
 
     for (let i = 0; i < totalPages; i++) {
       onProgress?.(i + 1, totalPages);
       const singleDoc = await PDFDocument.create();
-
-      const page = sourceDoc.getPage(i);
-      if (!page.node.Contents()) {
-        const emptyStream = sourceDoc.context.flateStream('');
-        const ref = sourceDoc.context.register(emptyStream);
-        page.node.set(PDFName.of('Contents'), ref);
-      }
-
       const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
       singleDoc.addPage(copiedPage);
 
@@ -451,7 +439,7 @@ export async function splitPdfToZip(
       zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
     }
   } catch (err) {
-    console.warn(`Native vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector ZIP split bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: uint8.slice(),
@@ -463,7 +451,7 @@ export async function splitPdfToZip(
       onProgress?.(i + 1, totalPages);
       const pageNum = i + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
 
       const singleDoc = await PDFDocument.create();
       const embeddedImage = await singleDoc.embedJpg(imgBytes);
@@ -487,7 +475,6 @@ export async function splitPdfToZip(
 
 /**
  * Removes specified pages from a PDF document.
- * Includes dual-engine fallback to prevent blank pages on encrypted bank statements.
  */
 export async function removePagesFromPDF(
   file: File,
@@ -510,31 +497,25 @@ export async function removePagesFromPDF(
   }
 
   try {
-    if (isPdfEncrypted(uint8)) {
-      throw new Error('Document has owner encryption; switching to high-res rendering engine.');
+    if (isComplexOrProtectedPdf(uint8)) {
+      throw new Error('Protected document; switching to rendering engine.');
     }
 
     const srcDoc = await PDFDocument.load(arrayBuffer);
-    if ((srcDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document');
-    }
-
-    const newDoc = await PDFDocument.create();
 
     for (const idx of indicesToKeep) {
       const page = srcDoc.getPage(idx);
-      if (!page.node.Contents()) {
-        const emptyStream = srcDoc.context.flateStream('');
-        const ref = srcDoc.context.register(emptyStream);
-        page.node.set(PDFName.of('Contents'), ref);
+      if (!page.node.Contents() || page.node.Annots()) {
+        throw new Error('Page missing Contents or has annotations');
       }
     }
 
+    const newDoc = await PDFDocument.create();
     const copied = await newDoc.copyPages(srcDoc, indicesToKeep);
     copied.forEach((p) => newDoc.addPage(p));
     return await newDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn(`Native removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+    console.warn(`Vector removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
     const loadingTask = pdfjsLib.getDocument({
       data: uint8.slice(),
@@ -546,7 +527,7 @@ export async function removePagesFromPDF(
     for (const idx of indicesToKeep) {
       const pageNum = idx + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
       const embeddedImage = await newDoc.embedJpg(imgBytes);
 
       const newPage = newDoc.addPage([width, height]);
@@ -563,8 +544,7 @@ export async function removePagesFromPDF(
 }
 
 /**
- * Dual-engine page counter: uses pdf-lib with ignoreEncryption,
- * with seamless PDF.js fallback for scanned or strict files.
+ * Dual-engine page counter.
  */
 export async function getPDFPageCount(file: File): Promise<number> {
   const bytes = await file.arrayBuffer();
@@ -937,7 +917,7 @@ export async function compressPDF(
       const viewport = page.getViewport({ scale: Math.max(0.02, scale * 0.7) });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
-      canvas.height = Math.floor(viewport.height);
+      canvas.height = Math.max(1, Math.floor(viewport.height));
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.fillStyle = '#ffffff';
@@ -997,14 +977,11 @@ export async function reorderAndProcessPDF(
   const outputDoc = await PDFDocument.create();
 
   try {
-    if (isPdfEncrypted(uint8)) {
-      throw new Error('Encrypted document; routing to fallback renderer');
+    if (isComplexOrProtectedPdf(uint8)) {
+      throw new Error('Encrypted or signed document; routing to fallback renderer');
     }
 
     const sourceDoc = await PDFDocument.load(arrayBuffer);
-    if ((sourceDoc as any).context?.trailerInfo?.Encrypt) {
-      throw new Error('Encrypted document');
-    }
 
     const indicesToCopy = pages.map((p) => p.originalIndex);
     const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
@@ -1030,7 +1007,7 @@ export async function reorderAndProcessPDF(
       const pageConfig = pages[idx];
       const pageNum = pageConfig.originalIndex + 1;
       const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page);
+      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
       const embeddedImage = await outputDoc.embedJpg(imgBytes);
 
       const newPage = outputDoc.addPage([width, height]);
@@ -2096,7 +2073,7 @@ export async function invertPDF(
 
     const jpegBlob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Failed to encode page'))),
+        (b) => (b ? resolve(b) : reject(new Error('Canvas buffer conversion failed'))),
         'image/jpeg',
         0.9
       );
