@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import heic2any from 'heic2any';
 import {
   Upload,
@@ -20,13 +20,27 @@ interface ConvertedImage {
 export function HeicToJpg() {
   const [isConverting, setIsConverting] = useState(false);
   const [progressStatus, setProgressStatus] = useState<string>('');
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [convertedImages, setConvertedImages] = useState<ConvertedImage[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<boolean>(false);
 
-  // Attempt instant native hardware decode first (Safari, macOS Chromium)
+  // Live timer so you can see active background progress
+  useEffect(() => {
+    let timer: any;
+    if (isConverting) {
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [isConverting]);
+
+  // Step 1: Attempt native hardware decode (instant on Safari / supported Chromium)
   const decodeNative = async (file: File): Promise<Blob | null> => {
     try {
       const bitmap = await createImageBitmap(file);
@@ -54,32 +68,46 @@ export function HeicToJpg() {
     }
   };
 
-  // Safe fallback to heic2any with a 20s timeout race
-  const decodeWithHeic2Any = async (file: File): Promise<Blob> => {
-    const conversionPromise = (async () => {
-      const safeBlob = new Blob([await file.arrayBuffer()], { type: 'image/heic' });
-      const conversionResult: any = await heic2any({
-        blob: safeBlob,
-        toType: 'image/jpeg',
-        quality: 0.92,
-      } as any);
+  // Step 2: Multi-track resilient heic2any WebAssembly conversion
+  const convertHeic = async (file: File): Promise<Blob> => {
+    const native = await decodeNative(file);
+    if (native) return native;
 
-      return Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
-    })();
+    const runWasm = async (): Promise<Blob> => {
+      try {
+        const res: any = await heic2any({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.9,
+        } as any);
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
+        return Array.isArray(res) ? res[0] : res;
+      } catch (firstErr) {
+        // If single conversion fails due to Live Photo / Portrait depth tracks, retry with multiple: true
+        const multiRes: any = await heic2any({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.9,
+          multiple: true,
+        } as any);
+
+        return Array.isArray(multiRes) ? multiRes[0] : multiRes;
+      }
+    };
+
+    const timeout = new Promise<never>((_, reject) =>
       setTimeout(
         () =>
           reject(
             new Error(
-              `"${file.name}" timed out. It may contain complex Apple ProRAW or HDR GainMap data.`
+              `"${file.name}" timed out after 90s. The image may exceed browser memory limits.`
             )
           ),
-        20000
+        90000
       )
     );
 
-    return Promise.race([conversionPromise, timeoutPromise]);
+    return Promise.race([runWasm(), timeout]);
   };
 
   const handleFiles = async (files: FileList | null) => {
@@ -91,37 +119,27 @@ export function HeicToJpg() {
 
     const fileList = Array.from(files);
     const results: ConvertedImage[] = [];
-    const failedNames: string[] = [];
+    const errors: string[] = [];
 
     for (let i = 0; i < fileList.length; i++) {
       if (abortRef.current) break;
 
       const file = fileList[i];
-      setProgressStatus(`Converting ${i + 1} of ${fileList.length}: ${file.name}...`);
+      setProgressStatus(`Decoding ${file.name} (${i + 1}/${fileList.length})`);
 
       try {
-        // Step 1: Try native decode first (sub-second)
-        let jpegBlob = await decodeNative(file);
+        const jpegBlob = await convertHeic(file);
+        const url = URL.createObjectURL(jpegBlob);
 
-        // Step 2: Fallback to heic2any if native isn't supported
-        if (!jpegBlob) {
-          jpegBlob = await decodeWithHeic2Any(file);
-        }
-
-        if (jpegBlob) {
-          const url = URL.createObjectURL(jpegBlob);
-          results.push({
-            name: file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-            url,
-            originalSize: file.size,
-            newSize: jpegBlob.size,
-          });
-        } else {
-          failedNames.push(file.name);
-        }
+        results.push({
+          name: file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+          url,
+          originalSize: file.size,
+          newSize: jpegBlob.size,
+        });
       } catch (err: any) {
         console.error(`Error converting ${file.name}:`, err);
-        failedNames.push(file.name);
+        errors.push(`${file.name}: ${err.message || 'Decoding failed'}`);
       }
     }
 
@@ -129,12 +147,8 @@ export function HeicToJpg() {
     setIsConverting(false);
     setProgressStatus('');
 
-    if (failedNames.length > 0) {
-      setErrorMsg(
-        `Could not convert ${failedNames.length} file(s): ${failedNames.join(
-          ', '
-        )}. Files may be corrupted or use an unsupported Apple HDR codec.`
-      );
+    if (errors.length > 0) {
+      setErrorMsg(errors.join(' | '));
     }
   };
 
@@ -160,7 +174,7 @@ export function HeicToJpg() {
         className="hidden"
         onChange={(e) => {
           handleFiles(e.target.files);
-          e.target.value = ''; // Reset input to allow re-uploading the same file
+          e.target.value = '';
         }}
       />
 
@@ -192,7 +206,7 @@ export function HeicToJpg() {
           Click or drop Apple HEIC / HEIF photos here
         </p>
         <p className="text-xs text-zinc-500 mt-1">
-          Auto-converts to standard high-res JPG & strips GPS / EXIF tags
+          Auto-converts to standard high-res JPG &amp; strips GPS / EXIF tags
         </p>
       </div>
 
@@ -201,12 +215,14 @@ export function HeicToJpg() {
         <span>Hardware-accelerated client decoding. Strips location &amp; device markers.</span>
       </div>
 
-      {/* Active Conversion State with Abort Option */}
+      {/* Active Converting Bar with Live Seconds & Cancel Button */}
       {isConverting && (
         <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-2.5 text-xs text-emerald-400 truncate">
             <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-            <span className="truncate">{progressStatus || 'Processing photos...'}</span>
+            <span className="truncate">
+              {progressStatus} ({elapsedSeconds}s)
+            </span>
           </div>
           <button
             type="button"
@@ -218,14 +234,14 @@ export function HeicToJpg() {
         </div>
       )}
 
-      {/* Error Notice */}
+      {/* Error Alert */}
       {errorMsg && (
         <div
           role="alert"
           className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300 mb-6"
         >
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <span>{errorMsg}</span>
+          <span className="break-all">{errorMsg}</span>
         </div>
       )}
 
