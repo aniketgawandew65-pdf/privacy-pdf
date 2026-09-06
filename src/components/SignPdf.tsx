@@ -20,6 +20,8 @@ import {
   Move,
   ZoomIn,
   ZoomOut,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
@@ -192,7 +194,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       setIsUnlocked(true);
       setTotalPages(doc.numPages);
       setCurrentPage(doc.numPages);
-      setSuccessMessage('Password verified! Preview unlocked.');
+      setSuccessMessage('Password verified! Document preview unlocked.');
     } catch (err: any) {
       setIsUnlocked(false);
       setErrorMessage('Incorrect password. Please verify and try again.');
@@ -312,15 +314,16 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       const url = canvas.toDataURL('image/png');
       setSignatureDataUrl(url);
 
+      // Place default on current page if not already added
       setPlacements((prev) => {
         if (prev[currentPage]) return prev;
         return {
           ...prev,
           [currentPage]: {
-            xPercent: 0.65,
-            yPercent: 0.82,
-            widthPercent: 0.26,
-            heightPercent: 0.10,
+            xPercent: 0.62,
+            yPercent: 0.78,
+            widthPercent: 0.28,
+            heightPercent: 0.11,
           },
         };
       });
@@ -431,6 +434,28 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
+  // Explicit Add to This Page action
+  const handleAddToThisPage = () => {
+    setPlacements((prev) => ({
+      ...prev,
+      [currentPage]: {
+        xPercent: 0.62,
+        yPercent: 0.78,
+        widthPercent: 0.28,
+        heightPercent: 0.11,
+      },
+    }));
+  };
+
+  // Explicit Remove from This Page action
+  const handleRemoveFromThisPage = () => {
+    setPlacements((prev) => ({
+      ...prev,
+      [currentPage]: null,
+    }));
+  };
+
+  // Copy signature position across all pages
   const handleCopyToAllPages = () => {
     const currentBox = placements[currentPage];
     if (!currentBox) return;
@@ -442,23 +467,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     setPlacements(newMap);
     setCopiedNotification(true);
     setTimeout(() => setCopiedNotification(false), 2000);
-  };
-
-  const toggleCurrentPageSignature = () => {
-    setPlacements((prev) => {
-      if (prev[currentPage]) {
-        return { ...prev, [currentPage]: null };
-      }
-      return {
-        ...prev,
-        [currentPage]: {
-          xPercent: 0.65,
-          yPercent: 0.82,
-          widthPercent: 0.26,
-          heightPercent: 0.10,
-        },
-      };
-    });
   };
 
   const handleApplySignature = async () => {
@@ -686,6 +694,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   <span>2. Position &amp; size signature on page</span>
                 </label>
 
+                {/* Copy To All Button */}
                 {totalPages > 1 && currentBox && (
                   <button
                     type="button"
@@ -707,7 +716,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 )}
               </div>
 
-              {/* Page Navigator */}
+              {/* Page Navigator with Explicit Add / Remove Controls */}
               <div className="flex items-center justify-between text-xs text-zinc-300 px-1">
                 <div className="flex items-center gap-2">
                   <button
@@ -729,20 +738,38 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={toggleCurrentPageSignature}
-                  className={`text-[11px] px-2 py-0.5 rounded font-medium transition cursor-pointer ${
-                    currentBox
-                      ? 'bg-zinc-800 text-zinc-300 hover:text-red-400'
-                      : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50'
-                  }`}
-                >
-                  {currentBox ? 'Remove from this page' : '+ Add to this page'}
-                </button>
+                {/* Dedicated Add or Placed/Remove Action */}
+                <div className="flex items-center gap-2">
+                  {!currentBox ? (
+                    <button
+                      type="button"
+                      onClick={handleAddToThisPage}
+                      className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg font-semibold bg-emerald-500 hover:bg-emerald-400 text-black transition cursor-pointer shadow-md shadow-emerald-500/20"
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      <span>Add to this page</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span className="flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded font-medium">
+                        <Check className="w-3 h-3 text-emerald-400 stroke-[2.5]" />
+                        <span>Placed</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRemoveFromThisPage}
+                        className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-red-400 bg-zinc-800/80 hover:bg-zinc-800 px-2 py-0.5 rounded transition cursor-pointer"
+                        title="Remove signature from this page"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Outer Viewport Frame with Floating Zoom Controls */}
+              {/* Document Surface & Zoom Viewport */}
               <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-hidden shadow-inner">
                 {isLoadingPage && (
                   <div className="absolute inset-0 bg-zinc-950/60 z-30 flex items-center justify-center backdrop-blur-xs">
@@ -750,8 +777,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   </div>
                 )}
 
-                {/* Scrollable Viewport with generous 2D padding */}
-                <div className="overflow-auto min-h-[420px] max-h-[620px] p-8 sm:p-14 text-center">
+                {/* 2D Scrollable Document Canvas Area */}
+                <div className="overflow-auto min-h-[420px] max-h-[620px] p-6 sm:p-10 text-center">
                   <div
                     style={{
                       width: `${displayWidth}px`,
@@ -773,7 +800,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                       {currentBox && (
                         <div
                           onMouseDown={handleSignatureBoxMouseDown}
-                          className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move flex items-center justify-center shadow-lg select-none group"
+                          className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move flex items-center justify-center shadow-lg select-none group z-20"
                           style={{
                             left: `${currentBox.xPercent * 100}%`,
                             top: `${currentBox.yPercent * 100}%`,
@@ -787,10 +814,12 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                             className="w-full h-full object-contain pointer-events-none"
                           />
 
+                          {/* Drag indicator in top-left */}
                           <div className="absolute top-0.5 left-0.5 p-0.5 bg-emerald-600 rounded-xs text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">
                             <Move className="w-2.5 h-2.5" />
                           </div>
 
+                          {/* Bottom-Right Resize Handle */}
                           <div
                             onMouseDown={handleResizeHandleMouseDown}
                             className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize shadow-md z-20 hover:scale-125 transition-transform"
@@ -802,7 +831,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   </div>
                 </div>
 
-                {/* Bottom-Right Floating Zoom Controls */}
+                {/* Floating Zoom Bar Pinned to Bottom-Right */}
                 <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg shadow-2xl z-30">
                   <button
                     type="button"
