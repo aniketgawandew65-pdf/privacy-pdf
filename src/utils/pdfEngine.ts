@@ -3249,6 +3249,17 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
   const fontBold = await pdfDoc.embedFont(boldFontName);
   const fontItalic = await pdfDoc.embedFont(italicFontName);
 
+  // Sanitizes emojis, smart quotes, dashes, and unprintable box symbols (▯) to prevent WinAnsi crashes
+  const sanitizeText = (input: string): string => {
+    return input
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/[\u2022\u25E6\u2023\u2219]/g, '-')
+      .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ');
+  };
+
   let currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
   let currentY = pageHeight - margin - baseFontSize;
 
@@ -3258,30 +3269,30 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
   for (let r = 0; r < rawLines.length; r++) {
     const rawLine = rawLines[r];
 
-    // 1. Detect block and inline alignment tags
-    let currentAlign: 'left' | 'center' | 'right' = activeAlign;
+    // 1. Detect block and multi-line alignment
     if (/align=["']?center["']?/i.test(rawLine) || /<center>/i.test(rawLine)) {
-      currentAlign = 'center';
+      activeAlign = 'center';
     } else if (/align=["']?right["']?/i.test(rawLine)) {
-      currentAlign = 'right';
+      activeAlign = 'right';
     } else if (/align=["']?left["']?/i.test(rawLine)) {
-      currentAlign = 'left';
+      activeAlign = 'left';
     }
+
+    const currentLineAlign = activeAlign;
 
     if (/<\/div>|<\/center>/i.test(rawLine)) {
       activeAlign = 'left';
-    } else {
-      activeAlign = currentAlign;
     }
 
-    // 2. Strip HTML alignment markup so raw tags never render on the PDF
-    let clean = rawLine
-      .replace(/<div[^>]*>/gi, '')
-      .replace(/<\/div>/gi, '')
-      .replace(/<\/?center>/gi, '')
-      .trim();
+    // 2. Strip HTML tags and sanitize encoding
+    let clean = sanitizeText(
+      rawLine
+        .replace(/<div[^>]*>/gi, '')
+        .replace(/<\/div>/gi, '')
+        .replace(/<\/?center>/gi, '')
+    ).trim();
 
-    // Handle blank lines
+    // Blank line spacing
     if (!clean) {
       currentY -= baseFontSize * 0.9;
       if (currentY < margin) {
@@ -3291,7 +3302,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       continue;
     }
 
-    // 3. Parse Heading hierarchies (H1, H2, H3) and Bullet points
+    // 3. Parse Headings & Bullets
     let isH1 = false;
     let isH2 = false;
     let isH3 = false;
@@ -3311,7 +3322,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       clean = clean.substring(2).trim();
     }
 
-    // 4. Parse inline formatting (Underline, Bold, Italic)
+    // 4. Parse inline formatting
     const isUnderline = /<\/?u>/i.test(clean);
     clean = clean.replace(/<\/?u>/gi, '');
 
@@ -3344,7 +3355,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       clean = clean.replace(/\*/g, '');
     }
 
-    // 5. Wrap lines to page width
+    // 5. Word wrap
     const maxLineWidth = isBullet ? contentWidth - 18 : contentWidth;
     const words = clean.split(/\s+/);
     const wrappedLines: string[] = [];
@@ -3361,7 +3372,7 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
     }
     if (cur) wrappedLines.push(cur);
 
-    // 6. Draw text using currentAlign (resolves unused variable error)
+    // 6. Draw lines
     const lineHeight = lineSize * 1.38;
 
     for (let idx = 0; idx < wrappedLines.length; idx++) {
@@ -3377,17 +3388,18 @@ export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8A
       if (isBullet) {
         posX = margin + 18;
         if (idx === 0) {
-          currentPage.drawText('•', {
+          // Native vector rectangle bullet avoids WinAnsi bullet and drawCircle crashes
+          currentPage.drawRectangle({
             x: margin + 4,
-            y: currentY,
-            size: lineSize,
-            font: fontBold,
-            color: rgb(0.1, 0.1, 0.1),
+            y: currentY + lineSize * 0.25,
+            width: 3.5,
+            height: 3.5,
+            color: rgb(0.15, 0.15, 0.15),
           });
         }
-      } else if (currentAlign === 'center') {
+      } else if (currentLineAlign === 'center') {
         posX = (pageWidth - textWidth) / 2;
-      } else if (currentAlign === 'right') {
+      } else if (currentLineAlign === 'right') {
         posX = pageWidth - margin - textWidth;
       }
 
