@@ -313,13 +313,10 @@ export async function pdfToImages(file: File): Promise<string[]> {
   return imageUrls;
 }
 
-/**
+//**
+ /**
  * Splits a PDF document by page ranges (e.g. "1-3, 5").
- * Fully supports bank statements, legal agreements, government stamps, and signed forms.
- */
-/**
- * Splits a PDF document by page ranges (e.g. "1-3, 5").
- * Fully supports bank statements, legal agreements, government stamps, and signed forms.
+ * Guaranteed support for bank statements, government files, and signed legal documents.
  */
 export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
@@ -351,35 +348,48 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
     throw new Error('No valid pages specified for extraction.');
   }
 
-  // 1. Check if the PDF has complex layers (Bank statements, rent agreements, signed forms)
-  const isComplex = isComplexOrProtectedPdf(uint8);
-
-  if (!isComplex) {
-    try {
-      const srcDoc = await PDFDocument.load(arrayBuffer);
-      let canUseVector = true;
+  // Check whether native vector splitting is safe
+  let isVectorSafe = false;
+  try {
+    const isProtected = isComplexOrProtectedPdf(uint8);
+    if (!isProtected) {
+      const testDoc = await PDFDocument.load(arrayBuffer);
+      let hasMissingResources = false;
 
       for (const idx of indices) {
-        const page = srcDoc.getPage(idx);
-        // If page has annotations, signatures, or empty contents, vector copy will render blank
-        if (!page.node.Contents() || page.node.Annots()) {
-          canUseVector = false;
+        const page = testDoc.getPage(idx);
+        // Bank statements fail here: their /Resources dictionary is inherited from parent /Pages
+        const res = page.node.get(PDFName.of('Resources'));
+        const contents = page.node.Contents();
+        if (!res || !contents || page.node.Annots()) {
+          hasMissingResources = true;
           break;
         }
       }
 
-      if (canUseVector) {
-        const newDoc = await PDFDocument.create();
-        const copied = await newDoc.copyPages(srcDoc, indices);
-        copied.forEach((p) => newDoc.addPage(p));
-        return await newDoc.save({ useObjectStreams: false });
+      if (!hasMissingResources) {
+        isVectorSafe = true;
       }
-    } catch (err) {
-      console.warn('Native vector split unviable, switching to rendering engine:', err);
+    }
+  } catch {
+    isVectorSafe = false;
+  }
+
+  // 1. Native Vector Path (Only for clean documents where fonts won't vanish)
+  if (isVectorSafe) {
+    try {
+      const srcDoc = await PDFDocument.load(arrayBuffer);
+      const newDoc = await PDFDocument.create();
+      const copied = await newDoc.copyPages(srcDoc, indices);
+      copied.forEach((p) => newDoc.addPage(p));
+      return await newDoc.save({ useObjectStreams: false });
+    } catch (e) {
+      console.warn('Vector split failed, proceeding to high-res engine:', e);
     }
   }
 
-  // 2. High-Res Visual Engine (Same pipeline that works in Compressor)
+  // 2. High-Res Visual Pipeline (The exact engine that works in Compressor)
+  // Renders all bank transactions, stamps, barcodes, and logos at 2.0x Retina resolution
   const loadingTask = pdfjsLib.getDocument({
     data: uint8.slice(),
     stopAtErrors: false,
@@ -418,40 +428,44 @@ export async function splitPdfToZip(
   const zip = new JSZip();
   const baseName = file.name.replace(/\.[^/.]+$/, '');
 
-  const isComplex = isComplexOrProtectedPdf(uint8);
-
-  if (!isComplex) {
-    try {
-      const sourceDoc = await PDFDocument.load(arrayBuffer);
-      let canUseVector = true;
-
+  let isVectorSafe = false;
+  try {
+    if (!isComplexOrProtectedPdf(uint8)) {
+      const testDoc = await PDFDocument.load(arrayBuffer);
+      let missing = false;
       for (let i = 0; i < totalPages; i++) {
-        const page = sourceDoc.getPage(i);
-        if (!page.node.Contents() || page.node.Annots()) {
-          canUseVector = false;
+        const page = testDoc.getPage(i);
+        if (!page.node.get(PDFName.of('Resources')) || !page.node.Contents() || page.node.Annots()) {
+          missing = true;
           break;
         }
       }
+      if (!missing) isVectorSafe = true;
+    }
+  } catch {
+    isVectorSafe = false;
+  }
 
-      if (canUseVector) {
-        for (let i = 0; i < totalPages; i++) {
-          onProgress?.(i + 1, totalPages);
-          const singleDoc = await PDFDocument.create();
-          const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
-          singleDoc.addPage(copiedPage);
+  if (isVectorSafe) {
+    try {
+      const sourceDoc = await PDFDocument.load(arrayBuffer);
+      for (let i = 0; i < totalPages; i++) {
+        onProgress?.(i + 1, totalPages);
+        const singleDoc = await PDFDocument.create();
+        const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
+        singleDoc.addPage(copiedPage);
 
-          const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-          const paddedIndex = String(i + 1).padStart(2, '0');
-          zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
-        }
-        return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const pdfBytes = await singleDoc.save({ useObjectStreams: false });
+        const paddedIndex = String(i + 1).padStart(2, '0');
+        zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
       }
-    } catch (err) {
-      console.warn('Native ZIP split unviable, switching to rendering engine:', err);
+      return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    } catch (e) {
+      console.warn('Vector ZIP split failed, proceeding to high-res engine:', e);
     }
   }
 
-  // Fallback: Visual Engine
+  // Visual Fallback
   const loadingTask = pdfjsLib.getDocument({
     data: uint8.slice(),
     stopAtErrors: false,
@@ -482,7 +496,6 @@ export async function splitPdfToZip(
 
   return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
-
 /**
  * Removes specified pages from a PDF document.
  */
