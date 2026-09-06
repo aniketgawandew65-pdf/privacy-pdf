@@ -710,58 +710,72 @@ export async function addPageNumbersToPDF(
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
 
-  let pdfDoc: PDFDocument;
+  // 1. Load source doc (bypassing permissions)
+  let srcDoc: PDFDocument;
   try {
-    pdfDoc = await PDFDocument.load(arrayBuffer);
+    srcDoc = await PDFDocument.load(arrayBuffer);
   } catch {
-    pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   }
 
-  const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pages = pdfDoc.getPages();
-  const totalPages = pages.length;
+  // 2. Create a clean, uncorrupted master document
+  const outDoc = await PDFDocument.create();
+  const helveticaBold = await outDoc.embedFont(StandardFonts.HelveticaBold);
+  const totalPages = srcDoc.getPageCount();
+
+  // 3. Embed all pages as clean visual templates
+  const embeddedPages = await outDoc.embedPages(srcDoc.getPages());
 
   for (let i = 0; i < totalPages; i++) {
-    const page = pages[i];
-    
-    // Get actual visible viewport box (handles custom crop/bleed boxes in legal & bank docs)
-    const box = page.getCropBox() || page.getMediaBox();
-    const pageNumberText = `${i + 1} of ${totalPages}`;
-    const textSize = 11;
-    const textWidth = helveticaFont.widthOfTextAtSize(pageNumberText, textSize);
+    const embeddedPage = embeddedPages[i];
+    const { width, height } = embeddedPage;
 
-    // Calculate relative coordinates within the real visible bounds
-    let xPosition = box.x + (box.width / 2) - (textWidth / 2);
-    if (position === 'bottom-right') {
-      xPosition = box.x + box.width - textWidth - 36;
-    }
+    // Create a new standard page matching original dimensions exactly
+    const page = outDoc.addPage([width, height]);
 
-    // Place text comfortably within visible margins (32 points above the bottom visible edge)
-    const yPosition = box.y + 32;
-
-    // Draw solid semi-transparent badge background so text is NEVER hidden behind scans or footers
-    const paddingX = 8;
-    const paddingY = 4;
-    page.drawRectangle({
-      x: xPosition - paddingX,
-      y: yPosition - paddingY,
-      width: textWidth + (paddingX * 2),
-      height: textSize + (paddingY * 2),
-      color: rgb(1, 1, 1),
-      opacity: 0.85,
+    // Draw the original content safely onto the new page
+    page.drawPage(embeddedPage, {
+      x: 0,
+      y: 0,
+      width,
+      height,
     });
 
-    // Draw bold black numbering on top of the badge
+    // 4. Draw page number directly on top of the clean layer
+    const pageNumberText = `${i + 1} of ${totalPages}`;
+    const textSize = 11;
+    const textWidth = helveticaBold.widthOfTextAtSize(pageNumberText, textSize);
+
+    let xPosition = (width / 2) - (textWidth / 2);
+    if (position === 'bottom-right') {
+      xPosition = width - textWidth - 36;
+    }
+    const yPosition = 24;
+
+    // Background pill/badge so it stands out over footers and black scan edges
+    const padX = 8;
+    const padY = 4;
+    page.drawRectangle({
+      x: xPosition - padX,
+      y: yPosition - padY,
+      width: textWidth + (padX * 2),
+      height: textSize + (padY * 2),
+      color: rgb(1, 1, 1),
+      opacity: 0.9,
+    });
+
+    // Sharp black text on the top layer
     page.drawText(pageNumberText, {
       x: xPosition,
       y: yPosition,
       size: textSize,
-      font: helveticaFont,
+      font: helveticaBold,
       color: rgb(0, 0, 0),
     });
   }
 
-  return await pdfDoc.save({
+  // Save with traditional uncompressed xref tables for WPS Office
+  return await outDoc.save({
     useObjectStreams: false,
     addDefaultPage: false,
   });
