@@ -738,82 +738,74 @@ export async function extractTextFromPDF(
   file: File,
   onProgress?: (status: string) => void
 ): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const pdfDoc = await loadingTask.promise;
+  const totalPages = pdfDoc.numPages;
+
+  let fullDigitalText = '';
+
+  // 1. Instant check for embedded digital text
+  for (let i = 1; i <= totalPages; i++) {
+    onProgress?.(`Reading digital text: page ${i} of ${totalPages}...`);
+    const page = await pdfDoc.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item: any) => item.str || '')
+      .filter(Boolean)
+      .join(' ');
+
+    if (pageText.trim()) {
+      fullDigitalText += `--- Page ${i} ---\n${pageText}\n\n`;
+    }
+    page.cleanup();
+  }
+
+  // If digital text exists, return it immediately
+  if (fullDigitalText.trim()) {
+    return fullDigitalText.trim();
+  }
+
+  // 2. Automatic Offline OCR for scanned agreements & flat image PDFs
+  onProgress?.('Scanned document detected. Starting offline OCR engine...');
+  const worker = await createWorker('eng', 1, {
+    workerPath: '/tessdata/worker.min.js',
+    corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+    langPath: '/tessdata',
+    gzip: true,
+  });
+
+  let fullOcrText = '';
+
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
-    const pdfDoc = await loadingTask.promise;
-    const totalPages = pdfDoc.numPages;
-
-    let fullDigitalText = '';
-
-    // Step 1: Attempt digital layer extraction
     for (let i = 1; i <= totalPages; i++) {
-      onProgress?.(`Checking digital text: page ${i} of ${totalPages}...`);
+      onProgress?.(`Running OCR on page ${i} of ${totalPages}...`);
       const page = await pdfDoc.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str || '')
-        .filter(Boolean)
-        .join(' ');
+      const viewport = page.getViewport({ scale: 1.5 });
 
-      if (pageText.trim()) {
-        fullDigitalText += `--- Page ${i} ---\n${pageText}\n\n`;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+        const { data } = await worker.recognize(canvas);
+
+        if (data?.text?.trim()) {
+          fullOcrText += `--- Page ${i} (Scanned) ---\n${data.text.trim()}\n\n`;
+        }
       }
+
+      canvas.width = 0;
+      canvas.height = 0;
       page.cleanup();
     }
-
-    // If selectable digital text was found, return it immediately
-    if (fullDigitalText.trim()) {
-      return fullDigitalText.trim();
-    }
-
-    // Step 2: Automatic OCR Fallback using 100% local assets
-    onProgress?.('Scanned PDF detected. Initializing offline OCR engine...');
-    const worker = await createWorker('eng', 1, {
-      workerPath: '/tessdata/worker.min.js',
-      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-      langPath: '/tessdata',
-      gzip: true,
-    });
-
-    let fullOcrText = '';
-
-    try {
-      for (let i = 1; i <= totalPages; i++) {
-        onProgress?.(`Running OCR on scanned page ${i} of ${totalPages}...`);
-        const page = await pdfDoc.getPage(i);
-        const viewport = page.getViewport({ scale: 1.5 }); // 1.5 scale balances high OCR accuracy and low memory usage
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
-
-        if (ctx) {
-          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-          const { data } = await worker.recognize(canvas);
-
-          if (data?.text?.trim()) {
-            fullOcrText += `--- Page ${i} (OCR) ---\n${data.text.trim()}\n\n`;
-          }
-        }
-
-        // Immediately free canvas memory buffer
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
-      }
-    } finally {
-      await worker.terminate();
-    }
-
-    return fullOcrText.trim() || 'No text could be identified in this scanned document.';
-  } catch (err: any) {
-    console.error('PDF extraction error:', err);
-    throw new Error(
-      err.message || 'Failed to read this PDF. The document may be corrupted or password-protected.'
-    );
+  } finally {
+    await worker.terminate();
   }
+
+  return fullOcrText.trim() || 'No readable text could be identified in this document.';
 }
 
 export interface PDFMetadata {
