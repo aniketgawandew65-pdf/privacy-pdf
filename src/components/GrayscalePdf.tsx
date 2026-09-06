@@ -9,6 +9,9 @@ import {
   Printer,
   Sliders,
   Eye,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { convertToGrayscalePDF } from '../utils/pdfEngine';
@@ -26,6 +29,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
@@ -39,6 +43,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     if (!file) {
       setPreviewUrl(null);
       setTotalPages(0);
+      setZoomLevel(1);
       revokeDownloadUrl();
       setErrorMessage(null);
       return;
@@ -57,7 +62,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
 
         setTotalPages(pdf.numPages);
         const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 0.8 });
+        const viewport = page.getViewport({ scale: 1.2 });
 
         const canvas = document.createElement('canvas');
         canvas.width = Math.floor(viewport.width);
@@ -83,7 +88,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
 
           ctx.putImageData(imgData, 0, 0);
           if (isMounted) {
-            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.85));
+            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.9));
           }
         }
         canvas.width = 0;
@@ -132,8 +137,21 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
   const handleClear = () => {
     onFileChange(null);
     setPreviewUrl(null);
+    setZoomLevel(1);
     revokeDownloadUrl();
     setErrorMessage(null);
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel((prev) => Math.min(2.5, Number((prev + 0.25).toFixed(2))));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => Math.max(0.5, Number((prev - 0.25).toFixed(2))));
+  };
+
+  const handleZoomReset = () => {
+    setZoomLevel(1);
   };
 
   return (
@@ -161,7 +179,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Printer className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
-          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to convert to B&W / Grayscale</p>
+          <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to convert to B&amp;W / Grayscale</p>
           <p className="text-xs text-zinc-500 mt-1">Optimize for printing, toner saving, and legal filings</p>
           <input
             ref={fileInputRef}
@@ -193,7 +211,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
             </div>
             <button
               onClick={handleClear}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors cursor-pointer"
               title="Remove file"
             >
               <X className="w-4 h-4" />
@@ -208,7 +226,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
                 setMode('grayscale');
                 revokeDownloadUrl();
               }}
-              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 mode === 'grayscale'
                   ? 'border-emerald-500 bg-emerald-950/40 text-emerald-400'
                   : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700'
@@ -223,14 +241,14 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
                 setMode('pure-bw');
                 revokeDownloadUrl();
               }}
-              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+              className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 mode === 'pure-bw'
                   ? 'border-emerald-500 bg-emerald-950/40 text-emerald-400'
                   : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700'
               }`}
             >
               <Printer className="w-4 h-4" />
-              <span>Pure B&W (Photocopy)</span>
+              <span>Pure B&amp;W (Photocopy)</span>
             </button>
           </div>
 
@@ -258,19 +276,68 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
             </div>
           )}
 
-          {/* Real-time Page 1 Preview Card */}
+          {/* Real-time Page 1 Preview Card with Zoom Controls & 4-Way Scroll Box */}
           {previewUrl && (
-            <div className="p-3 bg-zinc-950/60 rounded-xl border border-zinc-800 flex flex-col items-center gap-2">
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400 self-start">
-                <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Page 1 Live Preview:</span>
+            <div className="p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-zinc-300 font-medium">
+                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Page 1 Live Preview</span>
+                </div>
+
+                {/* Zoom Controls Bar */}
+                <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
+                  <button
+                    type="button"
+                    onClick={handleZoomOut}
+                    disabled={zoomLevel <= 0.5}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                    title="Zoom Out (-25%)"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[11px] font-mono text-zinc-300 px-1.5 select-none min-w-[42px] text-center">
+                    {Math.round(zoomLevel * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleZoomIn}
+                    disabled={zoomLevel >= 2.5}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                    title="Zoom In (+25%)"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="w-[1px] h-3 bg-zinc-800 mx-0.5" />
+                  <button
+                    type="button"
+                    onClick={handleZoomReset}
+                    disabled={zoomLevel === 1}
+                    className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/80 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                    title="Reset to 100%"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="w-36 aspect-[3/4] bg-zinc-900 rounded border border-zinc-700 overflow-hidden flex items-center justify-center">
-                {isLoadingPreview ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
-                ) : (
-                  <img src={previewUrl} alt="Preview" className="w-full h-full object-contain" />
-                )}
+
+              {/* 4-Way Scroll / Pan Preview Window */}
+              <div className="w-full h-80 bg-zinc-950/90 rounded-lg border border-zinc-800/90 overflow-auto scrollbar-thin p-4 shadow-inner flex">
+                <div className="min-w-full min-h-full m-auto flex items-center justify-center">
+                  {isLoadingPreview ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                  ) : (
+                    <img
+                      src={previewUrl}
+                      alt="Grayscale Preview"
+                      style={{
+                        width: `${Math.round(200 * zoomLevel)}px`,
+                        maxWidth: 'none',
+                      }}
+                      className="rounded border border-zinc-700/80 shadow-2xl object-contain transition-all duration-150 select-none"
+                    />
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -288,7 +355,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
             <button
               onClick={handleConvert}
               disabled={isProcessing}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               {isProcessing ? (
                 <>
@@ -322,3 +389,5 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     </div>
   );
 };
+
+export default GrayscalePdf;
