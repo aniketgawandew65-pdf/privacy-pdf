@@ -56,6 +56,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const viewportContainerRef = useRef<HTMLDivElement>(null);
   const pdfDocRef = useRef<any>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
@@ -104,7 +105,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  // Render current page at high DPI matching exact zoom factor
+  // Render current page: canvas scales with zoomLevel so 250% actually enlarges the document
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
@@ -156,7 +157,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     return { x, y };
   }, []);
 
-  // Keyboard navigation: Arrow keys to nudge, Delete/Backspace to remove
+  // Keyboard controls: Arrow keys to nudge, Delete/Backspace to remove selected box
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (selectedIndex === null) return;
@@ -197,7 +198,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIndex, currentPage, pageRedactions]);
 
-  // Window-level mouse interaction for moving, drawing, and 8-point resizing
+  // Global mouse handlers for drawing, moving, and 8-point resizing
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
       const state = dragStateRef.current;
@@ -215,8 +216,8 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         setActiveDrawRect({ x, y, width, height });
       } else if (state.mode === 'move' && state.index !== undefined) {
         const initial = state.initialRect;
-        let nextX = Math.max(0, Math.min(1 - initial.width, initial.x + dx));
-        let nextY = Math.max(0, Math.min(1 - initial.height, initial.y + dy));
+        const nextX = Math.max(0, Math.min(1 - initial.width, initial.x + dx));
+        const nextY = Math.max(0, Math.min(1 - initial.height, initial.y + dy));
 
         setPageRedactions((prev) => {
           const updated = [...(prev[currentPage] || [])];
@@ -270,7 +271,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               [currentPage]: [...list, activeDrawRect],
             };
           });
-          setSelectedIndex((prevList) => (prevList !== null ? prevList : (pageRedactions[currentPage] || []).length));
+          setSelectedIndex((prev) => (prev !== null ? prev : (pageRedactions[currentPage] || []).length));
         }
       }
 
@@ -287,7 +288,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   }, [getNormalizedCoords, activeDrawRect, currentPage, pageRedactions]);
 
-  // Start drawing on blank background
   const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
     const coords = getNormalizedCoords(e.clientX, e.clientY);
@@ -302,7 +302,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     setActiveDrawRect({ x: coords.x, y: coords.y, width: 0.005, height: 0.005 });
   };
 
-  // Start dragging/moving an existing blackout box
   const handleBoxMouseDown = (e: React.MouseEvent<HTMLDivElement>, index: number) => {
     e.stopPropagation();
     if (isLoadingPage || isProcessing || downloadUrl) return;
@@ -320,7 +319,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  // Start resizing via an 8-point handle
   const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>, index: number, handle: ResizeHandle) => {
     e.stopPropagation();
     if (isLoadingPage || isProcessing || downloadUrl) return;
@@ -379,7 +377,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
   const totalRedactionsCount = Object.values(pageRedactions).reduce((sum, r) => sum + r.length, 0);
 
-  // Scaled dimensions that drive genuine zoom
+  // Exact rendered dimensions driving authentic zoom
   const displayWidth = Math.round(pageDimensions.width * zoomLevel);
   const displayHeight = Math.round(pageDimensions.height * zoomLevel);
 
@@ -422,7 +420,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         </div>
       ) : (
         <div className="space-y-4 text-left select-none">
-          {/* Top File Bar */}
+          {/* File Card */}
           <div className="flex items-center justify-between p-3 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
@@ -444,7 +442,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             </button>
           </div>
 
-          {/* Page Navigation & Reset Controls */}
+          {/* Page Switcher & Reset Controls */}
           <div className="flex items-center justify-between text-xs text-zinc-300 px-1">
             <div className="flex items-center gap-2">
               <button
@@ -487,7 +485,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                   className="flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300 transition cursor-pointer font-medium"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Selected</span>
+                  <span>Delete Box</span>
                 </button>
               )}
 
@@ -503,131 +501,145 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             </div>
           </div>
 
-          {/* Zoomable Viewport with Real Overflow Scroll */}
-          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto min-h-[380px] max-h-[620px] flex">
+          {/* Outer Viewport Frame: Fixed relative wrapper */}
+          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-hidden shadow-inner">
             {isLoadingPage && (
               <div className="absolute inset-0 bg-zinc-950/60 z-40 flex items-center justify-center backdrop-blur-xs">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            {/* Document Surface Container */}
+            {/* Scrollable Viewport with generous padding for full 2D movement */}
             <div
-              style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
-              className="relative shrink-0 shadow-2xl m-auto"
+              ref={viewportContainerRef}
+              className="overflow-auto min-h-[420px] max-h-[620px] p-8 sm:p-16 text-center"
             >
-              <canvas
-                ref={canvasRef}
-                style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
-                className="block rounded pointer-events-none"
-              />
-
+              {/* Centered Document Wrapper */}
               <div
-                ref={overlayRef}
-                style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
-                onMouseDown={handleOverlayMouseDown}
-                className="absolute inset-0 cursor-crosshair z-10"
+                style={{
+                  width: `${displayWidth}px`,
+                  height: `${displayHeight}px`,
+                }}
+                className="relative inline-block text-left shadow-2xl bg-white rounded-xs align-middle"
               >
-                {currentRects.map((r, i) => {
-                  const isSelected = selectedIndex === i;
-                  return (
-                    <div
-                      key={i}
-                      onMouseDown={(e) => handleBoxMouseDown(e, i)}
-                      className={`absolute bg-black transition-shadow cursor-move ${
-                        isSelected ? 'ring-2 ring-emerald-400 shadow-xl z-30' : 'border border-zinc-700 shadow-md z-20'
-                      }`}
-                      style={{
-                        left: `${r.x * 100}%`,
-                        top: `${r.y * 100}%`,
-                        width: `${r.width * 100}%`,
-                        height: `${r.height * 100}%`,
-                      }}
-                    >
-                      {/* 8-Side Resize Handles for Active Box */}
-                      {isSelected && (
-                        <>
-                          {/* NW (Top-Left) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'nw')}
-                            className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
-                          />
-                          {/* N (Top-Center) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'n')}
-                            className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
-                          />
-                          {/* NE (Top-Right) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'ne')}
-                            className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
-                          />
-                          {/* E (Middle-Right) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'e')}
-                            className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
-                          />
-                          {/* SE (Bottom-Right) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'se')}
-                            className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
-                          />
-                          {/* S (Bottom-Center) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 's')}
-                            className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
-                          />
-                          {/* SW (Bottom-Left) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'sw')}
-                            className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
-                          />
-                          {/* W (Middle-Left) */}
-                          <div
-                            onMouseDown={(e) => handleResizeStart(e, i, 'w')}
-                            className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
-                          />
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+                <canvas
+                  ref={canvasRef}
+                  style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                  className="block rounded-xs pointer-events-none"
+                />
 
-                {/* Drawing Box Preview */}
-                {activeDrawRect && (
-                  <div
-                    className="absolute bg-black/80 border border-emerald-400 pointer-events-none z-30"
-                    style={{
-                      left: `${activeDrawRect.x * 100}%`,
-                      top: `${activeDrawRect.y * 100}%`,
-                      width: `${activeDrawRect.width * 100}%`,
-                      height: `${activeDrawRect.height * 100}%`,
-                    }}
-                  />
-                )}
+                <div
+                  ref={overlayRef}
+                  style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                  onMouseDown={handleOverlayMouseDown}
+                  className="absolute inset-0 cursor-crosshair z-10"
+                >
+                  {currentRects.map((r, i) => {
+                    const isSelected = selectedIndex === i;
+                    return (
+                      <div
+                        key={i}
+                        onMouseDown={(e) => handleBoxMouseDown(e, i)}
+                        className={`absolute bg-black transition-shadow cursor-move ${
+                          isSelected ? 'ring-2 ring-emerald-400 shadow-xl z-30' : 'border border-zinc-700 shadow-md z-20'
+                        }`}
+                        style={{
+                          left: `${r.x * 100}%`,
+                          top: `${r.y * 100}%`,
+                          width: `${r.width * 100}%`,
+                          height: `${r.height * 100}%`,
+                        }}
+                      >
+                        {/* 8-Side Resize Anchors */}
+                        {isSelected && (
+                          <>
+                            {/* NW (Top-Left) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'nw')}
+                              className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
+                            />
+                            {/* N (Top-Center) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'n')}
+                              className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
+                            />
+                            {/* NE (Top-Right) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'ne')}
+                              className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
+                            />
+                            {/* E (Middle-Right) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'e')}
+                              className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
+                            />
+                            {/* SE (Bottom-Right) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'se')}
+                              className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
+                            />
+                            {/* S (Bottom-Center) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 's')}
+                              className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
+                            />
+                            {/* SW (Bottom-Left) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'sw')}
+                              className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
+                            />
+                            {/* W (Middle-Left) */}
+                            <div
+                              onMouseDown={(e) => handleResizeStart(e, i, 'w')}
+                              className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
+                            />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Active Draw Rect Preview */}
+                  {activeDrawRect && (
+                    <div
+                      className="absolute bg-black/80 border border-emerald-400 pointer-events-none z-30"
+                      style={{
+                        left: `${activeDrawRect.x * 100}%`,
+                        top: `${activeDrawRect.y * 100}%`,
+                        width: `${activeDrawRect.width * 100}%`,
+                        height: `${activeDrawRect.height * 100}%`,
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Floating Zoom Controls */}
-            <div className="sticky bottom-3 left-full shrink-0 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-xl z-40 ml-2 mt-auto">
+            {/* Floating Zoom Bar pinned to bottom-right corner */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg shadow-2xl z-30">
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
                 disabled={zoomLevel <= 0.75}
                 className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
-                title="Zoom Out"
+                title="Zoom Out (-)"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-[10px] font-mono text-zinc-300 min-w-[38px] text-center">
+              <button
+                type="button"
+                onClick={() => setZoomLevel(1.0)}
+                className="text-[11px] font-mono font-medium text-zinc-300 hover:text-emerald-400 min-w-[42px] text-center transition cursor-pointer px-1 py-0.5 rounded hover:bg-zinc-800/60"
+                title="Reset to 100%"
+              >
                 {Math.round(zoomLevel * 100)}%
-              </span>
+              </button>
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.min(2.5, parseFloat((z + 0.25).toFixed(2))))}
                 disabled={zoomLevel >= 2.5}
                 className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
-                title="Zoom In"
+                title="Zoom In (+)"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
