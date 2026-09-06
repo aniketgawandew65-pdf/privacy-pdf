@@ -1996,7 +1996,6 @@ export async function addBatesNumberingToPDF(
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
   const newPdfDoc = await PDFDocument.create();
-  const font = await newPdfDoc.embedFont(StandardFonts.HelveticaBold);
 
   for (let i = 1; i <= numPages; i++) {
     if (options.onProgress) {
