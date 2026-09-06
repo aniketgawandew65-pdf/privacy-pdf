@@ -1918,88 +1918,109 @@ export type BatesPosition =
 
 export interface BatesOptions {
   prefix?: string;
-  startNumber?: number;
-  digits?: number;
   suffix?: string;
-  position?: BatesPosition;
-  fontSize?: number;
-  onProgress?: (current: number, total: number) => void;
+  startNumber: number;
+  totalDigits: number;
+  fontSize: number;
+  position: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
 }
 
-export async function addBatesNumbersToPDF(
+export async function addBatesNumberingToPDF(
   file: File,
-  options: BatesOptions = {}
+  options: BatesOptions
 ): Promise<Uint8Array> {
-  const {
-    prefix = '',
-    startNumber = 1,
-    digits = 6,
-    suffix = '',
-    position = 'bottom-right',
-    fontSize = 10,
-    onProgress,
-  } = options;
+  const bytes = await file.arrayBuffer();
+  const uint8 = new Uint8Array(bytes);
 
-  const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const pages = pdfDoc.getPages();
-  const totalPages = pages.length;
+  const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+  const pdfDoc = await loadingTask.promise;
+  const numPages = pdfDoc.numPages;
+  const newPdfDoc = await PDFDocument.create();
 
-  for (let i = 0; i < totalPages; i++) {
-    onProgress?.(i + 1, totalPages);
-    const page = pages[i];
-    const { width, height } = page.getSize();
+  const prefix = options.prefix || '';
+  const suffix = options.suffix || '';
+  const startNum = options.startNumber || 1;
+  const digits = Math.max(1, options.totalDigits || 6);
+  const fontSize = options.fontSize || 10;
+  const position = options.position || 'bottom-right';
 
-    const currentNum = startNumber + i;
-    const paddedNumber = String(currentNum).padStart(digits, '0');
-    const batesText = `${prefix}${paddedNumber}${suffix}`;
+  for (let i = 1; i <= numPages; i++) {
+    const pageNumStr = String(startNum + (i - 1)).padStart(digits, '0');
+    const stampText = `${prefix}${pageNumStr}${suffix}`;
 
-    const textWidth = font.widthOfTextAtSize(batesText, fontSize);
-    const textHeight = fontSize;
-    const margin = 28;
+    const page = await pdfDoc.getPage(i);
+    // Render at high-def 2.0 scale for crisp print quality
+    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
 
-    let x = margin;
-    let y = margin;
+    const compositeCanvas = document.createElement('canvas');
+    compositeCanvas.width = pWidth;
+    compositeCanvas.height = pHeight;
+    const ctx = compositeCanvas.getContext('2d');
 
-    switch (position) {
-      case 'top-left':
-        x = margin;
-        y = height - margin - textHeight;
-        break;
-      case 'top-center':
-        x = (width - textWidth) / 2;
-        y = height - margin - textHeight;
-        break;
-      case 'top-right':
-        x = width - margin - textWidth;
-        y = height - margin - textHeight;
-        break;
-      case 'bottom-left':
-        x = margin;
-        y = margin;
-        break;
-      case 'bottom-center':
-        x = (width - textWidth) / 2;
-        y = margin;
-        break;
-      case 'bottom-right':
-      default:
-        x = width - margin - textWidth;
-        y = margin;
-        break;
+    if (ctx) {
+      const pageImg = new Image();
+      await new Promise<void>((resolve) => {
+        pageImg.onload = () => {
+          ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
+          resolve();
+        };
+        pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
+      });
+
+      ctx.save();
+      
+      // Scale font size proportionally to high-def canvas resolution
+      const scaleNormalization = pWidth / 540;
+      const finalFontSize = fontSize * scaleNormalization;
+
+      ctx.font = `bold ${finalFontSize}px Helvetica, Arial, sans-serif`;
+      ctx.fillStyle = '#000000';
+
+      const metrics = ctx.measureText(stampText);
+      const textWidth = metrics.width;
+      const textHeight = finalFontSize;
+
+      // Margins from page edges
+      const marginX = pWidth * 0.06;
+      const marginY = pHeight * 0.05;
+
+      let posX = marginX;
+      let posY = pHeight - marginY; // Default bottom-left canvas coordinates (Y inverted from top)
+
+      // Calculate X coordinate
+      if (position.includes('center')) {
+        posX = (pWidth - textWidth) / 2;
+      } else if (position.includes('right')) {
+        posX = pWidth - textWidth - marginX;
+      }
+
+      // Calculate Y coordinate
+      if (position.includes('top')) {
+        posY = marginY + textHeight;
+      }
+
+      // Draw solid white background pill behind stamp for readability over dark backgrounds
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fillRect(posX - 4, posY - textHeight - 2, textWidth + 8, textHeight + 4);
+
+      // Draw Bates text
+      ctx.fillStyle = '#000000';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(stampText, posX, posY);
+
+      ctx.restore();
+
+      const stampedJpg = compositeCanvas.toDataURL('image/jpeg', 0.95);
+      const b64 = stampedJpg.split(',')[1];
+      const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const finalPageImg = await newPdfDoc.embedJpg(stampedBytes);
+
+      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
+      newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
     }
-
-    page.drawText(batesText, {
-      x,
-      y,
-      size: fontSize,
-      font,
-      color: rgb(0.15, 0.15, 0.15),
-    });
   }
 
-  return await pdfDoc.save({ useObjectStreams: true });
+  return await newPdfDoc.save({ useObjectStreams: false });
 }
 
 export interface ExtractedImage {
