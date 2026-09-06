@@ -38,7 +38,7 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
       console.error(err);
       setDownloadUrl(null);
       if (err.message === 'INCORRECT_PASSWORD') {
-        setError('Incorrect password. For e-Aadhaar, use the first 4 letters of your name in CAPITAL + 4-digit Birth Year (e.g., ANIK1992).');
+        setError('Incorrect password. ');
       } else {
         setError('Failed to decrypt document. Please check the password and try again.');
       }
