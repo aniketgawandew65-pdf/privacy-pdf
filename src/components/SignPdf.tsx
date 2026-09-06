@@ -9,6 +9,7 @@ import {
   PenTool,
   RotateCcw,
   Lock,
+  Unlock,
   Eye,
   EyeOff,
   AlertCircle,
@@ -17,9 +18,12 @@ import {
   Copy,
   Check,
   Move,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
+import { useObjectUrl } from '../utils/useObjectUrl';
 
 interface SignPdfProps {
   file: File | null;
@@ -41,32 +45,42 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const [hasDrawnSignature, setHasDrawnSignature] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
-  // Per-page signature coordinate map
+  // Zoom and viewport scaling
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const [pageDimensions, setPageDimensions] = useState<{ width: number; height: number }>({
+    width: 540,
+    height: 760,
+  });
+
+  // Placements and UI states
   const [placements, setPlacements] = useState<PagePlacementsMap>({});
   const [copiedNotification, setCopiedNotification] = useState(false);
 
-  // Encryption states
+  // Password-protection states
   const [isProtected, setIsProtected] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
-  // Rendering & processing states
+  // Processing & feedback states
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Canvas refs
+  // DOM Refs
   const drawCanvasRef = useRef<HTMLCanvasElement>(null);
   const pageCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfDocRef = useRef<any>(null);
 
-  // Drawing pad tracking
+  // Drawing stroke tracking
   const isPadDrawing = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Drag & resize tracking for visual placement
+  // Drag & resize tracking for placed signature
   const dragInfo = useRef<{
     mode: 'move' | 'resize';
     startX: number;
@@ -77,7 +91,9 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     initialH: number;
   } | null>(null);
 
-  // Check file protection & page count
+  const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  // Load and inspect PDF file
   useEffect(() => {
     if (!file) {
       setTotalPages(1);
@@ -85,18 +101,23 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       setPlacements({});
       setSignatureDataUrl(null);
       setHasDrawnSignature(false);
-      setDownloadUrl(null);
       setIsProtected(false);
+      setIsUnlocked(false);
       setPassword('');
-      setError(null);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      setZoomLevel(1.0);
+      revokeDownloadUrl();
       pdfDocRef.current = null;
       return;
     }
 
     let isMounted = true;
-    setDownloadUrl(null);
-    setError(null);
+    revokeDownloadUrl();
+    setErrorMessage(null);
+    setSuccessMessage(null);
     setPassword('');
+    setIsUnlocked(false);
 
     (async () => {
       try {
@@ -109,8 +130,9 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
           if (isMounted) {
             pdfDocRef.current = doc;
             setIsProtected(false);
+            setIsUnlocked(true);
             setTotalPages(doc.numPages);
-            setCurrentPage(doc.numPages); // Default to last page
+            setCurrentPage(doc.numPages);
           }
         } catch (err: any) {
           if (
@@ -120,6 +142,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
           ) {
             if (isMounted) {
               setIsProtected(true);
+              setIsUnlocked(false);
               setTotalPages(1);
               setCurrentPage(1);
             }
@@ -127,6 +150,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             const count = await getPDFPageCount(file);
             if (isMounted) {
               setIsProtected(false);
+              setIsUnlocked(true);
               setTotalPages(count);
               setCurrentPage(count);
             }
@@ -134,28 +158,66 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
         }
       } catch (err) {
         console.error(err);
-        if (isMounted) setError('Failed to inspect PDF.');
+        if (isMounted) setErrorMessage('Failed to open PDF document.');
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [file]);
+  }, [file, revokeDownloadUrl]);
 
-  // Render document page to background canvas
+  // Authenticate and unlock protected PDF for live preview
+  const handleVerifyAndUnlock = async () => {
+    if (!file || !password.trim()) {
+      setErrorMessage('Please enter the document password.');
+      return;
+    }
+
+    setIsVerifyingPassword(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(buffer);
+
+      const loadingTask = pdfjsLib.getDocument({
+        data: uint8.slice(),
+        password: password.trim(),
+      });
+
+      const doc = await loadingTask.promise;
+      pdfDocRef.current = doc;
+      setIsUnlocked(true);
+      setTotalPages(doc.numPages);
+      setCurrentPage(doc.numPages);
+      setSuccessMessage('Password verified! Preview unlocked.');
+    } catch (err: any) {
+      setIsUnlocked(false);
+      setErrorMessage('Incorrect password. Please verify and try again.');
+    } finally {
+      setIsVerifyingPassword(false);
+    }
+  };
+
+  // Render current document page with high-res zoom scaling
   const renderCurrentPage = useCallback(async () => {
-    if (!pdfDocRef.current || !pageCanvasRef.current) return;
+    if (!pdfDocRef.current || !pageCanvasRef.current || !isUnlocked) return;
     setIsLoadingPage(true);
 
     try {
       const page = await pdfDocRef.current.getPage(currentPage);
       const unscaledViewport = page.getViewport({ scale: 1.0 });
 
+      const baseWidth = 540;
+      const aspectRatio = unscaledViewport.height / unscaledViewport.width;
+      const baseHeight = Math.round(baseWidth * aspectRatio);
+      setPageDimensions({ width: baseWidth, height: baseHeight });
+
       const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
-      const displayWidth = 520;
-      const scale = (displayWidth / unscaledViewport.width) * dpr;
-      const viewport = page.getViewport({ scale });
+      const renderScale = (baseWidth / unscaledViewport.width) * dpr * zoomLevel;
+      const viewport = page.getViewport({ scale: renderScale });
 
       const canvas = pageCanvasRef.current;
       canvas.width = Math.floor(viewport.width);
@@ -174,15 +236,31 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     } finally {
       setIsLoadingPage(false);
     }
-  }, [currentPage]);
+  }, [currentPage, zoomLevel, isUnlocked]);
 
   useEffect(() => {
-    if (pdfDocRef.current && totalPages > 0) {
+    if (pdfDocRef.current && totalPages > 0 && isUnlocked) {
       renderCurrentPage();
     }
-  }, [currentPage, totalPages, renderCurrentPage]);
+  }, [currentPage, totalPages, isUnlocked, zoomLevel, renderCurrentPage]);
 
-  // Signature Pad Handlers
+  // Smooth drawing coordinate mapping
+  const getPadCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = drawCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
+
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
@@ -190,45 +268,50 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     if (!ctx) return;
 
     isPadDrawing.current = true;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const pt = getPadCoordinates(e);
+    lastPointRef.current = pt;
 
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3.2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
 
     ctx.beginPath();
-    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    ctx.arc(pt.x, pt.y, ctx.lineWidth / 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#000000';
+    ctx.fill();
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isPadDrawing.current) return;
+    if (!isPadDrawing.current || !lastPointRef.current) return;
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const currentPt = getPadCoordinates(e);
 
-    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.beginPath();
+    ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
+    const midX = (lastPointRef.current.x + currentPt.x) / 2;
+    const midY = (lastPointRef.current.y + currentPt.y) / 2;
+    ctx.quadraticCurveTo(lastPointRef.current.x, lastPointRef.current.y, midX, midY);
     ctx.stroke();
+
+    lastPointRef.current = currentPt;
     setHasDrawnSignature(true);
-    setDownloadUrl(null);
+    revokeDownloadUrl();
   };
 
   const stopDrawing = () => {
     if (!isPadDrawing.current) return;
     isPadDrawing.current = false;
+    lastPointRef.current = null;
     const canvas = drawCanvasRef.current;
     if (canvas) {
       const url = canvas.toDataURL('image/png');
       setSignatureDataUrl(url);
 
-      // Initialize default placement on current page if not already set
       setPlacements((prev) => {
         if (prev[currentPage]) return prev;
         return {
@@ -253,7 +336,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     setHasDrawnSignature(false);
     setSignatureDataUrl(null);
     setPlacements({});
-    setDownloadUrl(null);
+    revokeDownloadUrl();
   };
 
   // Convert mouse event to normalized [0, 1] relative to overlay
@@ -265,7 +348,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     return { x, y };
   }, []);
 
-  // Global mouse handlers for moving & resizing the placed signature
+  // Moving and resizing placed signature
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       const state = dragInfo.current;
@@ -314,7 +397,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   }, [currentPage, getNormalizedCoords]);
 
-  // Start moving signature box
   const handleSignatureBoxMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     const currentBox = placements[currentPage];
@@ -332,7 +414,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  // Start resizing signature box from bottom-right handle
   const handleResizeHandleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     const currentBox = placements[currentPage];
@@ -350,7 +431,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  // Copy signature position across all pages
   const handleCopyToAllPages = () => {
     const currentBox = placements[currentPage];
     if (!currentBox) return;
@@ -364,7 +444,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     setTimeout(() => setCopiedNotification(false), 2000);
   };
 
-  // Toggle signature on / off for current page
   const toggleCurrentPageSignature = () => {
     setPlacements((prev) => {
       if (prev[currentPage]) {
@@ -385,8 +464,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const handleApplySignature = async () => {
     if (!file || !signatureDataUrl) return;
 
-    if (isProtected && !password.trim()) {
-      setError('Please enter the password for this protected PDF.');
+    if (isProtected && !isUnlocked) {
+      setErrorMessage('Please unlock the document with its password first.');
       return;
     }
 
@@ -404,13 +483,13 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     });
 
     if (payload.length === 0) {
-      setError('Please place your signature on at least one page.');
+      setErrorMessage('Please place your signature on at least one page.');
       return;
     }
 
     setIsProcessing(true);
-    setError(null);
-    setDownloadUrl(null);
+    setErrorMessage(null);
+    revokeDownloadUrl();
 
     try {
       const outputBytes = await signPDF(
@@ -421,14 +500,13 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       );
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      createUrl(blob);
     } catch (err: any) {
       console.error(err);
       if (err.message === 'INCORRECT_PASSWORD') {
-        setError('Incorrect password. Please enter the valid document password.');
+        setErrorMessage('Incorrect password. Please verify the document password.');
       } else {
-        setError('Failed to sign document.');
+        setErrorMessage('Failed to sign document.');
       }
     } finally {
       setIsProcessing(false);
@@ -437,9 +515,11 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
   const currentBox = placements[currentPage];
   const totalSignedCount = Object.values(placements).filter(Boolean).length;
+  const displayWidth = Math.round(pageDimensions.width * zoomLevel);
+  const displayHeight = Math.round(pageDimensions.height * zoomLevel);
 
   return (
-    <div className="w-full max-w-2xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div className="w-full max-w-3xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
           onClick={() => fileInputRef.current?.click()}
@@ -468,7 +548,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
           />
         </div>
       ) : (
-        <div className="space-y-5 text-left">
+        <div className="space-y-5 text-left select-none">
           {/* File Card */}
           <div className="flex items-center justify-between p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
@@ -476,7 +556,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
               <div className="truncate">
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
                 <p className="text-xs text-zinc-500">
-                  {Math.round(file.size / 1024)} KB • {totalPages} {totalPages === 1 ? 'page' : 'pages'}
+                  {Math.round(file.size / 1024)} KB {totalPages > 1 ? `• ${totalPages} pages` : ''}
                   {totalSignedCount > 0 && ` • ${totalSignedCount} signed`}
                 </p>
               </div>
@@ -493,33 +573,72 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             </button>
           </div>
 
-          {/* Password Input for Protected PDFs */}
+          {/* Password Authentication & Preview Unlock Banner */}
           {isProtected && (
-            <div className="p-3.5 bg-zinc-950/70 rounded-xl border border-amber-500/30 space-y-2">
-              <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
-                <Lock className="w-3.5 h-3.5" />
-                <span>This PDF is password-protected</span>
+            <div className={`p-4 rounded-xl border transition-all space-y-3 ${
+              isUnlocked ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-zinc-950/70 border-amber-500/30'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium">
+                  {isUnlocked ? (
+                    <>
+                      <Unlock className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-300">Document unlocked for visual signing</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <span className="text-amber-300">Password-Protected Document</span>
+                    </>
+                  )}
+                </div>
+                {isUnlocked && (
+                  <span className="text-[11px] text-emerald-400 font-mono">Password active</span>
+                )}
               </div>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError(null);
-                    setDownloadUrl(null);
-                  }}
-                  placeholder="Enter password to unlock and sign"
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+
+              {!isUnlocked && (
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setErrorMessage(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleVerifyAndUnlock();
+                        }
+                      }}
+                      placeholder="Enter password to view and sign"
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleVerifyAndUnlock}
+                    disabled={isVerifyingPassword || !password.trim()}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-lg text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isVerifyingPassword ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Unlock className="w-3.5 h-3.5" />
+                    )}
+                    <span>Unlock Preview</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -544,8 +663,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             <div className="bg-white rounded-xl overflow-hidden border border-zinc-700 flex justify-center shadow-inner">
               <canvas
                 ref={drawCanvasRef}
-                width={460}
-                height={110}
+                width={800}
+                height={200}
                 onMouseDown={startDrawing}
                 onMouseMove={draw}
                 onMouseUp={stopDrawing}
@@ -553,13 +672,13 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 onTouchStart={startDrawing}
                 onTouchMove={draw}
                 onTouchEnd={stopDrawing}
-                className="w-full h-[110px] touch-none cursor-crosshair"
+                className="w-full h-[120px] touch-none cursor-crosshair"
               />
             </div>
           </div>
 
           {/* Interactive Document Placer */}
-          {signatureDataUrl && (
+          {signatureDataUrl && isUnlocked && (
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
@@ -567,7 +686,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   <span>2. Position &amp; size signature on page</span>
                 </label>
 
-                {/* Copy To All Button */}
                 {totalPages > 1 && currentBox && (
                   <button
                     type="button"
@@ -624,52 +742,94 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 </button>
               </div>
 
-              {/* Document Surface & Drag Overlay */}
-              <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center p-3 overflow-auto min-h-[380px] max-h-[520px]">
+              {/* Outer Viewport Frame with Floating Zoom Controls */}
+              <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-hidden shadow-inner">
                 {isLoadingPage && (
                   <div className="absolute inset-0 bg-zinc-950/60 z-30 flex items-center justify-center backdrop-blur-xs">
                     <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
                   </div>
                 )}
 
-                <div className="relative inline-block leading-none shadow-2xl bg-white rounded-xs">
-                  <canvas
-                    ref={pageCanvasRef}
-                    className="block rounded-xs max-h-[480px] w-auto h-auto object-contain pointer-events-none"
-                  />
+                {/* Scrollable Viewport with generous 2D padding */}
+                <div className="overflow-auto min-h-[420px] max-h-[620px] p-8 sm:p-14 text-center">
+                  <div
+                    style={{
+                      width: `${displayWidth}px`,
+                      height: `${displayHeight}px`,
+                    }}
+                    className="relative inline-block text-left shadow-2xl bg-white rounded-xs align-middle"
+                  >
+                    <canvas
+                      ref={pageCanvasRef}
+                      style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                      className="block rounded-xs pointer-events-none"
+                    />
 
-                  <div ref={overlayRef} className="absolute inset-0 z-10">
-                    {currentBox && (
-                      <div
-                        onMouseDown={handleSignatureBoxMouseDown}
-                        className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move flex items-center justify-center shadow-lg select-none group"
-                        style={{
-                          left: `${currentBox.xPercent * 100}%`,
-                          top: `${currentBox.yPercent * 100}%`,
-                          width: `${currentBox.widthPercent * 100}%`,
-                          height: `${currentBox.heightPercent * 100}%`,
-                        }}
-                      >
-                        <img
-                          src={signatureDataUrl}
-                          alt="Signature Preview"
-                          className="w-full h-full object-contain pointer-events-none"
-                        />
-
-                        {/* Drag indicator in top-left */}
-                        <div className="absolute top-0.5 left-0.5 p-0.5 bg-emerald-600 rounded-xs text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">
-                          <Move className="w-2.5 h-2.5" />
-                        </div>
-
-                        {/* Bottom-Right Resize Handle */}
+                    <div
+                      ref={overlayRef}
+                      style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                      className="absolute inset-0 z-10"
+                    >
+                      {currentBox && (
                         <div
-                          onMouseDown={handleResizeHandleMouseDown}
-                          className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize shadow-md z-20 hover:scale-125 transition-transform"
-                          title="Drag to resize signature"
-                        />
-                      </div>
-                    )}
+                          onMouseDown={handleSignatureBoxMouseDown}
+                          className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move flex items-center justify-center shadow-lg select-none group"
+                          style={{
+                            left: `${currentBox.xPercent * 100}%`,
+                            top: `${currentBox.yPercent * 100}%`,
+                            width: `${currentBox.widthPercent * 100}%`,
+                            height: `${currentBox.heightPercent * 100}%`,
+                          }}
+                        >
+                          <img
+                            src={signatureDataUrl}
+                            alt="Signature Preview"
+                            className="w-full h-full object-contain pointer-events-none"
+                          />
+
+                          <div className="absolute top-0.5 left-0.5 p-0.5 bg-emerald-600 rounded-xs text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">
+                            <Move className="w-2.5 h-2.5" />
+                          </div>
+
+                          <div
+                            onMouseDown={handleResizeHandleMouseDown}
+                            className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize shadow-md z-20 hover:scale-125 transition-transform"
+                            title="Drag to resize signature"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
+                </div>
+
+                {/* Bottom-Right Floating Zoom Controls */}
+                <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg shadow-2xl z-30">
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
+                    disabled={zoomLevel <= 0.75}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                    title="Zoom Out (-)"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel(1.0)}
+                    className="text-[11px] font-mono font-medium text-zinc-300 hover:text-emerald-400 min-w-[42px] text-center transition cursor-pointer px-1 py-0.5 rounded hover:bg-zinc-800/60"
+                    title="Reset to 100%"
+                  >
+                    {Math.round(zoomLevel * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.min(2.5, parseFloat((z + 0.25).toFixed(2))))}
+                    disabled={zoomLevel >= 2.5}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                    title="Zoom In (+)"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 
@@ -679,23 +839,30 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             </div>
           )}
 
-          {error && (
+          {errorMessage && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/40 border border-red-800/40 text-xs text-red-300">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span>{error}</span>
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-xs text-emerald-300">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>{successMessage}</span>
             </div>
           )}
 
           {!downloadUrl ? (
             <button
               onClick={handleApplySignature}
-              disabled={isProcessing || !hasDrawnSignature || (isProtected && !password.trim())}
+              disabled={isProcessing || !hasDrawnSignature || (isProtected && !isUnlocked)}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed text-xs"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Applying Signatures...</span>
+                  <span>Signing &amp; Removing Password Lock...</span>
                 </>
               ) : (
                 <>
@@ -711,7 +878,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
               <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>
-                  Document signed successfully! {isProtected && '(Password lock removed)'}
+                  Document signed successfully! {isProtected && '(Password lock permanently removed)'}
                 </span>
               </div>
               <a
