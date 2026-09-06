@@ -1414,16 +1414,87 @@ export async function resizePDF(
 ): Promise<Uint8Array> {
   const { size = 'A4', fitMode = 'fit', autoOrientation = true, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const uint8 = new Uint8Array(arrayBuffer);
+  const [baseWidth, baseHeight] = PAGE_DIMENSIONS[size];
+
+  // 1. Primary Vector Path (for standard, unencrypted PDFs)
+  if (!isComplexOrProtectedPdf(uint8)) {
+    try {
+      const sourceDoc = await PDFDocument.load(arrayBuffer);
+      const outputDoc = await PDFDocument.create();
+      const totalPages = sourceDoc.getPageCount();
+
+      for (let i = 0; i < totalPages; i++) {
+        onProgress?.(i + 1, totalPages);
+        const srcPage = sourceDoc.getPage(i);
+        const { width: origWidth, height: origHeight } = srcPage.getSize();
+
+        let targetWidth = baseWidth;
+        let targetHeight = baseHeight;
+
+        if (autoOrientation && origWidth > origHeight) {
+          targetWidth = Math.max(baseWidth, baseHeight);
+          targetHeight = Math.min(baseWidth, baseHeight);
+        } else if (autoOrientation) {
+          targetWidth = Math.min(baseWidth, baseHeight);
+          targetHeight = Math.max(baseWidth, baseHeight);
+        }
+
+        const embeddedPage = await outputDoc.embedPage(srcPage);
+        const newPage = outputDoc.addPage([targetWidth, targetHeight]);
+
+        let drawWidth = targetWidth;
+        let drawHeight = targetHeight;
+        let drawX = 0;
+        let drawY = 0;
+
+        if (fitMode === 'fit') {
+          const scale = Math.min(targetWidth / origWidth, targetHeight / origHeight);
+          drawWidth = origWidth * scale;
+          drawHeight = origHeight * scale;
+          drawX = (targetWidth - drawWidth) / 2;
+          drawY = (targetHeight - drawHeight) / 2;
+        } else if (fitMode === 'center') {
+          drawWidth = origWidth;
+          drawHeight = origHeight;
+          drawX = (targetWidth - origWidth) / 2;
+          drawY = (targetHeight - origHeight) / 2;
+        } else if (fitMode === 'stretch') {
+          drawWidth = targetWidth;
+          drawHeight = targetHeight;
+          drawX = 0;
+          drawY = 0;
+        }
+
+        newPage.drawPage(embeddedPage, {
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight,
+        });
+      }
+
+      return await outputDoc.save({ useObjectStreams: false });
+    } catch (vectorErr) {
+      console.warn('Vector resize bypassed; falling back to high-res rendering engine:', vectorErr);
+    }
+  }
+
+  // 2. High-Res Rendering Fallback (decrypts and resizes bank statements & legal forms)
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8.slice(),
+    stopAtErrors: false,
+  });
+  const fallbackDoc = await loadingTask.promise;
+  const totalPages = fallbackDoc.numPages;
   const outputDoc = await PDFDocument.create();
 
-  const [baseWidth, baseHeight] = PAGE_DIMENSIONS[size];
-  const totalPages = sourceDoc.getPageCount();
-
-  for (let i = 0; i < totalPages; i++) {
-    onProgress?.(i + 1, totalPages);
-    const srcPage = sourceDoc.getPage(i);
-    const { width: origWidth, height: origHeight } = srcPage.getSize();
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    onProgress?.(pageNum, totalPages);
+    const page = await fallbackDoc.getPage(pageNum);
+    const unscaled = page.getViewport({ scale: 1.0 });
+    const origWidth = unscaled.width;
+    const origHeight = unscaled.height;
 
     let targetWidth = baseWidth;
     let targetHeight = baseHeight;
@@ -1436,7 +1507,9 @@ export async function resizePDF(
       targetHeight = Math.max(baseWidth, baseHeight);
     }
 
-    const embeddedPage = await outputDoc.embedPage(srcPage);
+    // Render crisp 2.0x image of the page with full stamps and bank formatting
+    const { imgBytes } = await renderPageAsJpg(page, 2.0);
+    const embeddedImage = await outputDoc.embedJpg(imgBytes);
     const newPage = outputDoc.addPage([targetWidth, targetHeight]);
 
     let drawWidth = targetWidth;
@@ -1462,7 +1535,7 @@ export async function resizePDF(
       drawY = 0;
     }
 
-    newPage.drawPage(embeddedPage, {
+    newPage.drawImage(embeddedImage, {
       x: drawX,
       y: drawY,
       width: drawWidth,
@@ -1470,7 +1543,7 @@ export async function resizePDF(
     });
   }
 
-  return await outputDoc.save({ useObjectStreams: true });
+  return await outputDoc.save({ useObjectStreams: false });
 }
 
 export type NUpLayout = 2 | 4 | 9;
