@@ -24,6 +24,14 @@ export function HeicToJpg() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const withTimeout = <T,>(promise: Promise<T>, ms: number, timeoutMsg: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(timeoutMsg)), ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+  };
+
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setErrorMsg(null);
@@ -38,12 +46,18 @@ export function HeicToJpg() {
       setStatusText(`Converting ${file.name} (${i + 1}/${fileList.length})...`);
 
       try {
-        // Direct conversion call without secondary buffer copying
-        const conversionResult: any = await heic2any({
+        // Attempt standard single-frame conversion with 45s safety timeout
+        const conversionPromise = heic2any({
           blob: file,
           toType: 'image/jpeg',
           quality: 0.9,
         } as any);
+
+        const conversionResult: any = await withTimeout(
+          conversionPromise,
+          45000,
+          'Decoding timed out after 45s'
+        );
 
         const jpegBlob: Blob = Array.isArray(conversionResult)
           ? conversionResult[0]
@@ -58,16 +72,22 @@ export function HeicToJpg() {
           newSize: jpegBlob.size,
         });
       } catch (err: any) {
-        console.warn(`Standard decode failed for ${file.name}, retrying container mode...`, err);
+        console.warn(`Standard decode failed for ${file.name}, retrying multi-track mode...`, err);
 
-        // Fallback for Apple Live Photo / Multi-frame containers
+        // Fallback for Apple Live Photos / burst containers
         try {
-          const multiResult: any = await heic2any({
+          const multiPromise = heic2any({
             blob: file,
             toType: 'image/jpeg',
             quality: 0.9,
             multiple: true,
           } as any);
+
+          const multiResult: any = await withTimeout(
+            multiPromise,
+            45000,
+            'Multi-frame decoding timed out after 45s'
+          );
 
           const fallbackBlob: Blob = Array.isArray(multiResult)
             ? multiResult[0]
@@ -80,8 +100,8 @@ export function HeicToJpg() {
             originalSize: file.size,
             newSize: fallbackBlob.size,
           });
-        } catch (secondaryErr) {
-          failedFiles.push(file.name);
+        } catch (secondaryErr: any) {
+          failedFiles.push(`${file.name} (${secondaryErr.message || 'Worker failure'})`);
         }
       }
     }
@@ -91,9 +111,7 @@ export function HeicToJpg() {
     setStatusText('');
 
     if (failedFiles.length > 0) {
-      setErrorMsg(
-        `Failed to convert: ${failedFiles.join(', ')}. These shots contain Apple Live Photo video tracks.`
-      );
+      setErrorMsg(`Failed to convert: ${failedFiles.join(', ')}`);
     }
   };
 
