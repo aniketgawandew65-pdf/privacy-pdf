@@ -10,7 +10,7 @@ import {
   Layout,
 } from 'lucide-react';
 import {
-  addBatesNumbersToPDF,
+  addBatesNumberingToPDF,
   getPDFPageCount,
   type BatesPosition,
 } from '../utils/pdfEngine';
@@ -69,14 +69,14 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
     revokeDownloadUrl();
 
     try {
-      const outputBytes = await addBatesNumbersToPDF(file, {
+      const outputBytes = await addBatesNumberingToPDF(file, {
         prefix,
         startNumber,
         digits,
         suffix,
         position,
         fontSize,
-        onProgress: (curr, total) => {
+        onProgress: (curr: number, total: number) => {
           setProgressText(`Stamping page ${curr} of ${total}...`);
         },
       });
