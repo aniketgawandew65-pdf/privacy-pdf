@@ -2275,12 +2275,12 @@ export async function ocrPDFToSearchable(
 
   onProgress?.({ status: 'Initializing OCR Engine...', progress: 8 });
 
-  // 2. Spawn Tesseract with pinned, production-verified v5.1.0 CDN endpoints
+  // 2. Initialize Tesseract using 100% local assets from /public/tessdata
   const worker = await createWorker(language, 1, {
-    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-simd-lstm.wasm.js',
-    langPath: 'https://tessdata.projectnaptha.com/4.00',
-    workerBlobURL: true,
+    workerPath: '/tessdata/worker.min.js',
+    corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+    langPath: '/tessdata',
+    gzip: true,
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress({
