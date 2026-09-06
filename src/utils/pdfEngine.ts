@@ -688,30 +688,127 @@ export async function signPDF(
   file: File,
   signaturePngDataUrl: string,
   pageIndex: number = 0,
+  password?: string,
   xPercent: number = 0.6,
   yPercent: number = 0.1,
   width: number = 150,
   height: number = 60
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  const pages = pdfDoc.getPages();
+  const uint8 = new Uint8Array(bytes);
 
-  const targetPage = pages[pageIndex] || pages[0];
-  const { width: pageWidth, height: pageHeight } = targetPage.getSize();
+  // 1. If password is provided or document has encryption/complex streams, route via PDF.js
+  if (password || isComplexOrProtectedPdf(uint8)) {
+    const loadingTask = pdfjsLib.getDocument({
+      data: uint8.slice(),
+      password: password || undefined,
+      stopAtErrors: false,
+    });
 
-  const base64Data = signaturePngDataUrl.split(',')[1];
-  const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-  const embeddedImage = await pdfDoc.embedPng(imageBytes);
+    loadingTask.onPassword = () => {
+      throw new Error('INCORRECT_PASSWORD');
+    };
 
-  targetPage.drawImage(embeddedImage, {
-    x: pageWidth * xPercent,
-    y: pageHeight * yPercent,
-    width,
-    height,
-  });
+    let pdfDoc;
+    try {
+      pdfDoc = await loadingTask.promise;
+    } catch (err: any) {
+      if (
+        err?.name === 'PasswordException' ||
+        err?.message?.includes('password') ||
+        err?.message === 'INCORRECT_PASSWORD'
+      ) {
+        throw new Error('INCORRECT_PASSWORD');
+      }
+      throw err;
+    }
 
-  return await pdfDoc.save();
+    const numPages = pdfDoc.numPages;
+    const newPdfDoc = await PDFDocument.create();
+
+    const base64Data = signaturePngDataUrl.split(',')[1];
+    const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+    const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
+
+    const targetIdx = Math.max(0, Math.min(pageIndex, numPages - 1));
+
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdfDoc.getPage(i);
+      const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
+      const embeddedPageImg = await newPdfDoc.embedJpg(imgBytes);
+
+      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
+      newPage.drawImage(embeddedPageImg, {
+        x: 0,
+        y: 0,
+        width: pWidth,
+        height: pHeight,
+      });
+
+      if (i - 1 === targetIdx) {
+        newPage.drawImage(embeddedSignature, {
+          x: pWidth * xPercent,
+          y: pHeight * yPercent,
+          width,
+          height,
+        });
+      }
+    }
+
+    return await newPdfDoc.save({ useObjectStreams: false });
+  }
+
+  // 2. Vector path for clean, unencrypted documents
+  try {
+    const pdfDoc = await PDFDocument.load(bytes);
+    const pages = pdfDoc.getPages();
+    const targetPage = pages[pageIndex] || pages[0];
+    const { width: pageWidth, height: pageHeight } = targetPage.getSize();
+
+    const base64Data = signaturePngDataUrl.split(',')[1];
+    const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+    const embeddedImage = await pdfDoc.embedPng(imageBytes);
+
+    targetPage.drawImage(embeddedImage, {
+      x: pageWidth * xPercent,
+      y: pageHeight * yPercent,
+      width,
+      height,
+    });
+
+    return await pdfDoc.save({ useObjectStreams: false });
+  } catch (err) {
+    console.warn('Vector sign failed, falling back to high-res rendering engine:', err);
+    const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+    const fallbackDoc = await loadingTask.promise;
+    const newPdfDoc = await PDFDocument.create();
+
+    const base64Data = signaturePngDataUrl.split(',')[1];
+    const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+    const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
+
+    const targetIdx = Math.max(0, Math.min(pageIndex, fallbackDoc.numPages - 1));
+
+    for (let i = 1; i <= fallbackDoc.numPages; i++) {
+      const page = await fallbackDoc.getPage(i);
+      const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
+      const embeddedPageImg = await newPdfDoc.embedJpg(imgBytes);
+
+      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
+      newPage.drawImage(embeddedPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
+
+      if (i - 1 === targetIdx) {
+        newPage.drawImage(embeddedSignature, {
+          x: pWidth * xPercent,
+          y: pHeight * yPercent,
+          width,
+          height,
+        });
+      }
+    }
+
+    return await newPdfDoc.save({ useObjectStreams: false });
+  }
 }
 
 export async function encryptPDF(

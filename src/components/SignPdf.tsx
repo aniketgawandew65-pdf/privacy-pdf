@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, Download, Loader2, CheckCircle2, X, PenTool, RotateCcw } from 'lucide-react';
+import { Upload, FileText, Download, Loader2, CheckCircle2, X, PenTool, RotateCcw, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
 import { signPDF, getPDFPageCount } from '../utils/pdfEngine';
 
 interface SignPdfProps {
@@ -15,25 +16,74 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Password-protection states
+  const [isProtected, setIsProtected] = useState(false);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDrawing = useRef(false);
 
   useEffect(() => {
-    if (file) {
-      getPDFPageCount(file).then((count) => {
-        setTotalPages(count);
-        setSelectedPage(count); // Default to last page for signatures
-      }).catch(() => {
-        setError('Failed to read PDF pages.');
-      });
-      setDownloadUrl(null);
-      setError(null);
-    } else {
+    if (!file) {
       setTotalPages(1);
       setSelectedPage(1);
       setDownloadUrl(null);
+      setIsProtected(false);
+      setPassword('');
+      setError(null);
+      return;
     }
+
+    let isMounted = true;
+    setDownloadUrl(null);
+    setError(null);
+    setPassword('');
+
+    (async () => {
+      try {
+        const buffer = await file.arrayBuffer();
+        const uint8 = new Uint8Array(buffer);
+
+        // Test if document requires a password to open
+        try {
+          const loadingTask = pdfjsLib.getDocument({ data: uint8.slice() });
+          const doc = await loadingTask.promise;
+          if (isMounted) {
+            setIsProtected(false);
+            setTotalPages(doc.numPages);
+            setSelectedPage(doc.numPages);
+          }
+        } catch (err: any) {
+          if (
+            err?.name === 'PasswordException' ||
+            err?.message?.includes('password') ||
+            err?.message?.includes('need password')
+          ) {
+            if (isMounted) {
+              setIsProtected(true);
+              setTotalPages(1);
+              setSelectedPage(1);
+            }
+          } else {
+            const count = await getPDFPageCount(file);
+            if (isMounted) {
+              setIsProtected(false);
+              setTotalPages(count);
+              setSelectedPage(count);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(err);
+        if (isMounted) setError('Failed to read PDF pages.');
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
   }, [file]);
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -89,19 +139,36 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
   const handleApplySignature = async () => {
     if (!file || !hasSignature || !canvasRef.current) return;
+
+    if (isProtected && !password.trim()) {
+      setError('Please enter the password for this protected PDF.');
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
+    setDownloadUrl(null);
 
     try {
       const signatureDataUrl = canvasRef.current.toDataURL('image/png');
       const pageIndex = Math.max(0, Math.min(selectedPage - 1, totalPages - 1));
-      const outputBytes = await signPDF(file, signatureDataUrl, pageIndex);
-      const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+      const outputBytes = await signPDF(
+        file,
+        signatureDataUrl,
+        pageIndex,
+        isProtected ? password.trim() : undefined
+      );
+
+      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to sign the document.');
+      if (err.message === 'INCORRECT_PASSWORD') {
+        setError('Incorrect password. Please enter the valid document password.');
+      } else {
+        setError('Failed to sign the document.');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -112,6 +179,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     clearCanvas();
     setDownloadUrl(null);
     setError(null);
+    setPassword('');
+    setIsProtected(false);
   };
 
   return (
@@ -130,7 +199,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to sign</p>
-          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your machine</p>
+          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your device</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -152,18 +221,48 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
               <div className="truncate">
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
                 <p className="text-xs text-zinc-500">
-                  {Math.round(file.size / 1024)} KB • {totalPages} {totalPages === 1 ? 'page' : 'pages'}
+                  {Math.round(file.size / 1024)} KB {totalPages > 1 ? `• ${totalPages} pages` : ''}
                 </p>
               </div>
             </div>
             <button
               onClick={handleClearFile}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors cursor-pointer"
               title="Remove file"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Password Input for Protected PDFs */}
+          {isProtected && (
+            <div className="p-3.5 bg-zinc-950/70 rounded-xl border border-amber-500/30 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
+                <Lock className="w-3.5 h-3.5" />
+                <span>This PDF is password-protected</span>
+              </div>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError(null);
+                    setDownloadUrl(null);
+                  }}
+                  placeholder="Enter password to unlock and sign"
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Page Target Selector */}
           <div className="flex items-center justify-between gap-4 bg-zinc-950/50 p-3 rounded-xl border border-zinc-800/80">
@@ -174,11 +273,11 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 setSelectedPage(Number(e.target.value));
                 setDownloadUrl(null);
               }}
-              className="bg-zinc-900 text-zinc-200 border border-zinc-700 rounded-lg text-xs px-2.5 py-1.5 focus:outline-none focus:border-emerald-500"
+              className="bg-zinc-900 text-zinc-200 border border-zinc-700 rounded-lg text-xs px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => (
                 <option key={num} value={num}>
-                  Page {num} {num === totalPages ? '(Last)' : ''}
+                  Page {num} {num === totalPages && totalPages > 1 ? '(Last)' : ''}
                 </option>
               ))}
             </select>
@@ -191,13 +290,13 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
               <button
                 type="button"
                 onClick={clearCanvas}
-                className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+                className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200 cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
                 Clear
               </button>
             </div>
-            <div className="bg-white rounded-xl overflow-hidden border border-zinc-700 flex justify-center">
+            <div className="bg-white rounded-xl overflow-hidden border border-zinc-700 flex justify-center shadow-inner">
               <canvas
                 ref={canvasRef}
                 width={460}
@@ -215,26 +314,27 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
-              {error}
-            </p>
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/40 border border-red-800/40 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
           )}
 
           {!downloadUrl ? (
             <button
               onClick={handleApplySignature}
-              disabled={isProcessing || !hasSignature}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+              disabled={isProcessing || !hasSignature || (isProtected && !password.trim())}
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Signing document...</span>
+                  <span>Signing &amp; Decrypting Document...</span>
                 </>
               ) : (
                 <>
                   <PenTool className="w-4 h-4" />
-                  <span>Sign & Stamp PDF</span>
+                  <span>Sign &amp; Stamp PDF</span>
                 </>
               )}
             </button>
@@ -242,12 +342,12 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>Document signed successfully!</span>
+                <span>Document signed successfully! {isProtected && '(Password protection removed)'}</span>
               </div>
               <a
                 href={downloadUrl}
                 download={`${file.name.replace('.pdf', '')}_signed.pdf`}
-                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Signed PDF</span>
