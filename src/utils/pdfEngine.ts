@@ -784,71 +784,56 @@ export async function unlockPDF(
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
 
-  try {
-    const testDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    onProgress?.(100);
-    return await testDoc.save({ useObjectStreams: false });
-  } catch {}
-
+  // 1. Authenticate and decrypt stream via pdfjsLib
   const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer).slice(),
+    data: uint8.slice(),
     password,
   });
 
-  const pdf = await loadingTask.promise;
-  const numPages = pdf.numPages;
+  // Handle wrong password immediately without stalling
+  loadingTask.onPassword = (_updateCallback: any, reason: number) => {
+    throw new Error('INCORRECT_PASSWORD');
+  };
 
-  let doc: jsPDF | null = null;
-
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdf.getPage(i);
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
-    const renderViewport = page.getViewport({ scale: 2.0 });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = renderViewport.width;
-    canvas.height = renderViewport.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context unavailable');
-
-    await (
-      page.render({
-        canvasContext: ctx as any,
-        viewport: renderViewport,
-        canvas,
-      } as any) as any
-    ).promise;
-
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-    const pageWidth = unscaledViewport.width;
-    const pageHeight = unscaledViewport.height;
-    const orientation = pageWidth > pageHeight ? 'landscape' : 'portrait';
-
-    if (i === 1) {
-      doc = new jsPDF({
-        orientation,
-        unit: 'pt',
-        format: [pageWidth, pageHeight],
-      });
-      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
-    } else if (doc) {
-      doc.addPage([pageWidth, pageHeight], orientation);
-      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+  let pdfDoc;
+  try {
+    pdfDoc = await loadingTask.promise;
+  } catch (err: any) {
+    if (
+      err?.name === 'PasswordException' ||
+      err?.message?.includes('password') ||
+      err?.message === 'INCORRECT_PASSWORD'
+    ) {
+      throw new Error('INCORRECT_PASSWORD');
     }
-
-    if (onProgress) {
-      onProgress(Math.round((i / numPages) * 100));
-    }
-
-    canvas.width = 0;
-    canvas.height = 0;
+    throw new Error('CORRUPTED_PDF');
   }
 
-  if (!doc) throw new Error('Failed to generate unlocked PDF');
-  return new Uint8Array(doc.output('arraybuffer'));
-}
+  const numPages = pdfDoc.numPages;
+  const newPdfDoc = await PDFDocument.create();
 
+  // 2. Render and embed each decrypted page into a fresh, unencrypted PDF
+  for (let i = 1; i <= numPages; i++) {
+    onProgress?.(Math.round((i / numPages) * 100));
+
+    const page = await pdfDoc.getPage(i);
+    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
+    const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+
+    const newPage = newPdfDoc.addPage([width, height]);
+    newPage.drawImage(embeddedImg, {
+      x: 0,
+      y: 0,
+      width,
+      height,
+    });
+  }
+
+  // 3. Save as clean PDF with zero encryption dictionary
+  return await newPdfDoc.save({ useObjectStreams: false });
+}
 /**
  * Calibrated target-size compression matching the user's slider target within ±5-10 KB.
  */

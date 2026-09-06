@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Download, Loader2, CheckCircle2, X, Unlock, Eye, EyeOff } from 'lucide-react';
+import { Upload, FileText, Download, Loader2, CheckCircle2, X, Unlock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { unlockPDF } from '../utils/pdfEngine';
 
 interface UnlockPdfProps {
@@ -19,23 +19,29 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
   const handleUnlock = async () => {
     if (!file) return;
 
-    if (!password) {
+    if (!password.trim()) {
       setError('Please enter the current document password.');
       return;
     }
 
     setIsProcessing(true);
     setError(null);
+    setDownloadUrl(null);
     setProgress(0);
 
     try {
-      const outputBytes = await unlockPDF(file, password, (p) => setProgress(p));
-      const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+      const outputBytes = await unlockPDF(file, password.trim(), (p) => setProgress(p));
+      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Incorrect password or failed to decrypt PDF.');
+      setDownloadUrl(null);
+      if (err.message === 'INCORRECT_PASSWORD') {
+        setError('Incorrect password. For e-Aadhaar, use the first 4 letters of your name in CAPITAL + 4-digit Birth Year (e.g., ANIK1992).');
+      } else {
+        setError('Failed to decrypt document. Please check the password and try again.');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -60,13 +66,14 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
             if (e.dataTransfer.files[0]?.type === 'application/pdf') {
               onFileChange(e.dataTransfer.files[0]);
               setDownloadUrl(null);
+              setError(null);
             }
           }}
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a protected PDF here to unlock</p>
-          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your machine</p>
+          <p className="text-xs text-zinc-500 mt-1">Processed 100% locally on your device</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -76,6 +83,7 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
               if (e.target.files?.[0]?.type === 'application/pdf') {
                 onFileChange(e.target.files[0]);
                 setDownloadUrl(null);
+                setError(null);
               }
             }}
           />
@@ -126,15 +134,16 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
-              {error}
-            </p>
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/40 border border-red-800/40 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
           )}
 
           {isProcessing && (
             <div className="space-y-2">
               <div className="flex justify-between text-[11px] text-zinc-400">
-                <span>Decrypting pages...</span>
+                <span>Decrypting document...</span>
                 <span>{progress}%</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -149,18 +158,18 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
           {!downloadUrl ? (
             <button
               onClick={handleUnlock}
-              disabled={isProcessing || !password}
+              disabled={isProcessing || !password.trim()}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
             >
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Unlocking PDF...</span>
+                  <span>Verifying &amp; Unlocking...</span>
                 </>
               ) : (
                 <>
                   <Unlock className="w-4 h-4" />
-                  <span>Unlock & Remove Password</span>
+                  <span>Unlock &amp; Remove Password</span>
                 </>
               )}
             </button>
@@ -177,10 +186,10 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Unlocked PDF</span>
-            </a>
-            <p className="text-[11px] text-zinc-500 text-center mt-3">
-                  Notice: This tool is strictly intended for documents you are legally authorized to access and decrypt.
-                </p>
+              </a>
+              <p className="text-[11px] text-zinc-500 text-center mt-3">
+                Notice: This tool is strictly intended for documents you are legally authorized to access and decrypt.
+              </p>
             </div>
           )}
         </div>
