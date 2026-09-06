@@ -2261,7 +2261,7 @@ export async function ocrPDFToSearchable(
   language: string = 'eng',
   onProgress?: (p: OcrProgress) => void
 ): Promise<Uint8Array> {
-  // 1. Ensure PDF.js worker is active
+  // 1. Ensure PDF.js worker is initialized safely
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -2273,18 +2273,15 @@ export async function ocrPDFToSearchable(
     }
   }
 
-  onProgress?.({ status: 'Initializing OCR Engine...', progress: 5 });
+  onProgress?.({ status: 'Initializing OCR Engine...', progress: 10 });
 
-  // 2. Spawn Tesseract Worker with reliable public CDN fallbacks
+  // 2. Initialize Tesseract using default internal loaders (NO cross-origin CDN overrides)
   const worker = await createWorker(language, 1, {
-    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
-    langPath: 'https://tessdata.projectnaptha.com/4.00',
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress({
           status: 'Recognizing text...',
-          progress: Math.min(95, Math.round(m.progress * 90) + 5),
+          progress: Math.min(95, Math.round(m.progress * 85) + 10),
         });
       }
     },
@@ -2301,10 +2298,9 @@ export async function ocrPDFToSearchable(
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       onProgress?.({
         status: `Scanning Page ${pageNum} of ${totalPages}...`,
-        progress: Math.round(((pageNum - 1) / totalPages) * 90) + 5,
+        progress: Math.round(((pageNum - 1) / totalPages) * 85) + 10,
       });
 
-      // Render page to high-DPI canvas for OCR recognition
       const pdfJsPage = await pdfJsDoc.getPage(pageNum);
       const viewport = pdfJsPage.getViewport({ scale: 2.0 });
 
@@ -2314,12 +2310,12 @@ export async function ocrPDFToSearchable(
       const ctx = canvas.getContext('2d');
 
       if (!ctx) continue;
-     await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
+      await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
 
-      // Run OCR on the rendered canvas
+      // Run OCR on the page canvas
       const { data } = await worker.recognize(canvas);
 
-      // Clean up canvas memory immediately
+      // Free canvas memory
       canvas.width = 0;
       canvas.height = 0;
 
@@ -2329,17 +2325,15 @@ export async function ocrPDFToSearchable(
       const scaleX = pageWidth / viewport.width;
       const scaleY = pageHeight / viewport.height;
 
-     // 3. Inject coordinate-accurate invisible text layer (opacity: 0)
+      // 3. Inject coordinate-accurate invisible text layer (opacity: 0)
       const words = (data as any)?.words;
       if (Array.isArray(words)) {
         for (const word of words) {
-          // Sanitize OCR noise to prevent pdf-lib WinAnsi font crashes
           const clean = word.text.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').trim();
           if (!clean) continue;
 
           const box = word.bbox;
           const posX = box.x0 * scaleX;
-          // Invert Y coordinate: PDF origin is bottom-left, Canvas origin is top-left
           const posY = pageHeight - (box.y1 * scaleY);
           const wordHeight = (box.y1 - box.y0) * scaleY;
 
@@ -2348,7 +2342,7 @@ export async function ocrPDFToSearchable(
             y: Math.max(0, posY),
             size: Math.max(4, Math.round(wordHeight * 0.85)),
             font: helveticaFont,
-            opacity: 0, // 100% invisible over the scan
+            opacity: 0,
           });
         }
       }

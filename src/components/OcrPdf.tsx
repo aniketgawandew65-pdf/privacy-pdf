@@ -76,9 +76,9 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
-    } catch (err: any) {
+   } catch (err: any) {
       console.error('OCR Error:', err);
-      setErrorMessage(err.message || 'Failed to OCR document. Ensure worker files can load.');
+      setErrorMessage(err?.message || String(err) || 'Failed to OCR document.');
     } finally {
       setIsProcessing(false);
       setProgressInfo(null);
