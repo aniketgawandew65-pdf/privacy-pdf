@@ -1560,10 +1560,8 @@ export async function createNUpPDF(
 ): Promise<Uint8Array> {
   const { pagesPerSheet = 2, drawPageBorders = true, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const outputDoc = await PDFDocument.create();
+  const uint8 = new Uint8Array(arrayBuffer);
 
-  const totalPages = sourceDoc.getPageCount();
   const [cols, rows, sheetWidth, sheetHeight] =
     pagesPerSheet === 2
       ? [2, 1, 841.89, 595.28]
@@ -1575,6 +1573,77 @@ export async function createNUpPDF(
   const cellHeight = sheetHeight / rows;
   const margin = 12;
 
+  // 1. Primary Vector Path (for standard, unencrypted PDFs)
+  if (!isComplexOrProtectedPdf(uint8)) {
+    try {
+      const sourceDoc = await PDFDocument.load(arrayBuffer);
+      const totalPages = sourceDoc.getPageCount();
+      const outputDoc = await PDFDocument.create();
+
+      let pageCursor = 0;
+      while (pageCursor < totalPages) {
+        const sheet = outputDoc.addPage([sheetWidth, sheetHeight]);
+
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            if (pageCursor >= totalPages) break;
+
+            onProgress?.(pageCursor + 1, totalPages);
+            const srcPage = sourceDoc.getPage(pageCursor);
+            const { width: origW, height: origH } = srcPage.getSize();
+            const embedded = await outputDoc.embedPage(srcPage);
+
+            const usableW = cellWidth - margin * 2;
+            const usableH = cellHeight - margin * 2;
+
+            const scale = Math.min(usableW / origW, usableH / origH);
+            const scaledW = origW * scale;
+            const scaledH = origH * scale;
+
+            const cellOriginX = col * cellWidth;
+            const cellOriginY = sheetHeight - (row + 1) * cellHeight;
+
+            const drawX = cellOriginX + (cellWidth - scaledW) / 2;
+            const drawY = cellOriginY + (cellHeight - scaledH) / 2;
+
+            sheet.drawPage(embedded, {
+              x: drawX,
+              y: drawY,
+              width: scaledW,
+              height: scaledH,
+            });
+
+            if (drawPageBorders) {
+              sheet.drawRectangle({
+                x: drawX,
+                y: drawY,
+                width: scaledW,
+                height: scaledH,
+                borderColor: rgb(0.8, 0.8, 0.8),
+                borderWidth: 0.5,
+              });
+            }
+
+            pageCursor++;
+          }
+        }
+      }
+
+      return await outputDoc.save({ useObjectStreams: false });
+    } catch (vectorErr) {
+      console.warn('Vector N-Up bypassed; activating high-res rendering pipeline:', vectorErr);
+    }
+  }
+
+  // 2. High-Res Rendering Fallback (decrypts and arranges bank statements & legal forms)
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8.slice(),
+    stopAtErrors: false,
+  });
+  const fallbackDoc = await loadingTask.promise;
+  const totalPages = fallbackDoc.numPages;
+  const outputDoc = await PDFDocument.create();
+
   let pageCursor = 0;
 
   while (pageCursor < totalPages) {
@@ -1585,9 +1654,10 @@ export async function createNUpPDF(
         if (pageCursor >= totalPages) break;
 
         onProgress?.(pageCursor + 1, totalPages);
-        const srcPage = sourceDoc.getPage(pageCursor);
-        const { width: origW, height: origH } = srcPage.getSize();
-        const embedded = await outputDoc.embedPage(srcPage);
+        const pageNum = pageCursor + 1;
+        const page = await fallbackDoc.getPage(pageNum);
+        const { imgBytes, width: origW, height: origH } = await renderPageAsJpg(page, 2.0);
+        const embeddedImg = await outputDoc.embedJpg(imgBytes);
 
         const usableW = cellWidth - margin * 2;
         const usableH = cellHeight - margin * 2;
@@ -1602,7 +1672,7 @@ export async function createNUpPDF(
         const drawX = cellOriginX + (cellWidth - scaledW) / 2;
         const drawY = cellOriginY + (cellHeight - scaledH) / 2;
 
-        sheet.drawPage(embedded, {
+        sheet.drawImage(embeddedImg, {
           x: drawX,
           y: drawY,
           width: scaledW,
@@ -1625,7 +1695,7 @@ export async function createNUpPDF(
     }
   }
 
-  return await outputDoc.save({ useObjectStreams: true });
+  return await outputDoc.save({ useObjectStreams: false });
 }
 
 export type BatesPosition =
