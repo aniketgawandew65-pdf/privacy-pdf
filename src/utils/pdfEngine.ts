@@ -2139,6 +2139,7 @@ export async function extractImagesFromPDF(
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
   const images: ExtractedImage[] = [];
+  const seenImageHashes = new Set<string>();
   let counter = 0;
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
@@ -2154,84 +2155,134 @@ export async function extractImagesFromPDF(
 
     for (let i = 0; i < operatorList.fnArray.length; i++) {
       const fn = operatorList.fnArray[i];
-      if (validOps.includes(fn)) {
-        const imgKey = operatorList.argsArray[i][0];
+      if (!validOps.includes(fn)) continue;
 
-        try {
-          const imgObj: any = await new Promise((resolve) => {
-            const obj = (page.objs as any).get(imgKey, (resolved: any) => {
-              if (resolved) resolve(resolved);
-            });
-            if (obj) resolve(obj);
-          });
+      const imgArg = operatorList.argsArray[i][0];
 
-          if (!imgObj) continue;
+      try {
+        // 1. Resolve image object safely across inline dicts, page.objs, and commonObjs
+        const imgObj: any = await new Promise((resolve) => {
+          // Failsafe timeout: if an asset cannot be decoded within 1.2s, skip it instead of freezing
+          const timeout = setTimeout(() => resolve(null), 1200);
 
-          const width = imgObj.width;
-          const height = imgObj.height;
-          if (!width || !height) continue;
+          // Case A: Inline image where the argument is already the decoded object
+          if (imgArg && typeof imgArg === 'object') {
+            clearTimeout(timeout);
+            resolve(imgArg);
+            return;
+          }
 
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) continue;
+          if (!imgArg || typeof imgArg !== 'string') {
+            clearTimeout(timeout);
+            resolve(null);
+            return;
+          }
 
-          if (imgObj.bitmap) {
-            ctx.drawImage(imgObj.bitmap, 0, 0);
-          } else if (imgObj.data) {
-            let imgData: ImageData;
-            if (imgObj.data.length === width * height * 4) {
-              imgData = new ImageData(new Uint8ClampedArray(imgObj.data), width, height);
-            } else if (imgObj.data.length === width * height * 3) {
-              const rgba = new Uint8ClampedArray(width * height * 4);
-              for (let p = 0, q = 0; p < imgObj.data.length; p += 3, q += 4) {
-                rgba[q] = imgObj.data[p];
-                rgba[q + 1] = imgObj.data[p + 1];
-                rgba[q + 2] = imgObj.data[p + 2];
-                rgba[q + 3] = 255;
-              }
-              imgData = new ImageData(rgba, width, height);
-            } else if (imgObj.data.length === width * height) {
-              const rgba = new Uint8ClampedArray(width * height * 4);
-              for (let p = 0, q = 0; p < imgObj.data.length; p++, q += 4) {
-                const val = imgObj.data[p];
-                rgba[q] = val;
-                rgba[q + 1] = val;
-                rgba[q + 2] = val;
-                rgba[q + 3] = 255;
-              }
-              imgData = new ImageData(rgba, width, height);
-            } else {
-              continue;
+          let handled = false;
+          const handleResult = (data: any) => {
+            if (!handled && data) {
+              handled = true;
+              clearTimeout(timeout);
+              resolve(data);
             }
-            ctx.putImageData(imgData, 0, 0);
+          };
+
+          // Case B: Check page.objs first
+          try {
+            const syncObj = (page.objs as any).get(imgArg, handleResult);
+            if (syncObj) handleResult(syncObj);
+          } catch {}
+
+          // Case C: Check shared commonObjs (header/footer logos, book art)
+          if (!handled) {
+            try {
+              const commonStore = (page as any).commonObjs || (pdfDoc as any).commonObjs;
+              if (commonStore) {
+                const syncCommon = commonStore.get(imgArg, handleResult);
+                if (syncCommon) handleResult(syncCommon);
+              }
+            } catch {}
+          }
+        });
+
+        if (!imgObj) continue;
+
+        const width = imgObj.width;
+        const height = imgObj.height;
+        if (!width || !height || width < 10 || height < 10) continue;
+
+        // Skip duplicate images reused across pages
+        const dedupeKey = `${width}x${height}_${imgObj.data?.length || 0}`;
+        if (seenImageHashes.has(dedupeKey)) continue;
+        seenImageHashes.add(dedupeKey);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+
+        // 2. Render image data to canvas
+        if (imgObj.bitmap) {
+          ctx.drawImage(imgObj.bitmap, 0, 0);
+        } else if (imgObj instanceof ImageBitmap) {
+          ctx.drawImage(imgObj, 0, 0);
+        } else if (imgObj.data) {
+          let imgData: ImageData;
+          if (imgObj.data.length === width * height * 4) {
+            imgData = new ImageData(new Uint8ClampedArray(imgObj.data), width, height);
+          } else if (imgObj.data.length === width * height * 3) {
+            const rgba = new Uint8ClampedArray(width * height * 4);
+            for (let p = 0, q = 0; p < imgObj.data.length; p += 3, q += 4) {
+              rgba[q] = imgObj.data[p];
+              rgba[q + 1] = imgObj.data[p + 1];
+              rgba[q + 2] = imgObj.data[p + 2];
+              rgba[q + 3] = 255;
+            }
+            imgData = new ImageData(rgba, width, height);
+          } else if (imgObj.data.length === width * height) {
+            const rgba = new Uint8ClampedArray(width * height * 4);
+            for (let p = 0, q = 0; p < imgObj.data.length; p++, q += 4) {
+              const val = imgObj.data[p];
+              rgba[q] = val;
+              rgba[q + 1] = val;
+              rgba[q + 2] = val;
+              rgba[q + 3] = 255;
+            }
+            imgData = new ImageData(rgba, width, height);
           } else {
             continue;
           }
-
-          const blob = await new Promise<Blob | null>((resolve) =>
-            canvas.toBlob(resolve, 'image/png')
-          );
-          if (!blob) continue;
-
-          counter++;
-          images.push({
-            id: `img-${counter}-p${pageNum}`,
-            name: `extracted_img_${counter}_p${pageNum}.png`,
-            blob,
-            dataUrl: canvas.toDataURL('image/png'),
-            width,
-            height,
-          });
-
-          canvas.width = 0;
-          canvas.height = 0;
-        } catch (err) {
-          console.warn(`Could not extract image ${imgKey} on page ${pageNum}:`, err);
+          ctx.putImageData(imgData, 0, 0);
+        } else {
+          continue;
         }
+
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, 'image/png')
+        );
+        if (!blob) continue;
+
+        counter++;
+        images.push({
+          id: `img-${counter}-p${pageNum}`,
+          name: `extracted_img_${counter}_p${pageNum}.png`,
+          blob,
+          dataUrl: canvas.toDataURL('image/png'),
+          width,
+          height,
+        });
+
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch (err) {
+        console.warn(`Skipping unparseable image on page ${pageNum}:`, err);
       }
     }
+
+    try {
+      page.cleanup();
+    } catch {}
   }
 
   return images;
