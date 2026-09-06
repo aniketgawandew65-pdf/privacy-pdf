@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Download, Loader2, CheckCircle2, X, Hash } from 'lucide-react';
+import { Upload, FileText, Download, Loader2, CheckCircle2, X, Hash, AlertCircle } from 'lucide-react';
 import { addPageNumbersToPDF } from '../utils/pdfEngine';
 
 interface PageNumbersProps {
@@ -21,18 +21,27 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
 
     try {
       const outputBytes = await addPageNumbersToPDF(file, position);
-      const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+
+      // Safe buffer slice to eliminate byte-offset shifts in WPS Office
+      const cleanBuffer = outputBytes.buffer.slice(
+        outputBytes.byteOffset,
+        outputBytes.byteOffset + outputBytes.byteLength
+      );
+
+      const blob = new Blob([cleanBuffer as unknown as BlobPart], { type: 'application/pdf' });
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to add page numbers.');
+      setError(err.message || 'Failed to add page numbers to this document.');
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleClear = () => {
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
     onFileChange(null);
     setDownloadUrl(null);
     setError(null);
@@ -42,16 +51,26 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Drop a PDF here to add page numbers"
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
             if (e.dataTransfer.files[0]?.type === 'application/pdf') {
               onFileChange(e.dataTransfer.files[0]);
+              if (downloadUrl) URL.revokeObjectURL(downloadUrl);
               setDownloadUrl(null);
             }
           }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to add page numbers</p>
@@ -64,8 +83,10 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
             onChange={(e) => {
               if (e.target.files?.[0]?.type === 'application/pdf') {
                 onFileChange(e.target.files[0]);
+                if (downloadUrl) URL.revokeObjectURL(downloadUrl);
                 setDownloadUrl(null);
               }
+              e.target.value = '';
             }}
           />
         </div>
@@ -77,12 +98,13 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
               <div className="truncate">
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
-                <p className="text-xs text-zinc-500">{Math.round(file.size / 1024)} KB</p>
+                <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
             <button
+              type="button"
               onClick={handleClear}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors cursor-pointer"
               title="Remove file"
             >
               <X className="w-4 h-4" />
@@ -99,7 +121,7 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                   setPosition('bottom-center');
                   setDownloadUrl(null);
                 }}
-                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all ${
+                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
                   position === 'bottom-center'
                     ? 'bg-zinc-800 border-emerald-500/50 text-emerald-400'
                     : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
@@ -113,7 +135,7 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                   setPosition('bottom-right');
                   setDownloadUrl(null);
                 }}
-                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all ${
+                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
                   position === 'bottom-right'
                     ? 'bg-zinc-800 border-emerald-500/50 text-emerald-400'
                     : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
@@ -125,16 +147,21 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
           </div>
 
           {error && (
-            <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
-              {error}
-            </p>
+            <div
+              role="alert"
+              className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300"
+            >
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
           )}
 
           {!downloadUrl ? (
             <button
+              type="button"
               onClick={handleApplyNumbers}
               disabled={isProcessing}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               {isProcessing ? (
                 <>
@@ -156,8 +183,8 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
               </div>
               <a
                 href={downloadUrl}
-                download={`${file.name.replace('.pdf', '')}_numbered.pdf`}
-                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                download={`${file.name.replace(/\.[^/.]+$/, '')}_numbered.pdf`}
+                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Numbered PDF</span>
@@ -169,3 +196,5 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
     </div>
   );
 };
+
+export default PageNumbers;

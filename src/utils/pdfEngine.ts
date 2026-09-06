@@ -706,32 +706,48 @@ export async function addWatermarkToPDF(
 
 export async function addPageNumbersToPDF(
   file: File,
-  position: 'bottom-center' | 'bottom-right' = 'bottom-center'
+  position: 'bottom-center' | 'bottom-right'
 ): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const arrayBuffer = await file.arrayBuffer();
+
+  let pdfDoc: PDFDocument;
+  try {
+    pdfDoc = await PDFDocument.load(arrayBuffer);
+  } catch {
+    // Bypass permission locks on bank statements and legal agreements
+    pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  }
+
+  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
-  const total = pages.length;
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const totalPages = pages.length;
 
-  pages.forEach((page, index) => {
+  for (let i = 0; i < totalPages; i++) {
+    const page = pages[i];
     const { width } = page.getSize();
-    const text = `Page ${index + 1} of ${total}`;
+    const pageNumberText = `${i + 1} of ${totalPages}`;
     const textSize = 10;
-    const textWidth = font.widthOfTextAtSize(text, textSize);
+    const textWidth = helveticaFont.widthOfTextAtSize(pageNumberText, textSize);
 
-    const x = position === 'bottom-right' ? width - textWidth - 36 : (width - textWidth) / 2;
+    let xPosition = width / 2 - textWidth / 2; // default: bottom-center
+    if (position === 'bottom-right') {
+      xPosition = width - textWidth - 36; // 36pt margin from right edge
+    }
 
-    page.drawText(text, {
-      x,
-      y: 24,
+    page.drawText(pageNumberText, {
+      x: xPosition,
+      y: 24, // 24pt margin from bottom edge
       size: textSize,
-      font,
+      font: helveticaFont,
       color: rgb(0.3, 0.3, 0.3),
     });
-  });
+  }
 
-  return await pdfDoc.save();
+  // Save with traditional uncompressed Xref tables for WPS Office compatibility
+  return await pdfDoc.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+  });
 }
 
 export async function extractTextFromPDF(
