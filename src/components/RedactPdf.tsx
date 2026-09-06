@@ -12,6 +12,7 @@ import {
   RotateCcw,
   ZoomIn,
   ZoomOut,
+  Trash2,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
@@ -22,15 +23,31 @@ interface RedactPdfProps {
   onFileChange: (file: File | null) => void;
 }
 
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+interface DragState {
+  mode: 'draw' | 'move' | 'resize';
+  handle?: ResizeHandle;
+  startX: number;
+  startY: number;
+  initialRect: RedactionRect;
+  index?: number;
+}
+
 export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageRedactions, setPageRedactions] = useState<Record<number, RedactionRect[]>>({});
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
 
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
-  const [activeRect, setActiveRect] = useState<RedactionRect | null>(null);
+  const [pageDimensions, setPageDimensions] = useState<{ width: number; height: number }>({
+    width: 560,
+    height: 792,
+  });
+
+  const [activeDrawRect, setActiveDrawRect] = useState<RedactionRect | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
 
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -45,11 +62,13 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
   const currentRects = pageRedactions[currentPage] || [];
 
+  // Reset state when file changes
   useEffect(() => {
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
       setPageRedactions({});
+      setSelectedIndex(null);
       setZoomLevel(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
@@ -71,6 +90,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
         setPageRedactions({});
+        setSelectedIndex(null);
       } catch (err) {
         console.error('Redact doc load error:', err);
         if (isMounted) setErrorMessage('Failed to open PDF document.');
@@ -84,6 +104,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
+  // Render current page at high DPI matching exact zoom factor
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDocRef.current || !canvasRef.current) return;
     setIsLoadingPage(true);
@@ -92,11 +113,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       const page = await pdfDocRef.current.getPage(currentPage);
       const unscaledViewport = page.getViewport({ scale: 1.0 });
 
+      const baseWidth = 560;
+      const aspectRatio = unscaledViewport.height / unscaledViewport.width;
+      const baseHeight = Math.round(baseWidth * aspectRatio);
+      setPageDimensions({ width: baseWidth, height: baseHeight });
+
       const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
-      const targetWidth = overlayRef.current?.parentElement?.clientWidth ? overlayRef.current.parentElement.clientWidth - 32 : 560;
-      const targetHeight = 560;
-      const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height) * dpr * zoomLevel;
-      const viewport = page.getViewport({ scale });
+      const renderScale = (baseWidth / unscaledViewport.width) * dpr * zoomLevel;
+      const viewport = page.getViewport({ scale: renderScale });
 
       const canvas = canvasRef.current;
       canvas.width = Math.floor(viewport.width);
@@ -104,7 +128,11 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        await page.render({ canvasContext: ctx as any, viewport } as any).promise;
+        await page.render({
+          canvasContext: ctx as any,
+          viewport,
+          annotationMode: (pdfjsLib as any).AnnotationMode?.ENABLE ?? 2,
+        } as any).promise;
       }
     } catch (err) {
       console.error('Page render error:', err);
@@ -119,42 +147,196 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     }
   }, [currentPage, totalPages, zoomLevel, renderCurrentPage]);
 
-  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Normalized coordinate helper [0.0 - 1.0]
+  const getNormalizedCoords = useCallback((clientX: number, clientY: number) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
     const rect = overlayRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     return { x, y };
-  };
+  }, []);
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Keyboard navigation: Arrow keys to nudge, Delete/Backspace to remove
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedIndex === null) return;
+      const rects = pageRedactions[currentPage] || [];
+      if (selectedIndex < 0 || selectedIndex >= rects.length) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        setPageRedactions((prev) => {
+          const updated = [...(prev[currentPage] || [])];
+          updated.splice(selectedIndex, 1);
+          return { ...prev, [currentPage]: updated };
+        });
+        setSelectedIndex(null);
+        return;
+      }
+
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 0.02 : 0.005;
+
+        setPageRedactions((prev) => {
+          const updated = [...(prev[currentPage] || [])];
+          const target = { ...updated[selectedIndex] };
+
+          if (e.key === 'ArrowUp') target.y = Math.max(0, target.y - step);
+          if (e.key === 'ArrowDown') target.y = Math.min(1 - target.height, target.y + step);
+          if (e.key === 'ArrowLeft') target.x = Math.max(0, target.x - step);
+          if (e.key === 'ArrowRight') target.x = Math.min(1 - target.width, target.x + step);
+
+          updated[selectedIndex] = target;
+          return { ...prev, [currentPage]: updated };
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedIndex, currentPage, pageRedactions]);
+
+  // Window-level mouse interaction for moving, drawing, and 8-point resizing
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const state = dragStateRef.current;
+      if (!state) return;
+
+      const current = getNormalizedCoords(e.clientX, e.clientY);
+      const dx = current.x - state.startX;
+      const dy = current.y - state.startY;
+
+      if (state.mode === 'draw') {
+        const x = Math.min(state.startX, current.x);
+        const y = Math.min(state.startY, current.y);
+        const width = Math.abs(current.x - state.startX);
+        const height = Math.abs(current.y - state.startY);
+        setActiveDrawRect({ x, y, width, height });
+      } else if (state.mode === 'move' && state.index !== undefined) {
+        const initial = state.initialRect;
+        let nextX = Math.max(0, Math.min(1 - initial.width, initial.x + dx));
+        let nextY = Math.max(0, Math.min(1 - initial.height, initial.y + dy));
+
+        setPageRedactions((prev) => {
+          const updated = [...(prev[currentPage] || [])];
+          updated[state.index!] = { ...initial, x: nextX, y: nextY };
+          return { ...prev, [currentPage]: updated };
+        });
+      } else if (state.mode === 'resize' && state.index !== undefined && state.handle) {
+        const initial = state.initialRect;
+        const handle = state.handle;
+        const minDim = 0.008;
+
+        let { x, y, width, height } = initial;
+
+        if (handle.includes('e')) {
+          width = Math.max(minDim, Math.min(1 - x, initial.width + dx));
+        }
+        if (handle.includes('s')) {
+          height = Math.max(minDim, Math.min(1 - y, initial.height + dy));
+        }
+        if (handle.includes('w')) {
+          const rightEdge = initial.x + initial.width;
+          const newX = Math.max(0, Math.min(rightEdge - minDim, initial.x + dx));
+          x = newX;
+          width = rightEdge - newX;
+        }
+        if (handle.includes('n')) {
+          const bottomEdge = initial.y + initial.height;
+          const newY = Math.max(0, Math.min(bottomEdge - minDim, initial.y + dy));
+          y = newY;
+          height = bottomEdge - newY;
+        }
+
+        setPageRedactions((prev) => {
+          const updated = [...(prev[currentPage] || [])];
+          updated[state.index!] = { x, y, width, height };
+          return { ...prev, [currentPage]: updated };
+        });
+      }
+    };
+
+    const handleWindowMouseUp = () => {
+      const state = dragStateRef.current;
+      if (!state) return;
+
+      if (state.mode === 'draw' && activeDrawRect) {
+        if (activeDrawRect.width > 0.01 && activeDrawRect.height > 0.01) {
+          setPageRedactions((prev) => {
+            const list = prev[currentPage] || [];
+            return {
+              ...prev,
+              [currentPage]: [...list, activeDrawRect],
+            };
+          });
+          setSelectedIndex((prevList) => (prevList !== null ? prevList : (pageRedactions[currentPage] || []).length));
+        }
+      }
+
+      dragStateRef.current = null;
+      setActiveDrawRect(null);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [getNormalizedCoords, activeDrawRect, currentPage, pageRedactions]);
+
+  // Start drawing on blank background
+  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
-    const coords = getNormalizedCoords(e);
-    setIsDrawing(true);
-    setDrawStart(coords);
-    setActiveRect({ x: coords.x, y: coords.y, width: 0.01, height: 0.01 });
+    const coords = getNormalizedCoords(e.clientX, e.clientY);
+    setSelectedIndex(null);
+
+    dragStateRef.current = {
+      mode: 'draw',
+      startX: coords.x,
+      startY: coords.y,
+      initialRect: { x: coords.x, y: coords.y, width: 0, height: 0 },
+    };
+    setActiveDrawRect({ x: coords.x, y: coords.y, width: 0.005, height: 0.005 });
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDrawing || !drawStart) return;
-    const current = getNormalizedCoords(e);
-    const x = Math.min(drawStart.x, current.x);
-    const y = Math.min(drawStart.y, current.y);
-    const width = Math.abs(current.x - drawStart.x);
-    const height = Math.abs(current.y - drawStart.y);
-    setActiveRect({ x, y, width, height });
+  // Start dragging/moving an existing blackout box
+  const handleBoxMouseDown = (e: React.MouseEvent<HTMLDivElement>, index: number) => {
+    e.stopPropagation();
+    if (isLoadingPage || isProcessing || downloadUrl) return;
+
+    setSelectedIndex(index);
+    const coords = getNormalizedCoords(e.clientX, e.clientY);
+    const rect = currentRects[index];
+
+    dragStateRef.current = {
+      mode: 'move',
+      startX: coords.x,
+      startY: coords.y,
+      initialRect: { ...rect },
+      index,
+    };
   };
 
-  const handleMouseUp = () => {
-    if (activeRect && activeRect.width > 0.01 && activeRect.height > 0.01) {
-      setPageRedactions((prev) => ({
-        ...prev,
-        [currentPage]: [...(prev[currentPage] || []), activeRect],
-      }));
-    }
-    setIsDrawing(false);
-    setDrawStart(null);
-    setActiveRect(null);
+  // Start resizing via an 8-point handle
+  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>, index: number, handle: ResizeHandle) => {
+    e.stopPropagation();
+    if (isLoadingPage || isProcessing || downloadUrl) return;
+
+    setSelectedIndex(index);
+    const coords = getNormalizedCoords(e.clientX, e.clientY);
+    const rect = currentRects[index];
+
+    dragStateRef.current = {
+      mode: 'resize',
+      handle,
+      startX: coords.x,
+      startY: coords.y,
+      initialRect: { ...rect },
+      index,
+    };
   };
 
   const handleResetCurrent = () => {
@@ -163,6 +345,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       delete next[currentPage];
       return next;
     });
+    setSelectedIndex(null);
   };
 
   const handleApplyRedactions = async () => {
@@ -196,8 +379,12 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
   const totalRedactionsCount = Object.values(pageRedactions).reduce((sum, r) => sum + r.length, 0);
 
+  // Scaled dimensions that drive genuine zoom
+  const displayWidth = Math.round(pageDimensions.width * zoomLevel);
+  const displayHeight = Math.round(pageDimensions.height * zoomLevel);
+
   return (
-    <div className="w-full max-w-2xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div className="w-full max-w-3xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
           role="button"
@@ -235,13 +422,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         </div>
       ) : (
         <div className="space-y-4 text-left select-none">
+          {/* Top File Bar */}
           <div className="flex items-center justify-between p-3 bg-zinc-950/70 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-3 truncate">
               <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
               <div className="truncate">
                 <p className="text-xs font-semibold text-zinc-200 truncate">{file.name}</p>
                 <p className="text-[11px] text-zinc-500">
-                  {totalPages} Pages • {totalRedactionsCount} blackouts placed
+                  {totalPages} Pages • {totalRedactionsCount} blackout{totalRedactionsCount !== 1 ? 's' : ''} placed
                 </p>
               </div>
             </div>
@@ -256,83 +444,172 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             </button>
           </div>
 
+          {/* Page Navigation & Reset Controls */}
           <div className="flex items-center justify-between text-xs text-zinc-300 px-1">
             <div className="flex items-center gap-2">
               <button
                 disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => p - 1)}
+                onClick={() => {
+                  setCurrentPage((p) => p - 1);
+                  setSelectedIndex(null);
+                }}
                 className="p-1 rounded hover:bg-zinc-800 disabled:opacity-30 cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span>Page {currentPage} of {totalPages}</span>
+              <span>
+                Page {currentPage} of {totalPages}
+              </span>
               <button
                 disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => p + 1)}
+                onClick={() => {
+                  setCurrentPage((p) => p + 1);
+                  setSelectedIndex(null);
+                }}
                 className="p-1 rounded hover:bg-zinc-800 disabled:opacity-30 cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
-            {currentRects.length > 0 && (
-              <button
-                onClick={handleResetCurrent}
-                className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-red-400 transition cursor-pointer"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Clear Page Blackouts</span>
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {selectedIndex !== null && currentRects[selectedIndex] && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPageRedactions((prev) => {
+                      const updated = [...(prev[currentPage] || [])];
+                      updated.splice(selectedIndex, 1);
+                      return { ...prev, [currentPage]: updated };
+                    });
+                    setSelectedIndex(null);
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-rose-400 hover:text-rose-300 transition cursor-pointer font-medium"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected</span>
+                </button>
+              )}
+
+              {currentRects.length > 0 && (
+                <button
+                  onClick={handleResetCurrent}
+                  className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-red-400 transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Clear Page Blackouts</span>
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* High-DPI Canvas & Redaction Viewport with Bottom-Right Zoom */}
-          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center p-4 overflow-auto min-h-[340px] max-h-[580px]">
+          {/* Zoomable Viewport with Real Overflow Scroll */}
+          <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 p-4 overflow-auto min-h-[380px] max-h-[620px] flex">
             {isLoadingPage && (
-              <div className="absolute inset-0 bg-zinc-950/60 z-20 flex items-center justify-center backdrop-blur-xs">
+              <div className="absolute inset-0 bg-zinc-950/60 z-40 flex items-center justify-center backdrop-blur-xs">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            <div className="relative inline-block leading-none my-auto">
-              <canvas ref={canvasRef} className="block rounded shadow-md max-h-[520px] w-auto h-auto object-contain pointer-events-none" />
+            {/* Document Surface Container */}
+            <div
+              style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+              className="relative shrink-0 shadow-2xl m-auto"
+            >
+              <canvas
+                ref={canvasRef}
+                style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                className="block rounded pointer-events-none"
+              />
 
               <div
                 ref={overlayRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
+                style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
+                onMouseDown={handleOverlayMouseDown}
                 className="absolute inset-0 cursor-crosshair z-10"
               >
-                {currentRects.map((r, i) => (
-                  <div
-                    key={i}
-                    className="absolute bg-black border border-zinc-800 shadow-md"
-                    style={{
-                      left: `${r.x * 100}%`,
-                      top: `${r.y * 100}%`,
-                      width: `${r.width * 100}%`,
-                      height: `${r.height * 100}%`,
-                    }}
-                  />
-                ))}
+                {currentRects.map((r, i) => {
+                  const isSelected = selectedIndex === i;
+                  return (
+                    <div
+                      key={i}
+                      onMouseDown={(e) => handleBoxMouseDown(e, i)}
+                      className={`absolute bg-black transition-shadow cursor-move ${
+                        isSelected ? 'ring-2 ring-emerald-400 shadow-xl z-30' : 'border border-zinc-700 shadow-md z-20'
+                      }`}
+                      style={{
+                        left: `${r.x * 100}%`,
+                        top: `${r.y * 100}%`,
+                        width: `${r.width * 100}%`,
+                        height: `${r.height * 100}%`,
+                      }}
+                    >
+                      {/* 8-Side Resize Handles for Active Box */}
+                      {isSelected && (
+                        <>
+                          {/* NW (Top-Left) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'nw')}
+                            className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
+                          />
+                          {/* N (Top-Center) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'n')}
+                            className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
+                          />
+                          {/* NE (Top-Right) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'ne')}
+                            className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
+                          />
+                          {/* E (Middle-Right) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'e')}
+                            className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
+                          />
+                          {/* SE (Bottom-Right) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'se')}
+                            className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
+                          />
+                          {/* S (Bottom-Center) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 's')}
+                            className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
+                          />
+                          {/* SW (Bottom-Left) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'sw')}
+                            className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
+                          />
+                          {/* W (Middle-Left) */}
+                          <div
+                            onMouseDown={(e) => handleResizeStart(e, i, 'w')}
+                            className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
+                          />
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
 
-                {activeRect && (
+                {/* Drawing Box Preview */}
+                {activeDrawRect && (
                   <div
-                    className="absolute bg-black/80 border border-red-500"
+                    className="absolute bg-black/80 border border-emerald-400 pointer-events-none z-30"
                     style={{
-                      left: `${activeRect.x * 100}%`,
-                      top: `${activeRect.y * 100}%`,
-                      width: `${activeRect.width * 100}%`,
-                      height: `${activeRect.height * 100}%`,
+                      left: `${activeDrawRect.x * 100}%`,
+                      top: `${activeDrawRect.y * 100}%`,
+                      width: `${activeDrawRect.width * 100}%`,
+                      height: `${activeDrawRect.height * 100}%`,
                     }}
                   />
                 )}
               </div>
             </div>
 
-            {/* Bottom-Right Floating Zoom Controls */}
-            <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-lg z-30">
+            {/* Floating Zoom Controls */}
+            <div className="sticky bottom-3 left-full shrink-0 flex items-center gap-1 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2 py-1 rounded-lg shadow-xl z-40 ml-2 mt-auto">
               <button
                 type="button"
                 onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
@@ -342,7 +619,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-[10px] font-mono text-zinc-300 min-w-[36px] text-center">
+              <span className="text-[10px] font-mono text-zinc-300 min-w-[38px] text-center">
                 {Math.round(zoomLevel * 100)}%
               </span>
               <button
@@ -358,7 +635,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           <p className="text-[11px] text-zinc-500 text-center">
-            Click and drag across sensitive text or numbers to burn permanent blackout boxes.
+            Click &amp; drag to draw • Hold &amp; drag box to reposition • Drag 8 handles to resize • Arrow keys to nudge • Delete key to remove.
           </p>
 
           {errorMessage && (
