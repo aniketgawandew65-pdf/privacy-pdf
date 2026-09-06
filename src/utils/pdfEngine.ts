@@ -3224,109 +3224,199 @@ export interface TextToPdfOptions {
 }
 
 export async function generateTextPDF(options: TextToPdfOptions): Promise<Uint8Array> {
-  const {
-    text,
-    fontFamily = 'helvetica',
-    fontSize = 12,
-    lineSpacing = 1.4,
-    pageSize = 'a4',
-    margin = 40,
-  } = options;
+  const pdfDoc = await PDFDocument.create();
 
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'pt',
-    format: pageSize,
-  });
+  const [pageWidth, pageHeight] = options.pageSize === 'letter' ? [612, 792] : [595.28, 841.89];
+  const margin = options.margin ?? 40;
+  const contentWidth = pageWidth - margin * 2;
+  const baseFontSize = options.fontSize ?? 12;
 
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const printableWidth = pageWidth - margin * 2;
-  const bottomThreshold = pageHeight - margin;
+  let regularFontName = StandardFonts.Helvetica;
+  let boldFontName = StandardFonts.HelveticaBold;
+  let italicFontName = StandardFonts.HelveticaOblique;
 
-  let cursorY = margin + fontSize;
+  if (options.fontFamily === 'times') {
+    regularFontName = StandardFonts.TimesRoman;
+    boldFontName = StandardFonts.TimesRomanBold;
+    italicFontName = StandardFonts.TimesRomanItalic;
+  } else if (options.fontFamily === 'courier') {
+    regularFontName = StandardFonts.Courier;
+    boldFontName = StandardFonts.CourierBold;
+    italicFontName = StandardFonts.CourierOblique;
+  }
 
-  const lines = text.split('\n');
+  const fontReg = await pdfDoc.embedFont(regularFontName);
+  const fontBold = await pdfDoc.embedFont(boldFontName);
+  const fontItalic = await pdfDoc.embedFont(italicFontName);
 
-  for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
+  let currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
+  let currentY = pageHeight - margin - baseFontSize;
 
-    if (rawLine.startsWith('# ')) {
-      const h1Size = Math.round(fontSize * 1.6);
-      doc.setFont(fontFamily, 'bold');
-      doc.setFontSize(h1Size);
-      const splitLines = doc.splitTextToSize(rawLine.replace('# ', ''), printableWidth);
+  const rawLines = (options.text || '').split('\n');
+  let activeAlign: 'left' | 'center' | 'right' = 'left';
 
-      for (const line of splitLines) {
-        if (cursorY + h1Size > bottomThreshold) {
-          doc.addPage();
-          cursorY = margin + h1Size;
-        }
-        doc.text(line, margin, cursorY);
-        cursorY += h1Size * lineSpacing;
-      }
-      cursorY += 6;
-      continue;
+  for (let r = 0; r < rawLines.length; r++) {
+    const rawLine = rawLines[r];
+
+    // 1. Detect block and inline alignment tags
+    let currentAlign: 'left' | 'center' | 'right' = activeAlign;
+    if (/align=["']?center["']?/i.test(rawLine) || /<center>/i.test(rawLine)) {
+      currentAlign = 'center';
+    } else if (/align=["']?right["']?/i.test(rawLine)) {
+      currentAlign = 'right';
+    } else if (/align=["']?left["']?/i.test(rawLine)) {
+      currentAlign = 'left';
     }
 
-    if (rawLine.startsWith('## ')) {
-      const h2Size = Math.round(fontSize * 1.3);
-      doc.setFont(fontFamily, 'bold');
-      doc.setFontSize(h2Size);
-      const splitLines = doc.splitTextToSize(rawLine.replace('## ', ''), printableWidth);
-
-      for (const line of splitLines) {
-        if (cursorY + h2Size > bottomThreshold) {
-          doc.addPage();
-          cursorY = margin + h2Size;
-        }
-        doc.text(line, margin, cursorY);
-        cursorY += h2Size * lineSpacing;
-      }
-      cursorY += 4;
-      continue;
+    if (/<\/div>|<\/center>/i.test(rawLine)) {
+      activeAlign = 'left';
+    } else {
+      activeAlign = currentAlign;
     }
 
-    if (rawLine.startsWith('- ') || rawLine.startsWith('* ')) {
-      doc.setFont(fontFamily, 'normal');
-      doc.setFontSize(fontSize);
-      const bulletText = rawLine.replace(/^[-*]\s+/, '');
-      const splitLines = doc.splitTextToSize(bulletText, printableWidth - 14);
+    // 2. Strip HTML alignment markup so raw tags never render on the PDF
+    let clean = rawLine
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<\/div>/gi, '')
+      .replace(/<\/?center>/gi, '')
+      .trim();
 
-      for (let j = 0; j < splitLines.length; j++) {
-        if (cursorY + fontSize > bottomThreshold) {
-          doc.addPage();
-          cursorY = margin + fontSize;
-        }
-        if (j === 0) {
-          doc.text('•', margin, cursorY);
-        }
-        doc.text(splitLines[j], margin + 14, cursorY);
-        cursorY += fontSize * lineSpacing;
+    // Handle blank lines
+    if (!clean) {
+      currentY -= baseFontSize * 0.9;
+      if (currentY < margin) {
+        currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
+        currentY = pageHeight - margin - baseFontSize;
       }
       continue;
     }
 
-    if (!rawLine.trim()) {
-      cursorY += fontSize * 0.8;
-      continue;
+    // 3. Parse Heading hierarchies (H1, H2, H3) and Bullet points
+    let isH1 = false;
+    let isH2 = false;
+    let isH3 = false;
+    let isBullet = false;
+
+    if (clean.startsWith('# ')) {
+      isH1 = true;
+      clean = clean.substring(2).trim();
+    } else if (clean.startsWith('## ')) {
+      isH2 = true;
+      clean = clean.substring(3).trim();
+    } else if (clean.startsWith('### ')) {
+      isH3 = true;
+      clean = clean.substring(4).trim();
+    } else if (clean.startsWith('- ') || clean.startsWith('* ')) {
+      isBullet = true;
+      clean = clean.substring(2).trim();
     }
 
-    doc.setFont(fontFamily, 'normal');
-    doc.setFontSize(fontSize);
-    const splitLines = doc.splitTextToSize(rawLine, printableWidth);
+    // 4. Parse inline formatting (Underline, Bold, Italic)
+    const isUnderline = /<\/?u>/i.test(clean);
+    clean = clean.replace(/<\/?u>/gi, '');
 
-    for (const line of splitLines) {
-      if (cursorY + fontSize > bottomThreshold) {
-        doc.addPage();
-        cursorY = margin + fontSize;
+    let lineFont = fontReg;
+    let lineSize = baseFontSize;
+
+    if (isH1) {
+      lineFont = fontBold;
+      lineSize = Math.round(baseFontSize * 1.6);
+      currentY -= baseFontSize * 0.4;
+    } else if (isH2) {
+      lineFont = fontBold;
+      lineSize = Math.round(baseFontSize * 1.3);
+      currentY -= baseFontSize * 0.3;
+    } else if (isH3) {
+      lineFont = fontBold;
+      lineSize = Math.round(baseFontSize * 1.1);
+      currentY -= baseFontSize * 0.2;
+    } else if (clean.startsWith('**') && clean.endsWith('**')) {
+      lineFont = fontBold;
+      clean = clean.slice(2, -2);
+    } else if (clean.includes('**')) {
+      lineFont = fontBold;
+      clean = clean.replace(/\*\*/g, '');
+    } else if (clean.startsWith('*') && clean.endsWith('*')) {
+      lineFont = fontItalic;
+      clean = clean.slice(1, -1);
+    } else if (clean.includes('*')) {
+      lineFont = fontItalic;
+      clean = clean.replace(/\*/g, '');
+    }
+
+    // 5. Wrap lines to page width
+    const maxLineWidth = isBullet ? contentWidth - 18 : contentWidth;
+    const words = clean.split(/\s+/);
+    const wrappedLines: string[] = [];
+    let cur = '';
+
+    for (const word of words) {
+      const test = cur ? `${cur} ${word}` : word;
+      if (lineFont.widthOfTextAtSize(test, lineSize) <= maxLineWidth) {
+        cur = test;
+      } else {
+        if (cur) wrappedLines.push(cur);
+        cur = word;
       }
-      doc.text(line, margin, cursorY);
-      cursorY += fontSize * lineSpacing;
+    }
+    if (cur) wrappedLines.push(cur);
+
+    // 6. Draw text using currentAlign (resolves unused variable error)
+    const lineHeight = lineSize * 1.38;
+
+    for (let idx = 0; idx < wrappedLines.length; idx++) {
+      const subText = wrappedLines[idx];
+      if (currentY - lineHeight < margin) {
+        currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
+        currentY = pageHeight - margin - lineSize;
+      }
+
+      const textWidth = lineFont.widthOfTextAtSize(subText, lineSize);
+      let posX = margin;
+
+      if (isBullet) {
+        posX = margin + 18;
+        if (idx === 0) {
+          currentPage.drawText('•', {
+            x: margin + 4,
+            y: currentY,
+            size: lineSize,
+            font: fontBold,
+            color: rgb(0.1, 0.1, 0.1),
+          });
+        }
+      } else if (currentAlign === 'center') {
+        posX = (pageWidth - textWidth) / 2;
+      } else if (currentAlign === 'right') {
+        posX = pageWidth - margin - textWidth;
+      }
+
+      currentPage.drawText(subText, {
+        x: posX,
+        y: currentY,
+        size: lineSize,
+        font: lineFont,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+
+      if (isUnderline) {
+        currentPage.drawLine({
+          start: { x: posX, y: currentY - 2 },
+          end: { x: posX + textWidth, y: currentY - 2 },
+          thickness: 1,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+      }
+
+      currentY -= lineHeight;
+    }
+
+    if (isH1 || isH2 || isH3) {
+      currentY -= baseFontSize * 0.3;
     }
   }
 
-  return new Uint8Array(doc.output('arraybuffer'));
+  return await pdfDoc.save({ useObjectStreams: false });
 }
 
 export interface VisualOverlayItem {
