@@ -17,7 +17,6 @@ import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Configure worker URL so PDF.js can load any file on fresh page refresh
 if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
@@ -38,7 +37,6 @@ export const ComparePdf: React.FC = () => {
   const [viewMode, setViewMode] = useState<DiffViewMode>('overlay');
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
 
-  // Zoom controls state
   const [zoom, setZoom] = useState<number>(100);
 
   const [isRendering, setIsRendering] = useState(false);
@@ -55,7 +53,7 @@ export const ComparePdf: React.FC = () => {
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 25, 50));
   const handleResetZoom = () => setZoom(100);
 
-  // Load Document A (Original Working Logic)
+  // Load Document A
   useEffect(() => {
     if (!fileA) {
       setPdfDocA(null);
@@ -83,7 +81,7 @@ export const ComparePdf: React.FC = () => {
     };
   }, [fileA]);
 
-  // Load Document B (Original Working Logic)
+  // Load Document B
   useEffect(() => {
     if (!fileB) {
       setPdfDocB(null);
@@ -412,21 +410,20 @@ export const ComparePdf: React.FC = () => {
             </div>
           )}
 
-          {/* Render Area */}
-          <div className="relative min-h-[450px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 p-4 overflow-auto flex justify-center items-start">
+          {/* Render Area with true 4-way panning and balanced padding */}
+          <div className="relative min-h-[480px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 p-6 overflow-auto">
             {isRendering && (
               <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-xs flex items-center justify-center z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            {/* Scaled Preview Canvas Wrapper */}
+            {/* Layout Zoom Wrapper: dynamically sizes container layout so scrollbars pan in all directions */}
             <div
               style={{
-                transform: `scale(${zoom / 100})`,
-                transformOrigin: 'top center',
+                zoom: zoom / 100,
               }}
-              className="transition-transform duration-150 ease-out w-full flex justify-center"
+              className="min-w-fit w-full flex justify-center items-start mx-auto transition-all duration-150 ease-out"
             >
               {viewMode === 'overlay' ? (
                 <div className="flex flex-col items-center gap-2">
@@ -436,12 +433,12 @@ export const ComparePdf: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                  <div className="flex flex-col items-center gap-1.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl">
+                  <div className="flex flex-col items-center gap-2">
                     <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
                     <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
                   </div>
-                  <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center gap-2">
                     <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
                     <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
                   </div>
