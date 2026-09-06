@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Download,
   FileText,
@@ -22,19 +22,19 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { generateTextPDF, type TextToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
-const SAMPLE_TEXT = `# Executive Project Proposal
-
-This document was created directly in the browser with zero cloud storage.
-
-## Key Project Objectives
-- 100% privacy-first client-side document processing
-- Zero server hosting maintenance costs
-- Vector-grade text clarity on high-DPI displays
-
-<div align="center">Type or paste your text here to preview the output instantly.</div>`;
+const INITIAL_CONTENT = `<h1>BLOG</h1>
+<p style="text-align: center;"><strong>Title: Regulatory Update: Mandatory Static IP Requirements for API Trading</strong></p>
+<h3>Header: Understanding NSE's Circular on API Trading</h3>
+<p>If you depend on our API solutions for your trading strategies, then this article has some very important news. National Stock Exchange has released Circular INVG67858 requiring new guidelines in relation to retail investors who trade in API applications.</p>
+<p>Through this move, the aim is to ensure that your trading platform remains safe, with priority being given to the overall integrity of the market while at the same time allowing you to implement your preferred algorithms.</p>
+<p><strong>Key highlights of the NSE circular:</strong></p>
+<ul>
+  <li>Mandatory static IP addresses for all retail trading connections</li>
+  <li>Limitations on Updating IP Address to once per calendar week</li>
+  <li>10 Operations per Second (OPS) limit for unregistered algorithms</li>
+</ul>`;
 
 export const TextToPdf: React.FC = () => {
-  const [text, setText] = useState(SAMPLE_TEXT);
   const [fontFamily, setFontFamily] = useState<'helvetica' | 'times' | 'courier'>('helvetica');
   const [fontSize, setFontSize] = useState<number>(12);
   const [pageSize, setPageSize] = useState<'a4' | 'letter'>('a4');
@@ -43,70 +43,36 @@ export const TextToPdf: React.FC = () => {
   // Retina Preview & Zoom State
   const [zoom, setZoom] = useState<number>(1.0);
   const [pageCount, setPageCount] = useState<number>(1);
+  const [charCount, setCharCount] = useState<number>(0);
+  const [htmlContent, setHtmlContent] = useState<string>(INITIAL_CONTENT);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   const { url: downloadUrl, createUrl } = useObjectUrl();
 
-  // Formatting helpers that preserve selection and scroll position
-  const applyInlineWrap = (prefix: string, suffix: string, placeholder: string = 'text') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
+  // Initialize WYSIWYG editor on mount without resetting on typing
+  useEffect(() => {
+    if (editorRef.current && !editorRef.current.innerHTML) {
+      editorRef.current.innerHTML = INITIAL_CONTENT;
+      setCharCount(editorRef.current.innerText.trim().length);
+    }
+  }, []);
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = text.substring(start, end);
-    const content = selected || placeholder;
-    const updated = text.substring(0, start) + prefix + content + suffix + text.substring(end);
+  // Sync content from the WYSIWYG editor
+  const handleEditorInput = useCallback(() => {
+    if (!editorRef.current) return;
+    const html = editorRef.current.innerHTML;
+    setHtmlContent(html);
+    setCharCount(editorRef.current.innerText.trim().length);
+  }, []);
 
-    setText(updated);
-
-    setTimeout(() => {
-      textarea.focus();
-      if (selected) {
-        textarea.setSelectionRange(start + prefix.length, start + prefix.length + content.length);
-      } else {
-        textarea.setSelectionRange(start + prefix.length, start + prefix.length + placeholder.length);
-      }
-    }, 0);
-  };
-
-  const applyLinePrefix = (prefix: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const before = text.substring(0, start);
-    const lineStartIndex = before.lastIndexOf('\n') + 1;
-
-    const formattedPrefix = prefix.endsWith(' ') ? prefix : `${prefix} `;
-    const updated = text.substring(0, lineStartIndex) + formattedPrefix + text.substring(lineStartIndex);
-
-    setText(updated);
-
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + formattedPrefix.length, start + formattedPrefix.length);
-    }, 0);
-  };
-
-  const applyBlockAlignment = (align: 'left' | 'center' | 'right') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = text.substring(start, end) || 'Centered content';
-    const tagOpen = `<div align="${align}">`;
-    const tagClose = `</div>`;
-    const updated = text.substring(0, start) + tagOpen + selected + tagClose + text.substring(end);
-
-    setText(updated);
-
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + tagOpen.length, start + tagOpen.length + selected.length);
-    }, 0);
+  // Visual formatting execution (applies formatting with ZERO raw code tags inserted into text)
+  const applyFormat = (command: string, value: string | undefined = undefined) => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+    document.execCommand(command, false, value);
+    handleEditorInput();
   };
 
   // Fine 5% step zoom controls
@@ -114,13 +80,13 @@ export const TextToPdf: React.FC = () => {
   const handleZoomOut = () => setZoom((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))));
   const handleResetZoom = () => setZoom(1.0);
 
-  // Debounced generator to keep typing responsive
+  // Debounced PDF renderer
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(async () => {
       try {
         const options: TextToPdfOptions = {
-          text: text.trim() || 'Type something to generate your PDF...',
+          text: htmlContent.trim() || '<p>Type something to generate your PDF...</p>',
           fontFamily,
           fontSize,
           pageSize,
@@ -165,7 +131,7 @@ export const TextToPdf: React.FC = () => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [text, fontFamily, fontSize, pageSize, margin]);
+  }, [htmlContent, fontFamily, fontSize, pageSize, margin, createUrl]);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 text-left">
@@ -243,51 +209,48 @@ export const TextToPdf: React.FC = () => {
 
       {/* Split Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Left Side: Live Notepad Editor with Rich Formatting Tools */}
+        {/* Left Side: Visual WYSIWYG Editor (No raw code or background commands) */}
         <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[650px]">
-          {/* Header Info */}
           <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <span className="flex items-center gap-1.5 font-medium text-zinc-300">
               <FileText className="w-4 h-4 text-emerald-400" />
-              Editor (Markdown & Rich Text)
+              Document Editor
             </span>
-            <span>{text.length} characters</span>
+            <span>{charCount} characters</span>
           </div>
 
           {/* Formatting Toolbar */}
           <div className="flex flex-wrap items-center gap-1 p-1.5 mb-3 bg-zinc-950/80 border border-zinc-800 rounded-xl">
-            {/* Structure / Heading Hierarchy */}
             <button
               type="button"
-              onClick={() => applyLinePrefix('# ')}
+              onClick={() => applyFormat('formatBlock', '<h1>')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Title (H1)"
+              title="Heading 1"
             >
               <Heading1 className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => applyLinePrefix('## ')}
+              onClick={() => applyFormat('formatBlock', '<h2>')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Heading (H2)"
+              title="Heading 2"
             >
               <Heading2 className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => applyLinePrefix('### ')}
+              onClick={() => applyFormat('formatBlock', '<h3>')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Sub-paragraph / Section (H3)"
+              title="Heading 3"
             >
               <Heading3 className="w-3.5 h-3.5" />
             </button>
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Typography Modifiers */}
             <button
               type="button"
-              onClick={() => applyInlineWrap('**', '**', 'bold text')}
+              onClick={() => applyFormat('bold')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Bold"
             >
@@ -295,7 +258,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyInlineWrap('*', '*', 'italic text')}
+              onClick={() => applyFormat('italic')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Italic"
             >
@@ -303,7 +266,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyInlineWrap('<u>', '</u>', 'underlined text')}
+              onClick={() => applyFormat('underline')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Underline"
             >
@@ -312,22 +275,20 @@ export const TextToPdf: React.FC = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Bullet List */}
             <button
               type="button"
-              onClick={() => applyLinePrefix('- ')}
+              onClick={() => applyFormat('insertUnorderedList')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Bullet Pointer"
+              title="Bullet Points"
             >
               <List className="w-3.5 h-3.5" />
             </button>
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Alignment Options */}
             <button
               type="button"
-              onClick={() => applyBlockAlignment('left')}
+              onClick={() => applyFormat('justifyLeft')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Left"
             >
@@ -335,7 +296,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyBlockAlignment('center')}
+              onClick={() => applyFormat('justifyCenter')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Center"
             >
@@ -343,7 +304,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyBlockAlignment('right')}
+              onClick={() => applyFormat('justifyRight')}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Right"
             >
@@ -351,12 +312,12 @@ export const TextToPdf: React.FC = () => {
             </button>
           </div>
 
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Type or paste text here... Use toolbar buttons above to format words or lines."
-            className="w-full flex-1 bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-200 font-mono resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
+          {/* Visual ContentEditable Area: Shows pure styled text without code tags */}
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleEditorInput}
+            className="w-full flex-1 bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-200 font-sans focus:outline-none focus:border-emerald-500 overflow-y-auto leading-relaxed [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mb-1.5 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:mb-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-2"
           />
         </div>
 
@@ -369,7 +330,6 @@ export const TextToPdf: React.FC = () => {
 
           {/* Scrollable Preview Viewport */}
           <div className="flex-1 overflow-auto p-6 bg-zinc-950/60 relative">
-            {/* Scaffolding container: Keeps elements in positive coordinates to avoid left-side cutoffs */}
             <div
               className={`flex items-start transition-all duration-150 ease-out min-w-full ${
                 zoom > 1.0 ? 'justify-start' : 'justify-center'
@@ -400,7 +360,7 @@ export const TextToPdf: React.FC = () => {
             </div>
           </div>
 
-          {/* Floating Smooth Zoom Controls with Fine Step Adjuster */}
+          {/* Smooth Zoom Controls */}
           <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
             <button
               onClick={handleZoomOut}
@@ -420,8 +380,7 @@ export const TextToPdf: React.FC = () => {
               onChange={(e) => setZoom(Number(e.target.value))}
               className="w-16 accent-emerald-500 cursor-pointer hidden sm:block"
               title="Continuous Zoom"
-            >
-            </input>
+            />
 
             <span className="text-[11px] font-mono px-1 text-zinc-400 min-w-[42px] text-center select-none">
               {Math.round(zoom * 100)}%
