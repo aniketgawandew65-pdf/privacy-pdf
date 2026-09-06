@@ -815,55 +815,51 @@ export interface PDFMetadata {
 }
 
 export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
-  const bytes = await file.arrayBuffer();
-  
-  // Load document without suppressing encryption errors
-  let pdfDoc: PDFDocument;
-  try {
-    pdfDoc = await PDFDocument.load(bytes);
-  } catch (err: any) {
-    if (err?.message?.includes('encrypted') || err?.name === 'EncryptedPDFError') {
-      throw new Error(
-        'This document is encrypted or password-locked (e.g., bank statement or signed deed). Please unlock it before reading metadata.'
-      );
-    }
-    // Fallback attempt for non-standard trailers
-    pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  }
+  const arrayBuffer = await file.arrayBuffer();
 
-  return {
-    title: pdfDoc.getTitle() || '',
-    author: pdfDoc.getAuthor() || '',
-    subject: pdfDoc.getSubject() || '',
-    keywords: pdfDoc.getKeywords() || '',
-  };
+  try {
+    // Read directly via pdfjsLib which reads info on ALL PDFs (even bank statements)
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer.slice(0)),
+    });
+    const pdf = await loadingTask.promise;
+    const meta = await pdf.getMetadata();
+    const info = (meta?.info as any) || {};
+
+    return {
+      title: info.Title || '',
+      author: info.Author || '',
+      subject: info.Subject || '',
+      keywords: info.Keywords || '',
+    };
+  } catch (err: any) {
+    console.error('getPDFMetadata error:', err);
+    return {
+      title: '',
+      author: '',
+      subject: '',
+      keywords: '',
+    };
+  }
 }
 
 export async function updatePDFMetadata(
   file: File,
   metadata: PDFMetadata
 ): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
+  const arrayBuffer = await file.arrayBuffer();
 
   let pdfDoc: PDFDocument;
+
   try {
-    pdfDoc = await PDFDocument.load(bytes);
-  } catch (err: any) {
-    if (err?.message?.includes('encrypted') || err?.name === 'EncryptedPDFError') {
-      throw new Error(
-        'Cannot modify metadata on a password-protected or encrypted PDF (e.g. Bank Statement / Signed Agreement). Remove security restrictions using the Unlock tool first.'
-      );
-    }
-    throw err;
+    // Attempt standard load
+    pdfDoc = await PDFDocument.load(arrayBuffer);
+  } catch {
+    // If bank statement / permissions-locked, bypass permission checks
+    pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   }
 
-  // Check if document has active encryption dictionaries
-  if (pdfDoc.isEncrypted) {
-    throw new Error(
-      'This PDF contains security encryption. Modifying metadata on locked files causes file corruption. Please unlock it first.'
-    );
-  }
-
+  // Set the requested metadata fields
   if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
   if (metadata.author !== undefined) pdfDoc.setAuthor(metadata.author);
   if (metadata.subject !== undefined) pdfDoc.setSubject(metadata.subject);
@@ -876,11 +872,16 @@ export async function updatePDFMetadata(
     );
   }
 
-  // useObjectStreams: false writes traditional PDF 1.4 xref tables compatible with WPS Office
-  return await pdfDoc.save({
+  // Update timestamps
+  pdfDoc.setModificationDate(new Date());
+
+  // Save with traditional uncompressed Xref tables so WPS Office parses it cleanly
+  const savedBytes = await pdfDoc.save({
     useObjectStreams: false,
     addDefaultPage: false,
   });
+
+  return savedBytes;
 }
 
 export interface SignaturePlacement {

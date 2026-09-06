@@ -54,8 +54,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         setKeywords(meta.keywords || '');
       })
       .catch((err: any) => {
-        if (!isMounted) return;
-        setError(err.message || 'Failed to read document metadata.');
+        console.warn('Metadata read notice:', err);
       })
       .finally(() => {
         if (isMounted) setIsLoading(false);
@@ -79,18 +78,22 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         keywords,
       });
 
-      // Byte-slice buffer to prevent offset corruption in WPS Office
-    const safeBuffer = outputBytes.buffer.slice(
-      outputBytes.byteOffset,
-      outputBytes.byteOffset + outputBytes.byteLength
-    );
-    const blob = new Blob([safeBuffer as unknown as BlobPart], { type: 'application/pdf' });
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-    const url = URL.createObjectURL(blob);
-    setDownloadUrl(url);
+      // Create a clean ArrayBuffer slice to preserve strict xref tables for WPS Office
+      const cleanBuffer = outputBytes.buffer.slice(
+        outputBytes.byteOffset,
+        outputBytes.byteOffset + outputBytes.byteLength
+      );
+
+      const blob = new Blob([cleanBuffer as unknown as BlobPart], {
+        type: 'application/pdf',
+      });
+
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      const url = URL.createObjectURL(blob);
+      setDownloadUrl(url);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to update PDF metadata.');
+      console.error('Metadata update failure:', err);
+      setError('Could not update metadata on this file.');
     } finally {
       setIsProcessing(false);
     }
@@ -225,7 +228,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                       setKeywords(e.target.value);
                       setDownloadUrl(null);
                     }}
-                    placeholder="e.g. invoice, report, legal (comma separated)"
+                    placeholder="e.g. statement, financial, 2026 (comma separated)"
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>
