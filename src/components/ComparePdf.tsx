@@ -14,6 +14,13 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+// Configure worker URL so PDF.js can load any file on fresh page refresh
+if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
 
 type DiffViewMode = 'overlay' | 'split';
 
@@ -48,7 +55,7 @@ export const ComparePdf: React.FC = () => {
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 25, 50));
   const handleResetZoom = () => setZoom(100);
 
-  // Load Document A
+  // Load Document A (Original Working Logic)
   useEffect(() => {
     if (!fileA) {
       setPdfDocA(null);
@@ -76,7 +83,7 @@ export const ComparePdf: React.FC = () => {
     };
   }, [fileA]);
 
-  // Load Document B
+  // Load Document B (Original Working Logic)
   useEffect(() => {
     if (!fileB) {
       setPdfDocB(null);
