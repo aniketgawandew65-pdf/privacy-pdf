@@ -77,7 +77,6 @@ export const TextToPdf: React.FC = () => {
 
     const start = textarea.selectionStart;
     const before = text.substring(0, start);
-    const after = text.substring(start);
     const lineStartIndex = before.lastIndexOf('\n') + 1;
 
     const formattedPrefix = prefix.endsWith(' ') ? prefix : `${prefix} `;
