@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import heic2any from 'heic2any';
 import {
   Upload,
@@ -8,8 +8,6 @@ import {
   Loader2,
   ShieldCheck,
   AlertCircle,
-  X,
-  Archive,
 } from 'lucide-react';
 
 interface ConvertedImage {
