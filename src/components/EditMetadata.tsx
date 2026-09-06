@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileText, Download, Loader2, CheckCircle2, X, Tag } from 'lucide-react';
+import {
+  Upload,
+  FileText,
+  Download,
+  Loader2,
+  CheckCircle2,
+  X,
+  Tag,
+  AlertCircle,
+} from 'lucide-react';
 import { getPDFMetadata, updatePDFMetadata } from '../utils/pdfEngine';
 
 interface EditMetadataProps {
@@ -19,31 +28,42 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (file) {
-      setIsLoading(true);
-      setError(null);
-      setDownloadUrl(null);
-      getPDFMetadata(file)
-        .then((meta) => {
-          setTitle(meta.title || '');
-          setAuthor(meta.author || '');
-          setSubject(meta.subject || '');
-          setKeywords(meta.keywords || '');
-        })
-        .catch(() => {
-          setError('Failed to read document metadata.');
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
-    } else {
+    if (!file) {
       setTitle('');
       setAuthor('');
       setSubject('');
       setKeywords('');
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       setDownloadUrl(null);
       setError(null);
+      return;
     }
+
+    let isMounted = true;
+    setIsLoading(true);
+    setError(null);
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    setDownloadUrl(null);
+
+    getPDFMetadata(file)
+      .then((meta) => {
+        if (!isMounted) return;
+        setTitle(meta.title || '');
+        setAuthor(meta.author || '');
+        setSubject(meta.subject || '');
+        setKeywords(meta.keywords || '');
+      })
+      .catch((err: any) => {
+        if (!isMounted) return;
+        setError(err.message || 'Failed to read document metadata.');
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [file]);
 
   const handleSave = async () => {
@@ -58,18 +78,24 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         subject,
         keywords,
       });
-      const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+
+      const blob = new Blob([outputBytes], { type: 'application/pdf' });
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to update PDF metadata.');
+      setError(
+        err.message ||
+          'Failed to update PDF metadata. Document may be encrypted or corrupted.'
+      );
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleClear = () => {
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
     onFileChange(null);
     setDownloadUrl(null);
     setError(null);
@@ -79,15 +105,25 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Drop a PDF here to edit metadata"
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            if (e.dataTransfer.files[0]?.type === 'application/pdf') {
-              onFileChange(e.dataTransfer.files[0]);
+            const dropped = e.dataTransfer.files?.[0];
+            if (dropped && dropped.type === 'application/pdf') {
+              onFileChange(dropped);
             }
           }}
-          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-xl p-8 text-center bg-zinc-950/40"
+          className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 focus:border-emerald-500 focus:outline-none transition-all rounded-xl p-8 text-center bg-zinc-950/40"
         >
           <Upload className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to edit metadata</p>
@@ -98,9 +134,11 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
             accept="application/pdf"
             className="hidden"
             onChange={(e) => {
-              if (e.target.files?.[0]?.type === 'application/pdf') {
-                onFileChange(e.target.files[0]);
+              const selected = e.target.files?.[0];
+              if (selected && selected.type === 'application/pdf') {
+                onFileChange(selected);
               }
+              e.target.value = '';
             }}
           />
         </div>
@@ -112,12 +150,13 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
               <FileText className="w-6 h-6 text-emerald-400 shrink-0" />
               <div className="truncate">
                 <p className="text-sm font-medium text-zinc-200 truncate">{file.name}</p>
-                <p className="text-xs text-zinc-500">{Math.round(file.size / 1024)} KB</p>
+                <p className="text-xs text-zinc-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             </div>
             <button
+              type="button"
               onClick={handleClear}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-800/60 transition-colors cursor-pointer"
               title="Remove file"
             >
               <X className="w-4 h-4" />
@@ -191,16 +230,21 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
               </div>
 
               {error && (
-                <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg">
-                  {error}
-                </p>
+                <div
+                  role="alert"
+                  className="p-3.5 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300"
+                >
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
               )}
 
               {!downloadUrl ? (
                 <button
+                  type="button"
                   onClick={handleSave}
                   disabled={isProcessing}
-                  className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                  className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
@@ -223,7 +267,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                   <a
                     href={downloadUrl}
                     download={`${file.name.replace('.pdf', '')}_updated.pdf`}
-                    className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                    className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
                   >
                     <Download className="w-4 h-4 stroke-[2.5]" />
                     <span>Download Updated PDF</span>
@@ -237,3 +281,5 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
     </div>
   );
 };
+
+export default EditMetadata;

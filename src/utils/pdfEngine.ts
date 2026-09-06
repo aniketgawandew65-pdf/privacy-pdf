@@ -816,7 +816,21 @@ export interface PDFMetadata {
 
 export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  
+  // Load document without suppressing encryption errors
+  let pdfDoc: PDFDocument;
+  try {
+    pdfDoc = await PDFDocument.load(bytes);
+  } catch (err: any) {
+    if (err?.message?.includes('encrypted') || err?.name === 'EncryptedPDFError') {
+      throw new Error(
+        'This document is encrypted or password-locked (e.g., bank statement or signed deed). Please unlock it before reading metadata.'
+      );
+    }
+    // Fallback attempt for non-standard trailers
+    pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  }
+
   return {
     title: pdfDoc.getTitle() || '',
     author: pdfDoc.getAuthor() || '',
@@ -825,9 +839,30 @@ export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
   };
 }
 
-export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Promise<Uint8Array> {
+export async function updatePDFMetadata(
+  file: File,
+  metadata: PDFMetadata
+): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+
+  let pdfDoc: PDFDocument;
+  try {
+    pdfDoc = await PDFDocument.load(bytes);
+  } catch (err: any) {
+    if (err?.message?.includes('encrypted') || err?.name === 'EncryptedPDFError') {
+      throw new Error(
+        'Cannot modify metadata on a password-protected or encrypted PDF (e.g. Bank Statement / Signed Agreement). Remove security restrictions using the Unlock tool first.'
+      );
+    }
+    throw err;
+  }
+
+  // Check if document has active encryption dictionaries
+  if (pdfDoc.isEncrypted) {
+    throw new Error(
+      'This PDF contains security encryption. Modifying metadata on locked files causes file corruption. Please unlock it first.'
+    );
+  }
 
   if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
   if (metadata.author !== undefined) pdfDoc.setAuthor(metadata.author);
@@ -841,7 +876,11 @@ export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Prom
     );
   }
 
-  return await pdfDoc.save();
+  // useObjectStreams: false writes traditional PDF 1.4 xref tables compatible with WPS Office
+  return await pdfDoc.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+  });
 }
 
 export interface SignaturePlacement {
