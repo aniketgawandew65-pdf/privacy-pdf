@@ -37,7 +37,7 @@ export const ComparePdf: React.FC = () => {
   const [viewMode, setViewMode] = useState<DiffViewMode>('overlay');
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
 
-  // Zoom controls state
+  // Smooth zoom state with fine-grain control
   const [zoom, setZoom] = useState<number>(100);
 
   const [isRendering, setIsRendering] = useState(false);
@@ -50,8 +50,9 @@ export const ComparePdf: React.FC = () => {
   const fileInputARef = useRef<HTMLInputElement>(null);
   const fileInputBRef = useRef<HTMLInputElement>(null);
 
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 25, 250));
-  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 25, 50));
+  // Fine 5% step increments
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 5, 250));
+  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 5, 50));
   const handleResetZoom = () => setZoom(100);
 
   // Load Document A
@@ -351,35 +352,50 @@ export const ComparePdf: React.FC = () => {
               </button>
             </div>
 
-            {/* Zoom Controls */}
-            <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1">
+            {/* User-Controlled Smooth Zoom (Slider + 5% Fine Step Buttons) */}
+            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1">
               <button
                 type="button"
                 onClick={handleZoomOut}
                 disabled={zoom <= 50}
                 className="p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 rounded hover:bg-zinc-800 transition"
-                title="Zoom Out"
+                title="Zoom Out (-5%)"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-xs font-mono font-medium text-zinc-300 min-w-[2.75rem] text-center select-none">
+
+              <input
+                type="range"
+                min="50"
+                max="250"
+                step="5"
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="w-20 sm:w-24 accent-emerald-400 cursor-pointer"
+                title="Drag to zoom continuously"
+              />
+
+              <span className="text-xs font-mono font-medium text-zinc-300 min-w-[3rem] text-center select-none">
                 {zoom}%
               </span>
+
               <button
                 type="button"
                 onClick={handleZoomIn}
                 disabled={zoom >= 250}
                 className="p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 rounded hover:bg-zinc-800 transition"
-                title="Zoom In"
+                title="Zoom In (+5%)"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
-              <div className="w-[1px] h-3 bg-zinc-800 mx-0.5" />
+
+              <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
+
               <button
                 type="button"
                 onClick={handleResetZoom}
                 className="p-1 text-zinc-400 hover:text-zinc-200 rounded hover:bg-zinc-800 transition"
-                title="Reset Zoom"
+                title="Reset Zoom to 100%"
               >
                 <RotateCcw className="w-3 h-3" />
               </button>
@@ -411,26 +427,29 @@ export const ComparePdf: React.FC = () => {
             </div>
           )}
 
-          {/* Render Area with 4-way panning and balanced padding */}
-          <div className="relative min-h-[450px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 overflow-auto p-4 sm:p-6">
+          {/* Render Area: 4-Way Panning with Zero Left-Clipping */}
+          <div className="relative min-h-[450px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 overflow-auto p-6">
             {isRendering && (
               <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-xs flex items-center justify-center z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            {/* Dynamic spacer that guarantees positive scroll coordinates and equal padding on all sides */}
+            {/* Layout Scaffolding: Keeps content in positive coordinates so left side never clips */}
             <div
-              className="flex justify-center items-start min-w-full m-auto"
+              className="flex items-start transition-all duration-150 ease-out"
               style={{
                 width: zoom > 100 ? `${zoom}%` : '100%',
-                padding: '1.5rem',
+                minWidth: '100%',
+                justifyContent: zoom > 100 ? 'flex-start' : 'center',
+                paddingRight: zoom > 100 ? '2rem' : undefined,
+                paddingBottom: zoom > 100 ? '3rem' : undefined,
               }}
             >
               <div
                 style={{
                   transform: `scale(${zoom / 100})`,
-                  transformOrigin: 'top center',
+                  transformOrigin: zoom > 100 ? 'top left' : 'top center',
                 }}
                 className="transition-transform duration-150 ease-out w-full flex justify-center shrink-0"
               >
@@ -442,12 +461,12 @@ export const ComparePdf: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                    <div className="flex flex-col items-center gap-1.5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl">
+                    <div className="flex flex-col items-center gap-2">
                       <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
                       <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
                     </div>
-                    <div className="flex flex-col items-center gap-1.5">
+                    <div className="flex flex-col items-center gap-2">
                       <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
                       <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
                     </div>
