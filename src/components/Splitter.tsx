@@ -10,8 +10,7 @@ import {
   Layers,
   AlertCircle,
 } from 'lucide-react';
-import { PDFDocument } from 'pdf-lib';
-import { splitPdfToZip, getPDFPageCount } from '../utils/pdfEngine';
+import { splitPDF, splitPdfToZip, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
 interface SplitterProps {
@@ -108,15 +107,8 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
           throw new Error('Please specify a valid page range.');
         }
 
-        const arrayBuffer = await file.arrayBuffer();
-        const srcDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-        const newDoc = await PDFDocument.create();
-
-        const pageIndices = selectedPages.map((p) => p - 1);
-        const copiedPages = await newDoc.copyPages(srcDoc, pageIndices);
-        copiedPages.forEach((page) => newDoc.addPage(page));
-
-        const pdfBytes = await newDoc.save({ useObjectStreams: true });
+        // Call dual-engine splitPDF to support bank statements, forms, and protected files
+        const pdfBytes = await splitPDF(file, selectedPages.join(', '));
         const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
         createUrl(blob);
       }
