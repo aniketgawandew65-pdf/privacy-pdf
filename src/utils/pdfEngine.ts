@@ -2252,8 +2252,6 @@ export async function packageImagesToZip(
 }
 
 export interface OcrProgress {
-  page: number;
-  totalPages: number;
   status: string;
   progress: number;
 }
@@ -2261,51 +2259,54 @@ export interface OcrProgress {
 export async function ocrPDFToSearchable(
   file: File,
   language: string = 'eng',
-  onProgress?: (progress: OcrProgress) => void
+  onProgress?: (p: OcrProgress) => void
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const bytesForPdfJs = new Uint8Array(arrayBuffer).slice();
-  const loadingTask = pdfjsLib.getDocument({ data: bytesForPdfJs });
-  const sourcePdf = await loadingTask.promise;
-  const totalPages = sourcePdf.numPages;
+  // 1. Ensure PDF.js worker is active
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        'pdfjs-dist/build/pdf.worker.min.mjs',
+        import.meta.url
+      ).toString();
+    } catch {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+    }
+  }
 
-  let currentPageProcessing = 1;
+  onProgress?.({ status: 'Initializing OCR Engine...', progress: 5 });
+
+  // 2. Spawn Tesseract Worker with reliable public CDN fallbacks
   const worker = await createWorker(language, 1, {
-    langPath: '/tessdata',
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+    langPath: 'https://tessdata.projectnaptha.com/4.00',
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress({
-          page: currentPageProcessing,
-          totalPages,
-          status: `Recognizing text on page ${currentPageProcessing}...`,
-          progress: Math.round(((currentPageProcessing - 1 + (m.progress || 0)) / totalPages) * 100),
+          status: 'Recognizing text...',
+          progress: Math.min(95, Math.round(m.progress * 90) + 5),
         });
       }
     },
   });
 
-  const pdfDoc = await PDFDocument.load(arrayBuffer.slice(0), { ignoreEncryption: true });
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
   try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfJsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+    const pdfLibDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    const helveticaFont = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+
+    const totalPages = pdfJsDoc.numPages;
+
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      currentPageProcessing = pageNum;
       onProgress?.({
-        page: pageNum,
-        totalPages,
-        status: `Rendering page ${pageNum} for OCR...`,
-        progress: Math.round(((pageNum - 1) / totalPages) * 100),
+        status: `Scanning Page ${pageNum} of ${totalPages}...`,
+        progress: Math.round(((pageNum - 1) / totalPages) * 90) + 5,
       });
 
-      const pdfPage = pdfDoc.getPage(pageNum - 1);
-      const { width: pageWidth, height: pageHeight } = pdfPage.getSize();
-
-      const jsPage = await sourcePdf.getPage(pageNum);
-      const unscaled = jsPage.getViewport({ scale: 1.0 });
-
-      const maxDim = Math.max(unscaled.width, unscaled.height);
-      const scale = Math.min(1600 / maxDim, 2.0);
-      const viewport = jsPage.getViewport({ scale });
+      // Render page to high-DPI canvas for OCR recognition
+      const pdfJsPage = await pdfJsDoc.getPage(pageNum);
+      const viewport = pdfJsPage.getViewport({ scale: 2.0 });
 
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
@@ -2313,67 +2314,51 @@ export async function ocrPDFToSearchable(
       const ctx = canvas.getContext('2d');
 
       if (!ctx) continue;
+     await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
 
-      await (
-        jsPage.render({
-          canvasContext: ctx as any,
-          viewport,
-          canvas,
-        } as any) as any
-      ).promise;
-
+      // Run OCR on the rendered canvas
       const { data } = await worker.recognize(canvas);
-      const pageData = data as any;
 
-      const scaleX = pageWidth / canvas.width;
-      const scaleY = pageHeight / canvas.height;
-
-      if (pageData && pageData.words) {
-        for (const word of pageData.words) {
-          const cleanText = word.text?.trim();
-          if (!cleanText) continue;
-
-          const safeText = cleanText
-            .replace(/[\u2018\u2019]/g, "'")
-            .replace(/[\u201C\u201D]/g, '"')
-            .replace(/[\u2013\u2014]/g, '-')
-            .replace(/[^\x20-\x7E]/g, '');
-
-          if (!safeText) continue;
-
-          const { x0, y0, y1 } = word.bbox;
-          const pdfX = x0 * scaleX;
-          const wordBoxHeight = (y1 - y0) * scaleY;
-          const pdfY = pageHeight - y1 * scaleY;
-          const fontSize = Math.max(4, Math.min(72, wordBoxHeight * 0.85));
-
-          try {
-            pdfPage.drawText(safeText, {
-              x: pdfX,
-              y: pdfY,
-              size: fontSize,
-              font,
-              opacity: 0,
-            });
-          } catch {}
-        }
-      }
-
+      // Clean up canvas memory immediately
       canvas.width = 0;
       canvas.height = 0;
+
+      const pdfLibPage = pdfLibDoc.getPage(pageNum - 1);
+      const { width: pageWidth, height: pageHeight } = pdfLibPage.getSize();
+
+      const scaleX = pageWidth / viewport.width;
+      const scaleY = pageHeight / viewport.height;
+
+     // 3. Inject coordinate-accurate invisible text layer (opacity: 0)
+      const words = (data as any)?.words;
+      if (Array.isArray(words)) {
+        for (const word of words) {
+          // Sanitize OCR noise to prevent pdf-lib WinAnsi font crashes
+          const clean = word.text.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').trim();
+          if (!clean) continue;
+
+          const box = word.bbox;
+          const posX = box.x0 * scaleX;
+          // Invert Y coordinate: PDF origin is bottom-left, Canvas origin is top-left
+          const posY = pageHeight - (box.y1 * scaleY);
+          const wordHeight = (box.y1 - box.y0) * scaleY;
+
+          pdfLibPage.drawText(clean, {
+            x: Math.max(0, posX),
+            y: Math.max(0, posY),
+            size: Math.max(4, Math.round(wordHeight * 0.85)),
+            font: helveticaFont,
+            opacity: 0, // 100% invisible over the scan
+          });
+        }
+      }
     }
+
+    onProgress?.({ status: 'Finalizing Searchable PDF...', progress: 98 });
+    return await pdfLibDoc.save({ useObjectStreams: false });
   } finally {
     await worker.terminate();
   }
-
-  onProgress?.({
-    page: totalPages,
-    totalPages,
-    status: 'Finalizing searchable PDF...',
-    progress: 100,
-  });
-
-  return await pdfDoc.save({ useObjectStreams: true });
 }
 
 export interface RepairResult {
