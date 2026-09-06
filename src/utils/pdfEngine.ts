@@ -594,15 +594,6 @@ export interface WatermarkOptions {
   position?: 'center' | 'top' | 'bottom';
 }
 
-function hexToRgb01(hex: string) {
-  const cleanHex = hex.replace('#', '');
-  const bigint = parseInt(cleanHex, 16);
-  const r = ((bigint >> 16) & 255) / 255;
-  const g = ((bigint >> 8) & 255) / 255;
-  const b = (bigint & 255) / 255;
-  return rgb(r, g, b);
-}
-
 export async function addWatermarkToPDF(
   file: File,
   options: WatermarkOptions
