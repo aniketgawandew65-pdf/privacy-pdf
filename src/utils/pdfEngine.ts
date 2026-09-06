@@ -1932,6 +1932,7 @@ export async function addBatesNumberingToPDF(
   options: BatesOptions
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
+  const uint8 = new Uint8Array(bytes);
 
   const prefix = options.prefix || '';
   const suffix = options.suffix || '';
@@ -1940,70 +1941,6 @@ export async function addBatesNumberingToPDF(
   const fontSize = options.fontSize || 10;
   const position = options.position || 'bottom-right';
 
-  // PATH 1: Native Vector Mode (Preserves 100% original vector pixels, fonts, and tiny ~140 KB size)
-  try {
-    const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const pages = pdfDoc.getPages();
-    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const numPages = pages.length;
-
-    pages.forEach((page, idx) => {
-      if (options.onProgress) {
-        options.onProgress(idx + 1, numPages);
-      }
-
-      const pageNumStr = String(startNum + idx).padStart(digits, '0');
-      const stampText = `${prefix}${pageNumStr}${suffix}`;
-
-      const { width, height } = page.getSize();
-      const textWidth = font.widthOfTextAtSize(stampText, fontSize);
-      const textHeight = font.heightAtSize(fontSize);
-
-      const marginX = 28;
-      const marginY = 24;
-
-      let posX = marginX;
-      let posY = marginY;
-
-      if (position.includes('center')) {
-        posX = (width - textWidth) / 2;
-      } else if (position.includes('right')) {
-        posX = width - textWidth - marginX;
-      }
-
-      if (position.includes('top')) {
-        posY = height - marginY - textHeight;
-      }
-
-      // Draw background pill to keep stamp legible over any background
-      const padX = 6;
-      const padY = 3;
-      page.drawRectangle({
-        x: posX - padX,
-        y: posY - padY,
-        width: textWidth + padX * 2,
-        height: textHeight + padY * 2,
-        color: rgb(1, 1, 1),
-        opacity: 0.95,
-      });
-
-      // Stamp native vector text directly on top
-      page.drawText(stampText, {
-        x: posX,
-        y: posY,
-        size: fontSize,
-        font,
-        color: rgb(0, 0, 0),
-      });
-    });
-
-    return await pdfDoc.save({ useObjectStreams: false });
-  } catch (err) {
-    console.warn('Native vector bates stamping fallback to canvas compositor:', err);
-  }
-
-  // PATH 2: High-Def Compositor Fallback (for complex raster-only or locked files)
-  const uint8 = new Uint8Array(bytes);
   const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
@@ -2018,65 +1955,87 @@ export async function addBatesNumberingToPDF(
     const stampText = `${prefix}${pageNumStr}${suffix}`;
 
     const page = await pdfDoc.getPage(i);
-    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 3.0);
+    
+    // 1. Capture exact original page dimensions
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+    const origWidth = unscaledViewport.width;
+    const origHeight = unscaledViewport.height;
 
-    const compositeCanvas = document.createElement('canvas');
-    compositeCanvas.width = pWidth;
-    compositeCanvas.height = pHeight;
-    const ctx = compositeCanvas.getContext('2d');
+    // 2. Render canvas at 2.5x print resolution for 300 DPI sharpness
+    const renderScale = 2.5;
+    const renderViewport = page.getViewport({ scale: renderScale });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(renderViewport.width);
+    canvas.height = Math.floor(renderViewport.height);
+    const ctx = canvas.getContext('2d', { alpha: false });
 
     if (ctx) {
-      const pageImg = new Image();
-      await new Promise<void>((resolve) => {
-        pageImg.onload = () => {
-          ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
-          resolve();
-        };
-        pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
-      });
+      // White background prevents transparent grid artifacts
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      await page.render({
+        canvasContext: ctx as any,
+        viewport: renderViewport,
+        intent: 'print',
+      } as any).promise;
 
       ctx.save();
-      const scaleNormalization = pWidth / 540;
-      const finalFontSize = fontSize * scaleNormalization;
-
-      ctx.font = `bold ${finalFontSize}px Helvetica, Arial, sans-serif`;
-      ctx.fillStyle = '#000000';
+      
+      const stampFontSize = fontSize * renderScale;
+      ctx.font = `bold ${stampFontSize}px Helvetica, Arial, sans-serif`;
 
       const metrics = ctx.measureText(stampText);
       const textWidth = metrics.width;
-      const textHeight = finalFontSize;
+      const textHeight = stampFontSize;
 
-      const marginX = pWidth * 0.05;
-      const marginY = pHeight * 0.04;
+      const marginX = 24 * renderScale;
+      const marginY = 20 * renderScale;
 
       let posX = marginX;
-      let posY = pHeight - marginY;
+      let posY = canvas.height - marginY;
 
       if (position.includes('center')) {
-        posX = (pWidth - textWidth) / 2;
+        posX = (canvas.width - textWidth) / 2;
       } else if (position.includes('right')) {
-        posX = pWidth - textWidth - marginX;
+        posX = canvas.width - textWidth - marginX;
       }
 
       if (position.includes('top')) {
         posY = marginY + textHeight;
       }
 
+      // Draw crisp opaque background pill behind stamp
       ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.fillRect(posX - 6, posY - textHeight - 4, textWidth + 12, textHeight + 8);
+      ctx.fillRect(
+        posX - 4 * renderScale,
+        posY - textHeight - 2 * renderScale,
+        textWidth + 8 * renderScale,
+        textHeight + 4 * renderScale
+      );
 
+      // Draw sharp Bates stamp text
       ctx.fillStyle = '#000000';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(stampText, posX, posY);
+
       ctx.restore();
 
-      const stampedPng = compositeCanvas.toDataURL('image/png');
-      const b64 = stampedPng.split(',')[1];
-      const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const finalPageImg = await newPdfDoc.embedPng(stampedBytes);
+      // High-quality compression preserving sharp table borders and text
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.94);
+      const b64 = imgDataUrl.split(',')[1];
+      const imgBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
 
-      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-      newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
+      // 3. Add page with ORIGINAL dimensions and compress 2.5x density into it
+      const newPage = newPdfDoc.addPage([origWidth, origHeight]);
+      newPage.drawImage(embeddedImg, {
+        x: 0,
+        y: 0,
+        width: origWidth,
+        height: origHeight,
+      });
     }
   }
 
