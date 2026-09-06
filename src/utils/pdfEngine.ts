@@ -652,14 +652,28 @@ export async function addWatermarkToPDF(
 
         ctx.font = `bold ${finalFontSize}px ${fontFamilyCSS}`;
         ctx.fillStyle = options.colorHex || '#dc2626';
-        ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const spacing = options.letterSpacing ?? 0;
-        const rawText = options.text.trim();
-        const renderedText = spacing > 0 ? rawText.split('').join(' '.repeat(spacing)) : rawText;
+        const text = options.text.trim();
+        // Exact proportional letter spacing matching preview CSS (slider value * 6 px)
+        const spacingPx = (options.letterSpacing ?? 0) * 6 * scaleNormalization;
 
-        ctx.fillText(renderedText, 0, 0);
+        // Measure total width with precise character-by-character gaps
+        const chars = text.split('');
+        let totalWidth = 0;
+        const charWidths = chars.map((char) => {
+          const w = ctx.measureText(char).width;
+          totalWidth += w;
+          return w;
+        });
+        totalWidth += spacingPx * (chars.length - 1);
+
+        // Draw centered character by character so spacing never distorts
+        let currentX = -totalWidth / 2;
+        chars.forEach((char, idx) => {
+          ctx.fillText(char, currentX, 0);
+          currentX += charWidths[idx] + spacingPx;
+        });
       } else if (options.type === 'image' && options.imageDataUrl) {
         const logoImg = new Image();
         await new Promise<void>((resolve) => {
@@ -689,6 +703,7 @@ export async function addWatermarkToPDF(
 
   return await newPdfDoc.save({ useObjectStreams: false });
 }
+
 export async function addPageNumbersToPDF(
   file: File,
   position: 'bottom-center' | 'bottom-right' = 'bottom-center'
