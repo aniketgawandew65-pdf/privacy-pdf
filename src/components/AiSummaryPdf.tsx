@@ -111,7 +111,6 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-detect provider prefix when user pastes key
   const handleKeyChange = (key: string) => {
     const trimmed = key.trim();
     setApiKey(trimmed);
@@ -153,13 +152,13 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
       .then((text) => {
         if (!isMounted) return;
         if (!text.trim()) {
-          setErrorMessage('No selectable text found in this PDF. Use "OCR Searchable" first if this is a scanned document.');
+          setErrorMessage('No selectable text found in this PDF. It may be a scanned image.');
         } else {
           setExtractedText(text);
           setMessages([
             {
               role: 'assistant',
-              content: `Hello! I've loaded "${file.name}" into your browser's memory (${text.length.toLocaleString()} characters extracted). What would you like to know or summarize?`,
+              content: `Hello! I've loaded "${file.name}" into memory (${text.length.toLocaleString()} characters extracted). What would you like to know or summarize?`,
             },
           ]);
         }
@@ -183,7 +182,7 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
 
   const sendPrompt = async (userPrompt: string) => {
     if (!navigator.onLine) {
-      setErrorMessage('No internet connection. Please reconnect to communicate with the AI provider.');
+      setErrorMessage('No internet connection. Please reconnect.');
       return;
     }
 
@@ -220,7 +219,6 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
       headers['X-Title'] = '1into1 PDF Suite';
     }
 
-    // 1. Resolve active models dynamically from the provider API
     let candidateList: string[] = [];
 
     if (customModel.trim()) {
@@ -228,14 +226,12 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
     } else if (activeWorkingModel) {
       candidateList.push(activeWorkingModel);
     } else {
-      // Query provider's live models list using the user's key
       try {
         const modelsEndpoint = endpoint.replace('/chat/completions', '/models');
         const modelRes = await fetch(modelsEndpoint, { headers });
         if (modelRes.ok) {
           const modelData = await modelRes.json();
           if (Array.isArray(modelData.data)) {
-            // Filter out whisper/audio/embedding/vision-only models to prioritize chat models
             const chatModels = modelData.data
               .map((m: any) => m.id)
               .filter(
@@ -249,26 +245,25 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
           }
         }
       } catch (err) {
-        console.warn('Dynamic model fetch failed, falling back to static candidates:', err);
+        console.warn('Dynamic model fetch failed, using fallbacks:', err);
       }
     }
 
-    // Append fallback defaults if dynamic list was empty
     for (const m of providerConfig.candidateModels) {
       if (!candidateList.includes(m)) candidateList.push(m);
     }
 
-    const contextText = extractedText.slice(0, 45000);
+    // Safely truncate massive books/statements to prevent token overflow and silent API crashes
+    const contextText = extractedText.slice(0, 30000);
     const systemPrompt = `You are a helpful, accurate document assistant analyzing a PDF client-side.
-Answer user questions strictly based on the provided document text below. If the answer is not in the document, explicitly say so.
+Answer user questions strictly based on the provided document excerpt below. If the answer is not in the text, explicitly state so.
 
-DOCUMENT TEXT:
+DOCUMENT EXCERPT:
 ${contextText}`;
 
     let activeResponse: Response | null = null;
     let fatalError = '';
 
-    // 2. Waterfall execution
     for (const modelToAttempt of candidateList) {
       try {
         const res = await fetch(endpoint, {
@@ -285,17 +280,15 @@ ${contextText}`;
         });
 
         if (res.status === 401) {
-          fatalError = 'Invalid API Key. Please check the key in the input box.';
+          fatalError = 'Invalid API Key. Please check your key.';
           break;
         }
-
         if (res.status === 429) {
-          fatalError = 'Rate limit reached or free quota tokens exhausted for this key. Please try again later.';
+          fatalError = 'Rate limit reached or token quota exhausted. Please try again later.';
           break;
         }
-
         if (res.status === 402) {
-          fatalError = 'Insufficient balance or credits on your account.';
+          fatalError = 'Insufficient account balance or credits.';
           break;
         }
 
@@ -308,10 +301,9 @@ ${contextText}`;
             errText.includes('does not exist') ||
             errText.includes('not have access') ||
             errText.includes('model_not_found') ||
-            errText.includes('decommissioned') ||
-            errText.includes('deprecated')
+            errText.includes('decommissioned')
           ) {
-            continue; // Try next model in list
+            continue;
           }
 
           throw new Error(errData?.error?.message || `HTTP ${res.status}`);
@@ -329,20 +321,20 @@ ${contextText}`;
     if (!activeResponse) {
       setIsStreaming(false);
       setErrorMessage(
-        fatalError || 'Unable to start chat. Your API key might not have active permissions or credits.'
+        fatalError || 'Unable to reach AI provider. Check your API key or model availability.'
       );
       return;
     }
 
-    // 3. Stream tokens to UI
+    // Safely create the assistant bubble ONLY after the API stream successfully connects
+    setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+
     try {
       const reader = activeResponse.body?.getReader();
       if (!reader) throw new Error('Response stream not readable.');
 
       const decoder = new TextDecoder('utf-8');
       let assistantReply = '';
-
-      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -497,7 +489,6 @@ ${contextText}`;
               </div>
             </div>
 
-            {/* Provider and Key Row */}
             <div className="flex flex-col sm:flex-row gap-2">
               <select
                 value={selectedProvider}
@@ -520,7 +511,6 @@ ${contextText}`;
               />
             </div>
 
-            {/* Optional Custom Overrides */}
             {(showAdvanced || selectedProvider === 'custom') && (
               <div className="pt-2 border-t border-zinc-900 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs animate-in fade-in duration-150">
                 <div>
@@ -615,7 +605,7 @@ ${contextText}`;
             <div ref={chatEndRef} />
           </div>
 
-          {/* Clean User Feedback Banner */}
+          {/* Error Banner */}
           {errorMessage && (
             <div role="alert" className="p-3 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
