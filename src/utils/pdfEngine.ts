@@ -734,36 +734,85 @@ export async function addPageNumbersToPDF(
   return await pdfDoc.save();
 }
 
-export async function extractTextFromPDF(file: File): Promise<string> {
+export async function extractTextFromPDF(
+  file: File,
+  onProgress?: (status: string) => void
+): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
     const pdfDoc = await loadingTask.promise;
-    
-    let fullText = '';
+    const totalPages = pdfDoc.numPages;
 
-    // Loop through all pages and extract text layers safely
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
+    let fullDigitalText = '';
+
+    // Step 1: Attempt digital layer extraction
+    for (let i = 1; i <= totalPages; i++) {
+      onProgress?.(`Checking digital text: page ${i} of ${totalPages}...`);
       const page = await pdfDoc.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items
-        .map((item: any) => item.str)
+        .map((item: any) => item.str || '')
+        .filter(Boolean)
         .join(' ');
-      
+
       if (pageText.trim()) {
-        fullText += `--- Page ${i} ---\n${pageText}\n\n`;
+        fullDigitalText += `--- Page ${i} ---\n${pageText}\n\n`;
       }
+      page.cleanup();
     }
 
-    // If it's a scanned/image-based PDF with zero text layer, return a helpful notice instead of crashing
-    if (!fullText.trim()) {
-      return `[Scanned Document Notice: "${file.name}" has no selectable text layer (it appears to be an image or scan). Please convert it using the OCR Searchable tool first, or use a text-based PDF.]`;
+    // If selectable digital text was found, return it immediately
+    if (fullDigitalText.trim()) {
+      return fullDigitalText.trim();
     }
 
-    return fullText.trim();
+    // Step 2: Automatic OCR Fallback using 100% local assets
+    onProgress?.('Scanned PDF detected. Initializing offline OCR engine...');
+    const worker = await createWorker('eng', 1, {
+      workerPath: '/tessdata/worker.min.js',
+      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+      langPath: '/tessdata',
+      gzip: true,
+    });
+
+    let fullOcrText = '';
+
+    try {
+      for (let i = 1; i <= totalPages; i++) {
+        onProgress?.(`Running OCR on scanned page ${i} of ${totalPages}...`);
+        const page = await pdfDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 1.5 }); // 1.5 scale balances high OCR accuracy and low memory usage
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+          const { data } = await worker.recognize(canvas);
+
+          if (data?.text?.trim()) {
+            fullOcrText += `--- Page ${i} (OCR) ---\n${data.text.trim()}\n\n`;
+          }
+        }
+
+        // Immediately free canvas memory buffer
+        canvas.width = 0;
+        canvas.height = 0;
+        page.cleanup();
+      }
+    } finally {
+      await worker.terminate();
+    }
+
+    return fullOcrText.trim() || 'No text could be identified in this scanned document.';
   } catch (err: any) {
     console.error('PDF extraction error:', err);
-    throw new Error(err.message || 'Failed to read or parse this PDF document. It may be password-protected or corrupted.');
+    throw new Error(
+      err.message || 'Failed to read this PDF. The document may be corrupted or password-protected.'
+    );
   }
 }
 
