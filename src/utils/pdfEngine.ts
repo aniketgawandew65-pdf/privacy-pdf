@@ -2261,7 +2261,7 @@ export async function ocrPDFToSearchable(
   language: string = 'eng',
   onProgress?: (p: OcrProgress) => void
 ): Promise<Uint8Array> {
-  // 1. Ensure PDF.js worker is initialized safely
+  // 1. Ensure PDF.js worker is loaded
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -2273,10 +2273,14 @@ export async function ocrPDFToSearchable(
     }
   }
 
-  onProgress?.({ status: 'Initializing OCR Engine...', progress: 10 });
+  onProgress?.({ status: 'Initializing OCR Engine...', progress: 8 });
 
-  // 2. Initialize Tesseract using default internal loaders (NO cross-origin CDN overrides)
+  // 2. Spawn Tesseract with pinned, production-verified v5.1.0 CDN endpoints
   const worker = await createWorker(language, 1, {
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core-simd-lstm.wasm.js',
+    langPath: 'https://tessdata.projectnaptha.com/4.00',
+    workerBlobURL: true,
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress({
@@ -2315,7 +2319,7 @@ export async function ocrPDFToSearchable(
       // Run OCR on the page canvas
       const { data } = await worker.recognize(canvas);
 
-      // Free canvas memory
+      // Immediately release memory
       canvas.width = 0;
       canvas.height = 0;
 
