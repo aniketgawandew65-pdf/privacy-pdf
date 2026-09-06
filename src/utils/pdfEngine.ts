@@ -684,20 +684,35 @@ export async function updatePDFMetadata(file: File, metadata: PDFMetadata): Prom
   return await pdfDoc.save();
 }
 
+export interface SignaturePlacement {
+  pageIndex: number;
+  xPercent: number;      // 0.0 to 1.0 from left
+  yPercent: number;      // 0.0 to 1.0 from top
+  widthPercent: number;  // Relative to page width (e.g. 0.25 = 25%)
+  heightPercent: number; // Relative to page height
+}
+
 export async function signPDF(
   file: File,
   signaturePngDataUrl: string,
-  pageIndex: number = 0,
-  password?: string,
-  xPercent: number = 0.6,
-  yPercent: number = 0.1,
-  width: number = 150,
-  height: number = 60
+  placements: SignaturePlacement[],
+  password?: string
 ): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   const uint8 = new Uint8Array(bytes);
 
-  // 1. If password is provided or document has encryption/complex streams, route via PDF.js
+  const base64Data = signaturePngDataUrl.split(',')[1];
+  const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+
+  // Group placements by pageIndex
+  const placementMap = new Map<number, SignaturePlacement[]>();
+  placements.forEach((p) => {
+    const list = placementMap.get(p.pageIndex) || [];
+    list.push(p);
+    placementMap.set(p.pageIndex, list);
+  });
+
+  // 1. Decryption & High-Res Rendering Path (for protected or complex documents)
   if (password || isComplexOrProtectedPdf(uint8)) {
     const loadingTask = pdfjsLib.getDocument({
       data: uint8.slice(),
@@ -725,12 +740,7 @@ export async function signPDF(
 
     const numPages = pdfDoc.numPages;
     const newPdfDoc = await PDFDocument.create();
-
-    const base64Data = signaturePngDataUrl.split(',')[1];
-    const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
     const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
-
-    const targetIdx = Math.max(0, Math.min(pageIndex, numPages - 1));
 
     for (let i = 1; i <= numPages; i++) {
       const page = await pdfDoc.getPage(i);
@@ -745,12 +755,18 @@ export async function signPDF(
         height: pHeight,
       });
 
-      if (i - 1 === targetIdx) {
+      const pagePlacements = placementMap.get(i - 1) || [];
+      for (const pl of pagePlacements) {
+        const signW = pWidth * pl.widthPercent;
+        const signH = pHeight * pl.heightPercent;
+        const signX = pWidth * pl.xPercent;
+        const signY = pHeight - (pl.yPercent * pHeight) - signH;
+
         newPage.drawImage(embeddedSignature, {
-          x: pWidth * xPercent,
-          y: pHeight * yPercent,
-          width,
-          height,
+          x: signX,
+          y: signY,
+          width: signW,
+          height: signH,
         });
       }
     }
@@ -758,36 +774,38 @@ export async function signPDF(
     return await newPdfDoc.save({ useObjectStreams: false });
   }
 
-  // 2. Vector path for clean, unencrypted documents
+  // 2. Vector Path for clean unencrypted files
   try {
     const pdfDoc = await PDFDocument.load(bytes);
     const pages = pdfDoc.getPages();
-    const targetPage = pages[pageIndex] || pages[0];
-    const { width: pageWidth, height: pageHeight } = targetPage.getSize();
+    const embeddedSignature = await pdfDoc.embedPng(signatureBytes);
 
-    const base64Data = signaturePngDataUrl.split(',')[1];
-    const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-    const embeddedImage = await pdfDoc.embedPng(imageBytes);
+    pages.forEach((page, idx) => {
+      const { width: pageWidth, height: pageHeight } = page.getSize();
+      const pagePlacements = placementMap.get(idx) || [];
 
-    targetPage.drawImage(embeddedImage, {
-      x: pageWidth * xPercent,
-      y: pageHeight * yPercent,
-      width,
-      height,
+      for (const pl of pagePlacements) {
+        const signW = pageWidth * pl.widthPercent;
+        const signH = pageHeight * pl.heightPercent;
+        const signX = pageWidth * pl.xPercent;
+        const signY = pageHeight - (pl.yPercent * pageHeight) - signH;
+
+        page.drawImage(embeddedSignature, {
+          x: signX,
+          y: signY,
+          width: signW,
+          height: signH,
+        });
+      }
     });
 
     return await pdfDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn('Vector sign failed, falling back to high-res rendering engine:', err);
+    console.warn('Native vector sign fallback to visual engine:', err);
     const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
     const fallbackDoc = await loadingTask.promise;
     const newPdfDoc = await PDFDocument.create();
-
-    const base64Data = signaturePngDataUrl.split(',')[1];
-    const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
     const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
-
-    const targetIdx = Math.max(0, Math.min(pageIndex, fallbackDoc.numPages - 1));
 
     for (let i = 1; i <= fallbackDoc.numPages; i++) {
       const page = await fallbackDoc.getPage(i);
@@ -797,12 +815,18 @@ export async function signPDF(
       const newPage = newPdfDoc.addPage([pWidth, pHeight]);
       newPage.drawImage(embeddedPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
 
-      if (i - 1 === targetIdx) {
+      const pagePlacements = placementMap.get(i - 1) || [];
+      for (const pl of pagePlacements) {
+        const signW = pWidth * pl.widthPercent;
+        const signH = pHeight * pl.heightPercent;
+        const signX = pWidth * pl.xPercent;
+        const signY = pHeight - (pl.yPercent * pHeight) - signH;
+
         newPage.drawImage(embeddedSignature, {
-          x: pWidth * xPercent,
-          y: pHeight * yPercent,
-          width,
-          height,
+          x: signX,
+          y: signY,
+          width: signW,
+          height: signH,
         });
       }
     }
@@ -810,7 +834,6 @@ export async function signPDF(
     return await newPdfDoc.save({ useObjectStreams: false });
   }
 }
-
 export async function encryptPDF(
   file: File,
   userPassword: string,
