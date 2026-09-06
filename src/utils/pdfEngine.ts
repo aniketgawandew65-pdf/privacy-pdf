@@ -14,6 +14,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
 
+
 // Configure offline worker for 100% local processing
 if (typeof window !== 'undefined' && 'Worker' in window) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -580,23 +581,115 @@ export async function getPDFPageCount(file: File): Promise<number> {
   }
 }
 
-export async function addWatermarkToPDF(file: File, watermarkText: string): Promise<Uint8Array> {
+export interface WatermarkOptions {
+  type: 'text' | 'image';
+  text?: string;
+  imageDataUrl?: string;
+  fontFamily?: 'Helvetica' | 'TimesRoman' | 'Courier';
+  fontSize?: number;
+  colorHex?: string;
+  opacity?: number;
+  angle?: number;
+  letterSpacing?: number;
+  position?: 'center' | 'top' | 'bottom';
+}
+
+function hexToRgb01(hex: string) {
+  const cleanHex = hex.replace('#', '');
+  const bigint = parseInt(cleanHex, 16);
+  const r = ((bigint >> 16) & 255) / 255;
+  const g = ((bigint >> 8) & 255) / 255;
+  const b = (bigint & 255) / 255;
+  return rgb(r, g, b);
+}
+
+export async function addWatermarkToPDF(
+  file: File,
+  options: WatermarkOptions
+): Promise<Uint8Array> {
   const bytes = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pages = pdfDoc.getPages();
 
-  for (const page of pages) {
-    const { width, height } = page.getSize();
-    page.drawText(watermarkText, {
-      x: width * 0.2,
-      y: height * 0.4,
-      size: 42,
-      opacity: 0.25,
-      rotate: degrees(45),
-    });
+  const opacity = options.opacity ?? 0.25;
+  const angleDeg = options.angle ?? -45;
+
+  if (options.type === 'text' && options.text?.trim()) {
+    let font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    if (options.fontFamily === 'TimesRoman') {
+      font = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    } else if (options.fontFamily === 'Courier') {
+      font = await pdfDoc.embedFont(StandardFonts.CourierBold);
+    }
+
+    const fontSize = options.fontSize ?? 54;
+    const color = hexToRgb01(options.colorHex || '#64748b');
+
+    // Build letter-spaced text
+    const spacing = options.letterSpacing ?? 0;
+    const rawText = options.text.trim();
+    const renderedText = spacing > 0 ? rawText.split('').join(' '.repeat(spacing)) : rawText;
+    const textWidth = font.widthOfTextAtSize(renderedText, fontSize);
+    const textHeight = font.heightAtSize(fontSize);
+
+    for (const page of pages) {
+      const { width, height } = page.getSize();
+      let targetX = (width - textWidth) / 2;
+      let targetY = (height - textHeight) / 2;
+
+      if (options.position === 'top') {
+        targetY = height - textHeight - 60;
+      } else if (options.position === 'bottom') {
+        targetY = 60;
+      }
+
+      page.drawText(renderedText, {
+        x: targetX,
+        y: targetY,
+        size: fontSize,
+        font,
+        color,
+        opacity,
+        rotate: degrees(angleDeg),
+      });
+    }
+  } else if (options.type === 'image' && options.imageDataUrl) {
+    const base64Data = options.imageDataUrl.split(',')[1];
+    const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+
+    const isPng = options.imageDataUrl.includes('image/png');
+    const embeddedImg = isPng
+      ? await pdfDoc.embedPng(imageBytes)
+      : await pdfDoc.embedJpg(imageBytes);
+
+    const scaleFactor = (options.fontSize ?? 50) / 100; // reuse slider as scale 0.1 - 1.0
+
+    for (const page of pages) {
+      const { width, height } = page.getSize();
+      const imgWidth = embeddedImg.width * scaleFactor;
+      const imgHeight = embeddedImg.height * scaleFactor;
+
+      let targetX = (width - imgWidth) / 2;
+      let targetY = (height - imgHeight) / 2;
+
+      if (options.position === 'top') {
+        targetY = height - imgHeight - 60;
+      } else if (options.position === 'bottom') {
+        targetY = 60;
+      }
+
+      page.drawImage(embeddedImg, {
+        x: targetX,
+        y: targetY,
+        width: imgWidth,
+        height: imgHeight,
+        opacity,
+        rotate: degrees(angleDeg),
+      });
+    }
   }
 
-  return await pdfDoc.save();
+  return await pdfDoc.save({ useObjectStreams: false });
 }
 
 export async function addPageNumbersToPDF(
