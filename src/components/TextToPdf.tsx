@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Download,
   FileText,
@@ -22,121 +22,68 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { generateTextPDF, type TextToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
-const SAMPLE_TEXT = `# Executive Project Proposal
-
-This document was created directly in the browser with zero cloud storage.
-
-## Key Project Objectives
-- 100% privacy-first client-side document processing
-- Zero server hosting maintenance costs
-- Vector-grade text clarity on high-DPI displays
-
-<center>Type or paste your text here to preview the output instantly.</center>`;
+const INITIAL_DOC_HTML = `<h1 style="text-align: center;">BLOG</h1>
+<p style="text-align: center;"><strong>Title: Regulatory Update: Mandatory Static IP Requirements for API Trading</strong></p>
+<h3>Header: Understanding NSE's Circular on API Trading</h3>
+<p>If you depend on our API solutions for your trading strategies, then this article has some very important news. National Stock Exchange has released Circular INVG67858 requiring new guidelines in relation to retail investors who trade in API applications.</p>
+<p>Through this move, the aim is to ensure that your trading platform remains safe, with priority being given to the overall integrity of the market while at the same time allowing you to implement your preferred algorithms.</p>
+<p><strong>Key highlights of the NSE circular:</strong></p>
+<ul>
+  <li>Mandatory static IP addresses for all retail trading connections</li>
+  <li>Limitations on Updating IP Address to once per calendar week</li>
+  <li>10 Operations per Second (OPS) limit for unregistered algorithms</li>
+</ul>`;
 
 export const TextToPdf: React.FC = () => {
-  const [text, setText] = useState(SAMPLE_TEXT);
   const [fontFamily, setFontFamily] = useState<'helvetica' | 'times' | 'courier'>('helvetica');
   const [fontSize, setFontSize] = useState<number>(12);
   const [pageSize, setPageSize] = useState<'a4' | 'letter'>('a4');
   const [margin, setMargin] = useState<number>(40);
 
-  // Retina Preview & Zoom State
+  // Zoom & preview state
   const [zoom, setZoom] = useState<number>(1.0);
   const [pageCount, setPageCount] = useState<number>(1);
+  const [charCount, setCharCount] = useState<number>(0);
+  const [htmlContent, setHtmlContent] = useState<string>(INITIAL_DOC_HTML);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   const { url: downloadUrl, createUrl } = useObjectUrl();
 
-  // Toolbar Handlers for Plain Textarea
-  const applyHeadingOrBullet = (prefix: '# ' | '## ' | '### ' | '- ') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const before = text.substring(0, start);
-
-    const lineStartIndex = before.lastIndexOf('\n') + 1;
-    let lineEndIndex = text.indexOf('\n', start);
-    if (lineEndIndex === -1) lineEndIndex = text.length;
-
-    const line = text.substring(lineStartIndex, lineEndIndex);
-    // Strip any existing heading or bullet prefix so they never stack
-    const cleanedLine = line.replace(/^(#{1,3}\s*|-\s*|\*\s*)/, '');
-    const newLine = line.startsWith(prefix) ? cleanedLine : `${prefix}${cleanedLine}`;
-
-    const updated = text.substring(0, lineStartIndex) + newLine + text.substring(lineEndIndex);
-    setText(updated);
-
-    setTimeout(() => {
-      textarea.focus();
-      const diff = newLine.length - line.length;
-      textarea.setSelectionRange(start + diff, start + diff);
-    }, 0);
-  };
-
-  const applyInlineStyle = (open: string, close: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = text.substring(start, end);
-
-    if (!selected) return;
-
-    const updated = text.substring(0, start) + open + selected + close + text.substring(end);
-    setText(updated);
-
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + open.length, start + open.length + selected.length);
-    }, 0);
-  };
-
-  const applyAlignment = (align: 'center' | 'right' | 'left') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const before = text.substring(0, start);
-
-    const lineStartIndex = before.lastIndexOf('\n') + 1;
-    let lineEndIndex = text.indexOf('\n', start);
-    if (lineEndIndex === -1) lineEndIndex = text.length;
-
-    const line = text.substring(lineStartIndex, lineEndIndex);
-    const cleanedLine = line.replace(/<center>|<\/center>/gi, '').replace(/<div[^>]*>|<\/div>/gi, '').trim();
-
-    let newLine = cleanedLine;
-    if (align === 'center') {
-      newLine = `<center>${cleanedLine}</center>`;
-    } else if (align === 'right') {
-      newLine = `<div align="right">${cleanedLine}</div>`;
+  // Load initial content into editor once on mount
+  useEffect(() => {
+    if (editorRef.current && !editorRef.current.innerHTML) {
+      editorRef.current.innerHTML = INITIAL_DOC_HTML;
+      setCharCount(editorRef.current.innerText.trim().length);
     }
+  }, []);
 
-    const updated = text.substring(0, lineStartIndex) + newLine + text.substring(lineEndIndex);
-    setText(updated);
+  const handleEditorInput = useCallback(() => {
+    if (!editorRef.current) return;
+    setHtmlContent(editorRef.current.innerHTML);
+    setCharCount(editorRef.current.innerText.trim().length);
+  }, []);
 
-    setTimeout(() => {
-      textarea.focus();
-      const diff = newLine.length - line.length;
-      textarea.setSelectionRange(start + diff, start + diff);
-    }, 0);
+  // Visual MS Word formatting commands (Zero tags or markdown inserted)
+  const execFormat = (cmd: string, val: string | undefined = undefined) => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+    document.execCommand(cmd, false, val);
+    handleEditorInput();
   };
 
-  // Fine 5% step zoom controls
   const handleZoomIn = () => setZoom((z) => Math.min(2.5, Number((z + 0.05).toFixed(2))));
   const handleZoomOut = () => setZoom((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))));
   const handleResetZoom = () => setZoom(1.0);
 
-  // Debounced generator to keep typing and pasting responsive
+  // Debounced live PDF generator
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(async () => {
       try {
         const options: TextToPdfOptions = {
-          text: text.trim() || 'Type something to generate your PDF...',
+          text: htmlContent.trim() || '<p>Type something to generate your PDF...</p>',
           fontFamily,
           fontSize,
           pageSize,
@@ -175,13 +122,13 @@ export const TextToPdf: React.FC = () => {
       } catch (err) {
         console.error('Failed to render text preview:', err);
       }
-    }, 200);
+    }, 250);
 
     return () => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [text, fontFamily, fontSize, pageSize, margin, createUrl]);
+  }, [htmlContent, fontFamily, fontSize, pageSize, margin, createUrl]);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 text-left">
@@ -259,39 +206,39 @@ export const TextToPdf: React.FC = () => {
 
       {/* Split Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Left Side: Original Monospace Textarea Editor */}
+        {/* Left Side: MS Word Style Rich Text Editor */}
         <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[650px]">
           <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <span className="flex items-center gap-1.5 font-medium text-zinc-300">
               <FileText className="w-4 h-4 text-emerald-400" />
-              Editor (Markdown & Text)
+              Word Editor
             </span>
-            <span>{text.length} characters</span>
+            <span>{charCount} characters</span>
           </div>
 
-          {/* Formatting Toolbar */}
+          {/* Visual Formatting Toolbar */}
           <div className="flex flex-wrap items-center gap-1 p-1.5 mb-3 bg-zinc-950/80 border border-zinc-800 rounded-xl">
             <button
               type="button"
-              onClick={() => applyHeadingOrBullet('# ')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('formatBlock', '<h1>'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Heading 1"
+              title="Title (Heading 1)"
             >
               <Heading1 className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => applyHeadingOrBullet('## ')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('formatBlock', '<h2>'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Heading 2"
+              title="Heading (Heading 2)"
             >
               <Heading2 className="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
-              onClick={() => applyHeadingOrBullet('### ')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('formatBlock', '<h3>'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Heading 3"
+              title="Sub-heading (Heading 3)"
             >
               <Heading3 className="w-3.5 h-3.5" />
             </button>
@@ -300,7 +247,7 @@ export const TextToPdf: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => applyInlineStyle('**', '**')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('bold'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Bold"
             >
@@ -308,7 +255,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyInlineStyle('*', '*')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('italic'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Italic"
             >
@@ -316,7 +263,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyInlineStyle('<u>', '</u>')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('underline'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Underline"
             >
@@ -327,7 +274,7 @@ export const TextToPdf: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => applyHeadingOrBullet('- ')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('insertUnorderedList'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Bullet Points"
             >
@@ -338,7 +285,7 @@ export const TextToPdf: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => applyAlignment('left')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('justifyLeft'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Left"
             >
@@ -346,7 +293,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyAlignment('center')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('justifyCenter'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Center"
             >
@@ -354,7 +301,7 @@ export const TextToPdf: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => applyAlignment('right')}
+              onMouseDown={(e) => { e.preventDefault(); execFormat('justifyRight'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
               title="Align Right"
             >
@@ -362,23 +309,26 @@ export const TextToPdf: React.FC = () => {
             </button>
           </div>
 
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Type or paste text here... Use toolbar buttons above to format words or lines."
-            className="w-full flex-1 bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-200 font-mono resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
+          {/* Visual Document Box: True Word Editor with zero raw codes visible */}
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleEditorInput}
+            spellCheck={false}
+            className="w-full flex-1 bg-white text-zinc-900 rounded-xl p-6 text-sm overflow-y-auto leading-relaxed shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mb-3 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mb-2 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:mb-1.5 [&_p]:mb-2.5 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mb-2.5"
+            style={{
+              fontFamily: fontFamily === 'times' ? 'Times New Roman, serif' : fontFamily === 'courier' ? 'Courier New, monospace' : 'Helvetica, Arial, sans-serif',
+            }}
           />
         </div>
 
-        {/* Right Side: Retina Canvas Preview with 4-Way Panning & Zero Left-Clipping */}
+        {/* Right Side: High-DPI Preview with 4-Way Panning & Zero Left-Clipping */}
         <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl backdrop-blur-xl shadow-2xl h-[650px] overflow-hidden flex flex-col">
           <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/40">
             <span>High-DPI Retina Preview (Page 1)</span>
             <span className="text-zinc-500">Total: {pageCount} {pageCount === 1 ? 'Page' : 'Pages'}</span>
           </div>
 
-          {/* Scrollable Preview Viewport */}
           <div className="flex-1 overflow-auto p-6 bg-zinc-950/60 relative">
             <div
               className={`flex items-start transition-all duration-150 ease-out min-w-full ${
@@ -410,7 +360,7 @@ export const TextToPdf: React.FC = () => {
             </div>
           </div>
 
-          {/* Smooth Zoom Controls */}
+          {/* Smooth Zoom Adjuster */}
           <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
             <button
               onClick={handleZoomOut}
