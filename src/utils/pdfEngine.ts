@@ -743,69 +743,68 @@ export async function extractTextFromPDF(
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
-  let fullDigitalText = '';
-
-  // 1. Instant check for embedded digital text
-  for (let i = 1; i <= totalPages; i++) {
-    onProgress?.(`Reading digital text: page ${i} of ${totalPages}...`);
-    const page = await pdfDoc.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item: any) => item.str || '')
-      .filter(Boolean)
-      .join(' ');
-
-    if (pageText.trim()) {
-      fullDigitalText += `--- Page ${i} ---\n${pageText}\n\n`;
-    }
-    page.cleanup();
-  }
-
-  // If digital text exists, return it immediately
-  if (fullDigitalText.trim()) {
-    return fullDigitalText.trim();
-  }
-
-  // 2. Automatic Offline OCR for scanned agreements & flat image PDFs
-  onProgress?.('Scanned document detected. Starting offline OCR engine...');
-  const worker = await createWorker('eng', 1, {
-    workerPath: '/tessdata/worker.min.js',
-    corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-    langPath: '/tessdata',
-    gzip: true,
-  });
-
-  let fullOcrText = '';
+  let fullDocumentText = '';
+  let ocrWorker: any = null;
 
   try {
     for (let i = 1; i <= totalPages; i++) {
-      onProgress?.(`Running OCR on page ${i} of ${totalPages}...`);
+      onProgress?.(`Processing page ${i} of ${totalPages}...`);
       const page = await pdfDoc.getPage(i);
-      const viewport = page.getViewport({ scale: 1.5 });
+      const textContent = await page.getTextContent();
+      
+      const digitalText = textContent.items
+        .map((item: any) => item.str || '')
+        .filter(Boolean)
+        .join(' ')
+        .trim();
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d');
-
-      if (ctx) {
-        await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-        const { data } = await worker.recognize(canvas);
-
-        if (data?.text?.trim()) {
-          fullOcrText += `--- Page ${i} (Scanned) ---\n${data.text.trim()}\n\n`;
+      // If page has substantial digital text, use it
+      if (digitalText.length > 50) {
+        fullDocumentText += `--- Page ${i} ---\n${digitalText}\n\n`;
+      } else {
+        // Page is an image, screenshot, or flat scan -> Run Page-Level OCR
+        onProgress?.(`Page ${i} is visual/scanned. Running OCR...`);
+        
+        if (!ocrWorker) {
+          ocrWorker = await createWorker('eng', 1, {
+            workerPath: '/tessdata/worker.min.js',
+            corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+            langPath: '/tessdata',
+            gzip: true,
+          });
         }
+
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+          const { data } = await ocrWorker.recognize(canvas);
+          const scannedText = data?.text?.trim() || '';
+
+          if (scannedText) {
+            fullDocumentText += `--- Page ${i} (Scanned / OCR) ---\n${scannedText}\n\n`;
+          } else if (digitalText) {
+            fullDocumentText += `--- Page ${i} ---\n${digitalText}\n\n`;
+          }
+        }
+
+        canvas.width = 0;
+        canvas.height = 0;
       }
 
-      canvas.width = 0;
-      canvas.height = 0;
       page.cleanup();
     }
   } finally {
-    await worker.terminate();
+    if (ocrWorker) {
+      await ocrWorker.terminate();
+    }
   }
 
-  return fullOcrText.trim() || 'No readable text could be identified in this document.';
+  return fullDocumentText.trim() || 'No readable text could be extracted.';
 }
 
 export interface PDFMetadata {
