@@ -9,6 +9,9 @@ import {
   Eye,
   Layers,
   SplitSquareVertical,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -28,6 +31,9 @@ export const ComparePdf: React.FC = () => {
   const [viewMode, setViewMode] = useState<DiffViewMode>('overlay');
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
 
+  // Zoom controls state
+  const [zoom, setZoom] = useState<number>(100);
+
   const [isRendering, setIsRendering] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -37,6 +43,10 @@ export const ComparePdf: React.FC = () => {
 
   const fileInputARef = useRef<HTMLInputElement>(null);
   const fileInputBRef = useRef<HTMLInputElement>(null);
+
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 25, 250));
+  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 25, 50));
+  const handleResetZoom = () => setZoom(100);
 
   // Load Document A
   useEffect(() => {
@@ -101,7 +111,6 @@ export const ComparePdf: React.FC = () => {
     setErrorMessage(null);
 
     try {
-      // Fetch pages (or fallback if one document has fewer pages)
       const pageA = currentPage <= pageCountA ? await pdfDocA.getPage(currentPage) : null;
       const pageB = currentPage <= pageCountB ? await pdfDocB.getPage(currentPage) : null;
 
@@ -113,7 +122,6 @@ export const ComparePdf: React.FC = () => {
       const renderHeight = Math.max(viewportA?.height || 0, viewportB?.height || 0);
 
       if (viewMode === 'split') {
-        // Render Split Canvas A
         if (canvasSplitARef.current && pageA && viewportA) {
           const canvasA = canvasSplitARef.current;
           canvasA.width = viewportA.width;
@@ -124,7 +132,6 @@ export const ComparePdf: React.FC = () => {
           }
         }
 
-        // Render Split Canvas B
         if (canvasSplitBRef.current && pageB && viewportB) {
           const canvasB = canvasSplitBRef.current;
           canvasB.width = viewportB.width;
@@ -135,7 +142,6 @@ export const ComparePdf: React.FC = () => {
           }
         }
       } else {
-        // Render Visual Overlay Blend Diff
         if (canvasOverlayRef.current) {
           const mainCanvas = canvasOverlayRef.current;
           mainCanvas.width = renderWidth;
@@ -143,11 +149,9 @@ export const ComparePdf: React.FC = () => {
           const mainCtx = mainCanvas.getContext('2d');
           if (!mainCtx) return;
 
-          // Clear background to white
           mainCtx.fillStyle = '#FFFFFF';
           mainCtx.fillRect(0, 0, renderWidth, renderHeight);
 
-          // Offscreen Canvas for Doc A (tinted Red/Magenta for deletions)
           const offCanvasA = document.createElement('canvas');
           offCanvasA.width = renderWidth;
           offCanvasA.height = renderHeight;
@@ -157,7 +161,6 @@ export const ComparePdf: React.FC = () => {
             await pageA.render({ canvasContext: ctxA, viewport: viewportA }).promise;
           }
 
-          // Offscreen Canvas for Doc B (tinted Cyan/Green for additions)
           const offCanvasB = document.createElement('canvas');
           offCanvasB.width = renderWidth;
           offCanvasB.height = renderHeight;
@@ -167,7 +170,6 @@ export const ComparePdf: React.FC = () => {
             await pageB.render({ canvasContext: ctxB, viewport: viewportB }).promise;
           }
 
-          // Blend using difference calculation
           mainCtx.globalAlpha = 1.0;
           mainCtx.drawImage(offCanvasA, 0, 0);
 
@@ -175,7 +177,6 @@ export const ComparePdf: React.FC = () => {
           mainCtx.globalAlpha = overlayOpacity;
           mainCtx.drawImage(offCanvasB, 0, 0);
 
-          // Reset composite operation
           mainCtx.globalCompositeOperation = 'source-over';
           mainCtx.globalAlpha = 1.0;
 
@@ -200,7 +201,7 @@ export const ComparePdf: React.FC = () => {
   }, [renderComparison, pdfDocA, pdfDocB]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div className="w-full max-w-5xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
       {/* Document Selection Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         {/* Document A Upload Box */}
@@ -342,6 +343,40 @@ export const ComparePdf: React.FC = () => {
               </button>
             </div>
 
+            {/* Zoom Controls */}
+            <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1">
+              <button
+                type="button"
+                onClick={handleZoomOut}
+                disabled={zoom <= 50}
+                className="p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 rounded hover:bg-zinc-800 transition"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-xs font-mono font-medium text-zinc-300 min-w-[2.75rem] text-center select-none">
+                {zoom}%
+              </span>
+              <button
+                type="button"
+                onClick={handleZoomIn}
+                disabled={zoom >= 250}
+                className="p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 rounded hover:bg-zinc-800 transition"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-[1px] h-3 bg-zinc-800 mx-0.5" />
+              <button
+                type="button"
+                onClick={handleResetZoom}
+                className="p-1 text-zinc-400 hover:text-zinc-200 rounded hover:bg-zinc-800 transition"
+                title="Reset Zoom"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
+
             {/* Difference Opacity Slider for Overlay mode */}
             {viewMode === 'overlay' && (
               <div className="flex items-center gap-2 text-xs text-zinc-400">
@@ -369,32 +404,41 @@ export const ComparePdf: React.FC = () => {
           )}
 
           {/* Render Area */}
-          <div className="relative min-h-[400px] bg-zinc-950 rounded-xl border border-zinc-800 p-4 flex justify-center items-start overflow-auto">
+          <div className="relative min-h-[450px] max-h-[78vh] bg-zinc-950 rounded-xl border border-zinc-800 p-4 overflow-auto flex justify-center items-start">
             {isRendering && (
               <div className="absolute inset-0 bg-zinc-950/70 backdrop-blur-xs flex items-center justify-center z-20">
                 <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
               </div>
             )}
 
-            {viewMode === 'overlay' ? (
-              <div className="flex flex-col items-center gap-2">
-                <canvas ref={canvasOverlayRef} className="rounded shadow-xl max-w-full border border-zinc-800" />
-                <p className="text-[11px] text-zinc-500">
-                  Identical elements appear white/inverted; shifts, additions, and edits highlight in high-contrast color.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                <div className="flex flex-col items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
-                  <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+            {/* Scaled Preview Canvas Wrapper */}
+            <div
+              style={{
+                transform: `scale(${zoom / 100})`,
+                transformOrigin: 'top center',
+              }}
+              className="transition-transform duration-150 ease-out w-full flex justify-center"
+            >
+              {viewMode === 'overlay' ? (
+                <div className="flex flex-col items-center gap-2">
+                  <canvas ref={canvasOverlayRef} className="rounded shadow-xl max-w-full border border-zinc-800" />
+                  <p className="text-[11px] text-zinc-500">
+                    Identical elements appear white/inverted; shifts, additions, and edits highlight in high-contrast color.
+                  </p>
                 </div>
-                <div className="flex flex-col items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
-                  <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Document A</span>
+                    <canvas ref={canvasSplitARef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Document B</span>
+                    <canvas ref={canvasSplitBRef} className="rounded shadow-md max-w-full border border-zinc-800 bg-white" />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
