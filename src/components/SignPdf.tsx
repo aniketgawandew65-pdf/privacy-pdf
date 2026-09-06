@@ -41,6 +41,52 @@ interface PagePlacementsMap {
   } | null;
 }
 
+// Auto-trims transparent canvas borders so the signature lines stay bold and sharp
+function getTrimmedSignatureDataUrl(canvas: HTMLCanvasElement): string {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas.toDataURL('image/png');
+
+  const { width, height } = canvas;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let hasInk = false;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha > 15) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        hasInk = true;
+      }
+    }
+  }
+
+  if (!hasInk) return canvas.toDataURL('image/png');
+
+  const padding = 8;
+  const cropX = Math.max(0, minX - padding);
+  const cropY = Math.max(0, minY - padding);
+  const cropW = Math.min(width - cropX, maxX - minX + padding * 2);
+  const cropH = Math.min(height - cropY, maxY - minY + padding * 2);
+
+  const trimmedCanvas = document.createElement('canvas');
+  trimmedCanvas.width = cropW;
+  trimmedCanvas.height = cropH;
+  const tCtx = trimmedCanvas.getContext('2d');
+  if (!tCtx) return canvas.toDataURL('image/png');
+
+  tCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  return trimmedCanvas.toDataURL('image/png');
+}
+
 export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
@@ -78,11 +124,10 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfDocRef = useRef<any>(null);
 
-  // Drawing stroke tracking
+  // Drawing state
   const isPadDrawing = useRef(false);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Drag & resize tracking for placed signature
+  // Drag & resize tracking
   const dragInfo = useRef<{
     mode: 'move' | 'resize';
     startX: number;
@@ -246,7 +291,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     }
   }, [currentPage, totalPages, isUnlocked, zoomLevel, renderCurrentPage]);
 
-  // Smooth drawing coordinate mapping
+  // High-precision signature drawing mechanics
   const getPadCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = drawCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -271,36 +316,27 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
     isPadDrawing.current = true;
     const pt = getPadCoordinates(e);
-    lastPointRef.current = pt;
 
-    ctx.lineWidth = 3.2;
+    ctx.lineWidth = 3.0;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
 
     ctx.beginPath();
-    ctx.arc(pt.x, pt.y, ctx.lineWidth / 3, 0, Math.PI * 2);
-    ctx.fillStyle = '#000000';
-    ctx.fill();
+    ctx.moveTo(pt.x, pt.y);
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isPadDrawing.current || !lastPointRef.current) return;
+    if (!isPadDrawing.current) return;
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const currentPt = getPadCoordinates(e);
-
-    ctx.beginPath();
-    ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
-    const midX = (lastPointRef.current.x + currentPt.x) / 2;
-    const midY = (lastPointRef.current.y + currentPt.y) / 2;
-    ctx.quadraticCurveTo(lastPointRef.current.x, lastPointRef.current.y, midX, midY);
+    const pt = getPadCoordinates(e);
+    ctx.lineTo(pt.x, pt.y);
     ctx.stroke();
 
-    lastPointRef.current = currentPt;
     setHasDrawnSignature(true);
     revokeDownloadUrl();
   };
@@ -308,22 +344,21 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const stopDrawing = () => {
     if (!isPadDrawing.current) return;
     isPadDrawing.current = false;
-    lastPointRef.current = null;
+
     const canvas = drawCanvasRef.current;
     if (canvas) {
-      const url = canvas.toDataURL('image/png');
-      setSignatureDataUrl(url);
+      const trimmedUrl = getTrimmedSignatureDataUrl(canvas);
+      setSignatureDataUrl(trimmedUrl);
 
-      // Place default on current page if not already added
       setPlacements((prev) => {
         if (prev[currentPage]) return prev;
         return {
           ...prev,
           [currentPage]: {
-            xPercent: 0.62,
-            yPercent: 0.78,
-            widthPercent: 0.28,
-            heightPercent: 0.11,
+            xPercent: 0.65,
+            yPercent: 0.80,
+            widthPercent: 0.22,
+            heightPercent: 0.08,
           },
         };
       });
@@ -374,8 +409,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
           },
         }));
       } else if (state.mode === 'resize') {
-        const nextW = Math.max(0.08, Math.min(1 - state.initialX, state.initialW + dx));
-        const nextH = Math.max(0.03, Math.min(1 - state.initialY, state.initialH + dy));
+        const nextW = Math.max(0.06, Math.min(1 - state.initialX, state.initialW + dx));
+        const nextH = Math.max(0.02, Math.min(1 - state.initialY, state.initialH + dy));
 
         setPlacements((prev) => ({
           ...prev,
@@ -434,20 +469,18 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  // Explicit Add to This Page action
   const handleAddToThisPage = () => {
     setPlacements((prev) => ({
       ...prev,
       [currentPage]: {
-        xPercent: 0.62,
-        yPercent: 0.78,
-        widthPercent: 0.28,
-        heightPercent: 0.11,
+        xPercent: 0.65,
+        yPercent: 0.80,
+        widthPercent: 0.22,
+        heightPercent: 0.08,
       },
     }));
   };
 
-  // Explicit Remove from This Page action
   const handleRemoveFromThisPage = () => {
     setPlacements((prev) => ({
       ...prev,
@@ -455,7 +488,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     }));
   };
 
-  // Copy signature position across all pages
   const handleCopyToAllPages = () => {
     const currentBox = placements[currentPage];
     if (!currentBox) return;
@@ -694,7 +726,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   <span>2. Position &amp; size signature on page</span>
                 </label>
 
-                {/* Copy To All Button */}
                 {totalPages > 1 && currentBox && (
                   <button
                     type="button"
@@ -716,7 +747,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 )}
               </div>
 
-              {/* Page Navigator with Explicit Add / Remove Controls */}
+              {/* Page Navigation & Explicit Add/Remove Button */}
               <div className="flex items-center justify-between text-xs text-zinc-300 px-1">
                 <div className="flex items-center gap-2">
                   <button
@@ -738,7 +769,6 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   </button>
                 </div>
 
-                {/* Dedicated Add or Placed/Remove Action */}
                 <div className="flex items-center gap-2">
                   {!currentBox ? (
                     <button
@@ -814,12 +844,10 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                             className="w-full h-full object-contain pointer-events-none"
                           />
 
-                          {/* Drag indicator in top-left */}
                           <div className="absolute top-0.5 left-0.5 p-0.5 bg-emerald-600 rounded-xs text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">
                             <Move className="w-2.5 h-2.5" />
                           </div>
 
-                          {/* Bottom-Right Resize Handle */}
                           <div
                             onMouseDown={handleResizeHandleMouseDown}
                             className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize shadow-md z-20 hover:scale-125 transition-transform"
