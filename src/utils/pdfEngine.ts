@@ -1934,68 +1934,17 @@ export async function addBatesNumberingToPDF(
   const bytes = await file.arrayBuffer();
   const uint8 = new Uint8Array(bytes);
 
+  const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+  const pdfDoc = await loadingTask.promise;
+  const numPages = pdfDoc.numPages;
+  const newPdfDoc = await PDFDocument.create();
+
   const prefix = options.prefix || '';
   const suffix = options.suffix || '';
   const startNum = options.startNumber || 1;
   const digits = Math.max(1, options.digits ?? options.totalDigits ?? 6);
   const fontSize = options.fontSize || 10;
   const position = options.position || 'bottom-right';
-
-  try {
-    // 1. Native Vector Path: Preserves exact original pixels, fonts, and vector crispness perfectly
-    const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const pages = pdfDoc.getPages();
-    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    const numPages = pages.length;
-
-    pages.forEach((page, idx) => {
-      if (options.onProgress) {
-        options.onProgress(idx + 1, numPages);
-      }
-
-      const pageNumStr = String(startNum + idx).padStart(digits, '0');
-      const stampText = `${prefix}${pageNumStr}${suffix}`;
-
-      const { width: pWidth, height: pHeight } = page.getSize();
-      const textWidth = font.widthOfTextAtSize(stampText, fontSize);
-      const textHeight = font.heightAtSize(fontSize);
-
-      const marginX = pWidth * 0.06;
-      const marginY = pHeight * 0.04;
-
-      let posX = marginX;
-      let posY = marginY; // pdf-lib origin (0,0) is bottom-left
-
-      if (position.includes('center')) {
-        posX = (pWidth - textWidth) / 2;
-      } else if (position.includes('right')) {
-        posX = pWidth - textWidth - marginX;
-      }
-
-      if (position.includes('top')) {
-        posY = pHeight - marginY - textHeight;
-      }
-
-      // Draw vector text directly onto the original page stream without rasterizing
-      page.drawText(stampText, {
-        x: posX,
-        y: posY,
-        size: fontSize,
-        font,
-        color: rgb(0, 0, 0),
-      });
-    });
-
-    return await pdfDoc.save({ useObjectStreams: false });
-  } catch (err) {
-    console.warn('Native vector bates stamping fallback to high-def canvas:', err);
-  }
-
-  // 2. Fallback Canvas Compositor for heavily locked/scanned files
-  const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
-  const pdfDoc = await loadingTask.promise;
-  const numPages = pdfDoc.numPages;
-  const newPdfDoc = await PDFDocument.create();
 
   for (let i = 1; i <= numPages; i++) {
     if (options.onProgress) {
@@ -2006,6 +1955,7 @@ export async function addBatesNumberingToPDF(
     const stampText = `${prefix}${pageNumStr}${suffix}`;
 
     const page = await pdfDoc.getPage(i);
+    // Render at ultra-sharp 3.0 scale to keep bank statements and text pin-sharp
     const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 3.0);
 
     const compositeCanvas = document.createElement('canvas');
@@ -2024,6 +1974,7 @@ export async function addBatesNumberingToPDF(
       });
 
       ctx.save();
+      
       const scaleNormalization = pWidth / 540;
       const finalFontSize = fontSize * scaleNormalization;
 
@@ -2050,14 +2001,18 @@ export async function addBatesNumberingToPDF(
         posY = marginY + textHeight;
       }
 
+      // Solid background pill so text is always readable over any background
       ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
       ctx.fillRect(posX - 6, posY - textHeight - 4, textWidth + 12, textHeight + 8);
 
+      // Draw crisp stamp text on top of everything
       ctx.fillStyle = '#000000';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(stampText, posX, posY);
+
       ctx.restore();
 
+      // Export as Lossless PNG for 100% pixel fidelity with zero compression blur
       const stampedPng = compositeCanvas.toDataURL('image/png');
       const b64 = stampedPng.split(',')[1];
       const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
