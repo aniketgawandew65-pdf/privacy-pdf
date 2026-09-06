@@ -2276,34 +2276,132 @@ export async function createBookletPDF(
 ): Promise<Uint8Array> {
   const { sheetSize = 'A4', addFoldLine = true, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const sourceDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const origPageCount = sourceDoc.getPageCount();
+  const uint8 = new Uint8Array(arrayBuffer);
 
-  const targetPageCount = Math.ceil(origPageCount / 4) * 4;
-  const pagesToPad = targetPageCount - origPageCount;
-  for (let i = 0; i < pagesToPad; i++) {
-    sourceDoc.addPage();
-  }
+  const [sheetW, sheetH] =
+    sheetSize === 'LETTER' ? [792.0, 612.0] : [841.89, 595.28];
+  const halfW = sheetW / 2;
+  const halfH = sheetH;
 
-  for (let i = 0; i < sourceDoc.getPageCount(); i++) {
-    const page = sourceDoc.getPage(i);
-    if (!page.node.Contents()) {
-      const emptyStream = sourceDoc.context.flateStream('');
-      const ref = sourceDoc.context.register(emptyStream);
-      page.node.set(PDFName.of('Contents'), ref);
+  // 1. Primary Vector Path (for standard, unencrypted PDFs)
+  if (!isComplexOrProtectedPdf(uint8)) {
+    try {
+      const sourceDoc = await PDFDocument.load(arrayBuffer);
+      const origPageCount = sourceDoc.getPageCount();
+      const targetPageCount = Math.ceil(origPageCount / 4) * 4;
+      const pagesToPad = targetPageCount - origPageCount;
+
+      for (let i = 0; i < pagesToPad; i++) {
+        sourceDoc.addPage();
+      }
+
+      for (let i = 0; i < sourceDoc.getPageCount(); i++) {
+        const page = sourceDoc.getPage(i);
+        if (!page.node.Contents()) {
+          const emptyStream = sourceDoc.context.flateStream('');
+          const ref = sourceDoc.context.register(emptyStream);
+          page.node.set(PDFName.of('Contents'), ref);
+        }
+      }
+
+      const outputDoc = await PDFDocument.create();
+      const totalSpreads = targetPageCount / 2;
+
+      for (let i = 0; i < totalSpreads; i++) {
+        onProgress?.(i + 1, totalSpreads);
+        const k = Math.floor(i / 2);
+
+        let leftIndex: number;
+        let rightIndex: number;
+
+        if (i % 2 === 0) {
+          leftIndex = targetPageCount - 2 * k - 1;
+          rightIndex = 2 * k;
+        } else {
+          leftIndex = 2 * k + 1;
+          rightIndex = targetPageCount - 2 * k - 2;
+        }
+
+        const newSheet = outputDoc.addPage([sheetW, sheetH]);
+
+        const leftSrc = sourceDoc.getPage(leftIndex);
+        const { width: leftW, height: leftH } = leftSrc.getSize();
+        const embeddedLeft = await outputDoc.embedPage(leftSrc);
+        const scaleLeft = Math.min(halfW / leftW, halfH / leftH);
+        const drawLeftW = leftW * scaleLeft;
+        const drawLeftH = leftH * scaleLeft;
+        const drawLeftX = (halfW - drawLeftW) / 2;
+        const drawLeftY = (halfH - drawLeftH) / 2;
+
+        newSheet.drawPage(embeddedLeft, {
+          x: drawLeftX,
+          y: drawLeftY,
+          width: drawLeftW,
+          height: drawLeftH,
+        });
+
+        const rightSrc = sourceDoc.getPage(rightIndex);
+        const { width: rightW, height: rightH } = rightSrc.getSize();
+        const embeddedRight = await outputDoc.embedPage(rightSrc);
+        const scaleRight = Math.min(halfW / rightW, halfH / rightH);
+        const drawRightW = rightW * scaleRight;
+        const drawRightH = rightH * scaleRight;
+        const drawRightX = halfW + (halfW - drawRightW) / 2;
+        const drawRightY = (halfH - drawRightH) / 2;
+
+        newSheet.drawPage(embeddedRight, {
+          x: drawRightX,
+          y: drawRightY,
+          width: drawRightW,
+          height: drawRightH,
+        });
+
+        if (addFoldLine) {
+          newSheet.drawLine({
+            start: { x: halfW, y: 15 },
+            end: { x: halfW, y: sheetH - 15 },
+            thickness: 0.5,
+            color: rgb(0.82, 0.82, 0.82),
+            dashArray: [4, 4],
+          });
+        }
+      }
+
+      return await outputDoc.save({ useObjectStreams: false });
+    } catch (vectorErr) {
+      console.warn('Vector booklet bypassed; activating high-res rendering pipeline:', vectorErr);
     }
   }
 
-  const outputDoc = await PDFDocument.create();
-  const [sheetW, sheetH] =
-    sheetSize === 'LETTER' ? [792.0, 612.0] : [841.89, 595.28];
-
-  const halfW = sheetW / 2;
-  const halfH = sheetH;
+  // 2. High-Res Rendering Fallback (decrypts bank statements, signed docs, and rent agreements)
+  const loadingTask = pdfjsLib.getDocument({
+    data: uint8.slice(),
+    stopAtErrors: false,
+  });
+  const fallbackDoc = await loadingTask.promise;
+  const origPageCount = fallbackDoc.numPages;
+  const targetPageCount = Math.ceil(origPageCount / 4) * 4;
   const totalSpreads = targetPageCount / 2;
+  const outputDoc = await PDFDocument.create();
+
+  // Render and embed existing document pages
+  const embeddedImages: ({ image: any; width: number; height: number } | null)[] = [];
+
+  for (let p = 1; p <= origPageCount; p++) {
+    onProgress?.(p, origPageCount + totalSpreads);
+    const page = await fallbackDoc.getPage(p);
+    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
+    const image = await outputDoc.embedJpg(imgBytes);
+    embeddedImages.push({ image, width, height });
+  }
+
+  // Pad remaining booklet slots with null for clean blank pages
+  while (embeddedImages.length < targetPageCount) {
+    embeddedImages.push(null);
+  }
 
   for (let i = 0; i < totalSpreads; i++) {
-    onProgress?.(i + 1, totalSpreads);
+    onProgress?.(origPageCount + i + 1, origPageCount + totalSpreads);
     const k = Math.floor(i / 2);
 
     let leftIndex: number;
@@ -2319,37 +2417,39 @@ export async function createBookletPDF(
 
     const newSheet = outputDoc.addPage([sheetW, sheetH]);
 
-    const leftSrc = sourceDoc.getPage(leftIndex);
-    const { width: leftW, height: leftH } = leftSrc.getSize();
-    const embeddedLeft = await outputDoc.embedPage(leftSrc);
-    const scaleLeft = Math.min(halfW / leftW, halfH / leftH);
-    const drawLeftW = leftW * scaleLeft;
-    const drawLeftH = leftH * scaleLeft;
-    const drawLeftX = (halfW - drawLeftW) / 2;
-    const drawLeftY = (halfH - drawLeftH) / 2;
+    const leftItem = embeddedImages[leftIndex];
+    if (leftItem) {
+      const { image, width: leftW, height: leftH } = leftItem;
+      const scaleLeft = Math.min(halfW / leftW, halfH / leftH);
+      const drawLeftW = leftW * scaleLeft;
+      const drawLeftH = leftH * scaleLeft;
+      const drawLeftX = (halfW - drawLeftW) / 2;
+      const drawLeftY = (halfH - drawLeftH) / 2;
 
-    newSheet.drawPage(embeddedLeft, {
-      x: drawLeftX,
-      y: drawLeftY,
-      width: drawLeftW,
-      height: drawLeftH,
-    });
+      newSheet.drawImage(image, {
+        x: drawLeftX,
+        y: drawLeftY,
+        width: drawLeftW,
+        height: drawLeftH,
+      });
+    }
 
-    const rightSrc = sourceDoc.getPage(rightIndex);
-    const { width: rightW, height: rightH } = rightSrc.getSize();
-    const embeddedRight = await outputDoc.embedPage(rightSrc);
-    const scaleRight = Math.min(halfW / rightW, halfH / rightH);
-    const drawRightW = rightW * scaleRight;
-    const drawRightH = rightH * scaleRight;
-    const drawRightX = halfW + (halfW - drawRightW) / 2;
-    const drawRightY = (halfH - drawRightH) / 2;
+    const rightItem = embeddedImages[rightIndex];
+    if (rightItem) {
+      const { image, width: rightW, height: rightH } = rightItem;
+      const scaleRight = Math.min(halfW / rightW, halfH / rightH);
+      const drawRightW = rightW * scaleRight;
+      const drawRightH = rightH * scaleRight;
+      const drawRightX = halfW + (halfW - drawRightW) / 2;
+      const drawRightY = (halfH - drawRightH) / 2;
 
-    newSheet.drawPage(embeddedRight, {
-      x: drawRightX,
-      y: drawRightY,
-      width: drawRightW,
-      height: drawRightH,
-    });
+      newSheet.drawImage(image, {
+        x: drawRightX,
+        y: drawRightY,
+        width: drawRightW,
+        height: drawRightH,
+      });
+    }
 
     if (addFoldLine) {
       newSheet.drawLine({
@@ -2362,7 +2462,7 @@ export async function createBookletPDF(
     }
   }
 
-  return await outputDoc.save({ useObjectStreams: true });
+  return await outputDoc.save({ useObjectStreams: false });
 }
 
 export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, height: number): number {
