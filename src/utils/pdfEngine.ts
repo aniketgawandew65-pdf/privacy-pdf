@@ -3489,6 +3489,13 @@ export interface ExtractedMarkdownResult {
   estimatedTokens: number;
 }
 
+export interface MarkdownExtractOptions {
+  detectHeadings?: boolean;
+  detectLists?: boolean;
+  joinHyphenatedWords?: boolean;
+  onProgress?: (current: number, total: number) => void;
+}
+
 export async function extractMarkdownFromPDF(
   file: File,
   options: MarkdownExtractOptions = {}
@@ -3501,7 +3508,7 @@ export async function extractMarkdownFromPDF(
   } = options;
 
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -3515,7 +3522,9 @@ export async function extractMarkdownFromPDF(
 
   const pagesTextData: TextItemData[][] = [];
   const fontHeights: number[] = [];
+  let totalDigitalItems = 0;
 
+  // Step 1: Extract digital text coordinates
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.(pageNum, totalPages);
     const page = await pdfDoc.getPage(pageNum);
@@ -3534,93 +3543,185 @@ export async function extractMarkdownFromPDF(
         width: item.width || 0,
       });
     }
+    totalDigitalItems += items.length;
     pagesTextData.push(items);
+    page.cleanup();
   }
-
-  fontHeights.sort((a, b) => a - b);
-  const medianHeight = fontHeights[Math.floor(fontHeights.length / 2)] || 12;
 
   const markdownBlocks: string[] = [];
 
-  for (let pageIndex = 0; pageIndex < pagesTextData.length; pageIndex++) {
-    const items = pagesTextData[pageIndex];
-    if (items.length === 0) continue;
-
-    items.sort((a, b) => {
-      if (Math.abs(b.y - a.y) > 4) return b.y - a.y;
-      return a.x - b.x;
+  // =========================================================================
+  // PATH A: Automatic OCR Fallback for Scanned PDFs (e.g. Address agreement.pdf)
+  // =========================================================================
+  if (totalDigitalItems < 10) {
+    const ocrWorker = await createWorker('eng', 1, {
+      workerPath: '/tessdata/worker.min.js',
+      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+      langPath: '/tessdata',
+      gzip: true,
     });
 
-    const lines: { text: string; avgHeight: number }[] = [];
-    let currentLineItems: TextItemData[] = [];
-    let currentY: number | null = null;
+    try {
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        onProgress?.(pageNum, totalPages);
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.5 });
 
-    for (const item of items) {
-      if (currentY === null || Math.abs(item.y - currentY) <= 4) {
-        currentLineItems.push(item);
-        currentY = item.y;
-      } else {
-        if (currentLineItems.length > 0) {
-          const text = currentLineItems.map((i) => i.str).join(' ').trim();
-          const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
-          lines.push({ text, avgHeight });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+          const { data } = await ocrWorker.recognize(canvas);
+
+          if (data?.text) {
+            const rawLines = data.text.split('\n');
+            for (const rLine of rawLines) {
+              const trimmed = rLine.trim();
+              if (!trimmed) continue;
+
+              // Detect scanned legal headers (e.g., "LEAVE AND LICENSE AGREEMENT", "ARTICLE 1")
+              if (
+                detectHeadings &&
+                trimmed.length < 60 &&
+                (trimmed === trimmed.toUpperCase() || /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(trimmed)) &&
+                /[A-Za-z]{3,}/.test(trimmed)
+              ) {
+                markdownBlocks.push(`\n### ${trimmed}\n`);
+              } else if (detectLists && /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*(.*)$/.test(trimmed)) {
+                markdownBlocks.push(`- ${trimmed.replace(/^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*/, '')}`);
+              } else {
+                markdownBlocks.push(trimmed);
+              }
+            }
+          }
         }
-        currentLineItems = [item];
-        currentY = item.y;
+
+        canvas.width = 0;
+        canvas.height = 0;
+        page.cleanup();
+
+        if (pageNum < totalPages) {
+          markdownBlocks.push('\n---\n');
+        }
       }
+    } finally {
+      await ocrWorker.terminate();
     }
+  } else {
+    // =========================================================================
+    // PATH B: Intelligent Digital Text Structuring
+    // =========================================================================
+    fontHeights.sort((a, b) => a - b);
+    const medianHeight = fontHeights[Math.floor(fontHeights.length / 2)] || 12;
 
-    if (currentLineItems.length > 0) {
-      const text = currentLineItems.map((i) => i.str).join(' ').trim();
-      const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
-      lines.push({ text, avgHeight });
-    }
+    for (let pageIndex = 0; pageIndex < pagesTextData.length; pageIndex++) {
+      const items = pagesTextData[pageIndex];
+      if (items.length === 0) continue;
 
-    for (const line of lines) {
-      let lineText = line.text;
-      if (!lineText) continue;
+      items.sort((a, b) => {
+        if (Math.abs(b.y - a.y) > 4) return b.y - a.y;
+        return a.x - b.x;
+      });
 
-      if (joinHyphenatedWords && lineText.endsWith('-')) {
-        lineText = lineText.slice(0, -1);
-      }
+      const lines: { text: string; avgHeight: number }[] = [];
+      let currentLineItems: TextItemData[] = [];
+      let currentY: number | null = null;
 
-      if (detectHeadings) {
-        if (line.avgHeight >= medianHeight * 1.8) {
-          markdownBlocks.push(`\n# ${lineText}\n`);
-          continue;
-        } else if (line.avgHeight >= medianHeight * 1.35) {
-          markdownBlocks.push(`\n## ${lineText}\n`);
-          continue;
-        } else if (line.avgHeight >= medianHeight * 1.15 && lineText.length < 80) {
-          markdownBlocks.push(`\n### ${lineText}\n`);
-          continue;
+      for (const item of items) {
+        if (currentY === null || Math.abs(item.y - currentY) <= 4) {
+          currentLineItems.push(item);
+          currentY = item.y;
+        } else {
+          if (currentLineItems.length > 0) {
+            const text = currentLineItems.map((i) => i.str).join(' ').trim();
+            const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
+            lines.push({ text, avgHeight });
+          }
+          currentLineItems = [item];
+          currentY = item.y;
         }
       }
 
-      if (detectLists) {
-        const bulletMatch = lineText.match(/^[\u2022\u25E6\u2023\u2219\*\-]\s*(.*)$/);
-        if (bulletMatch) {
-          markdownBlocks.push(`- ${bulletMatch[1]}`);
-          continue;
-        }
-
-        const numberedMatch = lineText.match(/^(\d+[\.\)])\s*(.*)$/);
-        if (numberedMatch) {
-          markdownBlocks.push(`${numberedMatch[1]} ${numberedMatch[2]}`);
-          continue;
-        }
+      if (currentLineItems.length > 0) {
+        const text = currentLineItems.map((i) => i.str).join(' ').trim();
+        const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
+        lines.push({ text, avgHeight });
       }
 
-      markdownBlocks.push(lineText);
-    }
+      for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+        let lineText = lines[lIdx].text.trim();
+        const avgHeight = lines[lIdx].avgHeight;
+        if (!lineText) continue;
 
-    if (pageIndex < pagesTextData.length - 1) {
-      markdownBlocks.push('\n---\n');
+        // 1. Clean horizontal dividers
+        if (/^[-—_=~.]{3,}$/.test(lineText)) {
+          markdownBlocks.push('\n---\n');
+          continue;
+        }
+
+        // 2. Join hyphenated line breaks
+        if (joinHyphenatedWords && lineText.endsWith('-')) {
+          lineText = lineText.slice(0, -1);
+        }
+
+        // 3. Detect and clean all types of bullet lists (including Word Symbol/Wingdings)
+        if (detectLists) {
+          const bulletMatch = lineText.match(/^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7\u25AA\u25AB\u2043\u00B7\u2013\u2014•]\s*(.*)$/);
+          if (bulletMatch) {
+            markdownBlocks.push(`- ${bulletMatch[1]}`);
+            continue;
+          }
+
+          const numberedMatch = lineText.match(/^(\d+[\.\)])\s*(.*)$/);
+          if (numberedMatch) {
+            markdownBlocks.push(`${numberedMatch[1]} ${numberedMatch[2]}`);
+            continue;
+          }
+        }
+
+        // 4. Detect headings
+        if (detectHeadings) {
+          // Check for Title / Subtitle based on relative font scale
+          if (avgHeight >= medianHeight * 1.7) {
+            // Merge consecutive huge titles (e.g. First Name + Last Name)
+            if (markdownBlocks.length > 0 && markdownBlocks[markdownBlocks.length - 1].startsWith('# ')) {
+              markdownBlocks[markdownBlocks.length - 1] += ` ${lineText}`;
+            } else {
+              markdownBlocks.push(`\n# ${lineText}\n`);
+            }
+            continue;
+          } else if (avgHeight >= medianHeight * 1.35) {
+            markdownBlocks.push(`\n## ${lineText}\n`);
+            continue;
+          } else if (
+            // Detect Section Titles in ALL CAPS (e.g. "EDUCATION", "PROFESSIONAL EXPERIENCE")
+            (lineText.length < 50 &&
+              /^[A-Z0-9\s&,:\/\-\(\)]{3,}$/.test(lineText) &&
+              /[A-Z]{3,}/.test(lineText)) ||
+            (avgHeight >= medianHeight * 1.15 && lineText.length < 80)
+          ) {
+            markdownBlocks.push(`\n### ${lineText.replace(/:$/, '')}\n`);
+            continue;
+          }
+        }
+
+        markdownBlocks.push(lineText);
+      }
+
+      if (pageIndex < pagesTextData.length - 1) {
+        markdownBlocks.push('\n---\n');
+      }
     }
   }
 
-  const markdown = markdownBlocks
-    .join('\n')
+  // Step 5: Post-processing cleanups (Fix broken superscript ordinals: "th\n12 in 2011" -> "12th in 2011")
+  let markdown = markdownBlocks.join('\n');
+  markdown = markdown
+    .replace(/\n(th|st|nd|rd)\n+(\d+)\s+/gi, '\n$2$1 ')
+    .replace(/(\d+)\n+(th|st|nd|rd)\b/gi, '$1$2')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
