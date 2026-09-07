@@ -4507,6 +4507,7 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   const lineHeight = fontSize * 1.42;
 
   const drawPageLayout = () => {
+    // Force canvas background fill explicitly on every page
     doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
     doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
