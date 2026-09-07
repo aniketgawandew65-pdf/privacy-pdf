@@ -3213,108 +3213,256 @@ export interface ExtractedTableResult {
   totalRows: number;
 }
 
+export interface TableExtractOptions {
+  delimiter?: ',' | ';' | '\t';
+  yTolerance?: number;
+  minColumnGap?: number;
+  onProgress?: (current: number, total: number) => void;
+}
+
 export async function extractTableFromPDF(
   file: File,
   options: TableExtractOptions = {}
 ): Promise<ExtractedTableResult> {
   const { yTolerance = 4, minColumnGap = 12, delimiter = ',', onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
-  const allRows: string[][] = [];
+  interface RawItem {
+    str: string;
+    x: number;
+    y: number;
+    width: number;
+  }
 
+  interface Chunk {
+    str: string;
+    x: number;
+    width: number;
+    endX: number;
+  }
+
+  const allRows: string[][] = [];
+  let isScannedDoc = true;
+
+  // Step 1: Rapid digital layer scan
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     onProgress?.(pageNum, totalPages);
     const page = await pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
 
-    interface RawItem {
-      str: string;
-      x: number;
-      y: number;
-      width: number;
-    }
-
     const items: RawItem[] = [];
     for (const item of textContent.items as any[]) {
       if (!item.str || !item.str.trim()) continue;
-      const tx = item.transform[4];
-      const ty = item.transform[5];
       items.push({
         str: item.str,
-        x: tx,
-        y: ty,
+        x: item.transform[4],
+        y: item.transform[5],
         width: item.width || 0,
       });
     }
 
-    items.sort((a, b) => {
-      if (Math.abs(b.y - a.y) > yTolerance) {
-        return b.y - a.y;
+    if (items.length > 5) {
+      isScannedDoc = false;
+    }
+
+    if (items.length > 0) {
+      // Sort items top-to-bottom (PDF y goes up), then left-to-right
+      items.sort((a, b) => {
+        if (Math.abs(b.y - a.y) > yTolerance) {
+          return b.y - a.y;
+        }
+        return a.x - b.x;
+      });
+
+      // Group into horizontal lines
+      const lines: RawItem[][] = [];
+      let currentLine: RawItem[] = [];
+      let currentY: number | null = null;
+
+      for (const item of items) {
+        if (currentY === null || Math.abs(item.y - currentY) <= yTolerance) {
+          currentLine.push(item);
+          currentY = item.y;
+        } else {
+          if (currentLine.length > 0) lines.push(currentLine);
+          currentLine = [item];
+          currentY = item.y;
+        }
       }
-      return a.x - b.x;
+      if (currentLine.length > 0) lines.push(currentLine);
+
+      // Build text chunks per line based on minColumnGap
+      const lineChunks: Chunk[][] = [];
+      const multiChunkXStarts: number[] = [];
+
+      for (const line of lines) {
+        line.sort((a, b) => a.x - b.x);
+        const chunks: Chunk[] = [];
+        let currentChunkText = '';
+        let chunkStartX = -1;
+        let lastRightEdge = -1;
+
+        for (const item of line) {
+          if (lastRightEdge === -1) {
+            currentChunkText = item.str;
+            chunkStartX = item.x;
+            lastRightEdge = item.x + item.width;
+          } else {
+            const gap = item.x - lastRightEdge;
+            if (gap > minColumnGap) {
+              chunks.push({
+                str: currentChunkText.trim(),
+                x: chunkStartX,
+                width: lastRightEdge - chunkStartX,
+                endX: lastRightEdge,
+              });
+              currentChunkText = item.str;
+              chunkStartX = item.x;
+            } else {
+              currentChunkText += (gap > 2 ? ' ' : '') + item.str;
+            }
+            lastRightEdge = item.x + item.width;
+          }
+        }
+
+        if (currentChunkText.trim()) {
+          chunks.push({
+            str: currentChunkText.trim(),
+            x: chunkStartX,
+            width: lastRightEdge - chunkStartX,
+            endX: lastRightEdge,
+          });
+        }
+
+        if (chunks.length > 0) {
+          lineChunks.push(chunks);
+          if (chunks.length >= 2) {
+            for (const ch of chunks) {
+              multiChunkXStarts.push(ch.x);
+            }
+          }
+        }
+      }
+
+      // Step 2: Calculate Global Column Intervals for the page
+      multiChunkXStarts.sort((a, b) => a - b);
+      const clusters: number[][] = [];
+      for (const x of multiChunkXStarts) {
+        if (clusters.length === 0 || x - clusters[clusters.length - 1][clusters[clusters.length - 1].length - 1] > minColumnGap * 1.5) {
+          clusters.push([x]);
+        } else {
+          clusters[clusters.length - 1].push(x);
+        }
+      }
+
+      const columnCenters = clusters
+        .filter((c) => c.length >= 1)
+        .map((c) => c.reduce((sum, v) => sum + v, 0) / c.length);
+
+      const boundaries: number[] = [];
+      for (let cIdx = 0; cIdx < columnCenters.length - 1; cIdx++) {
+        boundaries.push((columnCenters[cIdx] + columnCenters[cIdx + 1]) / 2);
+      }
+
+      // Step 3: Map chunks to structured columns
+      const pageRows: string[][] = [];
+
+      for (const chunks of lineChunks) {
+        if (columnCenters.length >= 2) {
+          const row = new Array(columnCenters.length).fill('');
+          for (const ch of chunks) {
+            let colIdx = boundaries.findIndex((b) => ch.x < b);
+            if (colIdx === -1) colIdx = columnCenters.length - 1;
+
+            row[colIdx] = row[colIdx] ? `${row[colIdx]} ${ch.str}` : ch.str;
+          }
+
+          // Check if this row is a multi-line continuation of the previous row
+          const nonBlankIndices = row
+            .map((val, idx) => (val.trim() ? idx : -1))
+            .filter((idx) => idx !== -1);
+
+          const isNumeric = (val: string) => /^[\d,.-]+$/.test(val.trim().replace(/[A-Za-z]/g, ''));
+          const hasDateOrNumber = row.some((c) => /\d{2}-[A-Za-z]{3}-\d{4}/.test(c) || (isNumeric(c) && c.includes('.')));
+
+          if (
+            nonBlankIndices.length === 1 &&
+            !hasDateOrNumber &&
+            pageRows.length > 0
+          ) {
+            const contIdx = nonBlankIndices[0];
+            pageRows[pageRows.length - 1][contIdx] = `${pageRows[pageRows.length - 1][contIdx]} ${row[contIdx]}`.trim();
+          } else {
+            pageRows.push(row);
+          }
+        } else {
+          pageRows.push(chunks.map((c) => c.str));
+        }
+      }
+
+      allRows.push(...pageRows);
+    }
+
+    page.cleanup();
+  }
+
+  // Step 4: Fallback for Scanned Documents (Address agreement.pdf)
+  if (isScannedDoc || allRows.length === 0) {
+    onProgress?.(1, totalPages);
+    const ocrWorker = await createWorker('eng', 1, {
+      workerPath: '/tessdata/worker.min.js',
+      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+      langPath: '/tessdata',
+      gzip: true,
     });
 
-    const lines: RawItem[][] = [];
-    let currentLine: RawItem[] = [];
-    let currentY: number | null = null;
+    try {
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        onProgress?.(pageNum, totalPages);
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.5 });
 
-    for (const item of items) {
-      if (currentY === null || Math.abs(item.y - currentY) <= yTolerance) {
-        currentLine.push(item);
-        currentY = item.y;
-      } else {
-        if (currentLine.length > 0) {
-          lines.push(currentLine);
-        }
-        currentLine = [item];
-        currentY = item.y;
-      }
-    }
-    if (currentLine.length > 0) {
-      lines.push(currentLine);
-    }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
 
-    for (const line of lines) {
-      line.sort((a, b) => a.x - b.x);
+        if (ctx) {
+          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+          const { data } = await ocrWorker.recognize(canvas);
 
-      const rowCells: string[] = [];
-      let currentCellText = '';
-      let lastRightEdge = -1;
-
-      for (const item of line) {
-        if (lastRightEdge === -1) {
-          currentCellText = item.str;
-          lastRightEdge = item.x + item.width;
-        } else {
-          const gap = item.x - lastRightEdge;
-          if (gap > minColumnGap) {
-            rowCells.push(currentCellText.trim());
-            currentCellText = item.str;
-          } else {
-            currentCellText += (gap > 2 ? ' ' : '') + item.str;
+          if (data?.text) {
+            const rawLines = data.text.split('\n');
+            for (const line of rawLines) {
+              const text = line.trim();
+              if (text) {
+                // Split multi-tab/spaced columns in scanned tables, or capture clause paragraphs
+                const parts = text.split(/\s{3,}|\t/).map((p) => p.trim()).filter(Boolean);
+                allRows.push(parts.length > 0 ? parts : [text]);
+              }
+            }
           }
-          lastRightEdge = item.x + item.width;
         }
-      }
 
-      if (currentCellText.trim()) {
-        rowCells.push(currentCellText.trim());
+        canvas.width = 0;
+        canvas.height = 0;
+        page.cleanup();
       }
-
-      if (rowCells.length > 0) {
-        allRows.push(rowCells);
-      }
+    } finally {
+      await ocrWorker.terminate();
     }
   }
 
+  // Step 5: Format CSV with clean escaping
   const escapeCell = (val: string): string => {
-    if (val.includes(delimiter) || val.includes('"') || val.includes('\n')) {
-      return `"${val.replace(/"/g, '""')}"`;
+    const clean = val.trim();
+    if (clean.includes(delimiter) || clean.includes('"') || clean.includes('\n') || clean.includes('\r')) {
+      return `"${clean.replace(/"/g, '""')}"`;
     }
-    return val;
+    return clean;
   };
 
   const csvLines = allRows.map((row) => row.map(escapeCell).join(delimiter));
