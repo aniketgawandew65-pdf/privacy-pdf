@@ -4434,15 +4434,14 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
   return new Uint8Array(doc.output('arraybuffer'));
 }
 
-export interface CodeToPdfOptions {
-  code: string;
-  title?: string;
-  theme?: 'dark' | 'light';
-  showLineNumbers?: boolean;
-  fontSize?: number;
-  pageSize?: 'a4' | 'letter';
-  orientation?: 'portrait' | 'landscape';
+// ============================================================================
+// CODE TO PDF ENGINE
+// ============================================================================
+export interface SyntaxToken {
+  text: string;
+  color: [number, number, number];
 }
+
 export interface CodeToPdfOptions {
   code: string;
   title?: string;
@@ -4481,7 +4480,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 
   const isDark = theme === 'dark';
 
-  // Crisp, High-Contrast Distinct Palettes
   const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255];
   const defaultTextColor: [number, number, number] = isDark ? [226, 232, 240] : [15, 23, 42];
   const gutterBg: [number, number, number] = isDark ? [24, 33, 54] : [248, 250, 252];
@@ -4490,17 +4488,15 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   const headerBg: [number, number, number] = isDark ? [30, 41, 59] : [241, 245, 249];
   const headerText: [number, number, number] = isDark ? [56, 189, 248] : [14, 116, 144];
 
-  // Syntax Highlighting Colors
-  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [185, 28, 28];    // Red/Rose
-  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136];   // Emerald/Teal
-  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139]; // Slate Gray
-  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [194, 65, 12];     // Amber/Orange
-  const funcColor: [number, number, number] = isDark ? [96, 165, 250] : [29, 78, 216];       // Blue
+  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [185, 28, 28];
+  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136];
+  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139];
+  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [194, 65, 12];
+  const funcColor: [number, number, number] = isDark ? [96, 165, 250] : [29, 78, 216];
 
   doc.setFont('courier', 'normal');
   doc.setFontSize(fontSize);
 
-  // Exact Monospace Character Metrics
   const charWidth = doc.getTextWidth('M');
   const rawLines = code.replace(/\t/g, '    ').split(/\r?\n/);
   const totalLines = rawLines.length;
@@ -4510,12 +4506,10 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   const maxCharsPerLine = Math.max(20, Math.floor(codeAreaWidth / charWidth));
   const lineHeight = fontSize * 1.42;
 
-  const drawPageLayout = (pageNum: number) => {
-    // 1. Draw Full Canvas Background
+  const drawPageLayout = () => {
     doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
     doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-    // 2. Draw Clean File Header on Every Page
     if (title.trim()) {
       doc.setFillColor(headerBg[0], headerBg[1], headerBg[2]);
       doc.rect(margin, margin - 12, pageWidth - margin * 2, 20, 'F');
@@ -4528,7 +4522,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
       doc.text(`// ${title.trim()}`, margin + 8, margin + 2);
     }
 
-    // 3. Draw Continuous Vertical Gutter Line
     if (showLineNumbers) {
       doc.setFillColor(gutterBg[0], gutterBg[1], gutterBg[2]);
       doc.rect(margin, margin + 12, gutterWidth, pageHeight - margin * 2 - 12, 'F');
@@ -4539,7 +4532,7 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   };
 
   let cursorY = margin + (title.trim() ? 26 : 8);
-  drawPageLayout(1);
+  drawPageLayout();
 
   const KEYWORD_REGEX =
     /\b(const|let|var|function|return|import|from|export|default|class|extends|if|else|switch|case|break|for|while|do|try|catch|finally|throw|new|typeof|instanceof|async|await|def|elif|lambda|self|echo|select|where|insert|into|update|delete|public|private|protected|static|void|int|float|double|bool|struct|impl|fn|pub|type|interface)\b/;
@@ -4614,13 +4607,12 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
     for (let chunkIdx = 0; chunkIdx < wrappedChunks.length; chunkIdx++) {
       if (cursorY + lineHeight > bottomThreshold) {
         doc.addPage();
-        drawPageLayout(doc.getNumberOfPages());
+        drawPageLayout();
         cursorY = margin + (title.trim() ? 26 : 8);
         doc.setFont('courier', 'normal');
         doc.setFontSize(fontSize);
       }
 
-      // Line Numbers (Gutter)
       if (showLineNumbers) {
         doc.setTextColor(gutterText[0], gutterText[1], gutterText[2]);
         if (chunkIdx === 0) {
@@ -4630,7 +4622,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         }
       }
 
-      // Syntax Highlighted Tokens
       const chunkText = wrappedChunks[chunkIdx];
       const tokens = tokenizeLine(chunkText);
       let tokenCursorX = margin + gutterWidth + 6;
@@ -4645,7 +4636,6 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
     }
   }
 
-  // Add Professional Footer Page Numbers ("Page X of Y")
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
