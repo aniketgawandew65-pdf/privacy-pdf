@@ -4189,7 +4189,7 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
     orientation = 'portrait',
     pageSize = 'a4',
     theme = 'striped',
-    fontSize = 9,
+    fontSize = 8.5,
   } = options;
 
   if (!rows || rows.length === 0) {
@@ -4206,24 +4206,46 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 36;
   const printableWidth = pageWidth - margin * 2;
-  const bottomThreshold = pageHeight - margin;
+  const bottomThreshold = pageHeight - margin - 24; // Leave room for footer
 
   const colCount = Math.max(...rows.map((r) => r.length), 1);
-  const colWidth = printableWidth / colCount;
-  const rowHeight = Math.max(18, fontSize * 2.2);
+  const headerRow = rows[0] || [];
+  const dataRows = rows.slice(1);
+
+  // 1. Calculate Proportional Column Widths based on max content length per column
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(fontSize);
+  
+  const colMaxChars = new Array(colCount).fill(3);
+  for (const row of rows) {
+    for (let c = 0; c < colCount; c++) {
+      const val = (row[c] || '').trim();
+      if (val.length > colMaxChars[c]) {
+        colMaxChars[c] = Math.min(val.length, 60); // Cap max influence
+      }
+    }
+  }
+
+  const totalChars = colMaxChars.reduce((sum, n) => sum + n, 0);
+  const colWidths = colMaxChars.map((chars) => Math.max(50, (chars / totalChars) * printableWidth));
+
+  const currentTotalWidth = colWidths.reduce((sum, w) => sum + w, 0);
+  if (currentTotalWidth > 0) {
+    const scale = printableWidth / currentTotalWidth;
+    for (let i = 0; i < colWidths.length; i++) {
+      colWidths[i] *= scale;
+    }
+  }
 
   let cursorY = margin;
 
   if (title.trim()) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
+    doc.setFontSize(14);
     doc.setTextColor(24, 24, 27);
     doc.text(title.trim(), margin, cursorY + 12);
-    cursorY += 26;
+    cursorY += 28;
   }
-
-  const headerRow = rows[0] || [];
-  const dataRows = rows.slice(1);
 
   const drawHeader = () => {
     doc.setFont('helvetica', 'bold');
@@ -4237,19 +4259,34 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
       doc.setTextColor(24, 24, 27);
     }
 
-    doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
-    doc.setDrawColor(212, 212, 216);
-    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
-
+    let maxHeaderLines = 1;
+    const headerLinesPerCol: string[][] = [];
     for (let c = 0; c < colCount; c++) {
       const cellText = (headerRow[c] || '').trim();
-      const cellX = margin + c * colWidth + 6;
-      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
-      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
-      doc.text(truncated, cellX, cellY);
+      const wrapped = doc.splitTextToSize(cellText, colWidths[c] - 12);
+      headerLinesPerCol.push(wrapped);
+      if (wrapped.length > maxHeaderLines) maxHeaderLines = wrapped.length;
     }
 
-    cursorY += rowHeight;
+    const headerHeight = Math.max(22, maxHeaderLines * (fontSize * 1.3) + 10);
+
+    doc.rect(margin, cursorY, printableWidth, headerHeight, 'F');
+    doc.setDrawColor(212, 212, 216);
+    doc.line(margin, cursorY + headerHeight, margin + printableWidth, cursorY + headerHeight);
+
+    for (let c = 0; c < colCount; c++) {
+      let cellX = margin;
+      for (let i = 0; i < c; i++) cellX += colWidths[i];
+
+      const wrapped = headerLinesPerCol[c];
+      let textY = cursorY + 14;
+      for (const line of wrapped) {
+        doc.text(line, cellX + 6, textY);
+        textY += fontSize * 1.3;
+      }
+    }
+
+    cursorY += headerHeight;
   };
 
   drawHeader();
@@ -4260,7 +4297,18 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
   for (let r = 0; r < dataRows.length; r++) {
     const row = dataRows[r];
 
-    if (cursorY + rowHeight > bottomThreshold) {
+    const linesPerCol: string[][] = [];
+    let maxLines = 1;
+    for (let c = 0; c < colCount; c++) {
+      const cellText = (row[c] || '').trim();
+      const wrapped = doc.splitTextToSize(cellText, colWidths[c] - 12);
+      linesPerCol.push(wrapped);
+      if (wrapped.length > maxLines) maxLines = wrapped.length;
+    }
+
+    const dynRowHeight = Math.max(20, maxLines * (fontSize * 1.3) + 8);
+
+    if (cursorY + dynRowHeight > bottomThreshold) {
       doc.addPage();
       cursorY = margin;
       drawHeader();
@@ -4270,25 +4318,39 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
 
     if (theme === 'striped' && r % 2 === 1) {
       doc.setFillColor(250, 250, 250);
-      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
+      doc.rect(margin, cursorY, printableWidth, dynRowHeight, 'F');
     } else {
       doc.setFillColor(255, 255, 255);
-      doc.rect(margin, cursorY, printableWidth, rowHeight, 'F');
+      doc.rect(margin, cursorY, printableWidth, dynRowHeight, 'F');
     }
 
     doc.setDrawColor(228, 228, 231);
-    doc.line(margin, cursorY + rowHeight, margin + printableWidth, cursorY + rowHeight);
+    doc.line(margin, cursorY + dynRowHeight, margin + printableWidth, cursorY + dynRowHeight);
 
     doc.setTextColor(63, 63, 70);
     for (let c = 0; c < colCount; c++) {
-      const cellText = (row[c] || '').trim();
-      const cellX = margin + c * colWidth + 6;
-      const cellY = cursorY + rowHeight / 2 + fontSize / 3;
-      const truncated = doc.splitTextToSize(cellText, colWidth - 10)[0] || '';
-      doc.text(truncated, cellX, cellY);
+      let cellX = margin;
+      for (let i = 0; i < c; i++) cellX += colWidths[i];
+
+      const wrapped = linesPerCol[c];
+      let textY = cursorY + 12;
+      for (const line of wrapped) {
+        doc.text(line, cellX + 6, textY);
+        textY += fontSize * 1.3;
+      }
     }
 
-    cursorY += rowHeight;
+    cursorY += dynRowHeight;
+  }
+
+  // Stamp Page Numbers across all pages
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 16, { align: 'right' });
   }
 
   return new Uint8Array(doc.output('arraybuffer'));
