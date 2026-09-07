@@ -46,7 +46,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  // Keyboard Delete & Arrow Key Nudging
+  // Keyboard Delete & Sub-Pixel Arrow Key Nudging
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!selectedId) return;
@@ -62,10 +62,10 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         return;
       }
 
-      // Nudge position with arrow keys (Shift for 5x step)
+      // Nudge position with arrow keys (Shift = 5x step, Normal = single pixel precision)
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
-        const step = e.shiftKey ? 0.01 : 0.002;
+        const step = e.shiftKey ? 0.006 : 0.0012; // 0.0012 gives ~0.6px micro-control on canvas
         setItems((prev) =>
           prev.map((item) => {
             if (item.id !== selectedId) return item;
@@ -142,8 +142,8 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       pageIndex: currentPage - 1,
       x: 0.25,
       y: 0.25,
-      width: 0.25,
-      height: 0.04,
+      width: 0.2,
+      height: 0.03,
     };
     setItems((prev) => [...prev, newItem]);
     setSelectedId(newItem.id);
@@ -157,8 +157,8 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       pageIndex: currentPage - 1,
       x: 0.25,
       y: 0.25,
-      width: 0.35,
-      height: 0.045,
+      width: 0.3,
+      height: 0.035,
       text: 'Replace text here',
       fontFamily: 'helvetica',
       fontSize: 12,
@@ -200,7 +200,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     }
   };
 
-  // Delta-based Zoom-Aware Drag Move
+  // Delta-based Drag Move
   const handleDragPointerDown = (e: React.PointerEvent, item: VisualOverlayItem) => {
     e.stopPropagation();
     setSelectedId(item.id);
@@ -246,7 +246,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     window.addEventListener('pointerup', onPointerUp);
   };
 
-  // Delta-based Zoom-Aware 8-Directional Resize
+  // Delta-based Resize
   const handleResizePointerDown = (
     e: React.PointerEvent,
     item: VisualOverlayItem,
@@ -321,15 +321,12 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   const currentPageItems = items.filter((item) => item.pageIndex === currentPage - 1);
   const activeItem = items.find((i) => i.id === selectedId);
 
-  const RESIZE_HANDLES: { type: ResizeHandleType; cursor: string; className: string }[] = [
+  // Unobstructed 4-Corner Handles (Prevents handles from blocking adjacent text)
+  const CORNER_HANDLES: { type: ResizeHandleType; cursor: string; className: string }[] = [
     { type: 'nw', cursor: 'nwse-resize', className: '-top-1 -left-1' },
-    { type: 'n', cursor: 'ns-resize', className: '-top-1 left-1/2 -translate-x-1/2' },
     { type: 'ne', cursor: 'nesw-resize', className: '-top-1 -right-1' },
-    { type: 'e', cursor: 'ew-resize', className: 'top-1/2 -right-1 -translate-y-1/2' },
     { type: 'se', cursor: 'nwse-resize', className: '-bottom-1 -right-1' },
-    { type: 's', cursor: 'ns-resize', className: '-bottom-1 left-1/2 -translate-x-1/2' },
     { type: 'sw', cursor: 'nesw-resize', className: '-bottom-1 -left-1' },
-    { type: 'w', cursor: 'ew-resize', className: 'top-1/2 -left-1 -translate-y-1/2' },
   ];
 
   return (
@@ -348,8 +345,8 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-2xl p-12 text-center bg-zinc-950/40 max-w-xl mx-auto"
         >
           <FileEdit className="w-10 h-10 text-emerald-400 mx-auto mb-3 stroke-[1.5]" />
-          <p className="text-sm font-semibold text-zinc-200">Drop a PDF to add text or whiteout</p>
-          <p className="text-xs text-zinc-500 mt-1">Seamless borderless eraser • 8-direction handles • Precision arrow nudging</p>
+          <p className="text-sm font-semibold text-zinc-200">Drop a PDF to Edit (Replace Text or Erase)</p>
+          <p className="text-xs text-zinc-500 mt-1">Millimeter hairline precision • Arrow key micro-nudging • Zero data egress</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -372,7 +369,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Type className="w-3.5 h-3.5" />
-                <span>+ 2-in-1 Text &amp; Eraser Box</span>
+                <span>+ Text &amp; Erase Box</span>
               </button>
               <button
                 onClick={handleAddWhiteout}
@@ -417,12 +414,12 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                   {isProcessing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Saving changes...</span>
+                      <span>Applying edits...</span>
                     </>
                   ) : (
                     <>
                       <Save className="w-3.5 h-3.5 stroke-[2.5]" />
-                      <span>Save Changes ({items.length})</span>
+                      <span>Save Edits ({items.length})</span>
                     </>
                   )}
                 </button>
@@ -458,7 +455,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       type="text"
                       value={activeItem.text || ''}
                       onChange={(e) => handleUpdateItem(activeItem.id, { text: e.target.value })}
-                      placeholder="Type text..."
+                      placeholder="Type replacement text..."
                       className="flex-1 min-w-[150px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
                     />
 
@@ -497,11 +494,11 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                             : 'text-zinc-400 hover:text-zinc-200'
                         }`}
                       >
-                        Auto-fit Size
+                        Auto-fit
                       </button>
                     </div>
 
-                    {/* Synchronized Slider & Numeric Input (1pt to 72pt) */}
+                    {/* Synchronized Slider & Numeric Input */}
                     {(activeItem.fitMode || 'wrap') === 'wrap' && (
                       <div className="flex items-center gap-1.5 bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800 text-zinc-400">
                         <span>Size:</span>
@@ -539,7 +536,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                         }
                         className="accent-emerald-500 rounded"
                       />
-                      <span>Erase Background</span>
+                      <span>Erase Underneath</span>
                     </label>
 
                     <input
@@ -554,7 +551,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
                 {activeItem.type === 'whiteout' && (
                   <span className="text-zinc-400 text-[11px]">
-                    Drag to move • 8 border handles • Use <b>Arrow Keys</b> to nudge • <b>Del</b> to remove
+                    Drag to move • Corner handles to scale • Use <b>Arrow Keys</b> for 1px precision • <b>Del</b> to remove
                   </span>
                 )}
               </div>
@@ -562,10 +559,10 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               <button
                 onClick={() => handleDeleteItem(activeItem.id)}
                 className="text-red-400 hover:text-red-300 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer"
-                title="Delete item (or press Delete key)"
+                title="Delete (or press Delete key)"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete (Del)</span>
+                <span>Delete</span>
               </button>
             </div>
           )}
@@ -579,7 +576,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
           {downloadUrl && (
             <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-2.5 rounded-xl border border-emerald-800/30 font-medium">
-              <CheckCircle2 className="w-4 h-4" /> Modifications Saved Successfully
+              <CheckCircle2 className="w-4 h-4" /> Edits Successfully Saved into PDF
             </div>
           )}
 
@@ -589,9 +586,9 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
             className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl backdrop-blur-xl shadow-2xl h-[700px] overflow-hidden flex flex-col"
           >
             <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/40">
-              <span>Retina Vector Workspace (Page {currentPage})</span>
+              <span>PDF Canvas (Page {currentPage})</span>
               <span className="text-zinc-500">
-                {currentPageItems.length} active • Use Arrow Keys to adjust position
+                {currentPageItems.length} active • Use Arrow Keys to nudge • Hold Shift for faster movement
               </span>
             </div>
 
@@ -652,41 +649,44 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                           zIndex: isText ? 20 : 10,
                           touchAction: 'none',
                         }}
-                        className={`absolute cursor-move select-none transition-shadow ${
+                        /* 1px Hairline Border: eliminates outer padding that obscured adjacent characters */
+                        className={`absolute cursor-move select-none ${
                           !isText || (item.hasBackground ?? true)
                             ? 'bg-white'
                             : 'bg-transparent'
                         } ${
                           isSelected
-                            ? 'ring-2 ring-emerald-500 shadow-md'
-                            : 'border-none outline-none shadow-none'
+                            ? 'border border-emerald-500 shadow-sm'
+                            : 'border-none'
                         }`}
                         onPointerDown={(e) => handleDragPointerDown(e, item)}
                       >
-                        {/* Text Container */}
+                        {/* Text Container: Placed at exact 2px offset to match PDF engine output */}
                         {isText && (
                           <div
                             style={{
                               fontFamily: fontFamilyCss,
                               fontSize: `${effectiveFontSize}px`,
                               color: item.color || '#000000',
-                              lineHeight: 1.2,
+                              lineHeight: 1.15,
                               whiteSpace: item.fitMode === 'autofit' ? 'nowrap' : 'pre-wrap',
                               wordBreak: 'break-word',
+                              paddingLeft: '2px',
+                              paddingRight: '2px',
                             }}
-                            className="w-full h-full flex items-center justify-start px-1 font-normal overflow-hidden select-none"
+                            className="w-full h-full flex items-center justify-start font-normal overflow-hidden select-none"
                           >
                             {item.text || ''}
                           </div>
                         )}
 
-                        {/* 8-Directional Handles */}
+                        {/* 4 Unobstructed Corner Handles (Leaves the left/right edges transparent so colons & text remain visible) */}
                         {isSelected &&
-                          RESIZE_HANDLES.map((handle) => (
+                          CORNER_HANDLES.map((handle) => (
                             <div
                               key={handle.type}
                               style={{ cursor: handle.cursor, touchAction: 'none' }}
-                              className={`absolute w-2.5 h-2.5 bg-white border-2 border-emerald-500 rounded-xs shadow-sm z-30 ${handle.className}`}
+                              className={`absolute w-2 h-2 bg-white border border-emerald-500 rounded-full shadow-xs z-30 ${handle.className}`}
                               onPointerDown={(e) => handleResizePointerDown(e, item, handle.type)}
                             />
                           ))}

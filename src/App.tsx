@@ -155,7 +155,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
-  { name: 'Visual Editor', path: '/visual-editor', category: 'organize', icon: FileEdit },
+  { name: 'Edit PDF', path: '/edit-pdf', category: 'organize', icon: FileEdit },
   { name: 'Code to PDF', path: '/code-to-pdf', category: 'convert', icon: Code2 },
   { name: 'HTML / Receipt to PDF', path: '/html-to-pdf', category: 'convert', icon: Receipt },
 ];
@@ -556,7 +556,8 @@ export default function App() {
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
-              <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/edit-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+<Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
               <Route path="/html-to-pdf" element={<HtmlToPdf />} />
 
