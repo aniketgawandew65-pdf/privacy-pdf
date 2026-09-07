@@ -4057,6 +4057,10 @@ export interface VisualOverlayItem {
   color?: string;
   hasBackground?: boolean;
   fitMode?: 'wrap' | 'autofit';
+  isBold?: boolean;          // <--- ADD
+  isItalic?: boolean;        // <--- ADD
+  isUnderline?: boolean;     // <--- ADD
+  isStrikethrough?: boolean; // <--- ADD
 }
 
 export async function applyVisualOverlays(
@@ -4064,113 +4068,187 @@ export async function applyVisualOverlays(
   overlays: VisualOverlayItem[]
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
-  const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const timesFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const courierFont = await pdfDoc.embedFont(StandardFonts.Courier);
+  // Check if PDF is encrypted
+  let isEncrypted = false;
+  let pdfDoc: PDFDocument | null = null;
+  try {
+    pdfDoc = await PDFDocument.load(arrayBuffer);
+    if (pdfDoc.isEncrypted) isEncrypted = true;
+  } catch {
+    isEncrypted = true;
+  }
 
-  const totalPages = pdfDoc.getPageCount();
-
-  const sortedOverlays = [...overlays].sort((a, b) => {
-    if (a.type === 'whiteout' && b.type === 'text') return -1;
-    if (a.type === 'text' && b.type === 'whiteout') return 1;
-    return 0;
-  });
-
-  for (const item of sortedOverlays) {
-    if (item.pageIndex < 0 || item.pageIndex >= totalPages) continue;
-    const page = pdfDoc.getPage(item.pageIndex);
-    const { width: pageWidth, height: pageHeight } = page.getSize();
-
-    const boxWidth = Math.max(2, item.width * pageWidth);
-    const boxHeight = Math.max(2, item.height * pageHeight);
-    const boxX = item.x * pageWidth;
-    const boxY = pageHeight - item.y * pageHeight - boxHeight;
-
-    if (item.type === 'whiteout' || item.hasBackground !== false) {
-      page.drawRectangle({
-        x: boxX,
-        y: boxY,
-        width: boxWidth,
-        height: boxHeight,
-        color: rgb(1, 1, 1),
-      });
+  // Helper to pick font style variant
+  const getFont = (doc: PDFDocument, family: string = 'helvetica', bold = false, italic = false) => {
+    if (family === 'times') {
+      if (bold && italic) return doc.embedFont(StandardFonts.TimesRomanBoldItalic);
+      if (bold) return doc.embedFont(StandardFonts.TimesRomanBold);
+      if (italic) return doc.embedFont(StandardFonts.TimesRomanItalic);
+      return doc.embedFont(StandardFonts.TimesRoman);
     }
+    if (family === 'courier') {
+      if (bold && italic) return doc.embedFont(StandardFonts.CourierBoldOblique);
+      if (bold) return doc.embedFont(StandardFonts.CourierBold);
+      if (italic) return doc.embedFont(StandardFonts.CourierOblique);
+      return doc.embedFont(StandardFonts.Courier);
+    }
+    // Helvetica default
+    if (bold && italic) return doc.embedFont(StandardFonts.HelveticaBoldOblique);
+    if (bold) return doc.embedFont(StandardFonts.HelveticaBold);
+    if (italic) return doc.embedFont(StandardFonts.HelveticaOblique);
+    return doc.embedFont(StandardFonts.Helvetica);
+  };
 
-    if (item.type === 'text' && item.text?.trim()) {
-      let font = helveticaFont;
-      if (item.fontFamily === 'times') font = timesFont;
-      if (item.fontFamily === 'courier') font = courierFont;
+  // =========================================================================
+  // PATH A: Native Vector Path (For Standard Unencrypted PDFs)
+  // =========================================================================
+  if (!isEncrypted && pdfDoc) {
+    try {
+      const totalPages = pdfDoc.getPageCount();
+      const sorted = [...overlays].sort((a, b) => (a.type === b.type ? 0 : a.type === 'whiteout' ? -1 : 1));
 
-      const safeText = item.text
-        .replace(/[\u2018\u2019]/g, "'")
-        .replace(/[\u201C\u201D]/g, '"')
-        .replace(/[\u2013\u2014]/g, '-')
-        .replace(/[^\x20-\x7E]/g, '');
+      for (const item of sorted) {
+        if (item.pageIndex < 0 || item.pageIndex >= totalPages) continue;
+        const page = pdfDoc.getPage(item.pageIndex);
+        const { width: pW, height: pH } = page.getSize();
 
-      if (!safeText) continue;
+        const boxW = Math.max(2, item.width * pW);
+        const boxH = Math.max(2, item.height * pH);
+        const boxX = item.x * pW;
+        const boxY = pH - item.y * pH - boxH;
 
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      if (item.color && item.color.startsWith('#') && item.color.length === 7) {
-        r = parseInt(item.color.slice(1, 3), 16) / 255;
-        g = parseInt(item.color.slice(3, 5), 16) / 255;
-        b = parseInt(item.color.slice(5, 7), 16) / 255;
-      }
-      const textColor = rgb(r, g, b);
+        if (item.type === 'whiteout' || item.hasBackground !== false) {
+          page.drawRectangle({ x: boxX, y: boxY, width: boxW, height: boxH, color: rgb(1, 1, 1) });
+        }
 
-      if (item.fitMode === 'autofit') {
-        const unitWidth = font.widthOfTextAtSize(safeText, 1);
-        const maxFittingWidth = unitWidth > 0 ? (boxWidth - 4) / unitWidth : 12;
-        const maxFittingHeight = boxHeight * 0.8;
-        const autoSize = Math.max(1, Math.min(maxFittingWidth, maxFittingHeight, 120));
+        if (item.type === 'text' && item.text?.trim()) {
+          const font = await getFont(pdfDoc, item.fontFamily, item.isBold, item.isItalic);
+          const safeText = item.text.replace(/[^\x20-\x7E]/g, '');
+          if (!safeText) continue;
 
-        const textY = boxY + (boxHeight - autoSize * 0.85) / 2;
-        page.drawText(safeText, {
-          x: boxX + 2,
-          y: textY,
-          size: autoSize,
-          font,
-          color: textColor,
-        });
-      } else {
-        const fSize = Math.max(1, item.fontSize || 12);
-        const lineHeight = fSize * 1.25;
-        const words = safeText.split(' ');
-        const lines: string[] = [];
-        let currentLine = '';
+          let [r, g, b] = [0, 0, 0];
+          if (item.color?.startsWith('#') && item.color.length === 7) {
+            r = parseInt(item.color.slice(1, 3), 16) / 255;
+            g = parseInt(item.color.slice(3, 5), 16) / 255;
+            b = parseInt(item.color.slice(5, 7), 16) / 255;
+          }
+          const textColor = rgb(r, g, b);
+          const fSize = Math.max(1, item.fontSize || 12);
+          const textY = boxY + (boxH - fSize * 0.85) / 2;
 
-        for (const word of words) {
-          const testLine = currentLine ? `${currentLine} ${word}` : word;
-          const lineWidth = font.widthOfTextAtSize(testLine, fSize);
-          if (lineWidth > boxWidth - 4 && currentLine) {
-            lines.push(currentLine);
-            currentLine = word;
-          } else {
-            currentLine = testLine;
+          page.drawText(safeText, { x: boxX + 2, y: textY, size: fSize, font, color: textColor });
+          const textW = font.widthOfTextAtSize(safeText, fSize);
+
+          // Underline
+          if (item.isUnderline) {
+            page.drawLine({
+              start: { x: boxX + 2, y: textY - 1.5 },
+              end: { x: boxX + 2 + textW, y: textY - 1.5 },
+              thickness: Math.max(0.8, fSize * 0.07),
+              color: textColor,
+            });
+          }
+
+          // Strikethrough (cross between text)
+          if (item.isStrikethrough) {
+            page.drawLine({
+              start: { x: boxX + 2, y: textY + fSize * 0.32 },
+              end: { x: boxX + 2 + textW, y: textY + fSize * 0.32 },
+              thickness: Math.max(0.8, fSize * 0.07),
+              color: textColor,
+            });
           }
         }
-        if (currentLine) lines.push(currentLine);
-
-        let lineY = boxY + boxHeight - fSize;
-        for (const line of lines) {
-          if (lineY < boxY) break;
-          page.drawText(line, {
-            x: boxX + 2,
-            y: lineY,
-            size: fSize,
-            font,
-            color: textColor,
-          });
-          lineY -= lineHeight;
-        }
       }
+
+      return await pdfDoc.save({ useObjectStreams: false });
+    } catch (e) {
+      console.warn('Native vector overlay failed, falling back to canvas reconstruction...', e);
     }
   }
 
-  return await pdfDoc.save({ useObjectStreams: false });
+  // =========================================================================
+  // PATH B: Universal Canvas Reconstruction (For Encrypted Bank Statements)
+  // =========================================================================
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const pdf = await loadingTask.promise;
+  const reconstructedDoc = await PDFDocument.create();
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: 2.0 });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) continue;
+
+    await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+
+    // Burn overlays directly onto canvas for encrypted files
+    const pageOverlays = overlays.filter((o) => o.pageIndex === pageNum - 1);
+    for (const item of pageOverlays) {
+      const x = item.x * canvas.width;
+      const y = item.y * canvas.height;
+      const w = item.width * canvas.width;
+      const h = item.height * canvas.height;
+
+      if (item.type === 'whiteout' || item.hasBackground !== false) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(x, y, w, h);
+      }
+
+      if (item.type === 'text' && item.text?.trim()) {
+        const fSize = (item.fontSize || 12) * 2.0; // scale with 2.0 viewport
+        const fontName = item.fontFamily === 'times' ? 'Times New Roman' : item.fontFamily === 'courier' ? 'Courier New' : 'Arial';
+        const weight = item.isBold ? 'bold ' : '';
+        const style = item.isItalic ? 'italic ' : '';
+
+        ctx.font = `${style}${weight}${fSize}px ${fontName}`;
+        ctx.fillStyle = item.color || '#000000';
+        ctx.textBaseline = 'middle';
+        const textY = y + h / 2;
+        ctx.fillText(item.text, x + 4, textY);
+
+        const textMetrics = ctx.measureText(item.text);
+        ctx.strokeStyle = item.color || '#000000';
+        ctx.lineWidth = Math.max(1.5, fSize * 0.07);
+
+        // Underline
+        if (item.isUnderline) {
+          ctx.beginPath();
+          ctx.moveTo(x + 4, textY + fSize * 0.45);
+          ctx.lineTo(x + 4 + textMetrics.width, textY + fSize * 0.45);
+          ctx.stroke();
+        }
+
+        // Strikethrough
+        if (item.isStrikethrough) {
+          ctx.beginPath();
+          ctx.moveTo(x + 4, textY);
+          ctx.lineTo(x + 4 + textMetrics.width, textY);
+          ctx.stroke();
+        }
+      }
+    }
+
+    const imageBlob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.95));
+    const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
+    const embeddedImg = await reconstructedDoc.embedJpg(imageBytes);
+
+    const origW = viewport.width / 2.0;
+    const origH = viewport.height / 2.0;
+    const newPage = reconstructedDoc.addPage([origW, origH]);
+    newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
+
+    canvas.width = 0;
+    canvas.height = 0;
+    page.cleanup();
+  }
+
+  return await reconstructedDoc.save({ useObjectStreams: false });
 }
 
 export interface CsvToPdfOptions {

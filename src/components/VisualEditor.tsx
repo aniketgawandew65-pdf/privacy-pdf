@@ -165,6 +165,10 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       color: '#000000',
       hasBackground: true,
       fitMode: 'wrap',
+      isBold: false,
+      isItalic: false,
+      isUnderline: false,
+      isStrikethrough: false,
     };
     setItems((prev) => [...prev, newItem]);
     setSelectedId(newItem.id);
@@ -321,7 +325,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   const currentPageItems = items.filter((item) => item.pageIndex === currentPage - 1);
   const activeItem = items.find((i) => i.id === selectedId);
 
-  // Unobstructed 4-Corner Handles (Prevents handles from blocking adjacent text)
+  // Unobstructed 4-Corner Handles
   const CORNER_HANDLES: { type: ResizeHandleType; cursor: string; className: string }[] = [
     { type: 'nw', cursor: 'nwse-resize', className: '-top-1 -left-1' },
     { type: 'ne', cursor: 'nesw-resize', className: '-top-1 -right-1' },
@@ -472,6 +476,58 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                         <option value="times" className="bg-zinc-900">Serif (Times)</option>
                         <option value="courier" className="bg-zinc-900">Mono (Courier)</option>
                       </select>
+                    </div>
+
+                    {/* Text Styling: Bold, Italic, Underline, Strikethrough */}
+                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { isBold: !activeItem.isBold })}
+                        className={`w-7 h-6 rounded flex items-center justify-center text-xs font-bold transition-colors cursor-pointer ${
+                          activeItem.isBold
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Bold"
+                      >
+                        B
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { isItalic: !activeItem.isItalic })}
+                        className={`w-7 h-6 rounded flex items-center justify-center text-xs italic font-serif transition-colors cursor-pointer ${
+                          activeItem.isItalic
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Italic"
+                      >
+                        I
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { isUnderline: !activeItem.isUnderline })}
+                        className={`w-7 h-6 rounded flex items-center justify-center text-xs underline underline-offset-2 transition-colors cursor-pointer ${
+                          activeItem.isUnderline
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Underline"
+                      >
+                        U
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { isStrikethrough: !activeItem.isStrikethrough })}
+                        className={`w-7 h-6 rounded flex items-center justify-center text-xs line-through transition-colors cursor-pointer ${
+                          activeItem.isStrikethrough
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Strikethrough (Cross-out)"
+                      >
+                        S
+                      </button>
                     </div>
 
                     {/* Fit Mode Switcher */}
@@ -673,14 +729,20 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                               wordBreak: 'break-word',
                               paddingLeft: '2px',
                               paddingRight: '2px',
+                              fontWeight: item.isBold ? 'bold' : 'normal',
+                              fontStyle: item.isItalic ? 'italic' : 'normal',
+                              textDecoration: [
+                                item.isUnderline ? 'underline' : '',
+                                item.isStrikethrough ? 'line-through' : '',
+                              ].filter(Boolean).join(' ') || 'none',
                             }}
-                            className="w-full h-full flex items-center justify-start font-normal overflow-hidden select-none"
+                            className="w-full h-full flex items-center justify-start overflow-hidden select-none"
                           >
                             {item.text || ''}
                           </div>
                         )}
 
-                        {/* 4 Unobstructed Corner Handles (Leaves the left/right edges transparent so colons & text remain visible) */}
+                        {/* 4 Unobstructed Corner Handles */}
                         {isSelected &&
                           CORNER_HANDLES.map((handle) => (
                             <div
