@@ -4443,10 +4443,14 @@ export interface CodeToPdfOptions {
   pageSize?: 'a4' | 'letter';
   orientation?: 'portrait' | 'landscape';
 }
-
-interface SyntaxToken {
-  text: string;
-  color: [number, number, number];
+export interface CodeToPdfOptions {
+  code: string;
+  title?: string;
+  theme?: 'dark' | 'light';
+  showLineNumbers?: boolean;
+  fontSize?: number;
+  pageSize?: 'a4' | 'letter';
+  orientation?: 'portrait' | 'landscape';
 }
 
 export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8Array> {
@@ -4472,49 +4476,73 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 32;
-  const bottomThreshold = pageHeight - margin;
+  const margin = 28;
+  const bottomThreshold = pageHeight - margin - 18;
 
   const isDark = theme === 'dark';
-  const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255];
-  const defaultTextColor: [number, number, number] = isDark ? [226, 232, 240] : [30, 41, 59];
-  const gutterBg: [number, number, number] = isDark ? [30, 41, 59] : [241, 245, 249];
-  const gutterText: [number, number, number] = isDark ? [100, 116, 139] : [148, 163, 184];
-  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [192, 38, 211];
-  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136];
-  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139];
-  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [217, 119, 6];
 
-  const drawPageBackground = () => {
-    if (isDark) {
-      doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
-      doc.rect(0, 0, pageWidth, pageHeight, 'F');
+  // Crisp, High-Contrast Distinct Palettes
+  const bgColor: [number, number, number] = isDark ? [15, 23, 42] : [255, 255, 255];
+  const defaultTextColor: [number, number, number] = isDark ? [226, 232, 240] : [15, 23, 42];
+  const gutterBg: [number, number, number] = isDark ? [24, 33, 54] : [248, 250, 252];
+  const gutterBorder: [number, number, number] = isDark ? [51, 65, 85] : [226, 232, 240];
+  const gutterText: [number, number, number] = isDark ? [148, 163, 184] : [148, 163, 184];
+  const headerBg: [number, number, number] = isDark ? [30, 41, 59] : [241, 245, 249];
+  const headerText: [number, number, number] = isDark ? [56, 189, 248] : [14, 116, 144];
+
+  // Syntax Highlighting Colors
+  const keywordColor: [number, number, number] = isDark ? [244, 63, 94] : [185, 28, 28];    // Red/Rose
+  const stringColor: [number, number, number] = isDark ? [52, 211, 153] : [13, 148, 136];   // Emerald/Teal
+  const commentColor: [number, number, number] = isDark ? [100, 116, 139] : [100, 116, 139]; // Slate Gray
+  const numberColor: [number, number, number] = isDark ? [251, 146, 60] : [194, 65, 12];     // Amber/Orange
+  const funcColor: [number, number, number] = isDark ? [96, 165, 250] : [29, 78, 216];       // Blue
+
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(fontSize);
+
+  // Exact Monospace Character Metrics
+  const charWidth = doc.getTextWidth('M');
+  const rawLines = code.replace(/\t/g, '    ').split(/\r?\n/);
+  const totalLines = rawLines.length;
+  const gutterDigits = Math.max(2, String(totalLines).length);
+  const gutterWidth = showLineNumbers ? (gutterDigits + 2) * charWidth + 10 : 0;
+  const codeAreaWidth = pageWidth - margin * 2 - gutterWidth;
+  const maxCharsPerLine = Math.max(20, Math.floor(codeAreaWidth / charWidth));
+  const lineHeight = fontSize * 1.42;
+
+  const drawPageLayout = (pageNum: number) => {
+    // 1. Draw Full Canvas Background
+    doc.setFillColor(bgColor[0], bgColor[1], bgColor[2]);
+    doc.rect(0, 0, pageWidth, pageHeight, 'F');
+
+    // 2. Draw Clean File Header on Every Page
+    if (title.trim()) {
+      doc.setFillColor(headerBg[0], headerBg[1], headerBg[2]);
+      doc.rect(margin, margin - 12, pageWidth - margin * 2, 20, 'F');
+      doc.setDrawColor(gutterBorder[0], gutterBorder[1], gutterBorder[2]);
+      doc.line(margin, margin + 8, pageWidth - margin, margin + 8);
+
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(headerText[0], headerText[1], headerText[2]);
+      doc.text(`// ${title.trim()}`, margin + 8, margin + 2);
+    }
+
+    // 3. Draw Continuous Vertical Gutter Line
+    if (showLineNumbers) {
+      doc.setFillColor(gutterBg[0], gutterBg[1], gutterBg[2]);
+      doc.rect(margin, margin + 12, gutterWidth, pageHeight - margin * 2 - 12, 'F');
+
+      doc.setDrawColor(gutterBorder[0], gutterBorder[1], gutterBorder[2]);
+      doc.line(margin + gutterWidth, margin + 12, margin + gutterWidth, pageHeight - margin);
     }
   };
 
-  drawPageBackground();
-
-  let cursorY = margin;
-
-  if (title.trim()) {
-    doc.setFont('courier', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(isDark ? 56 : 15, isDark ? 189 : 23, isDark ? 248 : 42);
-    doc.text(`// ${title.trim()}`, margin, cursorY + 6);
-    cursorY += 24;
-  }
-
-  const rawLines = code.replace(/\t/g, '  ').split(/\r?\n/);
-  const totalLines = rawLines.length;
-  const gutterDigits = Math.max(2, String(totalLines).length);
-  const charWidth = fontSize * 0.6;
-  const gutterWidth = showLineNumbers ? (gutterDigits + 2) * charWidth + 12 : 0;
-  const codeAreaWidth = pageWidth - margin * 2 - gutterWidth;
-  const maxCharsPerLine = Math.floor(codeAreaWidth / charWidth);
-  const lineHeight = fontSize * 1.45;
+  let cursorY = margin + (title.trim() ? 26 : 8);
+  drawPageLayout(1);
 
   const KEYWORD_REGEX =
-    /\b(const|let|var|function|return|import|from|export|default|class|extends|if|else|switch|case|break|for|while|do|try|catch|finally|throw|new|typeof|instanceof|async|await|def|elif|lambda|self|echo|select|from|where|insert|into|update|delete|public|private|protected|static|void|int|float|double|bool|struct|impl|fn|pub|type|interface)\b/;
+    /\b(const|let|var|function|return|import|from|export|default|class|extends|if|else|switch|case|break|for|while|do|try|catch|finally|throw|new|typeof|instanceof|async|await|def|elif|lambda|self|echo|select|where|insert|into|update|delete|public|private|protected|static|void|int|float|double|bool|struct|impl|fn|pub|type|interface)\b/;
 
   const tokenizeLine = (text: string): SyntaxToken[] => {
     const tokens: SyntaxToken[] = [];
@@ -4547,7 +4575,14 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         continue;
       }
 
-      const plainMatch = remaining.match(/^[^"'`#/\d\w]+|^\w+/);
+      const fnMatch = remaining.match(/^[a-zA-Z_]\w*(?=\()/);
+      if (fnMatch) {
+        tokens.push({ text: fnMatch[0], color: funcColor });
+        remaining = remaining.slice(fnMatch[0].length);
+        continue;
+      }
+
+      const plainMatch = remaining.match(/^[^"'`#/\d\w\s]+|^\w+|^\s+/);
       if (plainMatch) {
         tokens.push({ text: plainMatch[0], color: defaultTextColor });
         remaining = remaining.slice(plainMatch[0].length);
@@ -4579,14 +4614,14 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
     for (let chunkIdx = 0; chunkIdx < wrappedChunks.length; chunkIdx++) {
       if (cursorY + lineHeight > bottomThreshold) {
         doc.addPage();
-        drawPageBackground();
-        cursorY = margin;
+        drawPageLayout(doc.getNumberOfPages());
+        cursorY = margin + (title.trim() ? 26 : 8);
+        doc.setFont('courier', 'normal');
+        doc.setFontSize(fontSize);
       }
 
+      // Line Numbers (Gutter)
       if (showLineNumbers) {
-        doc.setFillColor(gutterBg[0], gutterBg[1], gutterBg[2]);
-        doc.rect(margin, cursorY - fontSize * 0.85, gutterWidth - 6, lineHeight, 'F');
-
         doc.setTextColor(gutterText[0], gutterText[1], gutterText[2]);
         if (chunkIdx === 0) {
           doc.text(lineNumStr, margin + 4, cursorY);
@@ -4595,19 +4630,29 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
         }
       }
 
+      // Syntax Highlighted Tokens
       const chunkText = wrappedChunks[chunkIdx];
       const tokens = tokenizeLine(chunkText);
-      let tokenCursorX = margin + gutterWidth;
+      let tokenCursorX = margin + gutterWidth + 6;
 
       for (const token of tokens) {
         doc.setTextColor(token.color[0], token.color[1], token.color[2]);
-        const safeToken = token.text.replace(/[^\x20-\x7E]/g, ' ');
-        doc.text(safeToken, tokenCursorX, cursorY);
-        tokenCursorX += safeToken.length * charWidth;
+        doc.text(token.text, tokenCursorX, cursorY);
+        tokenCursorX += doc.getTextWidth(token.text);
       }
 
       cursorY += lineHeight;
     }
+  }
+
+  // Add Professional Footer Page Numbers ("Page X of Y")
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(gutterText[0], gutterText[1], gutterText[2]);
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 12, { align: 'right' });
   }
 
   return new Uint8Array(doc.output('arraybuffer'));
