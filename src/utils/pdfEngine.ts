@@ -2601,8 +2601,13 @@ export async function ocrPDFToSearchable(
       // Run OCR on preprocessed canvas
       const { data } = await worker.recognize(canvas);
 
+      // Fix 2: Explicitly wipe backing store & release PDF.js page resources immediately
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       canvas.width = 0;
       canvas.height = 0;
+      try {
+        pdfJsPage.cleanup();
+      } catch {}
 
       const pdfLibPage = pdfLibDoc.getPage(pageNum - 1);
       const { width: pageWidth, height: pageHeight } = pdfLibPage.getSize();
@@ -2641,7 +2646,6 @@ export async function ocrPDFToSearchable(
     await worker.terminate();
   }
 }
-
 export interface RepairResult {
   bytes: Uint8Array;
   method: 'lossless' | 'stream-salvage';
