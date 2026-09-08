@@ -353,7 +353,8 @@ export default function App() {
       : TOOLS_LIST.filter((tool) => tool.category === selectedCategory);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-6 selection:bg-emerald-500 selection:text-black">
+   
+<div className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f] flex flex-col font-sans">
       {/* Top Value / Announcement Banner */}
       <div className="w-full max-w-5xl mb-2 py-2 px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[11px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <span className="text-zinc-300 font-medium">
