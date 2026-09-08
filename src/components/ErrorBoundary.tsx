@@ -35,7 +35,6 @@ export class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error in tool component:', error, errorInfo);
 
-    // Auto-reload once if a new build invalidated the old chunk hash
     const isChunk =
       error?.message?.includes('Failed to fetch dynamically imported module') ||
       error?.message?.includes('Importing a module script failed') ||
@@ -46,7 +45,6 @@ export class ErrorBoundary extends Component<Props, State> {
       const lastReload = sessionStorage.getItem(storageKey);
       const now = Date.now();
 
-      // Only auto-reload if we haven't reloaded in the last 10 seconds
       if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
         sessionStorage.setItem(storageKey, now.toString());
         window.location.reload();
@@ -77,7 +75,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
             <button
               onClick={this.handleReset}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               Update Now
@@ -94,15 +92,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
           <div>
             <h3 className="text-base font-semibold text-white">Something went wrong</h3>
-            <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto">
-              {this.props.fallbackMessage ||
-                'Processing halted. The file may be corrupt, password-restricted, or exceeded available browser memory.'}
-            </p>
+           <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto font-mono text-red-300">
+  {this.state.error?.message || 'Unknown processing error'}
+</p>
           </div>
 
           <button
             onClick={this.handleReset}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Reload Tool
