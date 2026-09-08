@@ -4852,6 +4852,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
   `;
 
   const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-same-origin');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
