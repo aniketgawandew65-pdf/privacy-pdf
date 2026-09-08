@@ -51,7 +51,6 @@ import {
   Receipt,
 } from 'lucide-react';
 
-// Code-split all tool components to keep initial bundle tiny
 const Compressor = lazy(() => import('./components/Compressor').then((m) => ({ default: m.Compressor })));
 const Merger = lazy(() => import('./components/Merger').then((m) => ({ default: m.Merger })));
 const Splitter = lazy(() => import('./components/Splitter').then((m) => ({ default: m.Splitter })));
@@ -74,7 +73,7 @@ const BatesNumbering = lazy(() => import('./components/BatesNumbering').then((m)
 const ComparePdf = lazy(() => import('./components/ComparePdf').then((m) => ({ default: m.ComparePdf })));
 const RepairPdf = lazy(() => import('./components/RepairPdf').then((m) => ({ default: m.RepairPdf })));
 
-const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({ default: m.FillFormPdf })));// ✅ To this:
+const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({ default: m.FillFormPdf })));
 const ImageToPdf = lazy(() => import('./components/ImageToPdf'));
 const TextToPdf = lazy(() => import('./components/TextToPdf').then((m) => ({ default: m.TextToPdf })));
 const PdfToImages = lazy(() => import('./components/PdfToImages').then((m) => ({ default: m.PdfToImages })));
@@ -114,7 +113,6 @@ interface NavTool {
 }
 
 const TOOLS_LIST: NavTool[] = [
-  // Organize & Size
   { name: 'Compress', path: '/compress-pdf', category: 'organize', icon: Sliders },
   { name: 'Merge', path: '/merge-pdf', category: 'organize', icon: Files },
   { name: 'Split', path: '/split-pdf', category: 'organize', icon: Scissors },
@@ -127,7 +125,6 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Booklet Maker', path: '/booklet-pdf', category: 'organize', icon: BookOpen },
   { name: 'Deskew', path: '/deskew-pdf', category: 'organize', icon: RotateCw },
 
-  // Security & Privacy
   { name: 'Sanitize', path: '/sanitize-pdf', category: 'security', icon: EyeOff },
   { name: 'Redact', path: '/redact-pdf', category: 'security', icon: SquareSlash },
   { name: 'Protect', path: '/protect-pdf', category: 'security', icon: Lock },
@@ -138,7 +135,6 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Compare Diff', path: '/compare-pdf', category: 'security', icon: GitCompare },
   { name: 'Repair PDF', path: '/repair-pdf', category: 'security', icon: Wrench },
 
-  // Convert, AI & Text
   { name: 'Text to PDF', path: '/text-to-pdf', category: 'convert', icon: Type },
   { name: 'AI Summary & Chat', path: '/ai-summary-pdf', category: 'convert', icon: Bot },
   { name: 'OCR Searchable', path: '/ocr-pdf', category: 'convert', icon: ScanText },
@@ -178,20 +174,15 @@ export default function App() {
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
-  // Drag and drop state & depth tracker
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const dragCounter = useRef(0);
 
-  // Global window drag-and-drop listener (safeguarded against internal UI reordering)
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-
-      // Only trigger for external operating-system files, NOT page thumbnail reordering
       const isFileDrag = e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files');
       if (!isFileDrag) return;
-
       dragCounter.current += 1;
       setIsDraggingFile(true);
     };
@@ -199,10 +190,8 @@ export default function App() {
     const handleDragLeave = (e: DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-
       const isFileDrag = e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files');
       if (!isFileDrag) return;
-
       dragCounter.current -= 1;
       if (dragCounter.current <= 0) {
         setIsDraggingFile(false);
@@ -245,7 +234,6 @@ export default function App() {
     };
   }, []);
 
-  // Synchronize Pro status across tabs
   useEffect(() => {
     const handleSync = () => setIsPro(getLicenseStatus().isPro);
     window.addEventListener('storage', handleSync);
@@ -256,7 +244,6 @@ export default function App() {
     };
   }, []);
 
-  // Dynamic SEO title, description, canonical link, and JSON-LD schema injection
   useEffect(() => {
     const meta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
     document.title = meta.title;
@@ -276,7 +263,6 @@ export default function App() {
     const pageUrl = `https://www.1into1.com${cleanPath}`;
     canonicalLink.href = pageUrl;
 
-    // Inject/Update dynamic Schema.org JSON-LD
     let scriptTag = document.querySelector<HTMLScriptElement>('#schema-org-ld');
     if (!scriptTag) {
       scriptTag = document.createElement('script');
@@ -307,7 +293,6 @@ export default function App() {
     });
   }, [location.pathname]);
 
-  // Sync category view on direct URL navigation
   useEffect(() => {
     const currentTool = TOOLS_LIST.find((t) => t.path === location.pathname);
     if (currentTool && selectedCategory !== 'all' && selectedCategory !== currentTool.category) {
@@ -315,7 +300,6 @@ export default function App() {
     }
   }, [location.pathname]);
 
-  // PWA install handler
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -353,9 +337,9 @@ export default function App() {
       : TOOLS_LIST.filter((tool) => tool.category === selectedCategory);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-6 selection:bg-emerald-500 selection:text-black">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-3 sm:p-6 selection:bg-emerald-500 selection:text-black">
       {/* Top Value / Announcement Banner */}
-      <div className="w-full max-w-5xl mb-2 py-2 px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[11px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+      <div className="w-full max-w-5xl mb-2 py-2 px-3 sm:px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[10px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <span className="text-zinc-300 font-medium">
           4 Free Tasks/Day (25MB) • No Signup • Works Offline • Zero Data Saved
         </span>
@@ -373,26 +357,26 @@ export default function App() {
         )}
       </div>
 
-      {/* Header */}
-      <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-4 py-4 border-b border-zinc-800/80">
-        <NavLink to="/" className="flex items-center gap-3 text-left">
+      {/* Header: Responsive Mobile Layout */}
+      <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 py-3 sm:py-4 border-b border-zinc-800/80">
+        <NavLink to="/" className="flex items-center gap-2.5 sm:gap-3 text-left">
           <img
             src="/logo.png"
             alt="1into1 Logo"
             width="40"
             height="40"
-            className="w-10 h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
           />
           <div>
-            <p className="text-lg font-bold tracking-tight text-white">1into1 PDF</p>
-            <p className="text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
+            <p className="text-base sm:text-lg font-bold tracking-tight text-white">1into1 PDF</p>
+            <p className="text-[11px] sm:text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
           </div>
         </NavLink>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-2.5">
           <button
             onClick={() => setIsProModalOpen(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border min-h-[44px] cursor-pointer ${
               isPro
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
                 : 'bg-zinc-900 hover:bg-zinc-800 text-amber-300 border-amber-500/30 shadow-sm'
@@ -405,7 +389,7 @@ export default function App() {
           {installPrompt && (
             <button
               onClick={handleInstallApp}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-all shadow-md shadow-emerald-500/20"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-all shadow-md shadow-emerald-500/20 min-h-[44px] cursor-pointer"
             >
               <Download className="w-3.5 h-3.5 stroke-[2.5]" />
               Install App
@@ -415,7 +399,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setIsAuditDrawerOpen(true)}
-            className="cursor-pointer transition hover:opacity-85 focus:outline-none"
+            className="cursor-pointer transition hover:opacity-85 focus:outline-none min-h-[44px] flex items-center"
             title="Click to view real-time privacy & network telemetry audit"
           >
             <TrustBadge />
@@ -424,18 +408,18 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="w-full max-w-4xl my-auto text-center py-8">
+      <main className="w-full max-w-4xl my-auto text-center py-6 sm:py-8">
         <button
           type="button"
           onClick={() => setIsAuditDrawerOpen(true)}
-          className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 mb-6 hover:border-zinc-700 hover:text-white transition cursor-pointer"
+          className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] sm:text-xs text-zinc-300 mb-4 sm:mb-6 hover:border-zinc-700 hover:text-white transition cursor-pointer min-h-[36px]"
           title="Click to inspect network telemetry"
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           Zero uploads • Turn off Wi-Fi to test • 100% Private
         </button>
 
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
+        <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-3 sm:mb-4 px-2">
           {currentMeta.heading.includes('Never Upload Your Files') ? (
             <>
               Free PDF Tools That{' '}
@@ -446,14 +430,14 @@ export default function App() {
           )}
         </h1>
 
-        <p className="text-zinc-400 text-base max-w-lg mx-auto mb-6">
+        <p className="text-zinc-400 text-sm sm:text-base max-w-lg mx-auto mb-5 sm:mb-6 px-3">
           {currentMeta.subheading}
         </p>
 
-        {/* Categorized Navigation Suite */}
-        <div className="flex flex-col items-center gap-3 mb-8 w-full max-w-5xl mx-auto px-2">
+        {/* Categorized Navigation Suite: Touch Smooth In-Browser Scroll */}
+        <div className="flex flex-col items-center gap-3 mb-6 sm:mb-8 w-full max-w-5xl mx-auto px-1 sm:px-2">
           {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 p-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl backdrop-blur-md overflow-x-auto max-w-full">
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl backdrop-blur-md overflow-x-auto max-w-full touch-pan-x [-webkit-overflow-scrolling:touch]">
             {[
               { id: 'organize', label: 'Organize & Size' },
               { id: 'security', label: 'Security & Privacy' },
@@ -463,7 +447,7 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setSelectedCategory(tab.id as ToolCategory)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all ${
+                className={`px-3 py-2 sm:py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all min-h-[40px] cursor-pointer ${
                   selectedCategory === tab.id
                     ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                     : 'text-zinc-400 hover:text-zinc-200 border border-transparent hover:bg-zinc-900'
@@ -474,8 +458,11 @@ export default function App() {
             ))}
           </div>
 
-          {/* Filtered Tool Buttons */}
-          <nav aria-label="PDF Tools" className="flex flex-wrap items-center justify-center gap-2 max-w-full">
+          {/* Tool Navigation Bar: Native Touch Scrolling & 44px Tap Height */}
+          <nav 
+            aria-label="PDF Tools" 
+            className="flex flex-nowrap sm:flex-wrap items-center sm:justify-center gap-2 max-w-full overflow-x-auto sm:overflow-x-visible px-2 py-1 touch-pan-x [-webkit-overflow-scrolling:touch] no-scrollbar"
+          >
             {visibleTools.map((tool) => {
               const Icon = tool.icon;
               return (
@@ -483,14 +470,14 @@ export default function App() {
                   key={tool.path}
                   to={tool.path}
                   className={({ isActive }) =>
-                    `px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border whitespace-nowrap transition-all ${
+                    `px-3.5 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border whitespace-nowrap transition-all min-h-[44px] shrink-0 ${
                       isActive || (tool.path === '/compress-pdf' && location.pathname === '/')
                         ? 'bg-zinc-800 text-emerald-400 border-zinc-700 shadow-sm'
                         : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900'
                     }`
                   }
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-4 h-4 shrink-0" />
                   <span>{tool.name}</span>
                 </NavLink>
               );
@@ -505,7 +492,6 @@ export default function App() {
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/terms" element={<Terms />} />
 
-              {/* Core & Page Operations */}
               <Route path="/" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/merge-pdf" element={<Merger files={sharedFiles} onFilesChange={setSharedFiles} />} />
@@ -519,7 +505,6 @@ export default function App() {
               <Route path="/booklet-pdf" element={<BookletPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/deskew-pdf" element={<DeskewPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
 
-              {/* Security & Privacy */}
               <Route path="/sanitize-pdf" element={<SanitizePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/redact-pdf" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/protect-pdf" element={<ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
@@ -530,7 +515,6 @@ export default function App() {
               <Route path="/compare-pdf" element={<ComparePdf />} />
               <Route path="/repair-pdf" element={<RepairPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
 
-              {/* Convert, AI & Text */}
               <Route path="/text-to-pdf" element={<TextToPdf />} />
               <Route path="/ai-summary-pdf" element={<AiSummaryPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/ocr-pdf" element={<OcrPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
@@ -547,17 +531,15 @@ export default function App() {
               <Route path="/pdf-to-csv" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-markdown" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
 
-              {/* Programmatic High-Intent Aliases */}
               <Route path="/bank-statement-to-excel" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/offline-pdf-redaction" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/extract-pdf-for-llm" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
-              {/* Target-KB Programmatic Aliases */}
               <Route path="/compress-pdf-to-100kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
               <Route path="/edit-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
-<Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
               <Route path="/html-to-pdf" element={<HtmlToPdf />} />
 
@@ -568,58 +550,39 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full max-w-5xl mx-auto mt-16 sm:mt-20 px-4 sm:px-6 py-8 border-t border-zinc-900 flex flex-col gap-6 text-xs text-zinc-500">
-        {/* Popular Workflows & SEO Directory */}
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-6 border-b border-zinc-900/60">
+      <footer className="w-full max-w-5xl mx-auto mt-12 sm:mt-20 px-3 sm:px-6 py-6 sm:py-8 border-t border-zinc-900 flex flex-col gap-5 sm:gap-6 text-xs text-zinc-500">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 sm:gap-4 pb-5 sm:pb-6 border-b border-zinc-900/60">
           <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider shrink-0">
             Popular Workflows:
           </span>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
-            <NavLink
-              to="/compress-pdf-to-100kb"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/compress-pdf-to-100kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Compress to 100KB
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink
-              to="/compress-pdf-to-200kb"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/compress-pdf-to-200kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Compress to 200KB
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink
-              to="/compress-pdf-to-500kb"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/compress-pdf-to-500kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Compress to 500KB
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink
-              to="/bank-statement-to-excel"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/bank-statement-to-excel" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Bank Statement to Excel
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink
-              to="/offline-pdf-redaction"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/offline-pdf-redaction" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Offline PDF Redaction
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink
-              to="/extract-pdf-for-llm"
-              className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap"
-            >
+            <NavLink to="/extract-pdf-for-llm" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Extract PDF for LLMs
             </NavLink>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-center sm:text-left">
           <div className="leading-relaxed text-[11px]">
             <span>100% In-Browser. Zero Server Processing. Powered by </span>
             <span className="text-zinc-400">pdf-lib</span>,{' '}
@@ -628,11 +591,11 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4 shrink-0 text-[11px]">
-            <NavLink to="/privacy" className="hover:text-zinc-300 transition-colors">
+            <NavLink to="/privacy" className="hover:text-zinc-300 transition-colors min-h-[36px] flex items-center">
               Privacy Policy
             </NavLink>
             <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/terms" className="hover:text-zinc-300 transition-colors">
+            <NavLink to="/terms" className="hover:text-zinc-300 transition-colors min-h-[36px] flex items-center">
               Terms of Service
             </NavLink>
           </div>
@@ -641,10 +604,10 @@ export default function App() {
 
       {/* Global Drag-and-Drop Dropzone Overlay */}
       {isDraggingFile && (
-        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-6 pointer-events-none select-none transition-all">
-          <div className="w-full max-w-lg p-12 rounded-3xl border-2 border-dashed border-emerald-500 bg-zinc-900/90 shadow-2xl flex flex-col items-center text-center animate-pulse">
-            <Upload className="w-14 h-14 text-emerald-400 mb-4 stroke-[1.75]" />
-            <p className="text-xl font-bold text-white mb-1.5">Drop your file anywhere</p>
+        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 pointer-events-none select-none transition-all">
+          <div className="w-full max-w-lg p-8 sm:p-12 rounded-3xl border-2 border-dashed border-emerald-500 bg-zinc-900/90 shadow-2xl flex flex-col items-center text-center animate-pulse">
+            <Upload className="w-10 h-10 sm:w-14 sm:h-14 text-emerald-400 mb-3 sm:mb-4 stroke-[1.75]" />
+            <p className="text-lg sm:text-xl font-bold text-white mb-1">Drop your file anywhere</p>
             <p className="text-xs text-zinc-400 max-w-xs">
               Direct in-browser loading • Zero cloud transfer • 100% private
             </p>
@@ -652,10 +615,8 @@ export default function App() {
         </div>
       )}
       
-      {/* Pro Modal */}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
 
-      {/* Network Audit Drawer */}
       <NetworkAuditDrawer
         isOpen={isAuditDrawerOpen}
         onClose={() => setIsAuditDrawerOpen(false)}
