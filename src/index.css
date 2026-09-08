@@ -12,6 +12,7 @@ body,
 .min-h-screen,
 main,
 section,
+div.min-h-screen,
 div[class*="bg-black"],
 div[class*="bg-zinc-950"],
 div[class*="bg-zinc-900"] {
@@ -32,36 +33,86 @@ h1, h2, h3, h4,
   color: #6e6e73 !important;
 }
 
-/* Apple Tool Buttons & Cards */
+/* Apple Tool Buttons & Cards (Fix dark tool grid buttons) */
 div[class*="bg-zinc-900/"],
 div[class*="bg-zinc-800/"],
+div[class*="bg-zinc-900"],
 div[class*="bg-zinc-800"],
-button:not([class*="bg-emerald"]):not([class*="bg-green"]) {
+button[class*="bg-zinc-800"],
+button[class*="bg-zinc-900"],
+button[class*="bg-zinc-700"] {
   background-color: #ffffff !important;
-  border-color: rgba(0, 0, 0, 0.1) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
   color: #1d1d1f !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Tool Buttons SVG icons & text */
+button[class*="bg-zinc-800"] svg,
+button[class*="bg-zinc-900"] svg,
+button[class*="bg-zinc-700"] svg,
+button[class*="bg-zinc-800"] span,
+button[class*="bg-zinc-900"] span {
+  color: #1d1d1f !important;
+  stroke: #1d1d1f !important;
+}
+
+/* Active Tool Button (Compress) */
+button[class*="bg-emerald-950"],
+button[class*="border-emerald-500"],
+button[class*="bg-emerald-500/20"] {
+  background-color: #000000 !important;
+  border-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+button[class*="bg-emerald-950"] svg,
+button[class*="border-emerald-500"] svg,
+button[class*="bg-emerald-950"] span,
+button[class*="border-emerald-500"] span {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
 }
 
 /* Tool Button Hover */
-button:hover:not([class*="bg-emerald"]):not([class*="bg-green"]) {
-  background-color: #1d1d1f !important;
-  color: #ffffff !important;
-  border-color: #1d1d1f !important;
-}
-
-/* Retain Green Status Indicators */
-[class*="text-emerald"], [class*="text-green"] {
-  color: #059669 !important;
-}
-
-[class*="bg-emerald-"], [class*="bg-green-"] {
-  background-color: #10b981 !important;
+button[class*="bg-zinc-800"]:hover,
+button[class*="bg-zinc-900"]:hover,
+button[class*="bg-zinc-700"]:hover {
+  background-color: #000000 !important;
+  border-color: #000000 !important;
   color: #ffffff !important;
 }
 
-/* Upload Dropzone */
-div[class*="border-dashed"] {
+button[class*="bg-zinc-800"]:hover svg,
+button[class*="bg-zinc-900"]:hover svg,
+button[class*="bg-zinc-700"]:hover svg,
+button[class*="bg-zinc-800"]:hover span,
+button[class*="bg-zinc-900"]:hover span {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Fix Top Right Security Auditor Pill & Network Stats */
+div[class*="font-mono"],
+header [class*="text-zinc"],
+header [class*="text-white"] {
+  color: #1d1d1f !important;
+}
+
+header div[class*="border"] {
+  border-color: rgba(0, 0, 0, 0.12) !important;
   background-color: #ffffff !important;
-  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Dropzone & Control Panels */
+div[class*="border-dashed"],
+div[class*="rounded-3xl"],
+div[class*="rounded-2xl"] {
+  background-color: #ffffff !important;
+}
+
+/* Badges & Trust Banner */
+div[class*="rounded-full"][class*="border"] {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
 }
