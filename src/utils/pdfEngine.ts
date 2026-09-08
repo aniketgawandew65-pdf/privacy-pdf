@@ -4688,17 +4688,61 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     ? 595.28
     : 841.89;
 
-  const renderWidthPx = isReceipt ? 340 : orientation === 'landscape' ? 1120 : 794;
+  const renderWidthPx = isReceipt ? 340 : orientation === 'landscape' ? 1120 : 800;
 
-  // 1. Isolated sandbox container positioned behind the viewport (No CDN, no opacity bugs)
+  // 1. Strip dynamic scripts (three.js, particle animations, infinite loops) that cause 20,000px voids
+  const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+
+  // 2. Normalization CSS: clamps runaway canvases and constrains monster SVGs
+  const NORMALIZATION_CSS = `
+    * {
+      box-sizing: border-box !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    html, body {
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      overflow: visible !important;
+    }
+    /* Hide infinite background canvases (particles, webgl mesh grids) */
+    canvas {
+      display: none !important;
+    }
+    /* Constrain oversized vector logos & hero SVGs from taking up entire pages */
+    svg {
+      max-width: 100% !important;
+      max-height: 140px !important;
+      height: auto !important;
+      object-fit: contain !important;
+    }
+    img {
+      max-width: 100% !important;
+      height: auto !important;
+      object-fit: contain !important;
+    }
+    /* Unstick fixed navigation headers so they don't corrupt coordinate math */
+    header, nav, [style*="position: fixed"], [style*="position:fixed"] {
+      position: relative !important;
+    }
+    /* Avoid cutting cards and sections mid-element */
+    section, .card, table, tr, [class*="card"], [class*="box"] {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+  `;
+
+  // 3. Isolated sandbox container positioned at top-left behind viewport
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
   iframe.style.width = `${renderWidthPx}px`;
-  iframe.style.height = '1000px';
+  iframe.style.height = '1200px';
   iframe.style.zIndex = '-99999';
   iframe.style.border = 'none';
+  iframe.style.opacity = '0';
   iframe.style.pointerEvents = 'none';
   document.body.appendChild(iframe);
 
@@ -4706,10 +4750,13 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) throw new Error('Failed to initialize rendering sandbox.');
 
-    const isFullDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
+    const isFullDoc = /<html[\s>]/i.test(sanitizedHtml) || /<!doctype/i.test(sanitizedHtml);
     doc.open();
     if (isFullDoc) {
-      doc.write(html);
+      const styledDoc = sanitizedHtml.includes('</head>')
+        ? sanitizedHtml.replace('</head>', `<style>${NORMALIZATION_CSS}</style></head>`)
+        : `<style>${NORMALIZATION_CSS}</style>` + sanitizedHtml;
+      doc.write(styledDoc);
     } else {
       doc.write(`
         <!DOCTYPE html>
@@ -4717,9 +4764,8 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
           <head>
             <meta charset="utf-8" />
             <style>
-              * { box-sizing: border-box; }
+              ${NORMALIZATION_CSS}
               body {
-                margin: 0;
                 padding: ${isReceipt ? '12px' : '28px'};
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 color: #18181b;
@@ -4733,36 +4779,52 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
               hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
             </style>
           </head>
-          <body>${html}</body>
+          <body>${sanitizedHtml}</body>
         </html>
       `);
     }
     doc.close();
 
-    // Allow styles, images, and fonts to compute layout
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Allow styles, fonts, and DOM layout to settle
+    await new Promise((resolve) => setTimeout(resolve, 350));
 
-    const scrollHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 600);
-    iframe.style.height = `${scrollHeight}px`;
+    // 4. Calculate actual visible content height (clamps ghost heights)
+    let actualContentHeight = doc.body.scrollHeight;
+    const allElements = doc.body.querySelectorAll('*');
+    if (allElements.length > 0) {
+      let maxBottom = 0;
+      allElements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom > maxBottom && rect.height > 0) {
+          maxBottom = rect.bottom;
+        }
+      });
+      if (maxBottom > 80) {
+        actualContentHeight = Math.min(actualContentHeight, Math.ceil(maxBottom + 40));
+      }
+    }
 
-    // 2. Direct Canvas Render via local npm bundle (Never taints the canvas)
+    iframe.style.height = `${actualContentHeight}px`;
+
+    // 5. Render DOM via local html2canvas
     const canvas = await html2canvas(doc.body, {
       scale: 2,
       useCORS: true,
       allowTaint: false,
-      backgroundColor: '#ffffff',
+      backgroundColor: null, // Preserves natural dark or light background
       logging: false,
       width: renderWidthPx,
-      height: scrollHeight,
+      height: actualContentHeight,
       windowWidth: renderWidthPx,
-      windowHeight: scrollHeight,
+      windowHeight: actualContentHeight,
+      y: 0,
+      x: 0,
     });
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
-
-    // 3. Export Single-Page Continuous Thermal Receipt
+    // 6. Export Thermal Receipt (Single continuous page)
     if (isReceipt) {
       const receiptHeightPt = Math.max(120, (canvas.height / canvas.width) * targetWidthPt);
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'pt',
@@ -4772,25 +4834,51 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // 4. Export Multi-Page A4 / Letter Document
+    // 7. Multi-Page Canvas Slicing (Prevents image bleed and memory bloat)
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
       format: pageSize,
     });
 
-    const renderedHeightOnPage = (canvas.height / canvas.width) * targetWidthPt;
-    let heightRemaining = renderedHeightOnPage;
-    let positionY = 0;
+    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * canvas.width);
+    const totalPages = Math.ceil(canvas.height / pageHeightPx);
 
-    pdf.addImage(imgData, 'JPEG', 0, positionY, targetWidthPt, renderedHeightOnPage);
-    heightRemaining -= targetHeightPt;
+    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+      if (pageIdx > 0) {
+        pdf.addPage();
+      }
 
-    while (heightRemaining > 5) {
-      positionY -= targetHeightPt;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, positionY, targetWidthPt, renderedHeightOnPage);
-      heightRemaining -= targetHeightPt;
+      const sourceY = pageIdx * pageHeightPx;
+      const currentSliceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = pageHeightPx;
+      const sliceCtx = sliceCanvas.getContext('2d');
+
+      if (sliceCtx) {
+        // Draw the background color for short final pages
+        sliceCtx.fillStyle = '#0f172a';
+        sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        sliceCtx.drawImage(
+          canvas,
+          0,
+          sourceY,
+          canvas.width,
+          currentSliceHeight,
+          0,
+          0,
+          canvas.width,
+          currentSliceHeight
+        );
+
+        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.95);
+        pdf.addImage(sliceData, 'JPEG', 0, 0, targetWidthPt, targetHeightPt);
+      }
+
+      sliceCanvas.width = 0;
+      sliceCanvas.height = 0;
     }
 
     return new Uint8Array(pdf.output('arraybuffer'));
