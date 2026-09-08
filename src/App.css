@@ -1,28 +1,36 @@
+/* Force Apple Light Mode Background & Text Globally over Tailwind */
+html, body, #root, div[class*="bg-black"], div[class*="bg-zinc-950"] {
+  background-color: #f5f5f7 !important;
+  color: #1d1d1f !important;
+}
+
 :root {
-  --bg-primary: #000000;
-  --bg-secondary: #09090b;
-  --border-color: rgba(255, 255, 255, 0.1);
-  --text-primary: #f4f4f5;
-  --text-muted: #a1a1aa;
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #ffffff;
+  --border-color: rgba(0, 0, 0, 0.1);
+  --text-primary: #1d1d1f;
+  --text-muted: #86868b;
 }
 
 .counter {
   font-size: 16px;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: 980px; /* Apple pill radius style */
   color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+  transition: all 0.2s ease;
   margin-bottom: 24px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
 .counter:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(0, 0, 0, 0.3);
+  background: #fbfbfd;
 }
 
 .counter:focus-visible {
-  outline: 2px solid #ffffff;
+  outline: 2px solid #000000;
   outline-offset: 2px;
 }
 
@@ -135,20 +143,22 @@
 #next-steps ul a {
   color: var(--text-primary);
   font-size: 16px;
-  border-radius: 6px;
+  border-radius: 980px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   display: flex;
-  padding: 6px 12px;
+  padding: 6px 14px;
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
 #next-steps ul a:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: #18181b;
+  border-color: rgba(0, 0, 0, 0.3);
+  background: #000000;
+  color: #ffffff;
 }
 
 #next-steps ul a .button-icon {
