@@ -1368,17 +1368,30 @@ export async function compressPDF(
   const { level, targetKb = 200, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
 
-  // Safely inspect encryption before attempting any direct pdf-lib vector saves
-  const { doc: safeDoc, isEncrypted } = await loadSafe(arrayBuffer);
+  let safeDoc: PDFDocument | null = null;
+  let isEncrypted = true;
 
-  if (level === 'recommended') {
-    if (!isEncrypted) {
-      return await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
-    }
-    // If encrypted, bypass direct pdf-lib save to prevent corrupting the document
+  try {
+    const loaded = await loadSafe(arrayBuffer);
+    safeDoc = loaded.doc;
+    isEncrypted = loaded.isEncrypted;
+  } catch {
+    // If loading fails, keep isEncrypted = true to route safely to the raster pipeline
+    isEncrypted = true;
   }
 
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  if (level === 'recommended' && safeDoc && !isEncrypted) {
+    try {
+      return await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    } catch {
+      // Fall through to raster engine if vector save fails
+    }
+  }
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer).slice(),
+    stopAtErrors: false,
+  });
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
 
@@ -1386,7 +1399,7 @@ export async function compressPDF(
 
   // SAFEGUARD: High-density digital vector documents with < 25 KB/page
   const kbPerPage = (targetBytes / 1024) / totalPages;
-  if (kbPerPage < 25 && !isEncrypted) {
+  if (kbPerPage < 25 && safeDoc && !isEncrypted) {
     onProgress?.({
       currentPage: 1,
       totalPages,
@@ -1511,6 +1524,10 @@ export async function compressPDF(
         height: unscaledViewport.height,
       });
     }
+
+    try {
+      page.cleanup();
+    } catch {}
   }
 
   let outputBytes = await newPdfDoc.save({ useObjectStreams: false });
@@ -1530,6 +1547,7 @@ export async function compressPDF(
 
   return outputBytes;
 }
+
 export interface PageConfig {
 originalIndex: number;
 rotation: number;
