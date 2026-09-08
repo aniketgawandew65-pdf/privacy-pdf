@@ -8,14 +8,15 @@ import {
   AlertCircle,
   Loader2,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
-const RECEIPT_TEMPLATE = `<div style="text-align: center; margin-bottom: 12px;">
+const SAMPLE_RECEIPT = `<div style="text-align: center; margin-bottom: 12px;">
   <h2 style="margin: 0; font-size: 16px;">COFFEE &amp; BAKERY</h2>
   <p style="margin: 2px 0; color: #52525b; font-size: 10px;">Order #48291 • Table 4</p>
-  <p style="margin: 0; color: #52525b; font-size: 10px;">Date: Sept 5, 2026 10:45 AM</p>
+  <p style="margin: 0; color: #52525b; font-size: 10px;">Date: Sept 8, 2026 10:45 AM</p>
 </div>
 
 <hr/>
@@ -58,9 +59,46 @@ const RECEIPT_TEMPLATE = `<div style="text-align: center; margin-bottom: 12px;">
   Thank you for visiting! • Zero Cloud Saved
 </p>`;
 
+const SAMPLE_LANDING_PAGE = `<div style="width: 100%; max-width: 760px; margin: 0 auto; padding: 40px 24px; background: #09090b; color: #fafafa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center;">
+  
+  <p style="font-size: 12px; font-weight: 700; letter-spacing: 0.28em; text-transform: uppercase; color: #a855f7; margin: 0 0 16px 0;">
+    PURPL3 OS AI • 1INTO1
+  </p>
+
+  <h1 style="font-size: 36px; line-height: 1.15; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 16px 0; color: #ffffff;">
+    The Age of Typing is Over.<br />
+    <span style="color: #c084fc;">The Age of Intent is Here.</span>
+  </h1>
+
+  <p style="font-size: 14px; line-height: 1.6; color: #a1a1aa; max-width: 520px; margin: 0 auto 28px auto;">
+    Voice-controlled autonomous OS agent for macOS. Scrapes the web, inspects PDFs, plays music, and controls your workspace completely hands-free.
+  </p>
+
+  <div style="display: flex; justify-content: center; gap: 12px; margin-bottom: 32px;">
+    <span style="background: #a855f7; color: #ffffff; font-size: 12px; font-weight: 600; padding: 9px 20px; border-radius: 9999px;">
+      Get PURPL3 for Mac
+    </span>
+    <span style="background: #18181b; color: #d4d4d8; font-size: 12px; font-weight: 500; padding: 9px 18px; border-radius: 9999px; border: 1px solid #27272a;">
+      Watch Demo
+    </span>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; text-align: left; margin-top: 20px;">
+    <div style="background: #18181b; border: 1px solid #27272a; padding: 16px; border-radius: 12px;">
+      <h3 style="margin: 0 0 6px 0; font-size: 13px; color: #f4f4f5;">✈️ Travel &amp; Flight Booking</h3>
+      <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #71717a;">Compare travel costs, airline options, and hotel ranges with one voice command.</p>
+    </div>
+    <div style="background: #18181b; border: 1px solid #27272a; padding: 16px; border-radius: 12px;">
+      <h3 style="margin: 0 0 6px 0; font-size: 13px; color: #f4f4f5;">📄 Deep Research &amp; Synthesis</h3>
+      <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #71717a;">Synthesizes real-time web research into publication-grade Word documents with figures.</p>
+    </div>
+  </div>
+
+</div>`;
+
 export const HtmlToPdf: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'paste' | 'upload'>('paste');
-  const [htmlContent, setHtmlContent] = useState<string>(RECEIPT_TEMPLATE);
+  const [htmlContent, setHtmlContent] = useState<string>(SAMPLE_RECEIPT);
   const [file, setFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState<string>('receipt_document');
   const [pageSize, setPageSize] = useState<'receipt' | 'a4' | 'letter'>('receipt');
@@ -204,16 +242,32 @@ export const HtmlToPdf: React.FC = () => {
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-zinc-400">
             <label className="font-medium text-zinc-300">HTML / Receipt Markup</label>
-            <button
-              onClick={() => {
-                setHtmlContent(RECEIPT_TEMPLATE);
-                setPageSize('receipt');
-                revokeUrl();
-              }}
-              className="text-emerald-400 hover:underline text-[11px]"
-            >
-              Load Sample Receipt
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setHtmlContent(SAMPLE_RECEIPT);
+                  setPageSize('receipt');
+                  setFileName('receipt_sample');
+                  revokeUrl();
+                }}
+                className="text-emerald-400 hover:underline text-[11px]"
+              >
+                Sample Receipt
+              </button>
+              <span>•</span>
+              <button
+                onClick={() => {
+                  setHtmlContent(SAMPLE_LANDING_PAGE);
+                  setPageSize('a4');
+                  setFileName('purpl3_landing');
+                  revokeUrl();
+                }}
+                className="text-purple-400 hover:underline text-[11px] flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>Sample Hero Page</span>
+              </button>
+            </div>
           </div>
           <textarea
             value={htmlContent}

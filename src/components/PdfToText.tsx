@@ -39,7 +39,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
       setExtractedText(result);
     } catch (err: any) {
       console.error('Text extraction failed:', err);
-      setErrorMsg(err.message || 'Failed to extract text from this document.');
+      setErrorMsg(err.message || 'Failed to convert PDF to text.');
     } finally {
       setIsProcessing(false);
       setProgressMsg('');
@@ -57,7 +57,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${file?.name.replace(/\.[^/.]+$/, '') || 'extracted'}-text.txt`;
+    a.download = `${file?.name.replace(/\.[^/.]+$/, '') || 'document'}-text.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -101,7 +101,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 rounded-xl p-8 text-center transition-all bg-zinc-950/40 hover:bg-zinc-950/80 mb-6"
         >
           <Upload className="w-8 h-8 text-zinc-400 mx-auto mb-2 stroke-[1.5]" />
-          <p className="text-sm font-medium text-zinc-200">Click or drop a PDF to extract text</p>
+          <p className="text-sm font-medium text-zinc-200">Click or drop a PDF to convert to text</p>
           <p className="text-xs text-zinc-500 mt-1">
             Auto-detects digital documents, legal agreements, and physical scans
           </p>
@@ -150,12 +150,12 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
           {isProcessing ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>{progressMsg || 'Processing document...'}</span>
+              <span>{progressMsg || 'Converting PDF to text...'}</span>
             </>
           ) : (
             <>
               <Sparkles className="w-4 h-4" />
-              <span>Extract Text</span>
+              <span>Convert to Text</span>
             </>
           )}
         </button>
@@ -164,7 +164,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
       {extractedText && (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Extracted Content</span>
+            <span>Converted Text</span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
