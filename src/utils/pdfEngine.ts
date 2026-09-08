@@ -2684,7 +2684,7 @@ export async function ocrPDFToSearchable(
       if (!ctx) continue;
       await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
 
-      // Dark Mode Detection & Inversion: Fixes Tesseract reading dark UIs/screenshots
+      // Dark mode detection & brightness check
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imgData.data;
       let totalBrightness = 0;
@@ -2698,20 +2698,18 @@ export async function ocrPDFToSearchable(
 
       const avgBrightness = totalBrightness / sampleCount;
 
-      // If document background is dark (average luminance < 128), invert colors to black-on-white
       if (avgBrightness < 128) {
         for (let i = 0; i < d.length; i += 4) {
-          d[i] = 255 - d[i];         // R
-          d[i + 1] = 255 - d[i + 1]; // G
-          d[i + 2] = 255 - d[i + 2]; // B
+          d[i] = 255 - d[i];
+          d[i + 1] = 255 - d[i + 1];
+          d[i + 2] = 255 - d[i + 2];
         }
         ctx.putImageData(imgData, 0, 0);
       }
 
-      // Run OCR on preprocessed canvas
       const { data } = await worker.recognize(canvas);
 
-      // Fix 2: Explicitly wipe backing store & release PDF.js page resources immediately
+      // Free canvas memory immediately
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       canvas.width = 0;
       canvas.height = 0;
@@ -2725,28 +2723,35 @@ export async function ocrPDFToSearchable(
       const scaleX = pageWidth / viewport.width;
       const scaleY = pageHeight / viewport.height;
 
-      // Inject selectable text layer compatible with WPS, Chrome, and Acrobat
-      const words = (data as any)?.words;
-      if (Array.isArray(words)) {
-        for (const word of words) {
-          const clean = word.text.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').trim();
-          if (!clean) continue;
+      // Universal word extraction hierarchy (Tesseract v4 + v5 blocks fallback)
+      let words: any[] = [];
+      if (Array.isArray((data as any)?.words) && (data as any).words.length > 0) {
+        words = (data as any).words;
+      } else if (Array.isArray((data as any)?.blocks)) {
+        words = (data as any).blocks
+          .flatMap((b: any) => b.paragraphs ?? [])
+          .flatMap((p: any) => p.lines ?? [])
+          .flatMap((l: any) => l.words ?? []);
+      }
 
-          const box = word.bbox;
-          const posX = box.x0 * scaleX;
-          const posY = pageHeight - (box.y1 * scaleY);
-          const wordHeight = (box.y1 - box.y0) * scaleY;
+      for (const word of words) {
+        if (!word || !word.text || !word.bbox) continue;
+        const clean = word.text.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').trim();
+        if (!clean) continue;
 
-          // Using minimal opacity (0.01) rather than 0 prevents WPS from disabling selection
-          pdfLibPage.drawText(clean, {
-            x: Math.max(0, posX),
-            y: Math.max(0, posY),
-            size: Math.max(4, Math.round(wordHeight * 0.85)),
-            font: helveticaFont,
-            color: rgb(0, 0, 0),
-            opacity: 0.01,
-          });
-        }
+        const box = word.bbox;
+        const posX = box.x0 * scaleX;
+        const posY = pageHeight - (box.y1 * scaleY);
+        const wordHeight = (box.y1 - box.y0) * scaleY;
+
+        pdfLibPage.drawText(clean, {
+          x: Math.max(0, posX),
+          y: Math.max(0, posY),
+          size: Math.max(4, Math.round(wordHeight * 0.85)),
+          font: helveticaFont,
+          color: rgb(0, 0, 0),
+          opacity: 0.01,
+        });
       }
     }
 
