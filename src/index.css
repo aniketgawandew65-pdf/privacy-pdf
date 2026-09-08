@@ -1,10 +1,15 @@
 @import "tailwindcss";
 
-/* 1. Global Apple Base Canvas & System Font Stack */
+/* ==========================================================================
+   ILOVEPDF-STYLE CLEAN UI WITH PRESERVED TYPOGRAPHY & EMERALD ACCENTS
+   ========================================================================== */
+
+/* 1. Global Page Canvas */
 html, body, #root {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", sans-serif !important;
-  background-color: #f5f5f7 !important;
-  color: #1d1d1f !important;
+  background-color: #f7f7fa !important;
+  color: #1a1a1a !important;
+  margin: 0;
+  padding: 0;
 }
 
 body,
@@ -16,136 +21,177 @@ div.min-h-screen,
 div[class*="bg-black"],
 div[class*="bg-zinc-950"],
 div[class*="bg-zinc-900"] {
-  background-color: #f5f5f7 !important;
-  color: #1d1d1f !important;
+  background-color: #f7f7fa !important;
+  color: #1a1a1a !important;
 }
 
-/* 2. Headings & Typography */
+/* 2. Preserve Headings & Text Content Hierarchy */
 h1, h2, h3, h4,
-[class*="text-white"],
+p, label,
 [class*="text-zinc-100"],
-[class*="text-zinc-200"] {
-  color: #1d1d1f !important;
+[class*="text-zinc-200"],
+[class*="text-zinc-300"] {
+  color: #1a1a1a !important;
 }
 
 [class*="text-zinc-400"],
 [class*="text-zinc-500"] {
-  color: #6e6e73 !important;
+  color: #666666 !important;
 }
 
-/* 3. Retain Green Accents & Highlights */
+/* 3. Retain Green Highlights & Accents */
 [class*="text-emerald"], 
 [class*="text-green"] {
-  color: #059669 !important;
+  color: #10b981 !important;
 }
 
-/* 4. Top Header Auditor Pill */
-header div,
-header [class*="rounded-full"] {
+/* 4. Top Header & Auditor Bar */
+header,
+header > div {
   background-color: #ffffff !important;
-  border-color: rgba(0, 0, 0, 0.12) !important;
-  color: #1d1d1f !important;
+  border-bottom: 1px solid #e3e3e8 !important;
+}
+
+header div[class*="rounded-full"],
+header div[class*="font-mono"] {
+  background-color: #f4f4f7 !important;
+  border: 1px solid #e0e0e6 !important;
+  color: #1a1a1a !important;
 }
 
 header [class*="text-zinc"],
 header [class*="font-mono"],
 header span {
-  color: #1d1d1f !important;
+  color: #1a1a1a !important;
 }
 
-/* 5. TOOL GRID BUTTONS: Pure Apple White Pill Cards */
-button,
-button[class*="bg-"],
+/* 5. Tool Grid Buttons (iLovePDF Clean Elevated Tool Badges) */
+.grid button,
 div[class*="grid"] button,
-div[class*="flex-wrap"] button {
+div[class*="flex-wrap"] button,
+button[class*="rounded-xl"],
+button[class*="rounded-lg"] {
   background-color: #ffffff !important;
   background: #ffffff !important;
-  border: 1px solid #d2d2d7 !important;
-  color: #1d1d1f !important;
-  border-radius: 980px !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
-  opacity: 1 !important;
+  border: 1px solid #e0e0e6 !important;
+  border-radius: 8px !important;
+  color: #1a1a1a !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04) !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease !important;
 }
 
-/* Force All Button Text & Icons to Sharp Apple Black */
-button *,
-button span,
-button p,
-button[class*="bg-"] *,
-div[class*="grid"] button * {
-  color: #1d1d1f !important;
-  opacity: 1 !important;
+/* Tool Buttons: Sharp Black Icons & Labels */
+.grid button *,
+div[class*="grid"] button *,
+div[class*="flex-wrap"] button *,
+button[class*="rounded-xl"] *,
+button[class*="rounded-lg"] * {
+  color: #1a1a1a !important;
 }
 
-button svg,
-button svg path,
+.grid button svg,
 div[class*="grid"] button svg,
-div[class*="grid"] button svg path {
-  stroke: #1d1d1f !important;
+button[class*="rounded-xl"] svg,
+button[class*="rounded-lg"] svg {
+  stroke: #1a1a1a !important;
 }
 
-/* 6. ACTIVE SELECTED TOOL BUTTON (e.g., Split / Compress) -> Solid Black Pill */
+/* Tool Buttons: Hover State */
+.grid button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
+div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
+div[class*="flex-wrap"] button:hover:not([class*="emerald"]):not([class*="bg-emerald"]) {
+  border-color: #10b981 !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.12) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* Active Selected Tool (Preserving the Emerald Highlight) */
 button[class*="emerald"],
 button[class*="border-emerald"],
 button[class*="bg-emerald"],
-div[class*="grid"] button[class*="emerald"],
-div[class*="grid"] button[class*="border-emerald"] {
-  background-color: #1d1d1f !important;
-  background: #1d1d1f !important;
-  border-color: #1d1d1f !important;
+.grid button[class*="emerald"],
+div[class*="grid"] button[class*="emerald"] {
+  background-color: #0f172a !important;
+  background: #0f172a !important;
+  border-color: #0f172a !important;
   color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
 button[class*="emerald"] *,
 button[class*="border-emerald"] *,
-button[class*="bg-emerald"] *,
-div[class*="grid"] button[class*="emerald"] *,
-div[class*="grid"] button[class*="border-emerald"] * {
+button[class*="bg-emerald"] * {
   color: #ffffff !important;
 }
 
 button[class*="emerald"] svg,
-button[class*="emerald"] svg path,
 button[class*="border-emerald"] svg,
-button[class*="border-emerald"] svg path,
-div[class*="grid"] button[class*="emerald"] svg,
-div[class*="grid"] button[class*="emerald"] svg path {
+button[class*="bg-emerald"] svg {
   stroke: #10b981 !important;
   color: #10b981 !important;
 }
 
-/* 7. HOVER STATE: Apple Dark Invert (Just like "Your Saves" pill) */
-button:hover:not([class*="emerald"]):not([class*="border-emerald"]),
-div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="border-emerald"]) {
-  background-color: #1d1d1f !important;
-  background: #1d1d1f !important;
-  border-color: #1d1d1f !important;
+/* 6. Filter Bar Pills (Organize & Size, Security & Privacy, etc.) */
+div:has(> button[class*="rounded-full"]) {
+  background: transparent !important;
+}
+
+button[class*="rounded-full"] {
+  background-color: #ffffff !important;
+  border: 1px solid #dcdce2 !important;
+  color: #4b5563 !important;
+  border-radius: 9999px !important;
+}
+
+button[class*="rounded-full"]:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+/* Active Filter Pill */
+button[class*="rounded-full"][class*="bg-"],
+button[class*="rounded-full"][class*="black"] {
+  background-color: #111827 !important;
+  border-color: #111827 !important;
   color: #ffffff !important;
 }
 
-button:hover:not([class*="emerald"]):not([class*="border-emerald"]) *,
-div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="border-emerald"]) * {
-  color: #ffffff !important;
-}
-
-button:hover:not([class*="emerald"]):not([class*="border-emerald"]) svg,
-button:hover:not([class*="emerald"]):not([class*="border-emerald"]) svg path,
-div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="border-emerald"]) svg,
-div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="border-emerald"]) svg path {
-  stroke: #ffffff !important;
-}
-
-/* 8. Fix Dark Container Around Dropzone */
+/* 7. Remove Dark Outer Container Behind Dropzone */
 div[class*="bg-zinc-800"],
 div[class*="bg-zinc-900"],
-div[class*="bg-zinc-900/50"] {
-  background-color: #ffffff !important;
-  border-color: rgba(0, 0, 0, 0.08) !important;
+div[class*="bg-zinc-900/50"],
+div[class*="rounded-3xl"]:has(div[class*="border-dashed"]) {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
 }
 
-/* 9. Dropzone Clean White Card with Subtle Outline */
+/* 8. Main Dropzone (iLovePDF Style Clean Drop Block) */
 div[class*="border-dashed"] {
   background-color: #ffffff !important;
-  border: 1.5px dashed #d2d2d7 !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04) !important;
+  border: 2px dashed #cbd5e1 !important;
+  border-radius: 16px !important;
+  padding: 48px 24px !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04) !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease !important;
+}
+
+div[class*="border-dashed"]:hover {
+  border-color: #10b981 !important;
+  background-color: #fbfdfc !important;
+}
+
+/* Primary Action Callout inside Dropzone */
+div[class*="border-dashed"] svg {
+  stroke: #10b981 !important;
+  color: #10b981 !important;
+}
+
+/* 9. Floating Trust Badges */
+div[class*="rounded-full"][class*="border"]:not(header *) {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #1a1a1a !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
 }
