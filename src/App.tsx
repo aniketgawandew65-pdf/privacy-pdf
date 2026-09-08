@@ -149,7 +149,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Image to PDF', path: '/image-to-pdf', category: 'convert', icon: ImageIcon },
   { name: 'PDF to JPG', path: '/pdf-to-jpg', category: 'convert', icon: FileImage },
   { name: 'HEIC to JPG', path: '/heic-to-jpg', category: 'convert', icon: Camera },
-  { name: 'Extract Text', path: '/extract-text', category: 'convert', icon: AlignLeft },
+  { name: 'PDF to Text', path: '/pdf-to-text', category: 'convert', icon: AlignLeft },
   { name: 'Edit Metadata', path: '/edit-metadata', category: 'convert', icon: Tag },
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
   { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
@@ -539,7 +539,7 @@ export default function App() {
               <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/heic-to-jpg" element={<HeicToJpg />} />
               <Route path="/extract-images" element={<ExtractImages file={activeFile} onFileChange={handleSingleFileChange} />} />
-              <Route path="/extract-text" element={<PdfToText file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/pdf-to-text" element={<PdfToText file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/grayscale-pdf" element={<GrayscalePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/dark-mode-pdf" element={<DarkModePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/edit-metadata" element={<EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />} />

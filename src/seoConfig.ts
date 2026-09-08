@@ -77,8 +77,8 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Insert Page Numbers',
     subheading: 'Add sequential pagination across your PDF without tracking.',
   },
-  '/extract-text': {
-    path: '/extract-text',
+  '/pdf-to-text': {
+    path: '/pdf-to-text',
     title: 'Extract Text from PDF — Private In-Browser Text Reader',
     description: 'Extract raw text from PDF files directly inside the browser using WebAssembly.',
     heading: 'Extract PDF Text',
