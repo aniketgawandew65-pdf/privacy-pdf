@@ -149,3 +149,4 @@ export const ImageToPdf: React.FC = () => {
     </div>
   );
 };
+export default ImageToPdf;
