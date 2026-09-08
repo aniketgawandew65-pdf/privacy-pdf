@@ -1286,62 +1286,57 @@ export async function compressPDF(
 ): Promise<Uint8Array> {
   const { level, targetKb = 200, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
+  const targetBytes = (level === 'extreme' ? 35 : targetKb) * 1024;
 
-  // 1. Lossless Vector Stream Optimization Check
+  // If the file is already within the target budget, return it untouched
+  if (level === 'target' && arrayBuffer.byteLength <= targetBytes) {
+    return new Uint8Array(arrayBuffer);
+  }
+
+  // 1. Lossless Vector Optimization (Only for UNENCRYPTED PDFs)
   let vectorDoc: PDFDocument | null = null;
   let vectorBytes: Uint8Array | null = null;
   try {
     vectorDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    vectorBytes = await vectorDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    // NEVER save via pdf-lib if the document has encryption — it will corrupt the file!
+    if (!vectorDoc.isEncrypted) {
+      vectorBytes = await vectorDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    }
   } catch {
-    // If vector parsing fails (corrupted trailer or strict lock), fall through to rasterizer
+    vectorDoc = null;
+    vectorBytes = null;
   }
 
-  // Recommended / Standard mode: return lossless vector result directly
-  if (level === 'recommended') {
-    if (vectorBytes) return vectorBytes;
-    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+  if (level === 'recommended' && vectorBytes) {
+    return vectorBytes;
   }
 
-  const estimatedPages = vectorDoc ? vectorDoc.getPageCount() : 1;
-  const targetBytes = (level === 'extreme' ? Math.max(12 * estimatedPages, 35) : targetKb) * 1024;
-
-  // 2. Smart Hybrid Check: Protect crisp vector text on small/digital PDFs
-  if (vectorBytes) {
-    const isUnderTarget = vectorBytes.length <= targetBytes;
-    const isSmallVectorClose =
-      vectorBytes.length <= targetBytes * 1.08 && arrayBuffer.byteLength <= 1024 * 1024;
-
-    if (isUnderTarget || (level === 'target' && isSmallVectorClose)) {
-      if (level === 'target') {
-        const diff = targetBytes - vectorBytes.length;
-        if (diff > 1024) {
-          const paddingStreamOverhead = 78;
-          const padCount = Math.max(0, diff - paddingStreamOverhead);
-          if (padCount > 0) {
-            try {
-              const padDoc = await PDFDocument.load(vectorBytes);
-              const rawPadStream = (padDoc.context as any).stream(new Uint8Array(padCount));
-              padDoc.context.register(rawPadStream);
-              return await padDoc.save({ useObjectStreams: false });
-            } catch {
-              return vectorBytes;
-            }
+  if (vectorBytes && vectorBytes.length <= targetBytes) {
+    if (level === 'target') {
+      const diff = targetBytes - vectorBytes.length;
+      if (diff > 1024) {
+        const padCount = Math.max(0, diff - 78);
+        if (padCount > 0) {
+          try {
+            const padDoc = await PDFDocument.load(vectorBytes);
+            const rawPadStream = (padDoc.context as any).stream(new Uint8Array(padCount));
+            padDoc.context.register(rawPadStream);
+            return await padDoc.save({ useObjectStreams: false });
+          } catch {
+            return vectorBytes;
           }
         }
       }
-      return vectorBytes;
     }
+    return vectorBytes;
   }
 
-  // 3. Fallback to Multi-Attempt Canvas Rasterizer for Large Image / Scanned PDFs
+  // 2. High-Clarity Rasterizer Engine (Safe for both encrypted & large scanned files)
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
 
   const newPdfDoc = await PDFDocument.create();
-
   const pdfOverhead = 1024 + totalPages * 200;
   const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
   let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
@@ -1350,7 +1345,7 @@ export async function compressPDF(
     onProgress?.({
       currentPage: pageNum,
       totalPages,
-      stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
+      stage: `Compressing page ${pageNum} of ${totalPages}...`,
     });
 
     const page = await pdf.getPage(pageNum);
@@ -1359,13 +1354,14 @@ export async function compressPDF(
     const pagesLeft = totalPages - pageNum + 1;
     const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
 
-    const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-    let scale = Math.min(2.0, Math.max(0.25, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
-    let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
+    // Enforce a strict minimum resolution floor of 1.2x scale (~85-90 DPI)
+    // This ensures fine text and bank statement tables are never downscaled into blurry thumbnails
+    let scale = Math.max(1.2, Math.min(2.0, Math.sqrt(budgetPerPage / 12000)));
+    let quality = Math.max(0.18, Math.min(0.82, budgetPerPage / 22000));
 
     let validBlob: Blob | null = null;
 
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
@@ -1392,23 +1388,24 @@ export async function compressPDF(
       canvas.width = 0;
       canvas.height = 0;
 
-      if (blob.size <= budgetPerPage) {
+      if (blob.size <= budgetPerPage || attempt >= 3) {
         validBlob = blob;
-        if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
+        if (blob.size >= budgetPerPage * 0.82 || attempt >= 3) {
           break;
         }
-        const fillRatio = budgetPerPage / Math.max(blob.size, 1);
-        scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
-        quality = Math.min(0.88, quality + 0.05);
+        // If there is extra budget, slightly improve quality while preserving resolution
+        quality = Math.min(0.85, quality + 0.08);
       } else {
-        const excessRatio = blob.size / budgetPerPage;
-        scale = Math.max(0.15, scale / (Math.sqrt(excessRatio) * 1.06));
-        quality = Math.max(0.06, quality * 0.88);
+        // Budget exceeded: reduce JPEG quality first before lowering resolution
+        quality = Math.max(0.14, quality * 0.78);
+        if (attempt >= 2 && scale > 1.2) {
+          scale = Math.max(1.2, scale * 0.9);
+        }
       }
     }
 
     if (!validBlob) {
-      const viewport = page.getViewport({ scale: Math.max(0.15, scale * 0.7) });
+      const viewport = page.getViewport({ scale: 1.2 });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -1418,14 +1415,13 @@ export async function compressPDF(
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
         validBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.22)
         );
       }
     }
 
     if (validBlob) {
       remainingImageBudget -= validBlob.size;
-
       const imageBytes = await validBlob.arrayBuffer();
       const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
 
@@ -1444,8 +1440,7 @@ export async function compressPDF(
   if (level === 'target') {
     const diff = targetBytes - outputBytes.length;
     if (diff > 1024) {
-      const paddingStreamOverhead = 78;
-      const padCount = Math.max(0, diff - paddingStreamOverhead);
+      const padCount = Math.max(0, diff - 78);
       if (padCount > 0) {
         const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
         newPdfDoc.context.register(rawPadStream);
@@ -1456,7 +1451,6 @@ export async function compressPDF(
 
   return outputBytes;
 }
-
 export interface PageConfig {
   originalIndex: number;
   rotation: number;
