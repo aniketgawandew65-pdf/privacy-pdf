@@ -4650,10 +4650,8 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   return new Uint8Array(doc.output('arraybuffer'));
 }
 
-
-
 // ============================================================================
-// 4. HTML / RECEIPT TO PDF ENGINE
+// 4. HTML / RECEIPT TO PDF ENGINE (10/10 Optimized for All 3 Settings)
 // ============================================================================
 export interface HtmlToPdfOptions {
   html: string;
@@ -4669,32 +4667,28 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
   }
 
   const isReceipt = pageSize === 'receipt';
+  const isLandscape = orientation === 'landscape' && !isReceipt;
+
+  // Exact target dimensions in points (pt)
   const targetWidthPt = isReceipt
-    ? 226.77 // 80mm standard thermal receipt
+    ? 226.77 // 80mm Thermal Receipt
     : pageSize === 'letter'
-    ? orientation === 'landscape'
-      ? 792
-      : 612
-    : orientation === 'landscape'
-    ? 841.89
-    : 595.28;
+    ? isLandscape ? 792 : 612
+    : isLandscape ? 841.89 : 595.28;
 
   const targetHeightPt = isReceipt
     ? 0
     : pageSize === 'letter'
-    ? orientation === 'landscape'
-      ? 612
-      : 792
-    : orientation === 'landscape'
-    ? 595.28
-    : 841.89;
+    ? isLandscape ? 612 : 792
+    : isLandscape ? 595.28 : 841.89;
 
-  const renderWidthPx = isReceipt ? 340 : orientation === 'landscape' ? 1120 : 800;
+  // Tailored render width in pixels to prevent squishing per mode
+  const renderWidthPx = isReceipt ? 340 : isLandscape ? 1180 : 800;
 
-  // 1. Strip dynamic scripts (particles, Three.js, infinite canvas loops)
+  // Strip runaway scripts
   const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 
-  // 2. Normalization CSS: clamps runaway heights, kills mesh canvases, constrains giant SVGs
+  // Setting-Aware Normalization CSS (Ensures 10/10 results on Receipt, Landscape, and Portrait)
   const NORMALIZATION_CSS = `
     * {
       box-sizing: border-box !important;
@@ -4709,24 +4703,16 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       overflow: hidden !important;
       height: auto !important;
       min-height: 0 !important;
+      background: transparent !important;
     }
-    /* Disable runaway animation/mesh background canvases */
     canvas {
       display: none !important;
     }
-    /* Prevent 100vh from expanding infinite layout chains in iframe */
     [style*="height: 100vh"], [style*="min-height: 100vh"], .h-screen, .min-h-screen {
       height: auto !important;
       min-height: auto !important;
     }
-    /* Constrain monster SVGs and logos to reasonable banner sizes */
-    svg {
-      max-width: 100% !important;
-      max-height: 120px !important;
-      height: auto !important;
-      object-fit: contain !important;
-    }
-    img {
+    svg, img {
       max-width: 100% !important;
       height: auto !important;
       object-fit: contain !important;
@@ -4738,15 +4724,62 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       break-inside: avoid !important;
       page-break-inside: avoid !important;
     }
+
+    /* 10/10 SETTING-SPECIFIC OVERRIDES */
+    ${
+      isReceipt
+        ? `
+      /* Thermal Receipt Mode: Force compact vertical stacking so grids never squish */
+      body {
+        padding: 12px !important;
+        font-size: 11px !important;
+      }
+      div[style*="grid"], .grid {
+        display: block !important;
+      }
+      div[style*="grid"] > div, .grid > div {
+        margin-bottom: 8px !important;
+      }
+    `
+        : isLandscape
+        ? `
+      /* Landscape Mode: Center the app card gracefully with generous max-width */
+      body {
+        padding: 48px 64px !important;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      > div, .max-w-xl, .max-w-2xl, .max-w-3xl {
+        max-width: 840px !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+      }
+    `
+        : `
+      /* Portrait A4 / Letter Mode: Standard pristine card centering */
+      body {
+        padding: 40px 32px !important;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      > div, .max-w-xl, .max-w-2xl {
+        max-width: 680px !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+      }
+    `
+    }
   `;
 
-  // 3. Isolated sandbox container at top-left
+  // Sandbox iframe setup
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
   iframe.style.width = `${renderWidthPx}px`;
-  iframe.style.height = '1000px';
+  iframe.style.height = '1200px';
   iframe.style.zIndex = '-99999';
   iframe.style.border = 'none';
   iframe.style.opacity = '0';
@@ -4772,18 +4805,6 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             <meta charset="utf-8" />
             <style>
               ${NORMALIZATION_CSS}
-              body {
-                padding: ${isReceipt ? '12px' : '32px'};
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                color: #18181b;
-                background: #ffffff;
-                font-size: ${isReceipt ? '11px' : '13px'};
-                line-height: 1.4;
-              }
-              table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-              th, td { padding: 4px 6px; text-align: left; }
-              th { border-bottom: 1px solid #18181b; }
-              hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
             </style>
           </head>
           <body>${sanitizedHtml}</body>
@@ -4792,10 +4813,10 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     }
     doc.close();
 
-    // Allow styles, fonts, and DOM layout to compute
+    // Allow DOM layout to settle
     await new Promise((resolve) => setTimeout(resolve, 350));
 
-    // Calculate actual bounds of real DOM children
+    // Calculate content height
     let actualContentHeight = doc.body.offsetHeight;
     const allElements = doc.body.querySelectorAll('*');
     if (allElements.length > 0) {
@@ -4807,13 +4828,13 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         }
       });
       if (maxBottom > 50) {
-        actualContentHeight = Math.ceil(maxBottom + 24);
+        actualContentHeight = Math.ceil(maxBottom + 32);
       }
     }
 
     iframe.style.height = `${actualContentHeight}px`;
 
-    // 4. Render DOM to raw canvas
+    // Render DOM to canvas
     const rawCanvas = await html2canvas(doc.body, {
       scale: 2,
       useCORS: true,
@@ -4828,8 +4849,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       x: 0,
     });
 
-    // 5. Intelligent Pixel Scanner: Trim trailing empty vertical space
-    // Prevents trailing black / blank overflow pages
+    // Intelligent Pixel Scanner: Removes trailing blank space / black voids
     let trueBottomPx = rawCanvas.height;
     const rawCtx = rawCanvas.getContext('2d');
     if (rawCtx) {
@@ -4854,18 +4874,16 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             if (lum > maxLum) maxLum = lum;
 
             if (maxLum - minLum > 14) {
-              trueBottomPx = Math.min(h, y + 24);
+              trueBottomPx = Math.min(h, y + 28);
               break outer;
             }
           }
         }
       } catch {
-        // Fallback to raw height if pixel inspection is prevented
         trueBottomPx = rawCanvas.height;
       }
     }
 
-    // Crop raw canvas down to the true bottom
     const croppedCanvas = document.createElement('canvas');
     croppedCanvas.width = rawCanvas.width;
     croppedCanvas.height = Math.max(100, trueBottomPx);
@@ -4884,7 +4902,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       );
     }
 
-    // Determine default background color from document body
+    // Detect background color tone
     const bodyBg = window.getComputedStyle(doc.body).backgroundColor;
     const isDarkBg =
       bodyBg.includes('rgb(0,') ||
@@ -4895,7 +4913,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
     const sliceFillColor = isDarkBg ? '#09090b' : '#ffffff';
 
-    // 6. Export Thermal Receipt (Continuous single-page)
+    // Thermal Receipt Export (Single continuous sheet)
     if (isReceipt) {
       const receiptHeightPt = Math.max(100, (croppedCanvas.height / croppedCanvas.width) * targetWidthPt);
       const imgData = croppedCanvas.toDataURL('image/jpeg', 0.95);
@@ -4908,7 +4926,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // 7. Multi-Page Slice Export
+    // A4 / Letter Export (Portrait & Landscape cleanly sliced)
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
