@@ -31,29 +31,6 @@ import { useObjectUrl } from '../utils/useObjectUrl';
 
 const FONT_SIZES = [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
 
-const INITIAL_DOC_HTML = `<div style="text-align: center; margin-bottom: 24px;">
-  <p style="font-size: 24pt; font-weight: bold; margin: 0 0 6px 0; color: #111827;">MEMORANDUM &amp; BRIEF</p>
-  <p style="font-size: 11pt; color: #6b7280; margin: 0;">Confidential • Generated via Privacy Document Engine</p>
-</div>
-
-<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 16px 0;" />
-
-<p style="font-size: 14pt; font-weight: bold; color: #1f2937; margin-bottom: 8px;">1. Executive Summary</p>
-<p style="font-size: 11pt; line-height: 1.6; color: #374151; margin-bottom: 14px;">
-  This document serves as an official overview. You can highlight <strong>any word or line</strong> in this editor to adjust its exact font size, toggle bold, italic, highlight, or text colors just like in Microsoft Word.
-</p>
-
-<p style="font-size: 14pt; font-weight: bold; color: #1f2937; margin-bottom: 8px;">2. Core Objectives</p>
-<ul style="font-size: 11pt; line-height: 1.6; color: #374151; margin-left: 20px; margin-bottom: 16px;">
-  <li>Zero server transmission — 100% offline, client-side generation</li>
-  <li>Customizable margins, font families, and live retina preview</li>
-  <li>Pixel-perfect A4 and US Letter document formatting</li>
-</ul>
-
-<p style="font-size: 11pt; line-height: 1.6; color: #374151;">
-  Select this line to change its size or alignment, or start typing your own content from scratch.
-</p>`;
-
 export const TextToPdf = () => {
   const [fontFamily, setFontFamily] = useState<'Arial, sans-serif' | "'Times New Roman', serif" | "'Courier New', monospace" | "Georgia, serif">('Arial, sans-serif');
   const [selectedFontSize, setSelectedFontSize] = useState<number>(12);
@@ -64,20 +41,12 @@ export const TextToPdf = () => {
   const [zoom, setZoom] = useState<number>(1.0);
   const [pageCount, setPageCount] = useState<number>(1);
   const [charCount, setCharCount] = useState<number>(0);
-  const [htmlContent, setHtmlContent] = useState<string>(INITIAL_DOC_HTML);
+  const [htmlContent, setHtmlContent] = useState<string>('');
   const [isRendering, setIsRendering] = useState<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const { url: downloadUrl, createUrl } = useObjectUrl();
-
-  // Load initial content into editor
-  useEffect(() => {
-    if (editorRef.current && !editorRef.current.innerHTML) {
-      editorRef.current.innerHTML = INITIAL_DOC_HTML;
-      setCharCount(editorRef.current.innerText.trim().length);
-    }
-  }, []);
 
   const handleEditorInput = useCallback(() => {
     if (!editorRef.current) return;
@@ -85,7 +54,6 @@ export const TextToPdf = () => {
     setCharCount(editorRef.current.innerText.trim().length);
   }, []);
 
-  // Standard execCommand helper
   const execFormat = (cmd: string, val: string | undefined = undefined) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
@@ -93,7 +61,7 @@ export const TextToPdf = () => {
     handleEditorInput();
   };
 
-  // Word-style Selection Font Sizing (Affects highlighted text only)
+  // Word-style font size adjustment for selected text
   const applyFontSize = (sizePt: number) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
@@ -103,7 +71,6 @@ export const TextToPdf = () => {
       return;
     }
 
-    // Wrap selection using the standard browser font tag trick, then replace with styled span
     document.execCommand('fontSize', false, '7');
     const fontElements = editorRef.current.querySelectorAll('font[size="7"]');
     fontElements.forEach((el) => {
@@ -135,7 +102,7 @@ export const TextToPdf = () => {
   const handleZoomOut = () => setZoom((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))));
   const handleResetZoom = () => setZoom(1.0);
 
-  // Debounced live PDF renderer
+  // Live PDF generator
   useEffect(() => {
     let isMounted = true;
     setIsRendering(true);
@@ -143,8 +110,8 @@ export const TextToPdf = () => {
     const timer = setTimeout(async () => {
       try {
         const styledDocument = `
-          <div style="font-family: ${fontFamily}; padding: ${margin}pt; color: #111827; background: #ffffff; min-height: 100%;">
-            ${htmlContent.trim() || '<p>Start typing your document...</p>'}
+          <div style="font-family: ${fontFamily}; font-size: 11pt; line-height: 1.6; padding: ${margin}pt; color: #111827; background: #ffffff; width: 100%; box-sizing: border-box;">
+            ${htmlContent.trim() || '<p>&nbsp;</p>'}
           </div>
         `;
 
@@ -187,7 +154,7 @@ export const TextToPdf = () => {
       } finally {
         if (isMounted) setIsRendering(false);
       }
-    }, 380);
+    }, 350);
 
     return () => {
       isMounted = false;
@@ -256,12 +223,11 @@ export const TextToPdf = () => {
         )}
       </div>
 
-      {/* Split Workspace */}
+      {/* Symmetrical Dual Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Left: The MS Word Document Canvas */}
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[700px]">
-          {/* Ribbon Header */}
-          <div className="flex items-center justify-between pb-2 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
+        {/* Left Side: MS Word Document Editor */}
+        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[660px]">
+          <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <span className="flex items-center gap-1.5 font-medium text-zinc-300">
               <FileText className="w-4 h-4 text-emerald-400" />
               Document Editor
@@ -269,14 +235,13 @@ export const TextToPdf = () => {
             <span>{charCount} characters</span>
           </div>
 
-          {/* MS Word Ribbon Toolbar */}
-          <div className="flex flex-wrap items-center gap-1 p-1.5 mb-3 bg-zinc-950/90 border border-zinc-800 rounded-xl">
-            {/* Undo / Redo */}
+          {/* Ribbon Toolbar */}
+          <div className="flex flex-wrap items-center gap-1 p-1.5 mb-3 bg-zinc-950/80 border border-zinc-800 rounded-xl">
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('undo'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Undo (Ctrl+Z)"
+              title="Undo"
             >
               <Undo className="w-3.5 h-3.5" />
             </button>
@@ -284,14 +249,14 @@ export const TextToPdf = () => {
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('redo'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Redo (Ctrl+Y)"
+              title="Redo"
             >
               <Redo className="w-3.5 h-3.5" />
             </button>
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Selection Font Size Controls */}
+            {/* Selection Font Sizing */}
             <select
               value={selectedFontSize}
               onChange={(e) => applyFontSize(Number(e.target.value))}
@@ -309,7 +274,7 @@ export const TextToPdf = () => {
               type="button"
               onMouseDown={(e) => { e.preventDefault(); handleIncreaseFontSize(); }}
               className="px-1.5 py-1 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition"
-              title="Increase Font Size (A⁺)"
+              title="Increase Font Size"
             >
               A⁺
             </button>
@@ -317,14 +282,13 @@ export const TextToPdf = () => {
               type="button"
               onMouseDown={(e) => { e.preventDefault(); handleDecreaseFontSize(); }}
               className="px-1.5 py-1 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-zinc-800 rounded-lg transition"
-              title="Decrease Font Size (A⁻)"
+              title="Decrease Font Size"
             >
               A⁻
             </button>
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Bold, Italic, Underline, Strikethrough */}
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('bold'); }}
@@ -360,26 +324,24 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Text Color & Highlight */}
-            <div className="flex items-center gap-1 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800">
+            {/* Colors */}
+            <div className="flex items-center gap-1 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800" title="Text Color">
               <Palette className="w-3 h-3 text-zinc-400" />
               <input
                 type="color"
                 defaultValue="#111827"
                 onChange={(e) => execFormat('foreColor', e.target.value)}
                 className="w-4 h-4 rounded cursor-pointer bg-transparent border-0 p-0"
-                title="Font Ink Color"
               />
             </div>
 
-            <div className="flex items-center gap-1 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800">
+            <div className="flex items-center gap-1 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800" title="Highlight Color">
               <Highlighter className="w-3 h-3 text-yellow-400" />
               <input
                 type="color"
                 defaultValue="#fef08a"
                 onChange={(e) => execFormat('hiliteColor', e.target.value)}
                 className="w-4 h-4 rounded cursor-pointer bg-transparent border-0 p-0"
-                title="Text Highlight Color"
               />
             </div>
 
@@ -421,7 +383,7 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Lists & Dividers */}
+            {/* Lists & Divider */}
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('insertUnorderedList'); }}
@@ -442,7 +404,7 @@ export const TextToPdf = () => {
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('insertHorizontalRule'); }}
               className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-lg transition"
-              title="Horizontal Divider"
+              title="Divider Line"
             >
               <Minus className="w-3.5 h-3.5" />
             </button>
@@ -456,24 +418,22 @@ export const TextToPdf = () => {
             </button>
           </div>
 
-          {/* Authentic White Paper Desk Canvas */}
-          <div className="flex-1 bg-zinc-950/60 p-4 rounded-xl overflow-y-auto flex justify-center border border-zinc-800/80">
-            <div
-              ref={editorRef}
-              contentEditable
-              onInput={handleEditorInput}
-              spellCheck={true}
-              className="w-full max-w-[560px] bg-white text-zinc-900 rounded-sm shadow-2xl p-8 min-h-[600px] focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-              style={{
-                fontFamily,
-              }}
-            />
-          </div>
+          {/* Full-Height Document Editor Box */}
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleEditorInput}
+            spellCheck={true}
+            className="w-full flex-1 bg-white text-zinc-900 rounded-xl p-6 text-sm overflow-y-auto leading-relaxed shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+            style={{
+              fontFamily,
+            }}
+          />
         </div>
 
-        {/* Right: High-DPI Live Retina Preview */}
-        <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl backdrop-blur-xl shadow-2xl h-[700px] overflow-hidden flex flex-col">
-          <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/50">
+        {/* Right Side: High-DPI Preview (Matches Left Card Exactly) */}
+        <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl h-[660px] overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <span className="flex items-center gap-1.5">
               <span>High-DPI Retina Preview (Page 1)</span>
               {isRendering && <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />}
@@ -481,18 +441,20 @@ export const TextToPdf = () => {
             <span className="text-zinc-500">Total: {pageCount} {pageCount === 1 ? 'Page' : 'Pages'}</span>
           </div>
 
-          <div className="flex-1 overflow-auto p-6 bg-zinc-950/60 relative flex justify-center items-start">
+          {/* Symmetrical Preview Area */}
+          <div className="flex-1 overflow-auto p-4 bg-zinc-950/60 rounded-xl border border-zinc-800/80 relative flex justify-center items-start">
             <div
-              className="shadow-2xl rounded-sm border border-zinc-800 bg-white shrink-0 transition-transform duration-150"
               style={{
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top center',
+                transition: 'transform 0.15s ease-out',
               }}
+              className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-1"
             >
               <canvas
                 ref={canvasRef}
                 style={{
-                  width: pageSize === 'a4' ? '420px' : '432px',
+                  width: pageSize === 'a4' ? '390px' : '400px',
                   height: 'auto',
                   display: 'block',
                 }}
@@ -501,7 +463,7 @@ export const TextToPdf = () => {
           </div>
 
           {/* Zoom Adjuster */}
-          <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
+          <div className="absolute bottom-6 right-6 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
             <button
               onClick={handleZoomOut}
               disabled={zoom <= 0.5}
