@@ -75,7 +75,7 @@ const ComparePdf = lazy(() => import('./components/ComparePdf').then((m) => ({ d
 const RepairPdf = lazy(() => import('./components/RepairPdf').then((m) => ({ default: m.RepairPdf })));
 
 const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({ default: m.FillFormPdf })));// ✅ To this:
-const ImageToPdf = lazy(() => import('./components/ImageToPdf'));
+const ImageToPdf = lazy(() => import('./components/ImageToPdf').then((m) => ({ default: m.default })));
 const TextToPdf = lazy(() => import('./components/TextToPdf').then((m) => ({ default: m.TextToPdf })));
 const PdfToImages = lazy(() => import('./components/PdfToImages').then((m) => ({ default: m.PdfToImages })));
 const HeicToJpg = lazy(() => import('./components/HeicToJpg').then((m) => ({ default: m.HeicToJpg })));
