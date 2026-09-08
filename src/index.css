@@ -1,1 +1,67 @@
 @import "tailwindcss";
+
+/* Apple Clean Light Surface & Typography */
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", -apple-system, sans-serif !important;
+  background-color: #f5f5f7 !important;
+  color: #1d1d1f !important;
+}
+
+body,
+#root,
+.min-h-screen,
+main,
+section,
+div[class*="bg-black"],
+div[class*="bg-zinc-950"],
+div[class*="bg-zinc-900"] {
+  background-color: #f5f5f7 !important;
+  color: #1d1d1f !important;
+}
+
+/* Headings & Subtitles */
+h1, h2, h3, h4,
+[class*="text-white"],
+[class*="text-zinc-100"],
+[class*="text-zinc-200"] {
+  color: #1d1d1f !important;
+}
+
+[class*="text-zinc-400"],
+[class*="text-zinc-500"] {
+  color: #6e6e73 !important;
+}
+
+/* Apple Tool Buttons & Cards */
+div[class*="bg-zinc-900/"],
+div[class*="bg-zinc-800/"],
+div[class*="bg-zinc-800"],
+button:not([class*="bg-emerald"]):not([class*="bg-green"]) {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1d1d1f !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Tool Button Hover */
+button:hover:not([class*="bg-emerald"]):not([class*="bg-green"]) {
+  background-color: #1d1d1f !important;
+  color: #ffffff !important;
+  border-color: #1d1d1f !important;
+}
+
+/* Retain Green Status Indicators */
+[class*="text-emerald"], [class*="text-green"] {
+  color: #059669 !important;
+}
+
+[class*="bg-emerald-"], [class*="bg-green-"] {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+}
+
+/* Upload Dropzone */
+div[class*="border-dashed"] {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
