@@ -359,7 +359,7 @@ export default function App() {
 
       {/* Header: Responsive Mobile Layout */}
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 py-3 sm:py-4 border-b border-zinc-800/80">
-        <NavLink to="/" className="flex items-center gap-2.5 sm:gap-3 text-left">
+        <NavLink to="/" className="flex items-center justify-center gap-3 text-center sm:text-left">
           <img
             src="/logo.png"
             alt="1into1 Logo"
@@ -582,7 +582,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-center sm:text-left">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div className="leading-relaxed text-[11px]">
             <span>100% In-Browser. Zero Server Processing. Powered by </span>
             <span className="text-zinc-400">pdf-lib</span>,{' '}
