@@ -1288,8 +1288,12 @@ export async function compressPDF(
   const arrayBuffer = await file.arrayBuffer();
 
   if (level === 'recommended') {
-    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    try {
+      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+      return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    } catch {
+      // If direct save fails, proceed to standard compression
+    }
   }
 
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
@@ -1314,12 +1318,13 @@ export async function compressPDF(
     const unscaledViewport = page.getViewport({ scale: 1.0 });
 
     const pagesLeft = totalPages - pageNum + 1;
-    const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
+    // Prevent budget from ever becoming negative or zero
+    const budgetPerPage = Math.max(5000, Math.floor(remainingImageBudget / pagesLeft));
 
     const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-    // Keep canvas resolution sharp (scale >= 1.0) so text is never downsized into a blurry icon
-    let scale = Math.min(2.0, Math.max(1.0, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.05))));
-    let quality = Math.max(0.12, Math.min(0.85, budgetPerPage / 20000));
+    // Keep canvas scale at 1.0 minimum so text characters and numbers are never shrunken into blurry icons
+    let scale = Math.min(2.0, Math.max(1.0, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.04))));
+    let quality = Math.max(0.14, Math.min(0.85, budgetPerPage / 20000));
 
     let validBlob: Blob | null = null;
 
@@ -1355,21 +1360,21 @@ export async function compressPDF(
         if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
           break;
         }
-        const fillRatio = budgetPerPage / Math.max(blob.size, 1);
+        const fillRatio = Math.max(1.0, budgetPerPage / Math.max(blob.size, 1));
         scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
         quality = Math.min(0.88, quality + 0.05);
       } else {
-        const excessRatio = blob.size / budgetPerPage;
-        // Reduce JPEG compression quality first, keeping text resolution intact
-        quality = Math.max(0.10, quality / (Math.sqrt(excessRatio) * 1.05));
+        const excessRatio = Math.max(1.01, blob.size / budgetPerPage);
+        // Reduce JPEG compression quality first to keep physical resolution sharp
+        quality = Math.max(0.12, quality / (Math.sqrt(excessRatio) * 1.05));
         if (attempt >= 2) {
-          scale = Math.max(0.9, scale / (Math.sqrt(excessRatio) * 1.04));
+          scale = Math.max(0.95, scale / (Math.sqrt(excessRatio) * 1.04));
         }
       }
     }
 
     if (!validBlob) {
-      const viewport = page.getViewport({ scale: Math.max(0.9, scale * 0.8) });
+      const viewport = page.getViewport({ scale: Math.max(0.95, scale * 0.85) });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -1417,6 +1422,7 @@ export async function compressPDF(
 
   return outputBytes;
 }
+
 export interface PageConfig {
   originalIndex: number;
   rotation: number;
