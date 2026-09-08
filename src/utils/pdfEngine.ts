@@ -4688,7 +4688,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
   // Strip runaway scripts
   const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 
-  // Setting-Aware Normalization CSS (Ensures 10/10 results on Receipt, Landscape, and Portrait)
+  // Setting-Aware Normalization CSS (Ensures 10/10 single-page results)
   const NORMALIZATION_CSS = `
     * {
       box-sizing: border-box !important;
@@ -4725,11 +4725,11 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       page-break-inside: avoid !important;
     }
 
-    /* 10/10 SETTING-SPECIFIC OVERRIDES */
+    /* 10/10 SETTING-SPECIFIC OVERRIDES & SINGLE-PAGE CLAMPING */
     ${
       isReceipt
         ? `
-      /* Thermal Receipt Mode: Force compact vertical stacking so grids never squish */
+      /* Thermal Receipt Mode: Force compact vertical stacking */
       body {
         padding: 12px !important;
         font-size: 11px !important;
@@ -4743,12 +4743,14 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     `
         : isLandscape
         ? `
-      /* Landscape Mode: Center the app card gracefully with generous max-width */
+      /* Landscape Mode: Center and scale safely onto a single page */
       body {
-        padding: 48px 64px !important;
+        padding: 32px 48px !important;
         display: flex;
         justify-content: center;
         align-items: flex-start;
+        transform: scale(0.90);
+        transform-origin: top center;
       }
       > div, .max-w-xl, .max-w-2xl, .max-w-3xl {
         max-width: 840px !important;
@@ -4757,12 +4759,14 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       }
     `
         : `
-      /* Portrait A4 / Letter Mode: Standard pristine card centering */
+      /* Portrait A4 / Letter Mode: Center and scale safely onto a single page */
       body {
-        padding: 40px 32px !important;
+        padding: 24px 24px !important;
         display: flex;
         justify-content: center;
         align-items: flex-start;
+        transform: scale(0.92);
+        transform-origin: top center;
       }
       > div, .max-w-xl, .max-w-2xl {
         max-width: 680px !important;
@@ -4828,7 +4832,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         }
       });
       if (maxBottom > 50) {
-        actualContentHeight = Math.ceil(maxBottom + 32);
+        actualContentHeight = Math.ceil(maxBottom + 24);
       }
     }
 
@@ -4874,7 +4878,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             if (lum > maxLum) maxLum = lum;
 
             if (maxLum - minLum > 14) {
-              trueBottomPx = Math.min(h, y + 28);
+              trueBottomPx = Math.min(h, y + 20);
               break outer;
             }
           }
