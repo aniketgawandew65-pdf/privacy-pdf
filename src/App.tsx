@@ -338,7 +338,7 @@ export default function App() {
       : TOOLS_LIST.filter((tool) => tool.category === selectedCategory);
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f] flex flex-col items-center font-sans">
+   <div className="min-h-screen bg-black text-zinc-100 flex flex-col items-center font-sans">
       {/* Top Value / Announcement Banner */}
       <div className="w-full max-w-5xl mt-2 mb-2 py-2 px-4 rounded-xl bg-white border border-black/10 text-center text-[11px] sm:text-xs text-zinc-600 shadow-sm flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <span className="text-[#1d1d1f] font-medium">
@@ -464,20 +464,20 @@ export default function App() {
             {visibleTools.map((tool) => {
               const Icon = tool.icon;
               return (
-                <NavLink
-                  key={tool.path}
-                  to={tool.path}
-                  className={({ isActive }) =>
-                    `px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border whitespace-nowrap transition-all ${
-                      isActive || (tool.path === '/compress-pdf' && location.pathname === '/')
-                        ? 'bg-[#1d1d1f] text-white border-[#1d1d1f] shadow-sm'
-                        : 'bg-white text-[#1d1d1f] border-black/10 hover:border-black/30 hover:bg-zinc-50 shadow-sm'
-                    }`
-                  }
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{tool.name}</span>
-                </NavLink>
+               <NavLink
+  key={tool.path}
+  to={tool.path}
+  className={({ isActive }) =>
+    `px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border whitespace-nowrap transition-all ${
+      isActive || (tool.path === '/compress-pdf' && location.pathname === '/')
+        ? 'bg-zinc-800 text-emerald-400 border-zinc-700 shadow-sm'
+        : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900'
+    }`
+  }
+>
+  <Icon className="w-4 h-4" />
+  <span>{tool.name}</span>
+</NavLink>
               );
             })}
           </nav>
