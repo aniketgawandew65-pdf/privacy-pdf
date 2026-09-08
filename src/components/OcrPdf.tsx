@@ -37,6 +37,25 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
+  // Pre-warm offline files into browser cache on initial mount
+  useEffect(() => {
+    const prewarmOfflineCache = async () => {
+      try {
+        const assets = [
+          '/tessdata/worker.min.js',
+          '/tessdata/tesseract-core-simd-lstm.wasm.js',
+          '/tessdata/eng.traineddata.gz',
+        ];
+        assets.forEach((url) => {
+          fetch(url, { cache: 'force-cache' }).catch(() => {});
+        });
+      } catch {
+        // Silent catch: pre-warming failure should not block standard flow
+      }
+    };
+    prewarmOfflineCache();
+  }, []);
+
   useEffect(() => {
     if (!file) {
       setPageCount(0);
@@ -76,7 +95,7 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
-   } catch (err: any) {
+    } catch (err: any) {
       console.error('OCR Error:', err);
       setErrorMessage(err?.message || String(err) || 'Failed to OCR document.');
     } finally {

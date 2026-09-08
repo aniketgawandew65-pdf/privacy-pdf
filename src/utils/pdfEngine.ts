@@ -2534,9 +2534,6 @@ export async function ocrPDFToSearchable(
 
   onProgress?.({ status: 'Initializing Local OCR Engine...', progress: 10 });
 
-  // Use origin to ensure local files resolve reliably inside the Web Worker
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-
   const worker = await createWorker(language, 1, {
     workerPath: '/tessdata/worker.min.js',
     corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
