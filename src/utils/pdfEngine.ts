@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import {
   PDFDocument,
   degrees,
@@ -4649,7 +4650,7 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   return new Uint8Array(doc.output('arraybuffer'));
 }
 
-import html2canvas from 'html2canvas';
+
 
 // ============================================================================
 // 4. HTML / RECEIPT TO PDF ENGINE
@@ -4669,7 +4670,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
   const isReceipt = pageSize === 'receipt';
   const targetWidthPt = isReceipt
-    ? 226.77 // 80mm thermal receipt
+    ? 226.77 // 80mm standard thermal receipt
     : pageSize === 'letter'
     ? orientation === 'landscape'
       ? 792
@@ -4690,10 +4691,10 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
   const renderWidthPx = isReceipt ? 340 : orientation === 'landscape' ? 1120 : 800;
 
-  // 1. Strip dynamic scripts (three.js, particle animations, infinite loops) that cause 20,000px voids
+  // 1. Strip dynamic scripts (particles, Three.js, infinite canvas loops)
   const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 
-  // 2. Normalization CSS: clamps runaway canvases and constrains monster SVGs
+  // 2. Normalization CSS: clamps runaway heights, kills mesh canvases, constrains giant SVGs
   const NORMALIZATION_CSS = `
     * {
       box-sizing: border-box !important;
@@ -4704,16 +4705,24 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 !important;
-      overflow: visible !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+      height: auto !important;
+      min-height: 0 !important;
     }
-    /* Hide infinite background canvases (particles, webgl mesh grids) */
+    /* Disable runaway animation/mesh background canvases */
     canvas {
       display: none !important;
     }
-    /* Constrain oversized vector logos & hero SVGs from taking up entire pages */
+    /* Prevent 100vh from expanding infinite layout chains in iframe */
+    [style*="height: 100vh"], [style*="min-height: 100vh"], .h-screen, .min-h-screen {
+      height: auto !important;
+      min-height: auto !important;
+    }
+    /* Constrain monster SVGs and logos to reasonable banner sizes */
     svg {
       max-width: 100% !important;
-      max-height: 140px !important;
+      max-height: 120px !important;
       height: auto !important;
       object-fit: contain !important;
     }
@@ -4722,24 +4731,22 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       height: auto !important;
       object-fit: contain !important;
     }
-    /* Unstick fixed navigation headers so they don't corrupt coordinate math */
     header, nav, [style*="position: fixed"], [style*="position:fixed"] {
       position: relative !important;
     }
-    /* Avoid cutting cards and sections mid-element */
     section, .card, table, tr, [class*="card"], [class*="box"] {
       break-inside: avoid !important;
       page-break-inside: avoid !important;
     }
   `;
 
-  // 3. Isolated sandbox container positioned at top-left behind viewport
+  // 3. Isolated sandbox container at top-left
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
   iframe.style.width = `${renderWidthPx}px`;
-  iframe.style.height = '1200px';
+  iframe.style.height = '1000px';
   iframe.style.zIndex = '-99999';
   iframe.style.border = 'none';
   iframe.style.opacity = '0';
@@ -4766,7 +4773,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             <style>
               ${NORMALIZATION_CSS}
               body {
-                padding: ${isReceipt ? '12px' : '28px'};
+                padding: ${isReceipt ? '12px' : '32px'};
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 color: #18181b;
                 background: #ffffff;
@@ -4785,11 +4792,11 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     }
     doc.close();
 
-    // Allow styles, fonts, and DOM layout to settle
+    // Allow styles, fonts, and DOM layout to compute
     await new Promise((resolve) => setTimeout(resolve, 350));
 
-    // 4. Calculate actual visible content height (clamps ghost heights)
-    let actualContentHeight = doc.body.scrollHeight;
+    // Calculate actual bounds of real DOM children
+    let actualContentHeight = doc.body.offsetHeight;
     const allElements = doc.body.querySelectorAll('*');
     if (allElements.length > 0) {
       let maxBottom = 0;
@@ -4799,19 +4806,19 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
           maxBottom = rect.bottom;
         }
       });
-      if (maxBottom > 80) {
-        actualContentHeight = Math.min(actualContentHeight, Math.ceil(maxBottom + 40));
+      if (maxBottom > 50) {
+        actualContentHeight = Math.ceil(maxBottom + 24);
       }
     }
 
     iframe.style.height = `${actualContentHeight}px`;
 
-    // 5. Render DOM via local html2canvas
-    const canvas = await html2canvas(doc.body, {
+    // 4. Render DOM to raw canvas
+    const rawCanvas = await html2canvas(doc.body, {
       scale: 2,
       useCORS: true,
       allowTaint: false,
-      backgroundColor: null, // Preserves natural dark or light background
+      backgroundColor: null,
       logging: false,
       width: renderWidthPx,
       height: actualContentHeight,
@@ -4821,10 +4828,77 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       x: 0,
     });
 
-    // 6. Export Thermal Receipt (Single continuous page)
+    // 5. Intelligent Pixel Scanner: Trim trailing empty vertical space
+    // Prevents trailing black / blank overflow pages
+    let trueBottomPx = rawCanvas.height;
+    const rawCtx = rawCanvas.getContext('2d');
+    if (rawCtx) {
+      try {
+        const imgData = rawCtx.getImageData(0, 0, rawCanvas.width, rawCanvas.height);
+        const data = imgData.data;
+        const w = rawCanvas.width;
+        const h = rawCanvas.height;
+
+        outer: for (let y = h - 1; y >= 0; y -= 4) {
+          let minLum = 255;
+          let maxLum = 0;
+          const rowStart = y * w * 4;
+
+          for (let x = 0; x < w; x += 16) {
+            const idx = rowStart + x * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            if (lum < minLum) minLum = lum;
+            if (lum > maxLum) maxLum = lum;
+
+            if (maxLum - minLum > 14) {
+              trueBottomPx = Math.min(h, y + 24);
+              break outer;
+            }
+          }
+        }
+      } catch {
+        // Fallback to raw height if pixel inspection is prevented
+        trueBottomPx = rawCanvas.height;
+      }
+    }
+
+    // Crop raw canvas down to the true bottom
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = rawCanvas.width;
+    croppedCanvas.height = Math.max(100, trueBottomPx);
+    const croppedCtx = croppedCanvas.getContext('2d');
+    if (croppedCtx) {
+      croppedCtx.drawImage(
+        rawCanvas,
+        0,
+        0,
+        rawCanvas.width,
+        croppedCanvas.height,
+        0,
+        0,
+        rawCanvas.width,
+        croppedCanvas.height
+      );
+    }
+
+    // Determine default background color from document body
+    const bodyBg = window.getComputedStyle(doc.body).backgroundColor;
+    const isDarkBg =
+      bodyBg.includes('rgb(0,') ||
+      bodyBg.includes('rgb(9,') ||
+      bodyBg.includes('rgb(15,') ||
+      bodyBg.includes('rgb(24,') ||
+      bodyBg.includes('rgba(0,');
+
+    const sliceFillColor = isDarkBg ? '#09090b' : '#ffffff';
+
+    // 6. Export Thermal Receipt (Continuous single-page)
     if (isReceipt) {
-      const receiptHeightPt = Math.max(120, (canvas.height / canvas.width) * targetWidthPt);
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const receiptHeightPt = Math.max(100, (croppedCanvas.height / croppedCanvas.width) * targetWidthPt);
+      const imgData = croppedCanvas.toDataURL('image/jpeg', 0.95);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'pt',
@@ -4834,15 +4908,15 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // 7. Multi-Page Canvas Slicing (Prevents image bleed and memory bloat)
+    // 7. Multi-Page Slice Export
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
       format: pageSize,
     });
 
-    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * canvas.width);
-    const totalPages = Math.ceil(canvas.height / pageHeightPx);
+    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * croppedCanvas.width);
+    const totalPages = Math.max(1, Math.ceil(croppedCanvas.height / pageHeightPx));
 
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
       if (pageIdx > 0) {
@@ -4850,26 +4924,25 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       }
 
       const sourceY = pageIdx * pageHeightPx;
-      const currentSliceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+      const currentSliceHeight = Math.min(pageHeightPx, croppedCanvas.height - sourceY);
 
       const sliceCanvas = document.createElement('canvas');
-      sliceCanvas.width = canvas.width;
+      sliceCanvas.width = croppedCanvas.width;
       sliceCanvas.height = pageHeightPx;
       const sliceCtx = sliceCanvas.getContext('2d');
 
       if (sliceCtx) {
-        // Draw the background color for short final pages
-        sliceCtx.fillStyle = '#0f172a';
+        sliceCtx.fillStyle = sliceFillColor;
         sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
         sliceCtx.drawImage(
-          canvas,
+          croppedCanvas,
           0,
           sourceY,
-          canvas.width,
+          croppedCanvas.width,
           currentSliceHeight,
           0,
           0,
-          canvas.width,
+          croppedCanvas.width,
           currentSliceHeight
         );
 
