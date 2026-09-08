@@ -23,6 +23,21 @@ if (typeof window !== 'undefined' && 'Worker' in window) {
     import.meta.url
   ).toString();
 }
+/**
+ * Safely loads a PDF and verifies whether it has internal encryption dictionaries.
+ * Prevents pdf-lib from saving corrupt files when encryption is present.
+ */
+export async function loadSafe(
+  bytes: ArrayBuffer
+): Promise<{ doc: PDFDocument; isEncrypted: boolean }> {
+  try {
+    const doc = await PDFDocument.load(bytes);
+    return { doc, isEncrypted: doc.isEncrypted };
+  } catch {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    return { doc, isEncrypted: true };
+  }
+}
 
 /**
  * Fast scanner: detects whether a PDF contains encryption, digital signatures,
@@ -269,17 +284,72 @@ export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
   return await pdfDoc.save();
 }
 
-export async function rotatePDF(file: File, rotationAngle: number): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  const pages = pdfDoc.getPages();
+export async function rotatePDF(
+  file: File,
+  rotations: Record<number, number> | number
+): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  const { doc, isEncrypted } = await loadSafe(arrayBuffer);
 
-  for (const page of pages) {
-    const currentAngle = page.getRotation().angle;
-    page.setRotation(degrees((currentAngle + rotationAngle) % 360));
+  // If the document has internal encryption, pdf-lib cannot re-encrypt or save
+  // vector streams without corruption. Route through the clean rendering path.
+  if (isEncrypted) {
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+    const pdf = await loadingTask.promise;
+    const totalPages = pdf.numPages;
+    const newPdfDoc = await PDFDocument.create();
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const angle = typeof rotations === 'number' ? rotations : (rotations[pageNum] || 0);
+      const viewport = page.getViewport({ scale: 2.0, rotation: ((angle % 360) + 360) % 360 });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
+
+        const blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92)
+        );
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await blob.arrayBuffer();
+        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+        const newPage = newPdfDoc.addPage([viewport.width / 2.0, viewport.height / 2.0]);
+        newPage.drawImage(embeddedImg, {
+          x: 0,
+          y: 0,
+          width: viewport.width / 2.0,
+          height: viewport.height / 2.0,
+        });
+      }
+      try { page.cleanup(); } catch {}
+    }
+    return await newPdfDoc.save({ useObjectStreams: false });
   }
 
-  return await pdfDoc.save();
+  // Standard unencrypted vector path (fast & 100% lossless)
+  const pages = doc.getPages();
+  pages.forEach((page, idx) => {
+    const pageNum = idx + 1;
+    const additionalAngle = typeof rotations === 'number' ? rotations : (rotations[pageNum] || 0);
+    if (additionalAngle !== 0) {
+      const currentRotation = page.getRotation().angle;
+      const finalAngle = ((currentRotation + additionalAngle) % 360 + 360) % 360;
+      page.setRotation(degrees(finalAngle));
+    }
+  });
+
+  return await doc.save({ useObjectStreams: false });
 }
 
 export async function pdfToImages(file: File): Promise<string[]> {
@@ -1281,6 +1351,7 @@ export async function unlockPDF(
  * Calibrated target-size compression matching the user's slider target within ±5-10 KB.
  */
 
+// ✅ Replace that top section with this:
 export async function compressPDF(
   file: File,
   options: CompressOptions
@@ -1288,9 +1359,14 @@ export async function compressPDF(
   const { level, targetKb = 200, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
 
+  // Safely inspect encryption before attempting any direct pdf-lib vector saves
+  const { doc: safeDoc, isEncrypted } = await loadSafe(arrayBuffer);
+
   if (level === 'recommended') {
-    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    if (!isEncrypted) {
+      return await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
+    }
+    // If encrypted, bypass direct pdf-lib save to prevent corrupting the document
   }
 
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
@@ -1299,10 +1375,9 @@ export async function compressPDF(
 
   const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
 
-  // SAFEGUARD: High-density digital vector documents (e.g. 4,938 pages with < 25 KB/page)
-  // Converting dense vector code into raster images destroys readability and freezes the tab.
+  // SAFEGUARD: High-density digital vector documents with < 25 KB/page
   const kbPerPage = (targetBytes / 1024) / totalPages;
-  if (kbPerPage < 25) {
+  if (kbPerPage < 25 && !isEncrypted) {
     onProgress?.({
       currentPage: 1,
       totalPages,
@@ -1310,24 +1385,22 @@ export async function compressPDF(
     });
 
     try {
-      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-      let vectorBytes = await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+      let vectorBytes = await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
 
-      // If level is target, preserve exact target size matching via padding stream
       if (level === 'target' && targetBytes > vectorBytes.length) {
         const diff = targetBytes - vectorBytes.length;
         if (diff > 1024) {
           const padCount = Math.max(0, diff - 78);
           if (padCount > 0) {
-            const rawPadStream = (pdfDoc.context as any).stream(new Uint8Array(padCount));
-            pdfDoc.context.register(rawPadStream);
-            vectorBytes = await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+            const rawPadStream = (safeDoc.context as any).stream(new Uint8Array(padCount));
+            safeDoc.context.register(rawPadStream);
+            vectorBytes = await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
           }
         }
       }
       return vectorBytes;
     } catch {
-      // If direct vector parsing fails, fall through to canvas engine
+      // Fall through to rasterizer loop if vector stream write fails
     }
   }
 
@@ -1641,73 +1714,77 @@ export interface CropBox {
 
 export async function cropPDF(
   file: File,
-  cropData: CropBox | Record<number, CropBox>,
-  applyToAllPages: boolean = true,
-  targetPageIndex: number = 0
+  pageBoxes: Record<number, { x: number; y: number; width: number; height: number }>,
+  applyToAll: boolean = false
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-  const pages = pdfDoc.getPages();
+  const { doc, isEncrypted } = await loadSafe(arrayBuffer);
 
-  pages.forEach((page, index) => {
-    let box: CropBox | null = null;
+  const firstBox = pageBoxes[1] || Object.values(pageBoxes)[0];
 
-    if ('x' in cropData) {
-      if (applyToAllPages || index === targetPageIndex) {
-        box = cropData;
+  if (isEncrypted) {
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+    const pdf = await loadingTask.promise;
+    const totalPages = pdf.numPages;
+    const newPdfDoc = await PDFDocument.create();
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const box = applyToAll ? firstBox : (pageBoxes[pageNum] || firstBox);
+
+      if (!box) continue;
+
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(box.width * 2.0));
+      canvas.height = Math.max(1, Math.floor(box.height * 2.0));
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await (page.render({
+          canvasContext: ctx as any,
+          viewport,
+          transform: [1, 0, 0, 1, -box.x * 2.0, -box.y * 2.0] as any,
+          canvas,
+        } as any) as any).promise;
+
+        const blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92)
+        );
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const imgBytes = await blob.arrayBuffer();
+        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+        const newPage = newPdfDoc.addPage([box.width, box.height]);
+        newPage.drawImage(embeddedImg, {
+          x: 0,
+          y: 0,
+          width: box.width,
+          height: box.height,
+        });
       }
-    } else {
-      const pageNum = index + 1;
-      box = cropData[pageNum] || (applyToAllPages ? cropData[1] || Object.values(cropData)[0] : null);
+      try { page.cleanup(); } catch {}
     }
+    return await newPdfDoc.save({ useObjectStreams: false });
+  }
 
-    if (!box) return;
-
-    const mediaBox = page.getMediaBox();
-    const rotation = ((page.getRotation().angle % 360) + 360) % 360;
-
-    const mbX = mediaBox.x;
-    const mbY = mediaBox.y;
-    const mbW = mediaBox.width;
-    const mbH = mediaBox.height;
-
-    const safeW = Math.max(0.01, Math.min(1, box.width));
-    const safeH = Math.max(0.01, Math.min(1, box.height));
-    const safeX = Math.max(0, Math.min(1 - safeW, box.x));
-    const safeY = Math.max(0, Math.min(1 - safeH, box.y));
-
-    let finalX = mbX;
-    let finalY = mbY;
-    let finalW = mbW;
-    let finalH = mbH;
-
-    if (rotation === 0) {
-      finalX = mbX + safeX * mbW;
-      finalY = mbY + (1 - (safeY + safeH)) * mbH;
-      finalW = safeW * mbW;
-      finalH = safeH * mbH;
-    } else if (rotation === 90) {
-      finalX = mbX + (1 - (safeY + safeH)) * mbW;
-      finalY = mbY + (1 - (safeX + safeW)) * mbH;
-      finalW = safeH * mbW;
-      finalH = safeW * mbH;
-    } else if (rotation === 180) {
-      finalX = mbX + (1 - (safeX + safeW)) * mbW;
-      finalY = mbY + safeY * mbH;
-      finalW = safeW * mbW;
-      finalH = safeH * mbH;
-    } else if (rotation === 270) {
-      finalX = mbX + safeY * mbW;
-      finalY = mbY + safeX * mbH;
-      finalW = safeH * mbW;
-      finalH = safeW * mbH;
+  // Standard unencrypted vector path
+  const pages = doc.getPages();
+  pages.forEach((page, idx) => {
+    const pageNum = idx + 1;
+    const box = applyToAll ? firstBox : (pageBoxes[pageNum] || firstBox);
+    if (box) {
+      page.setCropBox(box.x, box.y, box.width, box.height);
     }
-
-    page.setCropBox(finalX, finalY, finalW, finalH);
-    page.setMediaBox(finalX, finalY, finalW, finalH);
   });
 
-  return await pdfDoc.save({ useObjectStreams: false });
+  return await doc.save({ useObjectStreams: false });
 }
 
 export interface FormFieldData {
