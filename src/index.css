@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
-/* Apple Clean Light Surface & Typography */
+/* 1. Global Apple Base Canvas & Font Stack */
 html, body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", -apple-system, sans-serif !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", sans-serif !important;
   background-color: #f5f5f7 !important;
   color: #1d1d1f !important;
 }
@@ -12,19 +12,17 @@ body,
 .min-h-screen,
 main,
 section,
-div.min-h-screen,
-div[class*="bg-black"],
-div[class*="bg-zinc-950"],
-div[class*="bg-zinc-900"] {
+div.min-h-screen {
   background-color: #f5f5f7 !important;
   color: #1d1d1f !important;
 }
 
-/* Headings & Subtitles */
+/* 2. Apple Headings & Typography */
 h1, h2, h3, h4,
-[class*="text-white"],
+p, span, label,
 [class*="text-zinc-100"],
-[class*="text-zinc-200"] {
+[class*="text-zinc-200"],
+[class*="text-zinc-300"] {
   color: #1d1d1f !important;
 }
 
@@ -33,86 +31,101 @@ h1, h2, h3, h4,
   color: #6e6e73 !important;
 }
 
-/* Apple Tool Buttons & Cards (Fix dark tool grid buttons) */
-div[class*="bg-zinc-900/"],
-div[class*="bg-zinc-800/"],
-div[class*="bg-zinc-900"],
-div[class*="bg-zinc-800"],
-button[class*="bg-zinc-800"],
-button[class*="bg-zinc-900"],
-button[class*="bg-zinc-700"] {
-  background-color: #ffffff !important;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
-  color: #1d1d1f !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+/* 3. Keep Green Accents & Security Badges Crisp */
+[class*="text-emerald"], 
+[class*="text-green"] {
+  color: #059669 !important;
 }
 
-/* Tool Buttons SVG icons & text */
-button[class*="bg-zinc-800"] svg,
-button[class*="bg-zinc-900"] svg,
-button[class*="bg-zinc-700"] svg,
-button[class*="bg-zinc-800"] span,
-button[class*="bg-zinc-900"] span {
+/* 4. Top Header Auditor Pill (Fixing 0 BYTES TRANSMITTED visibility) */
+header div,
+header [class*="rounded-full"] {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: #1d1d1f !important;
+}
+
+header [class*="text-zinc"],
+header [class*="font-mono"],
+header span {
+  color: #1d1d1f !important;
+}
+
+/* 5. Tool Grid Buttons -> Apple Crisp White Cards */
+.grid button,
+div[class*="grid"] button,
+button[class*="rounded-xl"],
+button[class*="rounded-lg"],
+button[class*="bg-zinc"] {
+  background-color: #ffffff !important;
+  background-image: none !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  color: #1d1d1f !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Force All Tool Button SVGs & Text to Sharp Black */
+.grid button *,
+div[class*="grid"] button *,
+button[class*="rounded-xl"] *,
+button[class*="rounded-lg"] * {
   color: #1d1d1f !important;
   stroke: #1d1d1f !important;
+  fill: none;
 }
 
-/* Active Tool Button (Compress) */
-button[class*="bg-emerald-950"],
-button[class*="border-emerald-500"],
-button[class*="bg-emerald-500/20"] {
+/* 6. Active Tool Button (Compress) -> Jet Black with Emerald Accent */
+button[class*="bg-emerald"],
+button[class*="border-emerald"],
+.grid button[class*="emerald"],
+div[class*="grid"] button[class*="emerald"] {
   background-color: #000000 !important;
   border-color: #000000 !important;
   color: #ffffff !important;
 }
 
-button[class*="bg-emerald-950"] svg,
-button[class*="border-emerald-500"] svg,
-button[class*="bg-emerald-950"] span,
-button[class*="border-emerald-500"] span {
+button[class*="bg-emerald"] *,
+button[class*="border-emerald"] *,
+.grid button[class*="emerald"] *,
+div[class*="grid"] button[class*="emerald"] * {
   color: #ffffff !important;
   stroke: #ffffff !important;
 }
 
-/* Tool Button Hover */
-button[class*="bg-zinc-800"]:hover,
-button[class*="bg-zinc-900"]:hover,
-button[class*="bg-zinc-700"]:hover {
+button[class*="bg-emerald"] [class*="text-emerald"],
+button[class*="border-emerald"] [class*="text-emerald"],
+.grid button[class*="emerald"] svg,
+div[class*="grid"] button[class*="emerald"] svg {
+  color: #10b981 !important;
+  stroke: #10b981 !important;
+}
+
+/* 7. Hover Effect on All Inactive Tool Buttons (Apple Dark Inversion) */
+.grid button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
+div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
+button[class*="rounded-xl"]:hover:not([class*="emerald"]),
+button[class*="rounded-lg"]:hover:not([class*="emerald"]) {
   background-color: #000000 !important;
   border-color: #000000 !important;
   color: #ffffff !important;
 }
 
-button[class*="bg-zinc-800"]:hover svg,
-button[class*="bg-zinc-900"]:hover svg,
-button[class*="bg-zinc-700"]:hover svg,
-button[class*="bg-zinc-800"]:hover span,
-button[class*="bg-zinc-900"]:hover span {
+.grid button:hover:not([class*="emerald"]) *,
+div[class*="grid"] button:hover:not([class*="emerald"]) *,
+button[class*="rounded-xl"]:hover:not([class*="emerald"]) *,
+button[class*="rounded-lg"]:hover:not([class*="emerald"]) * {
   color: #ffffff !important;
   stroke: #ffffff !important;
 }
 
-/* Fix Top Right Security Auditor Pill & Network Stats */
-div[class*="font-mono"],
-header [class*="text-zinc"],
-header [class*="text-white"] {
-  color: #1d1d1f !important;
+/* 8. Main Dropzone & Cards */
+div[class*="border-dashed"] {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.16) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04) !important;
 }
 
-header div[class*="border"] {
-  border-color: rgba(0, 0, 0, 0.12) !important;
-  background-color: #ffffff !important;
-}
-
-/* Dropzone & Control Panels */
-div[class*="border-dashed"],
-div[class*="rounded-3xl"],
-div[class*="rounded-2xl"] {
-  background-color: #ffffff !important;
-}
-
-/* Badges & Trust Banner */
-div[class*="rounded-full"][class*="border"] {
-  background-color: #ffffff !important;
+div[class*="rounded-2xl"],
+div[class*="rounded-3xl"] {
   border-color: rgba(0, 0, 0, 0.1) !important;
 }
