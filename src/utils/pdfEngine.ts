@@ -4653,6 +4653,8 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
 // ============================================================================
 // 4. HTML / RECEIPT TO PDF ENGINE (10/10 Optimized for All 3 Settings)
 // ============================================================================
+
+
 export interface HtmlToPdfOptions {
   html: string;
   pageSize?: 'receipt' | 'a4' | 'letter';
@@ -4663,15 +4665,15 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
   const { html, pageSize = 'a4', orientation = 'portrait' } = options;
 
   if (!html || !html.trim()) {
-    throw new Error('No HTML content provided to convert.');
+    throw new Error('No content provided to convert.');
   }
 
   const isReceipt = pageSize === 'receipt';
   const isLandscape = orientation === 'landscape' && !isReceipt;
 
-  // Exact target dimensions in points (pt)
+  // Standard document dimensions in points (pt)
   const targetWidthPt = isReceipt
-    ? 226.77 // 80mm Thermal Receipt
+    ? 226.77
     : pageSize === 'letter'
     ? isLandscape ? 792 : 612
     : isLandscape ? 841.89 : 595.28;
@@ -4682,13 +4684,11 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     ? isLandscape ? 612 : 792
     : isLandscape ? 595.28 : 841.89;
 
-  // Tailored render width in pixels to prevent squishing per mode
-  const renderWidthPx = isReceipt ? 340 : isLandscape ? 1180 : 800;
-
-  // Strip runaway scripts
+  // 794px is exact standard 96-DPI A4 width
+  const renderWidthPx = isReceipt ? 340 : isLandscape ? 1123 : 794;
   const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 
-  // Setting-Aware Normalization CSS (Ensures 10/10 single-page results)
+  // Strict 1:1 Document Flow CSS (No flex, no squishing, full-width coverage)
   const NORMALIZATION_CSS = `
     * {
       box-sizing: border-box !important;
@@ -4697,93 +4697,41 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     }
     html, body {
       width: 100% !important;
-      max-width: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
-      overflow: hidden !important;
-      height: auto !important;
-      min-height: 0 !important;
-      background: transparent !important;
+      background: #ffffff !important;
+      color: #111827 !important;
+      display: block !important;
+      overflow: visible !important;
     }
-    canvas {
-      display: none !important;
+    table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      margin: 12px 0 !important;
     }
-    [style*="height: 100vh"], [style*="min-height: 100vh"], .h-screen, .min-h-screen {
-      height: auto !important;
-      min-height: auto !important;
+    th, td {
+      border: 1px solid #d1d5db !important;
+      padding: 6px 10px !important;
     }
-    svg, img {
+    th {
+      background-color: #f3f4f6 !important;
+      font-weight: bold !important;
+    }
+    img, svg {
       max-width: 100% !important;
       height: auto !important;
-      object-fit: contain !important;
     }
-    header, nav, [style*="position: fixed"], [style*="position:fixed"] {
-      position: relative !important;
-    }
-    section, .card, table, tr, [class*="card"], [class*="box"] {
-      break-inside: avoid !important;
-      page-break-inside: avoid !important;
-    }
-
-    /* 10/10 SETTING-SPECIFIC OVERRIDES & SINGLE-PAGE CLAMPING */
-    ${
-      isReceipt
-        ? `
-      /* Thermal Receipt Mode: Force compact vertical stacking */
-      body {
-        padding: 12px !important;
-        font-size: 11px !important;
-      }
-      div[style*="grid"], .grid {
-        display: block !important;
-      }
-      div[style*="grid"] > div, .grid > div {
-        margin-bottom: 8px !important;
-      }
-    `
-        : isLandscape
-        ? `
-      /* Landscape Mode: Center and scale safely onto a single page */
-      body {
-        padding: 32px 48px !important;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        transform: scale(0.90);
-        transform-origin: top center;
-      }
-      > div, .max-w-xl, .max-w-2xl, .max-w-3xl {
-        max-width: 840px !important;
-        width: 100% !important;
-        margin: 0 auto !important;
-      }
-    `
-        : `
-      /* Portrait A4 / Letter Mode: Center and scale safely onto a single page */
-      body {
-        padding: 24px 24px !important;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        transform: scale(0.92);
-        transform-origin: top center;
-      }
-      > div, .max-w-xl, .max-w-2xl {
-        max-width: 680px !important;
-        width: 100% !important;
-        margin: 0 auto !important;
-      }
-    `
+    p, div, span, h1, h2, h3, h4, h5, h6 {
+      word-break: break-word !important;
     }
   `;
 
-  // Sandbox iframe setup
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
   iframe.style.width = `${renderWidthPx}px`;
-  iframe.style.height = '1200px';
+  iframe.style.height = '1123px';
   iframe.style.zIndex = '-99999';
   iframe.style.border = 'none';
   iframe.style.opacity = '0';
@@ -4794,56 +4742,30 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) throw new Error('Failed to initialize rendering sandbox.');
 
-    const isFullDoc = /<html[\s>]/i.test(sanitizedHtml) || /<!doctype/i.test(sanitizedHtml);
     doc.open();
-    if (isFullDoc) {
-      const styledDoc = sanitizedHtml.includes('</head>')
-        ? sanitizedHtml.replace('</head>', `<style>${NORMALIZATION_CSS}</style></head>`)
-        : `<style>${NORMALIZATION_CSS}</style>` + sanitizedHtml;
-      doc.write(styledDoc);
-    } else {
-      doc.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <style>
-              ${NORMALIZATION_CSS}
-            </style>
-          </head>
-          <body>${sanitizedHtml}</body>
-        </html>
-      `);
-    }
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>${NORMALIZATION_CSS}</style>
+        </head>
+        <body>${sanitizedHtml}</body>
+      </html>
+    `);
     doc.close();
 
-    // Allow DOM layout to settle
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    // Allow DOM to compute full layout
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // Calculate content height
-    let actualContentHeight = doc.body.offsetHeight;
-    const allElements = doc.body.querySelectorAll('*');
-    if (allElements.length > 0) {
-      let maxBottom = 0;
-      allElements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        if (rect.bottom > maxBottom && rect.height > 0) {
-          maxBottom = rect.bottom;
-        }
-      });
-      if (maxBottom > 50) {
-        actualContentHeight = Math.ceil(maxBottom + 24);
-      }
-    }
-
+    const actualContentHeight = Math.max(1123, doc.body.scrollHeight || doc.body.offsetHeight);
     iframe.style.height = `${actualContentHeight}px`;
 
-    // Render DOM to canvas
     const rawCanvas = await html2canvas(doc.body, {
       scale: 2,
       useCORS: true,
       allowTaint: false,
-      backgroundColor: '#ffffff', // Ensures documents are never transparent voids
+      backgroundColor: '#ffffff',
       logging: false,
       width: renderWidthPx,
       height: actualContentHeight,
@@ -4853,63 +4775,10 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       x: 0,
     });
 
-    // Intelligent Pixel Scanner: Removes trailing blank space / black voids
-    let trueBottomPx = rawCanvas.height;
-    const rawCtx = rawCanvas.getContext('2d');
-    if (rawCtx) {
-      try {
-        const imgData = rawCtx.getImageData(0, 0, rawCanvas.width, rawCanvas.height);
-        const data = imgData.data;
-        const w = rawCanvas.width;
-        const h = rawCanvas.height;
-
-        outer: for (let y = h - 1; y >= 0; y -= 4) {
-          let minLum = 255;
-          let maxLum = 0;
-          const rowStart = y * w * 4;
-
-          for (let x = 0; x < w; x += 16) {
-            const idx = rowStart + x * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-            if (lum < minLum) minLum = lum;
-            if (lum > maxLum) maxLum = lum;
-
-            if (maxLum - minLum > 14) {
-              trueBottomPx = Math.min(h, y + 20);
-              break outer;
-            }
-          }
-        }
-      } catch {
-        trueBottomPx = rawCanvas.height;
-      }
-    }
-
-    const croppedCanvas = document.createElement('canvas');
-    croppedCanvas.width = rawCanvas.width;
-    croppedCanvas.height = Math.max(100, trueBottomPx);
-    const croppedCtx = croppedCanvas.getContext('2d');
-    if (croppedCtx) {
-      croppedCtx.drawImage(
-        rawCanvas,
-        0,
-        0,
-        rawCanvas.width,
-        croppedCanvas.height,
-        0,
-        0,
-        rawCanvas.width,
-        croppedCanvas.height
-      );
-    }
-
-    // Thermal Receipt Export (Single continuous sheet)
+    // 80mm Thermal Receipt continuous output
     if (isReceipt) {
-      const receiptHeightPt = Math.max(100, (croppedCanvas.height / croppedCanvas.width) * targetWidthPt);
-      const imgData = croppedCanvas.toDataURL('image/jpeg', 0.95);
+      const receiptHeightPt = Math.max(100, (rawCanvas.height / rawCanvas.width) * targetWidthPt);
+      const imgData = rawCanvas.toDataURL('image/jpeg', 0.98);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'pt',
@@ -4919,56 +4788,49 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // A4 / Letter Export (Portrait & Landscape cleanly sliced with white background)
+    // A4 / Letter Multi-Page Export
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
       format: pageSize,
     });
 
-    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * croppedCanvas.width);
-    const totalPages = Math.max(1, Math.ceil(croppedCanvas.height / pageHeightPx));
+    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * rawCanvas.width);
+    const totalPages = Math.max(1, Math.ceil(rawCanvas.height / pageHeightPx));
 
     for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
-      if (pageIdx > 0) {
-        pdf.addPage();
-      }
+      if (pageIdx > 0) pdf.addPage();
 
       const sourceY = pageIdx * pageHeightPx;
-      const currentSliceHeight = Math.min(pageHeightPx, croppedCanvas.height - sourceY);
+      const currentSliceHeight = Math.min(pageHeightPx, rawCanvas.height - sourceY);
 
       const sliceCanvas = document.createElement('canvas');
-      sliceCanvas.width = croppedCanvas.width;
+      sliceCanvas.width = rawCanvas.width;
       sliceCanvas.height = pageHeightPx;
       const sliceCtx = sliceCanvas.getContext('2d');
 
       if (sliceCtx) {
-        sliceCtx.fillStyle = '#ffffff'; // Always clean white paper
+        sliceCtx.fillStyle = '#ffffff';
         sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
         sliceCtx.drawImage(
-          croppedCanvas,
+          rawCanvas,
           0,
           sourceY,
-          croppedCanvas.width,
+          rawCanvas.width,
           currentSliceHeight,
           0,
           0,
-          croppedCanvas.width,
+          rawCanvas.width,
           currentSliceHeight
         );
 
-        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.95);
+        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.98);
         pdf.addImage(sliceData, 'JPEG', 0, 0, targetWidthPt, targetHeightPt);
       }
-
-      sliceCanvas.width = 0;
-      sliceCanvas.height = 0;
     }
 
     return new Uint8Array(pdf.output('arraybuffer'));
   } finally {
-    if (iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
-    }
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
   }
 }
