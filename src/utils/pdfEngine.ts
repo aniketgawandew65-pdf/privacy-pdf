@@ -690,91 +690,100 @@ export async function addWatermarkToPDF(
     compositeCanvas.height = pHeight;
     const ctx = compositeCanvas.getContext('2d');
 
-    if (ctx) {
-      const pageImg = new Image();
+    // Prevent silent page drops if context fails to allocate
+    if (!ctx) {
+      throw new Error(`Failed to allocate 2D canvas context for page ${i}. Browser graphics memory may be exhausted.`);
+    }
+
+    const pageImg = new Image();
+    await new Promise<void>((resolve) => {
+      pageImg.onload = () => {
+        ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
+        URL.revokeObjectURL(pageImg.src); // Free blob reference immediately
+        resolve();
+      };
+      pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
+    });
+
+    ctx.save();
+    ctx.globalAlpha = opacity;
+
+    // Position mapping matching UI preview coordinates exactly
+    let posX = pWidth / 2;
+    let posY = pHeight / 2;
+    if (options.position === 'top') posY = pHeight * 0.14;
+    if (options.position === 'bottom') posY = pHeight * 0.86;
+
+    ctx.translate(posX, posY);
+    ctx.rotate((angleDeg * Math.PI) / 180);
+
+    if (options.type === 'text' && options.text?.trim()) {
+      // Normalized scale matching the 460px UI preview container
+      const scaleNormalization = pWidth / 460;
+      const finalFontSize = (options.fontSize ?? 48) * scaleNormalization;
+
+      let fontFamilyCSS = 'Helvetica, Arial, sans-serif';
+      if (options.fontFamily === 'TimesRoman') fontFamilyCSS = '"Times New Roman", Times, serif';
+      if (options.fontFamily === 'Courier') fontFamilyCSS = '"Courier New", Courier, monospace';
+
+      ctx.font = `bold ${finalFontSize}px ${fontFamilyCSS}`;
+      ctx.fillStyle = options.colorHex || '#dc2626';
+      ctx.textBaseline = 'middle';
+
+      const text = options.text.trim();
+      // Exact proportional letter spacing matching preview CSS (slider value * 6 px)
+      const spacingPx = (options.letterSpacing ?? 0) * 6 * scaleNormalization;
+
+      // Measure total width with precise character-by-character gaps
+      const chars = text.split('');
+      let totalWidth = 0;
+      const charWidths = chars.map((char) => {
+        const w = ctx.measureText(char).width;
+        totalWidth += w;
+        return w;
+      });
+      totalWidth += spacingPx * (chars.length - 1);
+
+      // Draw centered character by character so spacing never distorts
+      let currentX = -totalWidth / 2;
+      chars.forEach((char, idx) => {
+        ctx.fillText(char, currentX, 0);
+        currentX += charWidths[idx] + spacingPx;
+      });
+    } else if (options.type === 'image' && options.imageDataUrl) {
+      const logoImg = new Image();
       await new Promise<void>((resolve) => {
-        pageImg.onload = () => {
-          ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
+        logoImg.onload = () => {
+          const scaleNormalization = pWidth / 460;
+          const logoScale = ((options.fontSize ?? 50) / 100) * scaleNormalization;
+          const lW = logoImg.width * logoScale;
+          const lH = logoImg.height * logoScale;
+          ctx.drawImage(logoImg, -lW / 2, -lH / 2, lW, lH);
           resolve();
         };
-        pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
+        logoImg.src = options.imageDataUrl!;
       });
-
-      ctx.save();
-      ctx.globalAlpha = opacity;
-
-      // Position mapping matching UI preview coordinates exactly
-      let posX = pWidth / 2;
-      let posY = pHeight / 2;
-      if (options.position === 'top') posY = pHeight * 0.14;
-      if (options.position === 'bottom') posY = pHeight * 0.86;
-
-      ctx.translate(posX, posY);
-      ctx.rotate((angleDeg * Math.PI) / 180);
-
-      if (options.type === 'text' && options.text?.trim()) {
-        // Normalized scale matching the 460px UI preview container
-        const scaleNormalization = pWidth / 460;
-        const finalFontSize = (options.fontSize ?? 48) * scaleNormalization;
-
-        let fontFamilyCSS = 'Helvetica, Arial, sans-serif';
-        if (options.fontFamily === 'TimesRoman') fontFamilyCSS = '"Times New Roman", Times, serif';
-        if (options.fontFamily === 'Courier') fontFamilyCSS = '"Courier New", Courier, monospace';
-
-        ctx.font = `bold ${finalFontSize}px ${fontFamilyCSS}`;
-        ctx.fillStyle = options.colorHex || '#dc2626';
-        ctx.textBaseline = 'middle';
-
-        const text = options.text.trim();
-        // Exact proportional letter spacing matching preview CSS (slider value * 6 px)
-        const spacingPx = (options.letterSpacing ?? 0) * 6 * scaleNormalization;
-
-        // Measure total width with precise character-by-character gaps
-        const chars = text.split('');
-        let totalWidth = 0;
-        const charWidths = chars.map((char) => {
-          const w = ctx.measureText(char).width;
-          totalWidth += w;
-          return w;
-        });
-        totalWidth += spacingPx * (chars.length - 1);
-
-        // Draw centered character by character so spacing never distorts
-        let currentX = -totalWidth / 2;
-        chars.forEach((char, idx) => {
-          ctx.fillText(char, currentX, 0);
-          currentX += charWidths[idx] + spacingPx;
-        });
-      } else if (options.type === 'image' && options.imageDataUrl) {
-        const logoImg = new Image();
-        await new Promise<void>((resolve) => {
-          logoImg.onload = () => {
-            const scaleNormalization = pWidth / 460;
-            const logoScale = ((options.fontSize ?? 50) / 100) * scaleNormalization;
-            const lW = logoImg.width * logoScale;
-            const lH = logoImg.height * logoScale;
-            ctx.drawImage(logoImg, -lW / 2, -lH / 2, lW, lH);
-            resolve();
-          };
-          logoImg.src = options.imageDataUrl!;
-        });
-      }
-
-      ctx.restore();
-
-      const stampedJpg = compositeCanvas.toDataURL('image/jpeg', 0.95);
-      const b64 = stampedJpg.split(',')[1];
-      const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const finalPageImg = await newPdfDoc.embedJpg(stampedBytes);
-
-      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-      newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
     }
+
+    ctx.restore();
+
+    const stampedJpg = compositeCanvas.toDataURL('image/jpeg', 0.95);
+    const b64 = stampedJpg.split(',')[1];
+    const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const finalPageImg = await newPdfDoc.embedJpg(stampedBytes);
+
+    const newPage = newPdfDoc.addPage([pWidth, pHeight]);
+    newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
+
+    // Explicitly release canvas memory buffer per page
+    ctx.clearRect(0, 0, pWidth, pHeight);
+    compositeCanvas.width = 0;
+    compositeCanvas.height = 0;
+    try { page.cleanup(); } catch {}
   }
 
   return await newPdfDoc.save({ useObjectStreams: false });
 }
-
 export async function addPageNumbersToPDF(
   file: File,
   position: 'bottom-center' | 'bottom-right'
