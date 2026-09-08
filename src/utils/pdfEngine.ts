@@ -1366,65 +1366,31 @@ export async function compressPDF(
   options: CompressOptions
 ): Promise<Uint8Array> {
   const { level, targetKb = 200, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
+  const rawBytes = await file.arrayBuffer();
 
-  let safeDoc: PDFDocument | null = null;
-  let isEncrypted = true;
-
-  try {
-    const loaded = await loadSafe(arrayBuffer);
-    safeDoc = loaded.doc;
-    isEncrypted = loaded.isEncrypted;
-  } catch {
-    // If loading fails, keep isEncrypted = true to route safely to the raster pipeline
-    isEncrypted = true;
-  }
-
-  if (level === 'recommended' && safeDoc && !isEncrypted) {
+  // 1. Lossless Vector Path (ONLY for pristine, unsigned/unencrypted documents)
+  if (level === 'recommended') {
     try {
-      return await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
+      const testDoc = await PDFDocument.load(rawBytes.slice(0));
+      if (!testDoc.isEncrypted) {
+        return await testDoc.save({ useObjectStreams: true, addDefaultPage: false });
+      }
     } catch {
-      // Fall through to raster engine if vector save fails
+      // If pdf-lib rejects signatures/permissions, fall straight through to universal renderer
     }
   }
 
+  // 2. Universal PDF.js Engine (Handles any government, signed, scanned, or registered PDF)
+  // ✅ To this:
   const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer).slice(),
+    data: new Uint8Array(rawBytes.slice(0)),
     stopAtErrors: false,
   });
+
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
 
   const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
-
-  // SAFEGUARD: High-density digital vector documents with < 25 KB/page
-  const kbPerPage = (targetBytes / 1024) / totalPages;
-  if (kbPerPage < 25 && safeDoc && !isEncrypted) {
-    onProgress?.({
-      currentPage: 1,
-      totalPages,
-      stage: 'Applying lossless vector stream compression...',
-    });
-
-    try {
-      let vectorBytes = await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
-
-      if (level === 'target' && targetBytes > vectorBytes.length) {
-        const diff = targetBytes - vectorBytes.length;
-        if (diff > 1024) {
-          const padCount = Math.max(0, diff - 78);
-          if (padCount > 0) {
-            const rawPadStream = (safeDoc.context as any).stream(new Uint8Array(padCount));
-            safeDoc.context.register(rawPadStream);
-            vectorBytes = await safeDoc.save({ useObjectStreams: true, addDefaultPage: false });
-          }
-        }
-      }
-      return vectorBytes;
-    } catch {
-      // Fall through to rasterizer loop if vector stream write fails
-    }
-  }
 
   const newPdfDoc = await PDFDocument.create();
 
@@ -1446,7 +1412,6 @@ export async function compressPDF(
     const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
 
     const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-    // Keep scale floor at 0.85 minimum so normal scanned documents never turn into icons
     let scale = Math.min(2.0, Math.max(0.85, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
     let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
 
@@ -1464,50 +1429,60 @@ export async function compressPDF(
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      await (
-        page.render({
-          canvasContext: ctx as any,
-          viewport,
-          canvas,
-        } as any) as any
-      ).promise;
+      try {
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport,
+            canvas,
+          } as any) as any
+        ).promise;
 
-      const blob = await new Promise<Blob>((resolve) =>
-        canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
-      );
+        const blob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
+        );
 
-      canvas.width = 0;
-      canvas.height = 0;
+        canvas.width = 0;
+        canvas.height = 0;
 
-      if (blob.size <= budgetPerPage) {
-        validBlob = blob;
-        if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
-          break;
+        if (blob.size <= budgetPerPage) {
+          validBlob = blob;
+          if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
+            break;
+          }
+          const fillRatio = budgetPerPage / Math.max(blob.size, 1);
+          scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
+          quality = Math.min(0.88, quality + 0.05);
+        } else {
+          const excessRatio = blob.size / budgetPerPage;
+          scale = Math.max(0.75, scale / (Math.sqrt(excessRatio) * 1.06));
+          quality = Math.max(0.06, quality * 0.88);
         }
-        const fillRatio = budgetPerPage / Math.max(blob.size, 1);
-        scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
-        quality = Math.min(0.88, quality + 0.05);
-      } else {
-        const excessRatio = blob.size / budgetPerPage;
-        scale = Math.max(0.75, scale / (Math.sqrt(excessRatio) * 1.06));
-        quality = Math.max(0.06, quality * 0.88);
+      } catch {
+        canvas.width = 0;
+        canvas.height = 0;
+        break;
       }
     }
 
     if (!validBlob) {
-      const viewport = page.getViewport({ scale: Math.max(0.75, scale * 0.7) });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.floor(viewport.width));
-      canvas.height = Math.max(1, Math.floor(viewport.height));
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
-        validBlob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
-        );
-      }
+      try {
+        const viewport = page.getViewport({ scale: Math.max(0.75, scale * 0.7) });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(viewport.width));
+        canvas.height = Math.max(1, Math.floor(viewport.height));
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
+          validBlob = await new Promise<Blob>((resolve) =>
+            canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
+          );
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      } catch {}
     }
 
     if (validBlob) {
@@ -1538,9 +1513,11 @@ export async function compressPDF(
       const paddingStreamOverhead = 78;
       const padCount = Math.max(0, diff - paddingStreamOverhead);
       if (padCount > 0) {
-        const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
-        newPdfDoc.context.register(rawPadStream);
-        outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+        try {
+          const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
+          newPdfDoc.context.register(rawPadStream);
+          outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+        } catch {}
       }
     }
   }
