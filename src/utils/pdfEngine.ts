@@ -4649,11 +4649,7 @@ export async function generateCodePDF(options: CodeToPdfOptions): Promise<Uint8A
   return new Uint8Array(doc.output('arraybuffer'));
 }
 
-export interface HtmlToPdfOptions {
-  html: string;
-  pageSize?: 'a4' | 'letter' | 'receipt';
-  orientation?: 'portrait' | 'landscape';
-}
+import html2canvas from 'html2canvas';
 
 // ============================================================================
 // 4. HTML / RECEIPT TO PDF ENGINE
@@ -4664,28 +4660,6 @@ export interface HtmlToPdfOptions {
   orientation?: 'portrait' | 'landscape';
 }
 
-// Dynamically loads html2canvas without causing TypeScript bundle errors
-const loadHtml2Canvas = async (): Promise<any> => {
-  if (typeof window !== 'undefined' && (window as any).html2canvas) {
-    return (window as any).html2canvas;
-  }
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[src*="html2canvas"]');
-    if (existing) {
-      if ((window as any).html2canvas) return resolve((window as any).html2canvas);
-      existing.addEventListener('load', () => resolve((window as any).html2canvas));
-      existing.addEventListener('error', () => reject(new Error('Failed to load HTML canvas renderer.')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    script.async = true;
-    script.onload = () => resolve((window as any).html2canvas);
-    script.onerror = () => reject(new Error('Failed to load HTML rendering library. Please check your connection.'));
-    document.head.appendChild(script);
-  });
-};
-
 export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8Array> {
   const { html, pageSize = 'a4', orientation = 'portrait' } = options;
 
@@ -4695,7 +4669,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
   const isReceipt = pageSize === 'receipt';
   const targetWidthPt = isReceipt
-    ? 226.77
+    ? 226.77 // 80mm thermal receipt
     : pageSize === 'letter'
     ? orientation === 'landscape'
       ? 792
@@ -4714,26 +4688,24 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     ? 595.28
     : 841.89;
 
-  const renderWidthPx = isReceipt ? 320 : orientation === 'landscape' ? 1120 : 794;
+  const renderWidthPx = isReceipt ? 340 : orientation === 'landscape' ? 1120 : 794;
 
-  // 1. Create an isolated, zero-opacity sandbox at (0,0) so coordinates remain positive
+  // 1. Isolated sandbox container positioned behind the viewport (No CDN, no opacity bugs)
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.top = '0';
   iframe.style.left = '0';
   iframe.style.width = `${renderWidthPx}px`;
   iframe.style.height = '1000px';
-  iframe.style.opacity = '0';
-  iframe.style.pointerEvents = 'none';
-  iframe.style.zIndex = '-9999';
+  iframe.style.zIndex = '-99999';
   iframe.style.border = 'none';
+  iframe.style.pointerEvents = 'none';
   document.body.appendChild(iframe);
 
   try {
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) throw new Error('Failed to initialize rendering sandbox.');
 
-    // 2. Distinguish between full HTML documents (like uploaded index.html) and markup snippets
     const isFullDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
     doc.open();
     if (isFullDoc) {
@@ -4748,7 +4720,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
               * { box-sizing: border-box; }
               body {
                 margin: 0;
-                padding: ${isReceipt ? '12px' : '24px'};
+                padding: ${isReceipt ? '12px' : '28px'};
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 color: #18181b;
                 background: #ffffff;
@@ -4767,14 +4739,13 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     }
     doc.close();
 
-    // Allow internal styles, layout, and web fonts to settle
+    // Allow styles, images, and fonts to compute layout
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const scrollHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 600);
     iframe.style.height = `${scrollHeight}px`;
 
-    // 3. Direct DOM-to-Canvas rendering (Never taints the canvas context)
-    const html2canvas = await loadHtml2Canvas();
+    // 2. Direct Canvas Render via local npm bundle (Never taints the canvas)
     const canvas = await html2canvas(doc.body, {
       scale: 2,
       useCORS: true,
@@ -4789,7 +4760,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
-    // 4. Export Thermal Receipt (Single continuous page)
+    // 3. Export Single-Page Continuous Thermal Receipt
     if (isReceipt) {
       const receiptHeightPt = Math.max(120, (canvas.height / canvas.width) * targetWidthPt);
       const pdf = new jsPDF({
@@ -4801,7 +4772,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // 5. Export Standard Multi-Page (A4 or US Letter)
+    // 4. Export Multi-Page A4 / Letter Document
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
