@@ -4843,7 +4843,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       scale: 2,
       useCORS: true,
       allowTaint: false,
-      backgroundColor: null,
+      backgroundColor: '#ffffff', // Ensures documents are never transparent voids
       logging: false,
       width: renderWidthPx,
       height: actualContentHeight,
@@ -4906,17 +4906,6 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       );
     }
 
-    // Detect background color tone
-    const bodyBg = window.getComputedStyle(doc.body).backgroundColor;
-    const isDarkBg =
-      bodyBg.includes('rgb(0,') ||
-      bodyBg.includes('rgb(9,') ||
-      bodyBg.includes('rgb(15,') ||
-      bodyBg.includes('rgb(24,') ||
-      bodyBg.includes('rgba(0,');
-
-    const sliceFillColor = isDarkBg ? '#09090b' : '#ffffff';
-
     // Thermal Receipt Export (Single continuous sheet)
     if (isReceipt) {
       const receiptHeightPt = Math.max(100, (croppedCanvas.height / croppedCanvas.width) * targetWidthPt);
@@ -4930,7 +4919,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
-    // A4 / Letter Export (Portrait & Landscape cleanly sliced)
+    // A4 / Letter Export (Portrait & Landscape cleanly sliced with white background)
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
@@ -4954,7 +4943,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       const sliceCtx = sliceCanvas.getContext('2d');
 
       if (sliceCtx) {
-        sliceCtx.fillStyle = sliceFillColor;
+        sliceCtx.fillStyle = '#ffffff'; // Always clean white paper
         sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
         sliceCtx.drawImage(
           croppedCanvas,
