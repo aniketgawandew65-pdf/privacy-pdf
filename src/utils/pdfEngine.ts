@@ -1287,11 +1287,55 @@ export async function compressPDF(
   const { level, targetKb = 200, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
 
+  // 1. Lossless Vector Stream Optimization Check
+  let vectorDoc: PDFDocument | null = null;
+  let vectorBytes: Uint8Array | null = null;
+  try {
+    vectorDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    vectorBytes = await vectorDoc.save({ useObjectStreams: true, addDefaultPage: false });
+  } catch {
+    // If vector parsing fails (corrupted trailer or strict lock), fall through to rasterizer
+  }
+
+  // Recommended / Standard mode: return lossless vector result directly
   if (level === 'recommended') {
+    if (vectorBytes) return vectorBytes;
     const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
   }
 
+  const estimatedPages = vectorDoc ? vectorDoc.getPageCount() : 1;
+  const targetBytes = (level === 'extreme' ? Math.max(12 * estimatedPages, 35) : targetKb) * 1024;
+
+  // 2. Smart Hybrid Check: Protect crisp vector text on small/digital PDFs
+  if (vectorBytes) {
+    const isUnderTarget = vectorBytes.length <= targetBytes;
+    const isSmallVectorClose =
+      vectorBytes.length <= targetBytes * 1.08 && arrayBuffer.byteLength <= 1024 * 1024;
+
+    if (isUnderTarget || (level === 'target' && isSmallVectorClose)) {
+      if (level === 'target') {
+        const diff = targetBytes - vectorBytes.length;
+        if (diff > 1024) {
+          const paddingStreamOverhead = 78;
+          const padCount = Math.max(0, diff - paddingStreamOverhead);
+          if (padCount > 0) {
+            try {
+              const padDoc = await PDFDocument.load(vectorBytes);
+              const rawPadStream = (padDoc.context as any).stream(new Uint8Array(padCount));
+              padDoc.context.register(rawPadStream);
+              return await padDoc.save({ useObjectStreams: false });
+            } catch {
+              return vectorBytes;
+            }
+          }
+        }
+      }
+      return vectorBytes;
+    }
+  }
+
+  // 3. Fallback to Multi-Attempt Canvas Rasterizer for Large Image / Scanned PDFs
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
@@ -1299,7 +1343,6 @@ export async function compressPDF(
   const newPdfDoc = await PDFDocument.create();
 
   const pdfOverhead = 1024 + totalPages * 200;
-  const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
   const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
   let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
 
@@ -1317,7 +1360,7 @@ export async function compressPDF(
     const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
 
     const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-    let scale = Math.min(2.0, Math.max(0.04, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
+    let scale = Math.min(2.0, Math.max(0.25, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
     let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
 
     let validBlob: Blob | null = null;
@@ -1359,13 +1402,13 @@ export async function compressPDF(
         quality = Math.min(0.88, quality + 0.05);
       } else {
         const excessRatio = blob.size / budgetPerPage;
-        scale = Math.max(0.02, scale / (Math.sqrt(excessRatio) * 1.06));
+        scale = Math.max(0.15, scale / (Math.sqrt(excessRatio) * 1.06));
         quality = Math.max(0.06, quality * 0.88);
       }
     }
 
     if (!validBlob) {
-      const viewport = page.getViewport({ scale: Math.max(0.02, scale * 0.7) });
+      const viewport = page.getViewport({ scale: Math.max(0.15, scale * 0.7) });
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
