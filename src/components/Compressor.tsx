@@ -70,7 +70,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     };
   }, []);
 
-  // Dynamically inspect page count whenever a single file is selected
   useEffect(() => {
     if (!file) {
       setTotalPages(1);
@@ -100,7 +99,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
 
   const originalSizeKb = useMemo(() => (file ? Math.round(file.size / 1024) : 0), [file]);
 
-  // Adaptive slider boundaries
   const minSliderKb = 50;
   const maxSliderKb = useMemo(() => {
     if (!file) return 1000;
@@ -111,7 +109,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     return Math.min(Math.max(80, Math.round(totalPages * 75)), maxSliderKb);
   }, [totalPages, maxSliderKb]);
 
-  // Real-time clarity predictor
   const clarityStatus = useMemo(() => {
     const kbPerPage = targetKb / totalPages;
     if (kbPerPage < 35) {
@@ -300,7 +297,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         }}
       />
 
-      {/* Free Tier Usage Indicator */}
       {!isPro && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 pb-3 sm:pb-4 mb-4 sm:mb-5 border-b border-zinc-800 text-xs">
           <span className="text-zinc-400">
@@ -318,7 +314,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Error Message */}
       {errorMessage && (
         <div
           role="alert"
@@ -329,7 +324,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Upload Area: Mobile Touch Friendly & Min 44px Interaction Area */}
       {!file && batchFiles.length === 0 && (
         <div
           role="button"
@@ -362,7 +356,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Multi-File Batch Drawer */}
       {batchFiles.length > 1 && (
         <div className="space-y-4 mb-6">
           <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
@@ -387,7 +380,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Single File Card */}
       {file && (
         <div className="flex items-center justify-between p-3 sm:p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 mb-5 sm:mb-6">
           <div className="flex items-center gap-2.5 truncate min-w-0">
@@ -409,7 +401,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </div>
       )}
 
-      {/* Settings */}
       <div className="space-y-3 mb-5 sm:mb-6">
         <label className="text-xs font-semibold text-zinc-400 flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5" />
@@ -457,7 +448,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
           </button>
         </div>
 
-        {/* Adaptive Target Slider & Clarity Indicator */}
         {level === 'target' && (
           <div className="p-3 sm:p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 mt-3">
             <div className="flex justify-between items-center text-xs text-zinc-300 mb-2">
@@ -480,7 +470,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               <span>Max: {formatSize(maxSliderKb)}</span>
             </div>
 
-            {/* Live Clarity Predictor */}
             <div className={`mt-3 p-2.5 rounded-lg border flex items-start gap-2 ${clarityStatus.color}`}>
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <div className="text-[11px] leading-relaxed">
@@ -488,7 +477,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               </div>
             </div>
 
-            {/* Auto-set to sharp readability preset */}
             {targetKb < recommendedReadableKb && (
               <button
                 type="button"
@@ -503,7 +491,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         )}
       </div>
 
-      {/* Action Button for Single File */}
       {file && (
         <button
           disabled={isCompressing}
@@ -521,7 +508,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         </button>
       )}
 
-      {/* Download Result for Single File */}
       {downloadUrl && compressedSize && file && (
         <div className="mt-4 p-3.5 sm:p-4 rounded-xl bg-zinc-950 border border-emerald-500/30 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div>
