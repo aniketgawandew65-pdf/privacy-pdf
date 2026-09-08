@@ -69,7 +69,7 @@ export const TextToPdf = () => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
-  const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+  const { url: downloadUrl, createUrl } = useObjectUrl();
 
   // Load initial content into editor
   useEffect(() => {
