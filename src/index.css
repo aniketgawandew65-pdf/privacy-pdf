@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* 1. Global Apple Base Canvas & Font Stack */
+/* 1. Base Layout & Apple Typography */
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", sans-serif !important;
   background-color: #f5f5f7 !important;
@@ -17,9 +17,9 @@ div.min-h-screen {
   color: #1d1d1f !important;
 }
 
-/* 2. Apple Headings & Typography */
+/* 2. Headings & Typography */
 h1, h2, h3, h4,
-p, span, label,
+p, label,
 [class*="text-zinc-100"],
 [class*="text-zinc-200"],
 [class*="text-zinc-300"] {
@@ -31,13 +31,13 @@ p, span, label,
   color: #6e6e73 !important;
 }
 
-/* 3. Keep Green Accents & Security Badges Crisp */
+/* 3. Retain Green Accents & Highlights */
 [class*="text-emerald"], 
 [class*="text-green"] {
   color: #059669 !important;
 }
 
-/* 4. Top Header Auditor Pill (Fixing 0 BYTES TRANSMITTED visibility) */
+/* 4. Top Header Auditor Pill */
 header div,
 header [class*="rounded-full"] {
   background-color: #ffffff !important;
@@ -51,81 +51,94 @@ header span {
   color: #1d1d1f !important;
 }
 
-/* 5. Tool Grid Buttons -> Apple Crisp White Cards */
-.grid button,
-div[class*="grid"] button,
-button[class*="rounded-xl"],
-button[class*="rounded-lg"],
-button[class*="bg-zinc"] {
+/* 5. Tool Grid Buttons - High Contrast Apple White Cards */
+button,
+button[class*="rounded"],
+div[class*="flex-wrap"] button,
+div[class*="grid"] button {
   background-color: #ffffff !important;
-  background-image: none !important;
-  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
   color: #1d1d1f !important;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03) !important;
 }
 
-/* Force All Tool Button SVGs & Text to Sharp Black */
-.grid button *,
-div[class*="grid"] button *,
-button[class*="rounded-xl"] *,
-button[class*="rounded-lg"] * {
+/* Force All Icons & Button Text to Sharp Jet Black */
+button *,
+button span,
+button p {
   color: #1d1d1f !important;
+}
+
+button svg,
+button svg path {
   stroke: #1d1d1f !important;
-  fill: none;
 }
 
-/* 6. Active Tool Button (Compress) -> Jet Black with Emerald Accent */
+/* 6. Active Selected Tool (Compress) -> Contrast Black Apple Card */
 button[class*="bg-emerald"],
 button[class*="border-emerald"],
-.grid button[class*="emerald"],
+div[class*="flex-wrap"] button[class*="emerald"],
 div[class*="grid"] button[class*="emerald"] {
-  background-color: #000000 !important;
-  border-color: #000000 !important;
+  background-color: #1d1d1f !important;
+  background: #1d1d1f !important;
+  border-color: #1d1d1f !important;
   color: #ffffff !important;
 }
 
 button[class*="bg-emerald"] *,
 button[class*="border-emerald"] *,
-.grid button[class*="emerald"] *,
+div[class*="flex-wrap"] button[class*="emerald"] *,
 div[class*="grid"] button[class*="emerald"] * {
   color: #ffffff !important;
-  stroke: #ffffff !important;
 }
 
-button[class*="bg-emerald"] [class*="text-emerald"],
-button[class*="border-emerald"] [class*="text-emerald"],
-.grid button[class*="emerald"] svg,
-div[class*="grid"] button[class*="emerald"] svg {
-  color: #10b981 !important;
+button[class*="bg-emerald"] svg,
+button[class*="bg-emerald"] svg path,
+button[class*="border-emerald"] svg,
+button[class*="border-emerald"] svg path {
   stroke: #10b981 !important;
+  color: #10b981 !important;
 }
 
-/* 7. Hover Effect on All Inactive Tool Buttons (Apple Dark Inversion) */
-.grid button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
-div[class*="grid"] button:hover:not([class*="emerald"]):not([class*="bg-emerald"]),
-button[class*="rounded-xl"]:hover:not([class*="emerald"]),
-button[class*="rounded-lg"]:hover:not([class*="emerald"]) {
-  background-color: #000000 !important;
-  border-color: #000000 !important;
+/* 7. Hover Effect on Inactive Buttons */
+button:hover:not([class*="emerald"]):not([class*="bg-emerald"]) {
+  background-color: #f0f0f2 !important;
+  background: #f0f0f2 !important;
+  border-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+button:hover:not([class*="emerald"]):not([class*="bg-emerald"]) * {
+  color: #000000 !important;
+}
+
+button:hover:not([class*="emerald"]):not([class*="bg-emerald"]) svg,
+button:hover:not([class*="emerald"]):not([class*="bg-emerald"]) svg path {
+  stroke: #000000 !important;
+}
+
+/* 8. Top Category Filter Pills (Organize & Size, Security & Privacy, etc.) */
+div[class*="rounded-full"] button,
+button[class*="rounded-full"] {
+  border-radius: 980px !important;
+}
+
+button[class*="rounded-full"][class*="bg-emerald"],
+button[class*="rounded-full"][class*="bg-black"],
+button[class*="rounded-full"]:has(span:empty) {
+  background-color: #1d1d1f !important;
+  border-color: #1d1d1f !important;
   color: #ffffff !important;
 }
 
-.grid button:hover:not([class*="emerald"]) *,
-div[class*="grid"] button:hover:not([class*="emerald"]) *,
-button[class*="rounded-xl"]:hover:not([class*="emerald"]) *,
-button[class*="rounded-lg"]:hover:not([class*="emerald"]) * {
-  color: #ffffff !important;
-  stroke: #ffffff !important;
-}
-
-/* 8. Main Dropzone & Cards */
+/* 9. Upload Dropzone & Inner Cards */
 div[class*="border-dashed"] {
   background-color: #ffffff !important;
   border-color: rgba(0, 0, 0, 0.16) !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
 }
 
 div[class*="rounded-2xl"],
 div[class*="rounded-3xl"] {
-  border-color: rgba(0, 0, 0, 0.1) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
 }
