@@ -555,7 +555,7 @@ export default function App() {
           <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider shrink-0">
             Popular Workflows:
           </span>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[11px]">
             <NavLink to="/compress-pdf-to-100kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
               Compress to 100KB
             </NavLink>
