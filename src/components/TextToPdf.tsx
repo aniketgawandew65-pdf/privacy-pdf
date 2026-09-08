@@ -56,6 +56,15 @@ export const TextToPdf = () => {
 
   const handleEditorInput = useCallback(() => {
     if (!editorRef.current) return;
+    
+    // Auto-nuke leftover formatting tags when editor is emptied
+    if (editorRef.current.innerText.trim() === '') {
+      editorRef.current.innerHTML = '';
+      setHtmlContent('');
+      setCharCount(0);
+      return;
+    }
+
     setHtmlContent(editorRef.current.innerHTML);
     setCharCount(editorRef.current.innerText.trim().length);
   }, []);
