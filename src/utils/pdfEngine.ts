@@ -1282,139 +1282,172 @@ export async function unlockPDF(
  */
 
 export async function compressPDF(
-file: File,
-options: CompressOptions
+  file: File,
+  options: CompressOptions
 ): Promise<Uint8Array> {
-const { level, targetKb = 200, onProgress } = options;
-const arrayBuffer = await file.arrayBuffer();
+  const { level, targetKb = 200, onProgress } = options;
+  const arrayBuffer = await file.arrayBuffer();
 
-if (level === 'recommended') {
-const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+  if (level === 'recommended') {
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    return await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+  }
+
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const pdf = await loadingTask.promise;
+  const totalPages = pdf.numPages;
+
+  const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
+
+  // SAFEGUARD: High-density digital vector documents (e.g. 4,938 pages with < 25 KB/page)
+  // Converting dense vector code into raster images destroys readability and freezes the tab.
+  const kbPerPage = (targetBytes / 1024) / totalPages;
+  if (kbPerPage < 25) {
+    onProgress?.({
+      currentPage: 1,
+      totalPages,
+      stage: 'Applying lossless vector stream compression...',
+    });
+
+    try {
+      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+      let vectorBytes = await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+
+      // If level is target, preserve exact target size matching via padding stream
+      if (level === 'target' && targetBytes > vectorBytes.length) {
+        const diff = targetBytes - vectorBytes.length;
+        if (diff > 1024) {
+          const padCount = Math.max(0, diff - 78);
+          if (padCount > 0) {
+            const rawPadStream = (pdfDoc.context as any).stream(new Uint8Array(padCount));
+            pdfDoc.context.register(rawPadStream);
+            vectorBytes = await pdfDoc.save({ useObjectStreams: true, addDefaultPage: false });
+          }
+        }
+      }
+      return vectorBytes;
+    } catch {
+      // If direct vector parsing fails, fall through to canvas engine
+    }
+  }
+
+  const newPdfDoc = await PDFDocument.create();
+
+  const pdfOverhead = 1024 + totalPages * 200;
+  const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
+  let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
+
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    onProgress?.({
+      currentPage: pageNum,
+      totalPages,
+      stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
+    });
+
+    const page = await pdf.getPage(pageNum);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+
+    const pagesLeft = totalPages - pageNum + 1;
+    const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
+
+    const origPixelCount = unscaledViewport.width * unscaledViewport.height;
+    // Keep scale floor at 0.85 minimum so normal scanned documents never turn into icons
+    let scale = Math.min(2.0, Math.max(0.85, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
+    let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
+
+    let validBlob: Blob | null = null;
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (!ctx) break;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      await (
+        page.render({
+          canvasContext: ctx as any,
+          viewport,
+          canvas,
+        } as any) as any
+      ).promise;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
+      );
+
+      canvas.width = 0;
+      canvas.height = 0;
+
+      if (blob.size <= budgetPerPage) {
+        validBlob = blob;
+        if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
+          break;
+        }
+        const fillRatio = budgetPerPage / Math.max(blob.size, 1);
+        scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
+        quality = Math.min(0.88, quality + 0.05);
+      } else {
+        const excessRatio = blob.size / budgetPerPage;
+        scale = Math.max(0.75, scale / (Math.sqrt(excessRatio) * 1.06));
+        quality = Math.max(0.06, quality * 0.88);
+      }
+    }
+
+    if (!validBlob) {
+      const viewport = page.getViewport({ scale: Math.max(0.75, scale * 0.7) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
+        validBlob = await new Promise<Blob>((resolve) =>
+          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
+        );
+      }
+    }
+
+    if (validBlob) {
+      remainingImageBudget -= validBlob.size;
+
+      const imageBytes = await validBlob.arrayBuffer();
+      const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
+
+      const newPage = newPdfDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
+      newPage.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: unscaledViewport.width,
+        height: unscaledViewport.height,
+      });
+    }
+  }
+
+  let outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+
+  if (level === 'target') {
+    const diff = targetBytes - outputBytes.length;
+    if (diff > 1024) {
+      const paddingStreamOverhead = 78;
+      const padCount = Math.max(0, diff - paddingStreamOverhead);
+      if (padCount > 0) {
+        const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
+        newPdfDoc.context.register(rawPadStream);
+        outputBytes = await newPdfDoc.save({ useObjectStreams: false });
+      }
+    }
+  }
+
+  return outputBytes;
 }
-
-const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
-const pdf = await loadingTask.promise;
-const totalPages = pdf.numPages;
-
-const newPdfDoc = await PDFDocument.create();
-
-const pdfOverhead = 1024 + totalPages * 200;
-const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
-const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
-let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
-
-for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-onProgress?.({
-currentPage: pageNum,
-totalPages,
-stage: `Fitting page ${pageNum} of ${totalPages} to target size...`,
-});
-
-const page = await pdf.getPage(pageNum);
-const unscaledViewport = page.getViewport({ scale: 1.0 });
-
-const pagesLeft = totalPages - pageNum + 1;
-const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
-
-const origPixelCount = unscaledViewport.width * unscaledViewport.height;
-let scale = Math.min(2.0, Math.max(0.04, Math.sqrt((budgetPerPage * 0.8) / (origPixelCount * 0.07))));
-let quality = Math.max(0.1, Math.min(0.82, budgetPerPage / 20000));
-
-let validBlob: Blob | null = null;
-
-for (let attempt = 0; attempt < 6; attempt++) {
-const viewport = page.getViewport({ scale });
-const canvas = document.createElement('canvas');
-canvas.width = Math.max(1, Math.floor(viewport.width));
-canvas.height = Math.max(1, Math.floor(viewport.height));
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-if (!ctx) break;
-
-ctx.fillStyle = '#ffffff';
-ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-await (
-page.render({
-canvasContext: ctx as any,
-viewport,
-canvas,
-} as any) as any
-).promise;
-
-const blob = await new Promise<Blob>((resolve) =>
-canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
-);
-
-canvas.width = 0;
-canvas.height = 0;
-
-if (blob.size <= budgetPerPage) {
-validBlob = blob;
-if (blob.size >= budgetPerPage * 0.88 || attempt >= 4) {
-break;
-}
-const fillRatio = budgetPerPage / Math.max(blob.size, 1);
-scale = Math.min(2.2, scale * Math.sqrt(fillRatio) * 0.96);
-quality = Math.min(0.88, quality + 0.05);
-} else {
-const excessRatio = blob.size / budgetPerPage;
-scale = Math.max(0.02, scale / (Math.sqrt(excessRatio) * 1.06));
-quality = Math.max(0.06, quality * 0.88);
-}
-}
-
-if (!validBlob) {
-const viewport = page.getViewport({ scale: Math.max(0.02, scale * 0.7) });
-const canvas = document.createElement('canvas');
-canvas.width = Math.max(1, Math.floor(viewport.width));
-canvas.height = Math.max(1, Math.floor(viewport.height));
-const ctx = canvas.getContext('2d');
-if (ctx) {
-ctx.fillStyle = '#ffffff';
-ctx.fillRect(0, 0, canvas.width, canvas.height);
-await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
-validBlob = await new Promise<Blob>((resolve) =>
-canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.2)
-);
-}
-}
-
-if (validBlob) {
-remainingImageBudget -= validBlob.size;
-
-const imageBytes = await validBlob.arrayBuffer();
-const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
-
-const newPage = newPdfDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-newPage.drawImage(embeddedImage, {
-x: 0,
-y: 0,
-width: unscaledViewport.width,
-height: unscaledViewport.height,
-});
-}
-}
-
-let outputBytes = await newPdfDoc.save({ useObjectStreams: false });
-
-if (level === 'target') {
-const diff = targetBytes - outputBytes.length;
-if (diff > 1024) {
-const paddingStreamOverhead = 78;
-const padCount = Math.max(0, diff - paddingStreamOverhead);
-if (padCount > 0) {
-const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
-newPdfDoc.context.register(rawPadStream);
-outputBytes = await newPdfDoc.save({ useObjectStreams: false });
-}
-}
-}
-
-return outputBytes;
-}
-
 export interface PageConfig {
 originalIndex: number;
 rotation: number;
