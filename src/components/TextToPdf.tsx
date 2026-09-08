@@ -24,6 +24,8 @@ import {
   Eraser,
   Palette,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import { generateHtmlPDF } from '../utils/pdfEngine';
@@ -32,13 +34,16 @@ import { useObjectUrl } from '../utils/useObjectUrl';
 const FONT_SIZES = [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
 
 export const TextToPdf = () => {
-  const [fontFamily, setFontFamily] = useState<'Arial, sans-serif' | "'Times New Roman', serif" | "'Courier New', monospace" | "Georgia, serif">('Arial, sans-serif');
+  const [fontFamily, setFontFamily] = useState<
+    'Arial, sans-serif' | "'Times New Roman', serif" | "'Courier New', monospace" | 'Georgia, serif'
+  >('Arial, sans-serif');
   const [selectedFontSize, setSelectedFontSize] = useState<number>(12);
   const [pageSize, setPageSize] = useState<'a4' | 'letter'>('a4');
   const [margin, setMargin] = useState<number>(36);
 
-  // Zoom & Preview States
+  // Zoom, Pagination & Preview States
   const [zoom, setZoom] = useState<number>(1.0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageCount, setPageCount] = useState<number>(1);
   const [charCount, setCharCount] = useState<number>(0);
   const [htmlContent, setHtmlContent] = useState<string>('');
@@ -46,6 +51,7 @@ export const TextToPdf = () => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const pdfRef = useRef<any>(null);
   const { url: downloadUrl, createUrl } = useObjectUrl();
 
   const handleEditorInput = useCallback(() => {
@@ -61,7 +67,7 @@ export const TextToPdf = () => {
     handleEditorInput();
   };
 
-  // Word-style font size adjustment for selected text
+  // Word-style font size selection
   const applyFontSize = (sizePt: number) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
@@ -87,7 +93,10 @@ export const TextToPdf = () => {
 
   const handleIncreaseFontSize = () => {
     const currentIdx = FONT_SIZES.indexOf(selectedFontSize);
-    const nextSize = currentIdx !== -1 && currentIdx < FONT_SIZES.length - 1 ? FONT_SIZES[currentIdx + 1] : selectedFontSize + 2;
+    const nextSize =
+      currentIdx !== -1 && currentIdx < FONT_SIZES.length - 1
+        ? FONT_SIZES[currentIdx + 1]
+        : selectedFontSize + 2;
     applyFontSize(nextSize);
   };
 
@@ -98,11 +107,58 @@ export const TextToPdf = () => {
   };
 
   // Zoom controls
-  const handleZoomIn = () => setZoom((z) => Math.min(2.5, Number((z + 0.05).toFixed(2))));
-  const handleZoomOut = () => setZoom((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))));
+  const handleZoomIn = () => setZoom((z) => Math.min(2.5, Number((z + 0.1).toFixed(2))));
+  const handleZoomOut = () => setZoom((z) => Math.max(0.5, Number((z - 0.1).toFixed(2))));
   const handleResetZoom = () => setZoom(1.0);
 
-  // Live PDF generator
+  // Render a specific page to the retina canvas
+  const renderCanvasPage = useCallback(async (pdfDoc: any, pageNumber: number) => {
+    if (!pdfDoc || !canvasRef.current) return;
+    try {
+      const targetPage = Math.min(Math.max(1, pageNumber), pdfDoc.numPages);
+      const page = await pdfDoc.getPage(targetPage);
+      const retinaScale = 2.0;
+      const viewport = page.getViewport({ scale: retinaScale });
+
+      const canvas = canvasRef.current;
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        await (
+          page.render({
+            canvasContext: ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+      }
+    } catch (err) {
+      console.error('Failed to render page to canvas:', err);
+    }
+  }, []);
+
+  // Multi-page navigation
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      const target = currentPage - 1;
+      setCurrentPage(target);
+      if (pdfRef.current) {
+        renderCanvasPage(pdfRef.current, target);
+      }
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < pageCount) {
+      const target = currentPage + 1;
+      setCurrentPage(target);
+      if (pdfRef.current) {
+        renderCanvasPage(pdfRef.current, target);
+      }
+    }
+  };
+
+  // Debounced PDF generator
   useEffect(() => {
     let isMounted = true;
     setIsRendering(true);
@@ -110,6 +166,11 @@ export const TextToPdf = () => {
     const timer = setTimeout(async () => {
       try {
         const styledDocument = `
+          <style>
+            table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+            th, td { border: 1px solid #d1d5db; padding: 6px 10px; text-align: left; }
+            th { background-color: #f3f4f6; font-weight: bold; }
+          </style>
           <div style="font-family: ${fontFamily}; font-size: 11pt; line-height: 1.6; padding: ${margin}pt; color: #111827; background: #ffffff; width: 100%; box-sizing: border-box;">
             ${htmlContent.trim() || '<p>&nbsp;</p>'}
           </div>
@@ -130,44 +191,33 @@ export const TextToPdf = () => {
         const pdf = await loadingTask.promise;
         if (!isMounted) return;
 
+        pdfRef.current = pdf;
         setPageCount(pdf.numPages);
-        const page = await pdf.getPage(1);
-        const retinaScale = 2.0;
-        const viewport = page.getViewport({ scale: retinaScale });
 
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            await (
-              page.render({
-                canvasContext: ctx as any,
-                viewport,
-              } as any) as any
-            ).promise;
-          }
+        const validPage = Math.min(currentPage, pdf.numPages);
+        if (validPage !== currentPage) {
+          setCurrentPage(validPage);
         }
+
+        await renderCanvasPage(pdf, validPage);
       } catch (err) {
-        console.error('Failed to render PDF preview:', err);
+        console.error('Failed to generate PDF preview:', err);
       } finally {
         if (isMounted) setIsRendering(false);
       }
-    }, 350);
+    }, 380);
 
     return () => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [htmlContent, fontFamily, pageSize, margin, createUrl]);
+  }, [htmlContent, fontFamily, pageSize, margin, createUrl, renderCanvasPage]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-6 text-left">
-      {/* Top Document & Layout Bar */}
+    <div className="w-full max-w-7xl mx-auto space-y-6 text-left">
+      {/* Top Document Bar */}
       <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-xl">
         <div className="flex flex-wrap items-center gap-4 text-xs">
-          {/* Font Family */}
           <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-800">
             <Type className="w-3.5 h-3.5 text-emerald-400" />
             <select
@@ -178,11 +228,10 @@ export const TextToPdf = () => {
               <option value="Arial, sans-serif" className="bg-zinc-900">Arial (Sans)</option>
               <option value="'Times New Roman', serif" className="bg-zinc-900">Times New Roman (Serif)</option>
               <option value="Georgia, serif" className="bg-zinc-900">Georgia (Editorial)</option>
-              <option value="'Courier New', monospace" className="bg-zinc-900">Courier New (Monospace)</option>
+              <option value="'Courier New', monospace" className="bg-zinc-900">Courier New (Mono)</option>
             </select>
           </div>
 
-          {/* Paper Format */}
           <div className="flex items-center gap-1.5 bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-800">
             <Sliders className="w-3.5 h-3.5 text-emerald-400" />
             <select
@@ -195,7 +244,6 @@ export const TextToPdf = () => {
             </select>
           </div>
 
-          {/* Margins */}
           <div className="flex items-center gap-2 bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-800 text-zinc-300">
             <span>Margins:</span>
             <select
@@ -210,7 +258,6 @@ export const TextToPdf = () => {
           </div>
         </div>
 
-        {/* Download PDF Button */}
         {downloadUrl && (
           <a
             href={downloadUrl}
@@ -225,8 +272,8 @@ export const TextToPdf = () => {
 
       {/* Symmetrical Dual Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Left Side: MS Word Document Editor */}
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[660px]">
+        {/* Left Side: Document Editor */}
+        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[740px]">
           <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <span className="flex items-center gap-1.5 font-medium text-zinc-300">
               <FileText className="w-4 h-4 text-emerald-400" />
@@ -235,7 +282,7 @@ export const TextToPdf = () => {
             <span>{charCount} characters</span>
           </div>
 
-          {/* Ribbon Toolbar */}
+          {/* Ribbon */}
           <div className="flex flex-wrap items-center gap-1 p-1.5 mb-3 bg-zinc-950/80 border border-zinc-800 rounded-xl">
             <button
               type="button"
@@ -256,7 +303,6 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Selection Font Sizing */}
             <select
               value={selectedFontSize}
               onChange={(e) => applyFontSize(Number(e.target.value))}
@@ -324,7 +370,6 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Colors */}
             <div className="flex items-center gap-1 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800" title="Text Color">
               <Palette className="w-3 h-3 text-zinc-400" />
               <input
@@ -347,7 +392,6 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Alignment */}
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('justifyLeft'); }}
@@ -383,7 +427,6 @@ export const TextToPdf = () => {
 
             <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
 
-            {/* Lists & Divider */}
             <button
               type="button"
               onMouseDown={(e) => { e.preventDefault(); execFormat('insertUnorderedList'); }}
@@ -418,57 +461,95 @@ export const TextToPdf = () => {
             </button>
           </div>
 
-          {/* Full-Height Document Editor Box */}
-          <div
-            ref={editorRef}
-            contentEditable
-            onInput={handleEditorInput}
-            spellCheck={true}
-            className="w-full flex-1 bg-white text-zinc-900 rounded-xl p-6 text-sm overflow-y-auto leading-relaxed shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-            style={{
-              fontFamily,
-            }}
-          />
+          {/* Full Width, Zero-Clipping Editor Container */}
+          <div className="flex-1 bg-zinc-950/60 p-4 rounded-xl overflow-auto border border-zinc-800/80">
+            <div
+              ref={editorRef}
+              contentEditable
+              onInput={handleEditorInput}
+              spellCheck={true}
+              className="min-w-full w-fit bg-white text-zinc-900 rounded-sm shadow-2xl p-8 min-h-[620px] focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+              style={{
+                fontFamily,
+              }}
+            />
+          </div>
         </div>
 
-        {/* Right Side: High-DPI Preview (Matches Left Card Exactly) */}
-        <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl h-[660px] overflow-hidden flex flex-col">
+        {/* Right Side: High-DPI Preview with Page Navigator & 4-Way Panning */}
+        <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[740px]">
+          {/* Header with Multi-Page Navigation */}
           <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
-            <span className="flex items-center gap-1.5">
-              <span>High-DPI Retina Preview (Page 1)</span>
-              {isRendering && <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />}
-            </span>
-            <span className="text-zinc-500">Total: {pageCount} {pageCount === 1 ? 'Page' : 'Pages'}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-zinc-300">Live Preview</span>
+              {isRendering && <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />}
+            </div>
+
+            {/* Prev / Next Page Navigator */}
+            <div className="flex items-center gap-2 bg-zinc-950 px-2 py-1 rounded-xl border border-zinc-800">
+              <button
+                type="button"
+                onClick={handlePrevPage}
+                disabled={currentPage <= 1 || isRendering}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-300 disabled:opacity-30 transition-colors"
+                title="Previous Page"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-mono text-zinc-200 text-[11px] px-1 select-none">
+                Page {currentPage} of {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={handleNextPage}
+                disabled={currentPage >= pageCount || isRendering}
+                className="p-1 hover:bg-zinc-800 rounded text-zinc-300 disabled:opacity-30 transition-colors"
+                title="Next Page"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Symmetrical Preview Area */}
-          <div className="flex-1 overflow-auto p-4 bg-zinc-950/60 rounded-xl border border-zinc-800/80 relative flex justify-center items-start">
+          {/* 4-Way Pan & Zoom Viewport */}
+          <div className="flex-1 overflow-auto p-6 bg-zinc-950/60 rounded-xl border border-zinc-800/80 relative">
             <div
+              className={`flex items-start min-w-full ${
+                zoom > 1.0 ? 'justify-start' : 'justify-center'
+              }`}
               style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top center',
-                transition: 'transform 0.15s ease-out',
+                width: zoom > 1.0 ? `${zoom * 100}%` : '100%',
+                paddingRight: zoom > 1.0 ? '6rem' : undefined,
+                paddingBottom: zoom > 1.0 ? '6rem' : undefined,
               }}
-              className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-1"
             >
-              <canvas
-                ref={canvasRef}
+              <div
                 style={{
-                  width: pageSize === 'a4' ? '390px' : '400px',
-                  height: 'auto',
-                  display: 'block',
+                  transform: `scale(${zoom})`,
+                  transformOrigin: zoom > 1.0 ? 'top left' : 'top center',
+                  transition: 'transform 0.15s ease-out',
                 }}
-              />
+                className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-auto"
+              >
+                <canvas
+                  ref={canvasRef}
+                  style={{
+                    width: pageSize === 'a4' ? '420px' : '432px',
+                    height: 'auto',
+                    display: 'block',
+                  }}
+                />
+              </div>
             </div>
           </div>
 
           {/* Zoom Adjuster */}
-          <div className="absolute bottom-6 right-6 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300">
+          <div className="absolute bottom-6 right-6 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300 z-10">
             <button
               onClick={handleZoomOut}
               disabled={zoom <= 0.5}
               className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white disabled:opacity-30 transition-colors"
-              title="Zoom Out (-5%)"
+              title="Zoom Out (-10%)"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -481,7 +562,7 @@ export const TextToPdf = () => {
               onClick={handleZoomIn}
               disabled={zoom >= 2.5}
               className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white disabled:opacity-30 transition-colors"
-              title="Zoom In (+5%)"
+              title="Zoom In (+10%)"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
