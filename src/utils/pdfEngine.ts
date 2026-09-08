@@ -4655,6 +4655,37 @@ export interface HtmlToPdfOptions {
   orientation?: 'portrait' | 'landscape';
 }
 
+// ============================================================================
+// 4. HTML / RECEIPT TO PDF ENGINE
+// ============================================================================
+export interface HtmlToPdfOptions {
+  html: string;
+  pageSize?: 'receipt' | 'a4' | 'letter';
+  orientation?: 'portrait' | 'landscape';
+}
+
+// Dynamically loads html2canvas without causing TypeScript bundle errors
+const loadHtml2Canvas = async (): Promise<any> => {
+  if (typeof window !== 'undefined' && (window as any).html2canvas) {
+    return (window as any).html2canvas;
+  }
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src*="html2canvas"]');
+    if (existing) {
+      if ((window as any).html2canvas) return resolve((window as any).html2canvas);
+      existing.addEventListener('load', () => resolve((window as any).html2canvas));
+      existing.addEventListener('error', () => reject(new Error('Failed to load HTML canvas renderer.')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.async = true;
+    script.onload = () => resolve((window as any).html2canvas);
+    script.onerror = () => reject(new Error('Failed to load HTML rendering library. Please check your connection.'));
+    document.head.appendChild(script);
+  });
+};
+
 export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8Array> {
   const { html, pageSize = 'a4', orientation = 'portrait' } = options;
 
@@ -4672,6 +4703,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     : orientation === 'landscape'
     ? 841.89
     : 595.28;
+
   const targetHeightPt = isReceipt
     ? 0
     : pageSize === 'letter'
@@ -4682,12 +4714,18 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     ? 595.28
     : 841.89;
 
+  const renderWidthPx = isReceipt ? 320 : orientation === 'landscape' ? 1120 : 794;
+
+  // 1. Create an isolated, zero-opacity sandbox at (0,0) so coordinates remain positive
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
-  iframe.style.left = '-9999px';
   iframe.style.top = '0';
-  iframe.style.width = isReceipt ? '300px' : '800px';
+  iframe.style.left = '0';
+  iframe.style.width = `${renderWidthPx}px`;
   iframe.style.height = '1000px';
+  iframe.style.opacity = '0';
+  iframe.style.pointerEvents = 'none';
+  iframe.style.zIndex = '-9999';
   iframe.style.border = 'none';
   document.body.appendChild(iframe);
 
@@ -4695,44 +4733,17 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
     if (!doc) throw new Error('Failed to initialize rendering sandbox.');
 
+    // 2. Distinguish between full HTML documents (like uploaded index.html) and markup snippets
+    const isFullDoc = /<html[\s>]/i.test(html) || /<!doctype/i.test(html);
     doc.open();
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <style>
-            * { box-sizing: border-box; }
-            body {
-              margin: 0;
-              padding: ${isReceipt ? '12px' : '24px'};
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-              color: #18181b;
-              background: #ffffff;
-              font-size: ${isReceipt ? '11px' : '13px'};
-              line-height: 1.4;
-            }
-            table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-            th, td { padding: 4px 6px; text-align: left; }
-            th { border-bottom: 1px solid #18181b; }
-            hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
-          </style>
-        </head>
-        <body>${html}</body>
-      </html>
-    `);
-    doc.close();
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
-    const contentHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
-    const contentWidth = isReceipt ? 300 : 800;
-
-    const serializedHtml = new XMLSerializer().serializeToString(doc.body);
-    const svgData = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${contentWidth}" height="${contentHeight}">
-        <foreignObject width="100%" height="100%">
-          <div xmlns="http://www.w3.org/1999/xhtml">
+    if (isFullDoc) {
+      doc.write(html);
+    } else {
+      doc.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
             <style>
               * { box-sizing: border-box; }
               body {
@@ -4749,38 +4760,38 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
               th { border-bottom: 1px solid #18181b; }
               hr { border: none; border-top: 1px dashed #71717a; margin: 10px 0; }
             </style>
-            ${serializedHtml}
-          </div>
-        </foreignObject>
-      </svg>`;
+          </head>
+          <body>${html}</body>
+        </html>
+      `);
+    }
+    doc.close();
 
-    const img = new Image();
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
+    // Allow internal styles, layout, and web fonts to settle
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    await new Promise((resolve, reject) => {
-      img.onload = () => resolve(true);
-      img.onerror = reject;
-      img.src = svgUrl;
+    const scrollHeight = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight, 600);
+    iframe.style.height = `${scrollHeight}px`;
+
+    // 3. Direct DOM-to-Canvas rendering (Never taints the canvas context)
+    const html2canvas = await loadHtml2Canvas();
+    const canvas = await html2canvas(doc.body, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: renderWidthPx,
+      height: scrollHeight,
+      windowWidth: renderWidthPx,
+      windowHeight: scrollHeight,
     });
-
-    const scaleFactor = 2;
-    const canvas = document.createElement('canvas');
-    canvas.width = contentWidth * scaleFactor;
-    canvas.height = contentHeight * scaleFactor;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context could not be acquired.');
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(scaleFactor, scaleFactor);
-    ctx.drawImage(img, 0, 0);
-    URL.revokeObjectURL(svgUrl);
 
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
 
+    // 4. Export Thermal Receipt (Single continuous page)
     if (isReceipt) {
-      const receiptHeightPt = Math.max(120, (contentHeight / contentWidth) * targetWidthPt);
+      const receiptHeightPt = Math.max(120, (canvas.height / canvas.width) * targetWidthPt);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'pt',
@@ -4790,13 +4801,14 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       return new Uint8Array(pdf.output('arraybuffer'));
     }
 
+    // 5. Export Standard Multi-Page (A4 or US Letter)
     const pdf = new jsPDF({
       orientation,
       unit: 'pt',
       format: pageSize,
     });
 
-    const renderedHeightOnPage = (contentHeight / contentWidth) * targetWidthPt;
+    const renderedHeightOnPage = (canvas.height / canvas.width) * targetWidthPt;
     let heightRemaining = renderedHeightOnPage;
     let positionY = 0;
 
@@ -4812,6 +4824,8 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
     return new Uint8Array(pdf.output('arraybuffer'));
   } finally {
-    document.body.removeChild(iframe);
+    if (iframe.parentNode) {
+      iframe.parentNode.removeChild(iframe);
+    }
   }
 }
