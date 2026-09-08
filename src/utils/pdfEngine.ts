@@ -2538,9 +2538,9 @@ export async function ocrPDFToSearchable(
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
   const worker = await createWorker(language, 1, {
-    workerPath: `${baseUrl}/tessdata/worker.min.js`,
-    corePath: `${baseUrl}/tessdata/tesseract-core-simd-lstm.wasm.js`,
-    langPath: `${baseUrl}/tessdata`,
+    workerPath: '/tessdata/worker.min.js',
+    corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
+    langPath: '/tessdata',
     gzip: true,
     logger: (m) => {
       if (m.status === 'recognizing text' && onProgress) {
