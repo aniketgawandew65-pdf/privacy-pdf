@@ -5,8 +5,8 @@ export function useObjectUrl() {
   const activeUrlRef = useRef<string | null>(null);
 
   const revoke = useCallback(() => {
-    if (activeUrlRef.current) {
-      const urlToRevoke = activeUrlRef.current;
+    const urlToRevoke = activeUrlRef.current;
+    if (urlToRevoke) {
       setTimeout(() => {
         try {
           URL.revokeObjectURL(urlToRevoke);
@@ -18,8 +18,8 @@ export function useObjectUrl() {
   }, []);
 
   const createUrl = useCallback((blob: Blob | MediaSource) => {
-    if (activeUrlRef.current) {
-      const prevUrl = activeUrlRef.current;
+    const prevUrl = activeUrlRef.current;
+    if (prevUrl) {
       setTimeout(() => {
         try {
           URL.revokeObjectURL(prevUrl);
@@ -34,8 +34,8 @@ export function useObjectUrl() {
 
   useEffect(() => {
     return () => {
-      if (activeUrlRef.current) {
-        const finalUrl = activeUrlRef.current;
+      const finalUrl = activeUrlRef.current;
+      if (finalUrl) {
         setTimeout(() => {
           try {
             URL.revokeObjectURL(finalUrl);
