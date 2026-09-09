@@ -294,7 +294,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   }, [currentPage, totalPages, isUnlocked, zoomLevel, renderCurrentPage]);
 
   // High-precision signature drawing mechanics
-  const getPadCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const getPadCoordinates = (e: any | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = drawCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
@@ -310,7 +310,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: any | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -328,7 +328,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     ctx.moveTo(pt.x, pt.y);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const draw = (e: any | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isPadDrawing.current) return;
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
@@ -429,15 +429,19 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       dragInfo.current = null;
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("pointermove", handleMouseMove as any);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("pointerup", handleMouseUp as any);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+    window.removeEventListener("pointermove", handleMouseMove as any);
+      window.removeEventListener("mouseup", handleMouseUp);
+    window.removeEventListener("pointerup", handleMouseUp as any);
     };
   }, [currentPage, getNormalizedCoords]);
 
-  const handleSignatureBoxMouseDown = (e: React.MouseEvent) => {
+  const handleSignatureBoxMouseDown = (e: any) => {
     e.stopPropagation();
     const currentBox = placements[currentPage];
     if (!currentBox) return;
@@ -454,7 +458,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  const handleResizeHandleMouseDown = (e: React.MouseEvent) => {
+  const handleResizeHandleMouseDown = (e: any) => {
     e.stopPropagation();
     const currentBox = placements[currentPage];
     if (!currentBox) return;
@@ -707,14 +711,14 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 ref={drawCanvasRef}
                 width={800}
                 height={200}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
+                onPointerDown={(e: any) => { try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch(_) {} (startDrawing)(e); }}
+                onPointerMove={draw}
+                onPointerUp={stopDrawing}
                 onMouseLeave={stopDrawing}
                 onTouchStart={startDrawing}
                 onTouchMove={draw}
                 onTouchEnd={stopDrawing}
-                className="w-full h-[120px] touch-none cursor-crosshair"
+                className="w-full h-[120px] touch-none cursor-crosshair" style={{ touchAction: "none" }}
               />
             </div>
           </div>
@@ -831,8 +835,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                     >
                       {currentBox && (
                         <div
-                          onMouseDown={handleSignatureBoxMouseDown}
-                          className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move flex items-center justify-center shadow-lg select-none group z-20"
+                          onPointerDown={(e: any) => { try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch(_) {} (handleSignatureBoxMouseDown)(e); }}
+                          className="absolute ring-2 ring-emerald-500 bg-emerald-500/10 rounded-xs cursor-move touch-none select-none flex items-center justify-center shadow-lg select-none group z-20"
                           style={{
                             left: `${currentBox.xPercent * 100}%`,
                             top: `${currentBox.yPercent * 100}%`,
@@ -851,7 +855,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                           </div>
 
                           <div
-                            onMouseDown={handleResizeHandleMouseDown}
+                            onPointerDown={(e: any) => { try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch(_) {} (handleResizeHandleMouseDown)(e); }}
                             className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize shadow-md z-20 hover:scale-125 transition-transform"
                             title="Drag to resize signature"
                           />
