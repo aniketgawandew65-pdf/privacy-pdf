@@ -23,7 +23,6 @@ import {
   Minus,
   Eraser,
   Palette,
-  Loader2,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -482,8 +481,8 @@ export const TextToPdf = () => {
         <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 backdrop-blur-xl shadow-2xl flex flex-col h-[740px]">
           <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 mb-2.5 text-xs text-zinc-400">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-zinc-300">Live Preview</span>
-              {isRendering && <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />}
+              <span className="font-medium text-zinc-300">PDF Preview</span>
+              
             </div>
 
             <div className="flex items-center gap-2 bg-zinc-950 px-2 py-1 rounded-xl border border-zinc-800">
@@ -542,6 +541,18 @@ export const TextToPdf = () => {
             >
               {htmlContent ? htmlContent : <span className="text-zinc-400 italic">Type your text above to see it appear here live...</span>}
             </div>
+          </div>
+                    {/* Instant PDF Preview Card */}
+          <div className="w-full max-w-lg mx-auto aspect-[1/1.414] min-h-[480px] bg-white text-zinc-900 shadow-2xl rounded p-6 sm:p-10 overflow-y-auto text-left border border-zinc-700 select-text">
+            <div
+              style={{ fontFamily: typeof fontFamily !== "undefined" ? fontFamily : "sans-serif" }}
+              className="whitespace-pre-wrap font-sans text-zinc-900 leading-relaxed text-sm sm:text-base break-words"
+              dangerouslySetInnerHTML={{
+                __html: (typeof htmlContent !== "undefined" && htmlContent)
+                  ? htmlContent
+                  : "<span class=\"text-zinc-400 italic\">Type your text above to see it appear here...</span>"
+              }}
+            />
           </div>
           <canvas ref={canvasRef} className="hidden" />
 

@@ -141,7 +141,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     }
   }, [currentPage, totalPages, zoomLevel, renderCurrentPage]);
 
-  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+  const getNormalizedCoords = (e: any) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
     const rect = overlayRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -149,7 +149,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     return { x, y };
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>, mode: DragMode = 'draw') => {
+  const handleMouseDown = (e: any, mode: DragMode = 'draw') => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
 
     if (toolMode === 'pan') {
@@ -182,7 +182,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = (e: any) => {
     if (toolMode === 'pan') {
       if (isPanningRef.current && containerRef.current) {
         const dx = e.clientX - panStartRef.current.x;

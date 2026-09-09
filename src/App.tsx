@@ -338,7 +338,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-3 sm:p-6 selection:bg-emerald-500 selection:text-black">
-      
       {/* Top Value / Announcement Banner */}
       <div className="w-full max-w-5xl mb-2 py-2 px-3 sm:px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[10px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <span className="text-zinc-300 font-medium">
@@ -601,25 +600,10 @@ export default function App() {
             </NavLink>
           </div>
         </div>
-      
-      <div className="flex items-center justify-center gap-2 py-2 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-800/50 mt-8">
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 duration-1000"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-        </span>
-        <span>Build 11:15 PM (Live)</span>
-      </div>
-    
-      {/* Live Build Footer Indicator */}
-      <div className="flex items-center justify-center gap-1.5 py-4 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-800/40 mt-8">
-        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span>Live Build: 11:24 PM</span>
-      </div>
-    
-        {/* Single Live Build Indicator */}
-        <div className="flex items-center justify-center gap-2 py-3 text-xs text-zinc-500 font-mono select-none border-t border-zinc-800/40 mt-4">
+              {/* Single Live Build Indicator */}
+        <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Live Build: 11:41 PM</span>
+          <span>Live Build: 12:05 AM</span>
         </div>
       </footer>
 
