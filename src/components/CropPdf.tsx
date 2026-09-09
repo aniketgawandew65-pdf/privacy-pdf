@@ -50,6 +50,18 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const blockTouchGestures = (e: TouchEvent) => {
+      if (toolMode === "crop") {
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+    el.addEventListener("touchmove", blockTouchGestures, { passive: false });
+    return () => el.removeEventListener("touchmove", blockTouchGestures);
+  }, [toolMode]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -469,7 +481,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
 
           {/* Canvas & Interactive Crop Overlay with 360-Degree Panning Workspace */}
           <div
-            ref={containerRef}
+            ref={containerRef} style={{ overflow: (toolMode === "crop") ? "hidden" : "auto", touchAction: (toolMode === "crop") ? "none" : "pan-x pan-y", overscrollBehavior: "none" }}
             className={`relative w-full bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-auto max-h-[600px] select-none ${
               toolMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : ''
             }`}
