@@ -615,7 +615,13 @@ export default function App() {
         <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span>Live Build: 11:24 PM</span>
       </div>
-    </footer>
+    
+        {/* Single Live Build Indicator */}
+        <div className="flex items-center justify-center gap-2 py-3 text-xs text-zinc-500 font-mono select-none border-t border-zinc-800/40 mt-4">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>Live Build: 11:41 PM</span>
+        </div>
+      </footer>
 
       {/* Global Drag-and-Drop Dropzone Overlay */}
       {isDraggingFile && (

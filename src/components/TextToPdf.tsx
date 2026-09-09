@@ -163,7 +163,7 @@ export const TextToPdf = () => {
 
   useEffect(() => {
     let isMounted = true;
-    setIsRendering(true);
+    setIsRendering(false);
 
     const timer = setTimeout(async () => {
       try {
@@ -533,12 +533,18 @@ export const TextToPdf = () => {
               >
                 <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[420px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
-      <canvas ref={canvasRef}
-                  style={{
-                    width: pageSize === 'a4' ? '440px' : '450px',
-                    height: 'auto',
-                    display: 'block',
-                  }} className="w-full h-auto max-h-full object-contain mx-auto shadow-sm" />
+      
+          {/* Instant Live A4 Reflection */}
+          <div className="w-full max-w-lg mx-auto aspect-[1/1.414] min-h-[480px] bg-white text-zinc-900 shadow-2xl rounded p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text">
+            <div
+              style={{ fontFamily: typeof fontFamily !== "undefined" ? fontFamily : "sans-serif" }}
+              className="whitespace-pre-wrap break-words text-sm sm:text-base leading-relaxed text-black"
+            >
+              {htmlContent ? htmlContent : <span className="text-zinc-400 italic">Type your text above to see it appear here live...</span>}
+            </div>
+          </div>
+          <canvas ref={canvasRef} className="hidden" />
+
     </div>
     </div>
               </div>
