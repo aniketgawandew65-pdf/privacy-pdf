@@ -1,18 +1,3 @@
-// __DEV_BYPASS__
-if (typeof window !== "undefined") {
-  const p = new URLSearchParams(window.location.search);
-  if (p.get("pro") === "true" || p.get("dev") === "true") {
-    try { localStorage.setItem("pro_license_active", "true"); } catch {}
-  }
-}
-if (typeof window !== "undefined") {
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get("pro") === "true" || urlParams.get("dev") === "true") {
-    try {
-      localStorage.setItem("pro_license_active", "true");
-    } catch {}
-  }
-}
 import { verifyLicenseKey, type LicensePayload } from './cryptoLicense';
 
 const LICENSE_STORAGE_KEY = 'one_into_one_license';
@@ -23,12 +8,36 @@ export interface StoredLicense {
   verifiedAt: string;
 }
 
+// Auto-activate developer unlimited mode via URL parameter
+if (typeof window !== 'undefined') {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('pro') === 'true' || params.get('dev') === 'true') {
+      const devRecord: StoredLicense = {
+        key: 'DEV',
+        payload: { email: 'developer@1into1.com', type: 'lifetime' } as any,
+        verifiedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(LICENSE_STORAGE_KEY, JSON.stringify(devRecord));
+      localStorage.setItem('pro_license_active', 'true');
+    }
+  } catch {}
+}
+
 export function getLicenseStatus(): {
   isPro: boolean;
   payload?: LicensePayload;
   licenseKey?: string;
 } {
   try {
+    if (localStorage.getItem('pro_license_active') === 'true') {
+      return {
+        isPro: true,
+        payload: { email: 'developer@1into1.com', type: 'lifetime' } as any,
+        licenseKey: 'DEV',
+      };
+    }
+
     const raw = localStorage.getItem(LICENSE_STORAGE_KEY);
     if (!raw) return { isPro: false };
 
@@ -37,6 +46,7 @@ export function getLicenseStatus(): {
     if (parsed.payload?.expiresAt) {
       if (new Date(parsed.payload.expiresAt) < new Date()) {
         localStorage.removeItem(LICENSE_STORAGE_KEY);
+        localStorage.removeItem('pro_license_active');
         return { isPro: false };
       }
     }
@@ -64,6 +74,26 @@ export function openCheckout(checkoutUrl?: string): void {
 }
 
 export async function activateLicenseKey(key: string): Promise<{ success: boolean; message: string }> {
+  const clean = (key || '').trim().toUpperCase();
+
+  // Instant Developer Bypass
+  if (clean === 'DEV' || clean === 'ADMIN' || clean === 'PRO' || clean === 'TEST') {
+    const record: StoredLicense = {
+      key: clean,
+      payload: { email: 'developer@1into1.com', type: 'lifetime' } as any,
+      verifiedAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(LICENSE_STORAGE_KEY, JSON.stringify(record));
+      localStorage.setItem('pro_license_active', 'true');
+      window.dispatchEvent(new Event('storage'));
+    } catch {}
+    return {
+      success: true,
+      message: 'Developer Pro activated! Unlimited tasks unlocked.',
+    };
+  }
+
   const result = await verifyLicenseKey(key);
 
   if (!result.valid || !result.payload) {
@@ -80,6 +110,7 @@ export async function activateLicenseKey(key: string): Promise<{ success: boolea
   };
 
   localStorage.setItem(LICENSE_STORAGE_KEY, JSON.stringify(record));
+  localStorage.setItem('pro_license_active', 'true');
   window.dispatchEvent(new Event('storage'));
 
   return {
@@ -90,11 +121,11 @@ export async function activateLicenseKey(key: string): Promise<{ success: boolea
 
 export function deactivateLicense(): void {
   localStorage.removeItem(LICENSE_STORAGE_KEY);
+  localStorage.removeItem('pro_license_active');
   window.dispatchEvent(new Event('storage'));
 }
 
 export function canPerformTask(): boolean {
-  if (getLicenseStatus().isPro) return true;
   return true;
 }
 

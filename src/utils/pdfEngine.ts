@@ -62,31 +62,29 @@ function isComplexOrProtectedPdf(bytes: Uint8Array): boolean {
  */
 async function renderPageAsJpg(
   page: any,
-  scale = 2.0
+  scale = 1.5
 ): Promise<{ imgBytes: Uint8Array; width: number; height: number }> {
   const unscaledViewport = page.getViewport({ scale: 1.0 });
-  const renderViewport = page.getViewport({ scale });
+  const maxDimension = Math.max(unscaledViewport.width, unscaledViewport.height);
+  const safeScale = maxDimension * scale > 2048 ? 2048 / maxDimension : scale;
+  const renderViewport = page.getViewport({ scale: safeScale });
 
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.floor(renderViewport.width);
-  canvas.height = Math.floor(renderViewport.height);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('Failed to acquire canvas rendering context');
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(renderViewport.width));
+  canvas.height = Math.max(1, Math.floor(renderViewport.height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to acquire canvas rendering context");
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  await (
-    page.render({
-      canvasContext: ctx as any,
-      viewport: renderViewport,
-      canvas,
-      annotationMode: (pdfjsLib as any).AnnotationMode?.ENABLE ?? 2,
-    } as any) as any
-  ).promise;
+  await page.render({
+    canvasContext: ctx,
+    viewport: renderViewport,
+  }).promise;
 
   const jpegBlob = await new Promise<Blob>((resolve) =>
-    canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.95)
+    canvas.toBlob((b) => resolve(b || new Blob()), "image/jpeg", 0.92)
   );
 
   canvas.width = 0;
