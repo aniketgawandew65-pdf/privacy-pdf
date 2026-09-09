@@ -29,6 +29,17 @@ interface PageThumbnail {
 
 export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) => {
   const [pages, setPages] = useState<PageThumbnail[]>([]);
+  const movePage = (fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= pages.length) return;
+    setPages((prev: any[]) => {
+      const next = [...prev];
+      const [item] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, item);
+      return next;
+    });
+  };
+  if (false) { (movePage as any)(0, 0); }
+
   const [cardZoom, setCardZoom] = useState<number>(1.0);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -261,6 +272,26 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
                       >
                         <RotateCw className="w-3.5 h-3.5" />
                       </button>
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => movePage(idx, idx - 1)}
+                      className="px-2 py-1 text-xs font-bold rounded bg-zinc-800 disabled:opacity-20 text-zinc-300 hover:bg-zinc-700 active:scale-95"
+                      title="Move Earlier"
+                    >
+                      ◀
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === pages.length - 1}
+                      onClick={() => movePage(idx, idx + 1)}
+                      className="px-2 py-1 text-xs font-bold rounded bg-zinc-800 disabled:opacity-20 text-zinc-300 hover:bg-zinc-700 active:scale-95"
+                      title="Move Later"
+                    >
+                      ▶
+                    </button>
+                  </div>
                       <button
                         type="button"
                         onClick={() => handleDeletePage(idx)}
