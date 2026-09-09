@@ -6,17 +6,9 @@ import App from "./App.tsx";
 import "./index.css";
 import { registerSW } from "virtual:pwa-register";
 
-// Inline blob worker: immune to Cloudflare MIME types, PWA caching, and WebKit classic worker bugs
+// Local same-origin worker: zero CDN dependencies, works across all mobile browsers
 if (typeof window !== "undefined") {
-  try {
-    const workerBlob = new Blob(
-      ['importScripts("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/' + pdfjsLib.version + '/pdf.worker.min.js");'],
-      { type: "application/javascript" }
-    );
-    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
-  } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/" + pdfjsLib.version + "/pdf.worker.min.js";
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
 registerSW({ immediate: true });

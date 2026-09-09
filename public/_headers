@@ -1,8 +1,9 @@
 /*
   X-Content-Type-Options: nosniff
 
-/assets/*.mjs
+/pdf.worker.min.mjs
   Content-Type: application/javascript; charset=utf-8
+  Access-Control-Allow-Origin: *
 
 /*.mjs
   Content-Type: application/javascript; charset=utf-8
