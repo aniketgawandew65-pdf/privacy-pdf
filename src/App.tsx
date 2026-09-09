@@ -437,7 +437,7 @@ export default function App() {
         {/* Categorized Navigation Suite: Touch Smooth In-Browser Scroll */}
         <div className="flex flex-col items-center gap-3 mb-6 sm:mb-8 w-full max-w-5xl mx-auto px-1 sm:px-2">
           {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 p-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl backdrop-blur-md overflow-x-auto max-w-full touch-pan-x [-webkit-overflow-scrolling:touch]">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 p-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl backdrop-blur-md max-w-full">
             {[
               { id: 'organize', label: 'Organize & Size' },
               { id: 'security', label: 'Security & Privacy' },
@@ -461,7 +461,7 @@ export default function App() {
           {/* Tool Navigation Bar: Native Touch Scrolling & 44px Tap Height */}
           <nav 
             aria-label="PDF Tools" 
-            className="flex flex-nowrap sm:flex-wrap items-center sm:justify-center gap-2 max-w-full overflow-x-auto sm:overflow-x-visible px-2 py-1 touch-pan-x [-webkit-overflow-scrolling:touch] no-scrollbar"
+            className="flex flex-wrap items-center justify-center gap-2 max-w-full px-2 py-1"
           >
             {visibleTools.map((tool) => {
               const Icon = tool.icon;
