@@ -281,16 +281,20 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       setActiveDrawRect(null);
     };
 
-    window.addEventListener('mousemove', handleWindowMouseMove);
-    window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("pointermove", handleWindowMouseMove as any);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    window.addEventListener("pointerup", handleWindowMouseUp as any);
 
     return () => {
-      window.removeEventListener('mousemove', handleWindowMouseMove);
-      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+    window.removeEventListener("pointermove", handleWindowMouseMove as any);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+    window.removeEventListener("pointerup", handleWindowMouseUp as any);
     };
   }, [getNormalizedCoords, activeDrawRect, currentPage, pageRedactions]);
 
-  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleOverlayMouseDown = (e: any) => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
     const coords = getNormalizedCoords(e.clientX, e.clientY);
     setSelectedIndex(null);
@@ -304,7 +308,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     setActiveDrawRect({ x: coords.x, y: coords.y, width: 0.005, height: 0.005 });
   };
 
-  const handleBoxMouseDown = (e: React.MouseEvent<HTMLDivElement>, index: number) => {
+  const handleBoxMouseDown = (e: any, index: number) => {
     e.stopPropagation();
     if (isLoadingPage || isProcessing || downloadUrl) return;
 
@@ -321,7 +325,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     };
   };
 
-  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>, index: number, handle: ResizeHandle) => {
+  const handleResizeStart = (e: any, index: number, handle: ResizeHandle) => {
     e.stopPropagation();
     if (isLoadingPage || isProcessing || downloadUrl) return;
 
@@ -533,15 +537,15 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                 <div
                   ref={overlayRef}
                   style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
-                  onMouseDown={handleOverlayMouseDown}
-                  className="absolute inset-0 cursor-crosshair z-10"
+                  onPointerDown={handleOverlayMouseDown}
+                  className="absolute inset-0 cursor-crosshair touch-none select-none z-10"
                 >
                   {currentRects.map((r, i) => {
                     const isSelected = selectedIndex === i;
                     return (
                       <div
                         key={i}
-                        onMouseDown={(e) => handleBoxMouseDown(e, i)}
+                        onPointerDown={(e) => handleBoxMouseDown(e, i)}
                         className={`absolute bg-black transition-shadow cursor-move ${
                           isSelected ? 'ring-2 ring-emerald-400 shadow-xl z-30' : 'border border-zinc-700 shadow-md z-20'
                         }`}
@@ -557,42 +561,42 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                           <>
                             {/* NW (Top-Left) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'nw')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'nw')}
                               className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
                             />
                             {/* N (Top-Center) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'n')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'n')}
                               className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
                             />
                             {/* NE (Top-Right) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'ne')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'ne')}
                               className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
                             />
                             {/* E (Middle-Right) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'e')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'e')}
                               className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
                             />
                             {/* SE (Bottom-Right) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'se')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'se')}
                               className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nwse-resize z-40"
                             />
                             {/* S (Bottom-Center) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 's')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 's')}
                               className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ns-resize z-40"
                             />
                             {/* SW (Bottom-Left) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'sw')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'sw')}
                               className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-nesw-resize z-40"
                             />
                             {/* W (Middle-Left) */}
                             <div
-                              onMouseDown={(e) => handleResizeStart(e, i, 'w')}
+                              onPointerDown={(e) => handleResizeStart(e, i, 'w')}
                               className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-white border-2 border-emerald-500 rounded-xs cursor-ew-resize z-40"
                             />
                           </>
