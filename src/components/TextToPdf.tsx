@@ -34,10 +34,6 @@ import { useObjectUrl } from '../utils/useObjectUrl';
 const FONT_SIZES = [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
 
 export const TextToPdf = () => {
-  const activeRenderTaskRef = useRef<any>(null);
-  // @ts-ignore
-  void activeRenderTaskRef;
-
   const [fontFamily, setFontFamily] = useState<
     'Arial, sans-serif' | "'Times New Roman', serif" | "'Courier New', monospace" | 'Georgia, serif'
   >('Arial, sans-serif');
@@ -136,25 +132,15 @@ export const TextToPdf = () => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         await (
-          (() => {
-    if ((window as any).__pdfRenderTask) {
-      try { (window as any).__pdfRenderTask.cancel(); } catch (_: any) {
-    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
-    if (_?.name === "RenderingCancelledException") return;}
-      (window as any).__pdfRenderTask = null;
-    }
-    const _t = page.render({
+          page.render({
             canvasContext: ctx as any,
             viewport,
-          } as any);
-    (window as any).__pdfRenderTask = _t;
-    return _t;
-  })() as any
+          } as any) as any
         ).promise;
       }
     } catch (err: any) {
-    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
-    if (err?.name === "RenderingCancelledException") return;
+    setIsRendering(false);
+    
       console.error('Canvas render failed:', err);
     }
   }, []);
@@ -212,8 +198,8 @@ export const TextToPdf = () => {
 
         await renderCanvasPage(pdf, validPage);
       } catch (err: any) {
-    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
-    if (err?.name === "RenderingCancelledException") return;
+    setIsRendering(false);
+    
         console.error('Live preview generation failed:', err);
       } finally {
         if (isMounted) setIsRendering(false);
@@ -546,7 +532,6 @@ export const TextToPdf = () => {
                 className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-auto"
               >
                 <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[420px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
-      <div className="w-full max-w-lg mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <canvas ref={canvasRef}
                   style={{
@@ -554,7 +539,6 @@ export const TextToPdf = () => {
                     height: 'auto',
                     display: 'block',
                   }} className="w-full h-auto max-h-full object-contain mx-auto shadow-sm" />
-    </div>
     </div>
     </div>
               </div>
