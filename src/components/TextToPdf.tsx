@@ -34,6 +34,10 @@ import { useObjectUrl } from '../utils/useObjectUrl';
 const FONT_SIZES = [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
 
 export const TextToPdf = () => {
+  const activeRenderTaskRef = useRef<any>(null);
+  // @ts-ignore
+  void activeRenderTaskRef;
+
   const [fontFamily, setFontFamily] = useState<
     'Arial, sans-serif' | "'Times New Roman', serif" | "'Courier New', monospace" | 'Georgia, serif'
   >('Arial, sans-serif');
@@ -528,12 +532,14 @@ export const TextToPdf = () => {
                 className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-auto"
               >
                 <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[420px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
+      <div className="w-full max-w-lg mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <canvas ref={canvasRef}
                   style={{
                     width: pageSize === 'a4' ? '440px' : '450px',
                     height: 'auto',
                     display: 'block',
-                  }} className="w-full h-full object-contain" />
+                  }} className="w-full h-auto max-h-full object-contain mx-auto" />
+    </div>
     </div>
               </div>
             </div>
