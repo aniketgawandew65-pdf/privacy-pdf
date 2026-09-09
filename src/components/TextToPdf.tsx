@@ -136,13 +136,25 @@ export const TextToPdf = () => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         await (
-          page.render({
+          (() => {
+    if ((window as any).__pdfRenderTask) {
+      try { (window as any).__pdfRenderTask.cancel(); } catch (_: any) {
+    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
+    if (_?.name === "RenderingCancelledException") return;}
+      (window as any).__pdfRenderTask = null;
+    }
+    const _t = page.render({
             canvasContext: ctx as any,
             viewport,
-          } as any) as any
+          } as any);
+    (window as any).__pdfRenderTask = _t;
+    return _t;
+  })() as any
         ).promise;
       }
-    } catch (err) {
+    } catch (err: any) {
+    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
+    if (err?.name === "RenderingCancelledException") return;
       console.error('Canvas render failed:', err);
     }
   }, []);
@@ -199,7 +211,9 @@ export const TextToPdf = () => {
         }
 
         await renderCanvasPage(pdf, validPage);
-      } catch (err) {
+      } catch (err: any) {
+    if ((window as any).__pdfRenderTask) { (window as any).__pdfRenderTask = null; }
+    if (err?.name === "RenderingCancelledException") return;
         console.error('Live preview generation failed:', err);
       } finally {
         if (isMounted) setIsRendering(false);
@@ -533,12 +547,14 @@ export const TextToPdf = () => {
               >
                 <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[420px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <div className="w-full max-w-lg mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
+      <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[480px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
       <canvas ref={canvasRef}
                   style={{
                     width: pageSize === 'a4' ? '440px' : '450px',
                     height: 'auto',
                     display: 'block',
-                  }} className="w-full h-auto max-h-full object-contain mx-auto" />
+                  }} className="w-full h-auto max-h-full object-contain mx-auto shadow-sm" />
+    </div>
     </div>
     </div>
               </div>
