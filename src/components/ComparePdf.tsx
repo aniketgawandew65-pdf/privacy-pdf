@@ -14,11 +14,10 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
 
 if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+  
 }
 
 type DiffViewMode = 'overlay' | 'split';
