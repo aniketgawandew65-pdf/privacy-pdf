@@ -1,3 +1,5 @@
+// @ts-ignore
+import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -18,10 +20,7 @@ import { createWorker } from 'tesseract.js';
 
 // Configure offline worker for 100% local processing
 if (typeof window !== 'undefined' && 'Worker' in window) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.mjs',
-    import.meta.url
-  ).toString();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 }
 /**
  * Safely loads a PDF and verifies whether it has internal encryption dictionaries.
@@ -2637,10 +2636,7 @@ export async function ocrPDFToSearchable(
 ): Promise<Uint8Array> {
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.min.mjs',
-        import.meta.url
-      ).toString();
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
     } catch {
       pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
     }

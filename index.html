@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -22,6 +25,29 @@
     <meta name="twitter:title" content="1into1 PDF — 100% Private In-Browser PDF Suite" />
     <meta name="twitter:description" content="Compress, merge, split, sign, and protect PDF documents directly inside your browser. Zero server uploads, zero tracking." />
     <meta name="twitter:image" content="https://www.1into1.com/og-image.png" />
+  
+    <script>
+      (function __checkSwUpdate() {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            for (var r of regs) {
+              r.update();
+              r.onupdatefound = function() {
+                var installing = r.installing;
+                if (installing) {
+                  installing.onstatechange = function() {
+                    if (installing.state === "installed" && navigator.serviceWorker.controller) {
+                      window.location.reload();
+                    }
+                  };
+                }
+              };
+            }
+          });
+        }
+      })();
+    </script>
+  
   </head>
   <body class="bg-[#f5f5f7] text-[#1d1d1f] antialiased">
     <div id="root"></div>
