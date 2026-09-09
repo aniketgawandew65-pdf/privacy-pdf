@@ -1,3 +1,5 @@
+// @ts-ignore
+import PDFWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -12,7 +14,13 @@ import {
   PDFDropdown,
 } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
-if (typeof window !== "undefined") { pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"; }
+if (typeof window !== "undefined") {
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker();
+  } catch {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  }
+}
 if (typeof window !== "undefined") {  }
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
@@ -43,18 +51,14 @@ export async function loadSafe(
  * form widgets, XFA layers, or annotation appearances.
  */
 function isComplexOrProtectedPdf(bytes: Uint8Array): boolean {
-  const headChunk = new TextDecoder('latin1').decode(bytes.slice(0, Math.min(bytes.length, 131072)));
-  const tailChunk = new TextDecoder('latin1').decode(bytes.slice(Math.max(0, bytes.length - 131072)));
-  const scanArea = headChunk + tailChunk;
-
-  return (
-    scanArea.includes('/Encrypt') ||
-    scanArea.includes('/encrypt') ||
-    scanArea.includes('/XFA') ||
-    scanArea.includes('/AcroForm') ||
-    scanArea.includes('/Sig') ||
-    scanArea.includes('/Widget')
-  );
+  try {
+    const head = new TextDecoder("latin1").decode(bytes.slice(0, 4096));
+    const tail = new TextDecoder("latin1").decode(bytes.slice(Math.max(0, bytes.length - 4096)));
+    const scan = head + tail;
+    return scan.includes("/Encrypt") || scan.includes("/encrypt");
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -66,15 +70,25 @@ async function renderPageAsJpg(
   scale = 1.5
 ): Promise<{ imgBytes: Uint8Array; width: number; height: number }> {
   const unscaledViewport = page.getViewport({ scale: 1.0 });
-  const maxDimension = Math.max(unscaledViewport.width, unscaledViewport.height);
-  const safeScale = maxDimension * scale > 2048 ? 2048 / maxDimension : scale;
+  const maxDim = Math.max(unscaledViewport.width, unscaledViewport.height);
+  const safeScale = maxDim * scale > 2048 ? 2048 / maxDim : scale;
   const renderViewport = page.getViewport({ scale: safeScale });
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.floor(renderViewport.width));
   canvas.height = Math.max(1, Math.floor(renderViewport.height));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Failed to acquire canvas rendering context");
+  canvas.style.position = "fixed";
+  canvas.style.left = "-9999px";
+  canvas.style.top = "-9999px";
+  canvas.style.opacity = "0";
+  canvas.style.pointerEvents = "none";
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) {
+    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+    throw new Error("Failed to acquire canvas context");
+  }
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -84,18 +98,18 @@ async function renderPageAsJpg(
     viewport: renderViewport,
   }).promise;
 
+  // Force WebKit to commit GPU drawing commands to the bitmap buffer
+  ctx.getImageData(0, 0, 1, 1);
+
   const jpegBlob = await new Promise<Blob>((resolve) =>
     canvas.toBlob((b) => resolve(b || new Blob()), "image/jpeg", 0.92)
   );
 
-  canvas.width = 0;
-  canvas.height = 0;
+  if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
 
   const arrayBuffer = await jpegBlob.arrayBuffer();
-  const imgBytes = new Uint8Array(arrayBuffer);
-
   return {
-    imgBytes,
+    imgBytes: new Uint8Array(arrayBuffer),
     width: unscaledViewport.width,
     height: unscaledViewport.height,
   };
@@ -252,7 +266,11 @@ export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
     canvas.width = imgBitmap.width;
     canvas.height = imgBitmap.height;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) continue;
     ctx.drawImage(imgBitmap, 0, 0);
 
@@ -302,7 +320,11 @@ export async function rotatePDF(
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
       if (ctx) {
         ctx.fillStyle = '#ffffff';
@@ -360,7 +382,11 @@ export async function pdfToImages(file: File): Promise<string[]> {
     const canvas = document.createElement('canvas');
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
     if (!ctx) continue;
 
@@ -865,7 +891,11 @@ export async function addPageNumbersToPDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
     if (!ctx) {
       page.cleanup();
@@ -973,7 +1003,11 @@ export async function extractTextFromPDF(
         const canvas = document.createElement('canvas');
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
         if (ctx) {
           await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
@@ -1248,7 +1282,11 @@ export async function encryptPDF(
     const canvas = document.createElement('canvas');
     canvas.width = renderViewport.width;
     canvas.height = renderViewport.height;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) throw new Error('Canvas context unavailable');
 
     await (
@@ -1429,9 +1467,11 @@ export async function compressPDF(
           } as any) as any
         ).promise;
 
+        if (ctx) ctx.getImageData(0, 0, 1, 1);
         const blob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', quality)
+          canvas.toBlob((b) => resolve(b || new Blob()), "image/jpeg", quality)
         );
+        if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
 
         canvas.width = 0;
         canvas.height = 0;
@@ -1462,7 +1502,11 @@ export async function compressPDF(
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
         if (ctx) {
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1650,7 +1694,11 @@ export async function redactPDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) throw new Error('Canvas rendering context unavailable');
 
     await (
@@ -1731,7 +1779,11 @@ export async function cropPDF(
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(box.width * 2.0));
       canvas.height = Math.max(1, Math.floor(box.height * 2.0));
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
       if (ctx) {
         ctx.fillStyle = '#ffffff';
@@ -1869,7 +1921,11 @@ export async function convertToGrayscalePDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) throw new Error('Canvas rendering context unavailable');
 
     await (
@@ -2529,7 +2585,11 @@ export async function extractImagesFromPDF(
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
         if (!ctx) continue;
 
         // 2. Render image data to canvas
@@ -2818,7 +2878,11 @@ export async function repairPDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
     if (!ctx) continue;
 
@@ -2887,7 +2951,11 @@ export async function invertPDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) throw new Error('Canvas rendering context unavailable');
 
     await (
@@ -3254,7 +3322,11 @@ export async function deskewPDF(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) throw new Error('Canvas context unavailable');
 
     await (
@@ -3536,7 +3608,11 @@ export async function extractTableFromPDF(
         const canvas = document.createElement('canvas');
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
         if (ctx) {
           await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
@@ -3678,7 +3754,11 @@ export async function extractMarkdownFromPDF(
         const canvas = document.createElement('canvas');
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
 
         if (ctx) {
           await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
@@ -4290,7 +4370,11 @@ export async function applyVisualOverlays(
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d", { alpha: false });
+      canvas.style.position = "fixed";
+      canvas.style.left = "-9999px";
+      canvas.style.opacity = "0";
+      document.body.appendChild(canvas);
     if (!ctx) continue;
 
     await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;

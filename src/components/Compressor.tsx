@@ -30,8 +30,8 @@ interface CompressorProps {
 
 type CompressionLevel = 'recommended' | 'extreme' | 'target';
 
-const MAX_FREE_BYTES = 25 * 1024 * 1024; // 25 MB
-const MAX_PRO_BYTES = 150 * 1024 * 1024; // 150 MB
+const MAX_FREE_BYTES = 25 * 1024 * 1024;
+const MAX_PRO_BYTES = 150 * 1024 * 1024;
 
 export function Compressor({ file, onFileChange }: CompressorProps) {
   const [level, setLevel] = useState<CompressionLevel>('target');
@@ -47,7 +47,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const [dailyStats, setDailyStats] = useState(getDailyUsage());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Multi-file batch state
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const { createUrl: createZipUrl, revoke: revokeZipUrl } = useObjectUrl();
   const { tasksState, isProcessing: isBatchRunning, startBatch, cancelBatch } = useBatchQueue<
@@ -259,7 +258,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     if (!file || !downloadUrl || !compressedBlob) return;
     const fileName = `compressed_${file.name}`;
 
-    // On iOS Safari / Android Chrome, offer native Web Share (Save to Files)
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile && navigator.canShare) {
       try {
@@ -267,7 +265,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         if (navigator.canShare({ files: [shareFile] })) {
           await navigator.share({
             files: [shareFile],
-            title: fileName,
           });
           return;
         }
@@ -276,7 +273,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       }
     }
 
-    // Direct browser anchor fallback
     const tempLink = document.createElement('a');
     tempLink.href = downloadUrl;
     tempLink.download = fileName;
