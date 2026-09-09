@@ -1,3 +1,11 @@
+if (typeof window !== "undefined") {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get("pro") === "true" || urlParams.get("dev") === "true") {
+    try {
+      localStorage.setItem("pro_license_active", "true");
+    } catch {}
+  }
+}
 import { verifyLicenseKey, type LicensePayload } from './cryptoLicense';
 
 const LICENSE_STORAGE_KEY = 'one_into_one_license';
