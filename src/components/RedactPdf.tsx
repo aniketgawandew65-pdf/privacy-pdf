@@ -36,7 +36,8 @@ interface DragState {
 
 export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPage, setCurrentPage] = useState<number>(1); 
+  const [redactMode, setRedactMode] = useState<"draw" | "pan">("draw");
   const [pageRedactions, setPageRedactions] = useState<Record<number, RedactionRect[]>>({});
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
@@ -476,6 +477,25 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               </button>
             </div>
 
+          {/* Mobile Draw / Pan Toggle */}
+          <div className="flex items-center bg-zinc-800 p-1 rounded-lg border border-zinc-700 mx-2">
+            <button
+              type="button"
+              onClick={() => setRedactMode("draw")}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${redactMode === "draw" ? "bg-emerald-600 text-white shadow" : "text-zinc-400 hover:text-white"}`}
+            >
+              ⬛ Draw
+            </button>
+            <button
+              type="button"
+              onClick={() => setRedactMode("pan")}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${redactMode === "pan" ? "bg-emerald-600 text-white shadow" : "text-zinc-400 hover:text-white"}`}
+            >
+              ✋ Pan
+            </button>
+          </div>
+
+
             <div className="flex items-center gap-3">
               {selectedIndex !== null && currentRects[selectedIndex] && (
                 <button
@@ -538,7 +558,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                   ref={overlayRef}
                   style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
                   onPointerDown={handleOverlayMouseDown}
-                  className="absolute inset-0 cursor-crosshair touch-none select-none z-10"
+                  className={`absolute inset-0 ${redactMode === "draw" ? "cursor-crosshair touch-none z-20" : "pointer-events-none z-0"}`}
                 >
                   {currentRects.map((r, i) => {
                     const isSelected = selectedIndex === i;

@@ -527,14 +527,14 @@ export const TextToPdf = () => {
                 }}
                 className="shadow-2xl rounded-sm border border-zinc-700 bg-white shrink-0 my-auto"
               >
-                <canvas
-                  ref={canvasRef}
+                <div className="w-full max-w-md mx-auto aspect-[1/1.414] min-h-[420px] bg-white shadow-2xl rounded flex items-center justify-center overflow-hidden border border-zinc-700">
+      <canvas ref={canvasRef}
                   style={{
                     width: pageSize === 'a4' ? '440px' : '450px',
                     height: 'auto',
                     display: 'block',
-                  }}
-                />
+                  }} className="w-full h-full object-contain" />
+    </div>
               </div>
             </div>
           </div>

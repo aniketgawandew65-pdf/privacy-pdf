@@ -141,7 +141,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     }
   }, [currentPage, totalPages, zoomLevel, renderCurrentPage]);
 
-  const getNormalizedCoords = (e: React.MouseEvent<HTMLDivElement>) => {
+  const getNormalizedCoords = (e: any) => {
     if (!overlayRef.current) return { x: 0, y: 0 };
     const rect = overlayRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -149,7 +149,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     return { x, y };
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>, mode: DragMode = 'draw') => {
+  const handleMouseDown = (e: any, mode: DragMode = 'draw') => {
     if (isLoadingPage || isProcessing || downloadUrl) return;
 
     if (toolMode === 'pan') {
@@ -182,7 +182,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = (e: any) => {
     if (toolMode === 'pan') {
       if (isPanningRef.current && containerRef.current) {
         const dx = e.clientX - panStartRef.current.x;
@@ -460,7 +460,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                   onClick={handleResetCurrent}
                   className="flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-red-400 transition"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-7 h-7 rounded-full shadow-md touch-none" />
                   <span>{applyToAll ? 'Reset All' : 'Reset Box'}</span>
                 </button>
               )}
@@ -473,9 +473,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
             className={`relative w-full bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-auto max-h-[600px] select-none ${
               toolMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : ''
             }`}
-            onMouseDown={(e) => handleMouseDown(e, 'draw')}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
+            onPointerDown={(e) => handleMouseDown(e, 'draw')}
+            onPointerMove={handleMouseMove}
+            onPointerUp={handleMouseUp}
           >
             <div className="inline-block p-20 sm:p-32 min-w-full min-h-full">
               {isLoadingPage && (
@@ -505,7 +505,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                       }}
                     />
                     <div
-                      onMouseDown={(e) => {
+                      onPointerDown={(e) => {
                         if (toolMode === 'pan') return;
                         handleMouseDown(e, 'move');
                       }}
@@ -519,14 +519,14 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                       }}
                     >
                       {/* 8-way resize grips */}
-                      <div onMouseDown={(e) => handleMouseDown(e, 'nw')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-nw-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'n')} className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-n-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'ne')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-ne-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'e')} className="absolute top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-e-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'se')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-se-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 's')} className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-s-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'sw')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-sw-resize" />
-                      <div onMouseDown={(e) => handleMouseDown(e, 'w')} className="absolute top-1/2 -translate-y-1/2 -left-1.5 w-3 h-3 bg-emerald-400 border border-black rounded-xs cursor-w-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'nw')} className="absolute -top-1.5 -left-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-nw-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'n')} className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-n-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'ne')} className="absolute -top-1.5 -right-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-ne-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'e')} className="absolute top-1/2 -translate-y-1/2 -right-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-e-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'se')} className="absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-se-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 's')} className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-s-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'sw')} className="absolute -bottom-1.5 -left-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-sw-resize" />
+                      <div onPointerDown={(e) => handleMouseDown(e, 'w')} className="absolute top-1/2 -translate-y-1/2 -left-1.5 w-7 h-7 rounded-full shadow-md touch-none bg-emerald-400 border border-black rounded-xs cursor-w-resize" />
                     </div>
                   </>
                 )}
