@@ -1,17 +1,12 @@
 /*
-  X-Frame-Options: DENY
+  X-Frame-Options: SAMEORIGIN
   X-Content-Type-Options: nosniff
-  Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob: data: https://api.groq.com https://api.openai.com https://openrouter.ai https://api.deepseek.com http://localhost:* http://127.0.0.1:*; frame-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self';
 
-/sw.js
-  Cache-Control: no-cache, no-store, must-revalidate
+/*.mjs
+  Content-Type: application/javascript; charset=utf-8
 
-/assets/*
-  Cache-Control: public, max-age=31536000, immutable
+/*.js
+  Content-Type: application/javascript; charset=utf-8
 
-/tessdata/*
-  Cache-Control: public, max-age=31536000, immutable
-  Access-Control-Allow-Origin: *
+/pdf.worker.min.mjs
+  Content-Type: application/javascript; charset=utf-8

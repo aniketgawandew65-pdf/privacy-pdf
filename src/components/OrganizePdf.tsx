@@ -73,6 +73,8 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
           const ctx = canvas.getContext('2d');
 
           if (ctx) {
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             await page.render({ canvasContext: ctx as any, viewport } as any).promise;
             thumbs.push({
               originalIndex: i - 1,

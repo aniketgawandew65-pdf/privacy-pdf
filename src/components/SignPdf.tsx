@@ -179,7 +179,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
             setIsProtected(false);
             setIsUnlocked(true);
             setTotalPages(doc.numPages);
-            setCurrentPage(doc.numPages);
+            setCurrentPage(1);
           }
         } catch (err: any) {
           if (
@@ -238,7 +238,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       pdfDocRef.current = doc;
       setIsUnlocked(true);
       setTotalPages(doc.numPages);
-      setCurrentPage(doc.numPages);
+      setCurrentPage(1);
       setSuccessMessage('Password verified! Document preview unlocked.');
     } catch (err: any) {
       setIsUnlocked(false);
@@ -272,6 +272,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({
           canvasContext: ctx as any,
           viewport,
