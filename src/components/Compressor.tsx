@@ -39,6 +39,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const [totalPages, setTotalPages] = useState<number>(1);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
   const [progressStatus, setProgressStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
@@ -173,6 +174,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     revokeDownloadUrl();
     revokeZipUrl();
     setCompressedSize(null);
+    setCompressedBlob(null);
 
     if (files.length === 0) return;
     if (!validateFiles(files)) return;
@@ -239,6 +241,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       });
 
       const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+      setCompressedBlob(blob);
       setCompressedSize(blob.size);
       createUrl(blob);
       recordActionExecution();
@@ -250,6 +253,36 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       setIsCompressing(false);
       setProgressStatus('');
     }
+  };
+
+  const handleDownload = async () => {
+    if (!file || !downloadUrl || !compressedBlob) return;
+    const fileName = `compressed_${file.name}`;
+
+    // On iOS Safari / Android Chrome, offer native Web Share (Save to Files)
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile && navigator.canShare) {
+      try {
+        const shareFile = new File([compressedBlob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare({ files: [shareFile] })) {
+          await navigator.share({
+            files: [shareFile],
+            title: fileName,
+          });
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+
+    // Direct browser anchor fallback
+    const tempLink = document.createElement('a');
+    tempLink.href = downloadUrl;
+    tempLink.download = fileName;
+    document.body.appendChild(tempLink);
+    tempLink.click();
+    document.body.removeChild(tempLink);
   };
 
   const handleDownloadBatchZip = async () => {
@@ -267,8 +300,9 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     const tempLink = document.createElement('a');
     tempLink.href = URL.createObjectURL(zipBlob);
     tempLink.download = 'compressed_bundle.zip';
+    document.body.appendChild(tempLink);
     tempLink.click();
-    setTimeout(() => URL.revokeObjectURL(tempLink.href), 1000);
+    document.body.removeChild(tempLink);
   };
 
   const handleClearAll = () => {
@@ -278,6 +312,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     revokeZipUrl();
     cancelBatch();
     setCompressedSize(null);
+    setCompressedBlob(null);
     setErrorMessage(null);
     setProgressStatus('');
   };
@@ -523,14 +558,13 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               </span>
             </div>
           </div>
-          <a
-            href={downloadUrl}
-            download={`compressed_${file.name}`}
-            className="w-full sm:w-auto py-2.5 px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition flex items-center justify-center gap-1.5 shrink-0 min-h-[44px]"
+          <button
+            onClick={handleDownload}
+            className="w-full sm:w-auto py-2.5 px-4 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition flex items-center justify-center gap-1.5 shrink-0 min-h-[44px] cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            Download
-          </a>
+            <span>Download PDF</span>
+          </button>
         </div>
       )}
 

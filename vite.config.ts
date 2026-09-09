@@ -9,6 +9,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'logo.png', 'robots.txt', 'tessdata/*'],
       manifest: {
         name: '1into1 PDF - Offline Privacy Suite',
@@ -32,35 +33,34 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,mjs,gz,traineddata}'],
+        // Exclude HTML from precache so browsers ALWAYS fetch the latest index.html
+        globPatterns: ['**/*.{js,css,ico,png,svg,wasm,mjs,gz,traineddata}'],
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        navigateFallback: '/index.html',
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
-            // Network-First for HTML navigation so returning users immediately get new deploys
+            // Network-First strictly for index.html navigation
             urlPattern: ({ request }) => request.mode === 'navigate',
             handler: 'NetworkFirst',
             options: {
               cacheName: 'html-cache',
-              networkTimeoutSeconds: 3,
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24, // 1 day
-              },
+              networkTimeoutSeconds: 2,
               cacheableResponse: {
                 statuses: [0, 200],
               },
             },
           },
           {
-            // Cache heavy local Tesseract language models and binary wasm
+            // Cache heavy local Tesseract models
             urlPattern: ({ url }) => url.pathname.includes('/tessdata/'),
             handler: 'CacheFirst',
             options: {
               cacheName: 'tesseract-offline-data',
               expiration: {
                 maxEntries: 5,
-                maxAgeSeconds: 60 * 60 * 24 * 90, // 90 days
+                maxAgeSeconds: 60 * 60 * 24 * 90,
               },
               cacheableResponse: {
                 statuses: [0, 200],

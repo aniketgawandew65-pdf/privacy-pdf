@@ -13,6 +13,7 @@ import {
 } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 if (typeof window !== "undefined") { pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"; }
+if (typeof window !== "undefined") {  }
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
 
@@ -209,9 +210,7 @@ export async function compressPDFToTarget(
 
     await (
       page.render({
-        canvasContext: context as any,
-        viewport,
-        canvas,
+        canvasContext: context as any, viewport,
       } as any) as any
     ).promise;
 
@@ -367,9 +366,7 @@ export async function pdfToImages(file: File): Promise<string[]> {
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
@@ -1418,7 +1415,7 @@ export async function compressPDF(
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.floor(viewport.width));
       canvas.height = Math.max(1, Math.floor(viewport.height));
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const ctx = canvas.getContext('2d', {});
 
       if (!ctx) break;
 
@@ -1428,9 +1425,7 @@ export async function compressPDF(
       try {
         await (
           page.render({
-            canvasContext: ctx as any,
-            viewport,
-            canvas,
+            canvasContext: ctx as any, viewport,
           } as any) as any
         ).promise;
 
@@ -1660,9 +1655,7 @@ export async function redactPDF(
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
@@ -1881,9 +1874,7 @@ export async function convertToGrayscalePDF(
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
@@ -2676,7 +2667,7 @@ export async function ocrPDFToSearchable(
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width);
       canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const ctx = canvas.getContext('2d', {});
 
       if (!ctx) continue;
       await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
@@ -2833,9 +2824,7 @@ export async function repairPDF(
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
@@ -2903,9 +2892,7 @@ export async function invertPDF(
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
@@ -3182,7 +3169,7 @@ export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, 
   const sampleCanvas = document.createElement('canvas');
   sampleCanvas.width = sampleW;
   sampleCanvas.height = sampleH;
-  const sCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+  const sCtx = sampleCanvas.getContext('2d', {});
   if (!sCtx) return 0;
 
   sCtx.drawImage(ctx.canvas, 0, 0, sampleW, sampleH);
@@ -3194,7 +3181,7 @@ export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, 
     const rotCanvas = document.createElement('canvas');
     rotCanvas.width = sampleW;
     rotCanvas.height = sampleH;
-    const rCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
+    const rCtx = rotCanvas.getContext('2d', {});
     if (!rCtx) continue;
 
     rCtx.save();
@@ -3272,9 +3259,7 @@ export async function deskewPDF(
 
     await (
       page.render({
-        canvasContext: ctx as any,
-        viewport,
-        canvas,
+        canvasContext: ctx as any, viewport,
       } as any) as any
     ).promise;
 
