@@ -338,6 +338,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-3 sm:p-6 selection:bg-emerald-500 selection:text-black">
+      <div id="cache-test-badge" className="bg-emerald-500 text-black text-center text-xs font-bold py-1 px-2 tracking-wide select-none z-50">⚡ LIVE BUILD: 10:40 PM (CACHE CLEARED)</div>
       {/* Top Value / Announcement Banner */}
       <div className="w-full max-w-5xl mb-2 py-2 px-3 sm:px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[10px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
         <span className="text-zinc-300 font-medium">
