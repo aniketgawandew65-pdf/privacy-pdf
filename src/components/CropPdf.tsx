@@ -1,18 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Download,
-  Loader2,
-  CheckCircle2,
-  FileText,
-  X,
-  AlertCircle,
-  Crop,
-  ChevronLeft,
-  ChevronRight,
-  RotateCcw,
-  ZoomIn,
-  Move,
-} from 'lucide-react';
+import { Download, Loader2, CheckCircle2, FileText, X, AlertCircle, Crop, ChevronLeft, ChevronRight, RotateCcw, ZoomIn, Move,  ZoomOut } from "lucide-react";
 import * as pdfjsLib from 'pdfjs-dist';
 
 import { cropPDF, type CropBox } from '../utils/pdfEngine';
@@ -43,8 +30,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     x: 0,
     y: 0,
     scrollLeft: 0,
-    scrollTop: 0,
-  });
+    scrollTop: 0 });
 
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -138,8 +124,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({
         canvasContext: ctx,
-        viewport,
-      }).promise;
+        viewport }).promise;
     } catch (err) {
       console.error('Page render error:', err);
     } finally {
@@ -171,8 +156,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
           x: e.clientX,
           y: e.clientY,
           scrollLeft: containerRef.current.scrollLeft,
-          scrollTop: containerRef.current.scrollTop,
-        };
+          scrollTop: containerRef.current.scrollTop };
       }
       return;
     }
@@ -255,8 +239,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
     } else {
       setPageBoxes((prev) => ({
         ...prev,
-        [currentPage]: newBox,
-      }));
+        [currentPage]: newBox }));
     }
   };
 
@@ -432,19 +415,36 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                 </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <ZoomIn className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-[11px] text-zinc-400">{zoomLevel.toFixed(1)}x</span>
-                <input
-                  type="range"
-                  min="1.0"
-                  max="3.0"
-                  step="0.2"
-                  value={zoomLevel}
-                  onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                  className="w-20 accent-emerald-500 h-1 bg-zinc-800 rounded-lg cursor-pointer"
-                />
-              </div>
+              {/* Standard Zoom Controls */}
+            <div className="flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => setZoomLevel((prev: number) => Math.max(0.5, Math.round((prev - 0.1) * 10) / 10))}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-xs font-mono px-1.5 text-zinc-300 min-w-[2.75rem] text-center select-none">
+                {Math.round(zoomLevel * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomLevel((prev: number) => Math.min(2.5, Math.round((prev + 0.1) * 10) / 10))}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setZoomLevel(1.0)}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Reset Zoom"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
             </div>
 
             <div className="flex items-center gap-3">
@@ -513,8 +513,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                           ${(currentBox.x + currentBox.width) * 100}% ${(currentBox.y + currentBox.height) * 100}%,
                           ${(currentBox.x + currentBox.width) * 100}% ${currentBox.y * 100}%,
                           0% ${currentBox.y * 100}%
-                        )`,
-                      }}
+                        )` }}
                     />
                     <div
                       onPointerDown={(e) => {
@@ -527,8 +526,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file, onFileChange }) => {
                         top: `${currentBox.y * 100}%`,
                         width: `${currentBox.width * 100}%`,
                         height: `${currentBox.height * 100}%`,
-                        backgroundColor: 'rgba(16, 185, 129, 0.05)',
-                      }}
+                        backgroundColor: 'rgba(16, 185, 129, 0.05)' }}
                     >
                       {/* 8-way resize grips */}
                       <div onPointerDown={(e) => handleMouseDown(e, 'nw')} className="absolute -top-1.5 -left-1.5 w-7 h-7 rounded-full shadow-lg touch-none bg-emerald-400 border border-black rounded-xs cursor-nw-resize" />
