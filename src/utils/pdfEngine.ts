@@ -1,5 +1,3 @@
-// @ts-ignore
-import PDFWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -13,14 +11,13 @@ import {
   PDFCheckBox,
   PDFDropdown,
 } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
-if (typeof window !== "undefined") {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker();
-  } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-  }
+import * as pdfjsLib from "pdfjs-dist";
+// @ts-ignore
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 }
+
 if (typeof window !== "undefined") {  }
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
@@ -77,18 +74,8 @@ async function renderPageAsJpg(
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.floor(renderViewport.width));
   canvas.height = Math.max(1, Math.floor(renderViewport.height));
-  canvas.style.position = "fixed";
-  canvas.style.left = "-9999px";
-  canvas.style.top = "-9999px";
-  canvas.style.opacity = "0";
-  canvas.style.pointerEvents = "none";
-  document.body.appendChild(canvas);
-
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) {
-    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
-    throw new Error("Failed to acquire canvas context");
-  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to acquire canvas rendering context");
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -98,14 +85,14 @@ async function renderPageAsJpg(
     viewport: renderViewport,
   }).promise;
 
-  // Force WebKit to commit GPU drawing commands to the bitmap buffer
   ctx.getImageData(0, 0, 1, 1);
 
   const jpegBlob = await new Promise<Blob>((resolve) =>
     canvas.toBlob((b) => resolve(b || new Blob()), "image/jpeg", 0.92)
   );
 
-  if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  canvas.width = 0;
+  canvas.height = 0;
 
   const arrayBuffer = await jpegBlob.arrayBuffer();
   return {

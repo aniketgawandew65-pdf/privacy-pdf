@@ -1,9 +1,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import App from './App.tsx';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
+
+// Configure PDF.js worker globally for all 37 tools
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
 
 // Auto-update Service Worker on deployment
 const updateSW = registerSW({
@@ -19,7 +27,6 @@ const updateSW = registerSW({
   },
 });
 
-// Auto-reload the tab immediately when a new service worker version activates
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((regs) => {
     for (const r of regs) {
