@@ -12,13 +12,14 @@ import {
   PDFDropdown,
 } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
+if (typeof window !== "undefined") { pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"; }
 import JSZip from 'jszip';
 import { createWorker } from 'tesseract.js';
 
 
 // Configure offline worker for 100% local processing
 if (typeof window !== 'undefined' && 'Worker' in window) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  
 }
 /**
  * Safely loads a PDF and verifies whether it has internal encryption dictionaries.
@@ -2634,9 +2635,9 @@ export async function ocrPDFToSearchable(
 ): Promise<Uint8Array> {
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      
     } catch {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      
     }
   }
 

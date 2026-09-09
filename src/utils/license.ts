@@ -1,3 +1,10 @@
+// __DEV_BYPASS__
+if (typeof window !== "undefined") {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get("pro") === "true" || p.get("dev") === "true") {
+    try { localStorage.setItem("pro_license_active", "true"); } catch {}
+  }
+}
 if (typeof window !== "undefined") {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get("pro") === "true" || urlParams.get("dev") === "true") {

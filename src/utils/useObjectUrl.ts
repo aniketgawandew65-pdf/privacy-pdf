@@ -5,12 +5,10 @@ export function useObjectUrl() {
   const activeUrlRef = useRef<string | null>(null);
 
   const revoke = useCallback(() => {
-    const urlToRevoke = activeUrlRef.current;
-    if (urlToRevoke) {
+    const target = activeUrlRef.current;
+    if (target) {
       setTimeout(() => {
-        try {
-          URL.revokeObjectURL(urlToRevoke);
-        } catch {}
+        try { URL.revokeObjectURL(target); } catch {}
       }, 60000);
       activeUrlRef.current = null;
       setUrl(null);
@@ -18,28 +16,24 @@ export function useObjectUrl() {
   }, []);
 
   const createUrl = useCallback((blob: Blob | MediaSource) => {
-    const prevUrl = activeUrlRef.current;
-    if (prevUrl) {
+    const prev = activeUrlRef.current;
+    if (prev) {
       setTimeout(() => {
-        try {
-          URL.revokeObjectURL(prevUrl);
-        } catch {}
+        try { URL.revokeObjectURL(prev); } catch {}
       }, 60000);
     }
-    const newUrl = URL.createObjectURL(blob);
-    activeUrlRef.current = newUrl;
-    setUrl(newUrl);
-    return newUrl;
+    const next = URL.createObjectURL(blob);
+    activeUrlRef.current = next;
+    setUrl(next);
+    return next;
   }, []);
 
   useEffect(() => {
     return () => {
-      const finalUrl = activeUrlRef.current;
-      if (finalUrl) {
+      const target = activeUrlRef.current;
+      if (target) {
         setTimeout(() => {
-          try {
-            URL.revokeObjectURL(finalUrl);
-          } catch {}
+          try { URL.revokeObjectURL(target); } catch {}
         }, 60000);
       }
     };
