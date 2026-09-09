@@ -601,9 +601,11 @@ export default function App() {
           </div>
         </div>
               {/* Single Live Build Indicator */}
+        
+              {/* Single Live Build Indicator */}
         <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Live Build: 12:05 AM</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>Live Build: 12:17 AM</span>
         </div>
       </footer>
 
