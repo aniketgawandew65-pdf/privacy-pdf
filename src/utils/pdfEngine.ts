@@ -1,3 +1,5 @@
+// @ts-ignore
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -12,8 +14,9 @@ import {
   PDFDropdown,
 } from 'pdf-lib';
 import * as pdfjsLib from "pdfjs-dist";
-// @ts-ignore
-import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+}
 if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
   
 }
