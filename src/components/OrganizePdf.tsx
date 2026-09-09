@@ -89,7 +89,7 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
         if (isMounted) setPages(thumbs);
       } catch (err: any) {
         console.error('Failed to load page thumbnails:', err);
-        if (isMounted) setErrorMessage('Failed to render page previews.');
+        if (isMounted) setErrorMessage(err?.message || String(err));
       } finally {
         if (isMounted) setIsLoadingPages(false);
       }

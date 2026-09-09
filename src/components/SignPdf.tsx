@@ -184,8 +184,8 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
         } catch (err: any) {
           if (
             err?.name === 'PasswordException' ||
-            err?.message?.includes('password') ||
-            err?.message?.includes('need password')
+            (err as any)?.message?.includes('password') ||
+            (err as any)?.message?.includes('need password')
           ) {
             if (isMounted) {
               setIsProtected(true);
@@ -205,7 +205,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
         }
       } catch (err) {
         console.error(err);
-        if (isMounted) setErrorMessage('Failed to open PDF document.');
+        if (isMounted) setErrorMessage((err as any)?.message || String(err));
       }
     })();
 
@@ -548,7 +548,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       if (err.message === 'INCORRECT_PASSWORD') {
         setErrorMessage('Incorrect password. Please verify the document password.');
       } else {
-        setErrorMessage('Failed to sign document.');
+        setErrorMessage((err as any)?.message || String(err));
       }
     } finally {
       setIsProcessing(false);

@@ -41,7 +41,7 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
       setDownloadUrl(url);
     } catch (err) {
       console.error(err);
-      setError('Failed to encrypt PDF. The file may be corrupted or already restricted.');
+      setError((err as any)?.message || String(err));
     } finally {
       setIsProcessing(false);
     }

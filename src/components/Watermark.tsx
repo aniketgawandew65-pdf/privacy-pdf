@@ -86,7 +86,7 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
         setCurrentPage(1);
       } catch (err) {
         console.error('Error loading PDF for preview:', err);
-        if (isMounted) setError('Failed to open PDF document.');
+        if (isMounted) setError((err as any)?.message || String(err));
       } finally {
         if (isMounted) setIsLoadingPage(false);
       }
@@ -185,7 +185,7 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       createUrl(blob);
     } catch (err) {
       console.error(err);
-      setError('Failed to apply watermark. The PDF may be password-protected or corrupted.');
+      setError((err as any)?.message || String(err));
     } finally {
       setIsProcessing(false);
     }

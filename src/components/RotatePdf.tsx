@@ -70,7 +70,7 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
         canvas.height = 0;
       } catch (err) {
         console.error('Rotate preview error:', err);
-        if (isMounted) setErrorMessage('Failed to generate high-resolution page preview.');
+        if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
         if (isMounted) setIsLoadingPreview(false);
       }

@@ -94,7 +94,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         setSelectedIndex(null);
       } catch (err) {
         console.error('Redact doc load error:', err);
-        if (isMounted) setErrorMessage('Failed to open PDF document.');
+        if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
         if (isMounted) setIsLoadingPage(false);
       }

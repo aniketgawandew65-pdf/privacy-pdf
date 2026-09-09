@@ -73,7 +73,7 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
         canvas.height = 0;
       } catch (err) {
         console.error('Deskew preview error:', err);
-        if (isMounted) setErrorMessage('Failed to generate high-resolution page preview.');
+        if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
         if (isMounted) setIsLoadingPreview(false);
       }

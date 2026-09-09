@@ -1,12 +1,8 @@
 /*
-  X-Frame-Options: SAMEORIGIN
   X-Content-Type-Options: nosniff
 
+/assets/*.mjs
+  Content-Type: application/javascript; charset=utf-8
+
 /*.mjs
-  Content-Type: application/javascript; charset=utf-8
-
-/*.js
-  Content-Type: application/javascript; charset=utf-8
-
-/pdf.worker.min.mjs
   Content-Type: application/javascript; charset=utf-8

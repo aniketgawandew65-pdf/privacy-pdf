@@ -40,7 +40,7 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
       if (err.message === 'INCORRECT_PASSWORD') {
         setError('Incorrect password. ');
       } else {
-        setError('Failed to decrypt document. Please check the password and try again.');
+        setError(err?.message || String(err));
       }
     } finally {
       setIsProcessing(false);
