@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Download,
   Loader2,
@@ -32,6 +32,7 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
+const A4_PAGE_HEIGHT_PX = 1050; // Standard usable A4 page height threshold
 
 const FONT_OPTIONS = [
   { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
@@ -60,8 +61,12 @@ export const TextToPdf: React.FC<any> = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editorPageBreaks, setEditorPageBreaks] = useState<number[]>([]);
+  const [previewPageBreaks, setPreviewPageBreaks] = useState<number[]>([]);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
+  const savedRangeRef = useRef<Range | null>(null);
 
   // 1. Auto-restore draft from localStorage
   useEffect(() => {
@@ -77,7 +82,47 @@ export const TextToPdf: React.FC<any> = () => {
     } catch (_) {}
   }, []);
 
-  // 2. Instant 0ms synchronization + auto-save
+  // 2. Track mobile touch selection so font sizing never loses highlighted words
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (
+        sel &&
+        sel.rangeCount > 0 &&
+        !sel.isCollapsed &&
+        editorRef.current &&
+        editorRef.current.contains(sel.anchorNode)
+      ) {
+        savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+      }
+    };
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, []);
+
+  // 3. Calculate dynamic A4 page boundaries in both editor and preview
+  const recalculatePageBreaks = useCallback(() => {
+    if (editorRef.current) {
+      const scrollH = editorRef.current.scrollHeight;
+      const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
+      const breaks: number[] = [];
+      for (let i = 1; i < totalPages; i++) {
+        breaks.push(i * A4_PAGE_HEIGHT_PX);
+      }
+      setEditorPageBreaks(breaks);
+    }
+    if (previewRef.current) {
+      const scrollH = previewRef.current.scrollHeight;
+      const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
+      const breaks: number[] = [];
+      for (let i = 1; i < totalPages; i++) {
+        breaks.push(i * A4_PAGE_HEIGHT_PX);
+      }
+      setPreviewPageBreaks(breaks);
+    }
+  }, []);
+
+  // 4. Instant 0ms synchronization + auto-save
   const syncContent = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
@@ -87,6 +132,7 @@ export const TextToPdf: React.FC<any> = () => {
     try {
       localStorage.setItem(STORAGE_KEY, html);
     } catch (_) {}
+    setTimeout(recalculatePageBreaks, 50);
   };
 
   useEffect(() => {
@@ -95,33 +141,42 @@ export const TextToPdf: React.FC<any> = () => {
     const observer = new MutationObserver(() => syncContent());
     observer.observe(el, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
-  }, []);
+  }, [recalculatePageBreaks]);
 
   const formatDoc = (cmd: string, val: string = "") => {
     document.execCommand(cmd, false, val);
     syncContent();
   };
 
-  // Precise inline font size application on selected words/sentences
+  // 5. Individual Word / Sentence Font Size Sizing (iOS-safe)
   const handleFontSizeChange = (size: number) => {
     setFontSize(size);
+
     const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editorRef.current?.contains(sel.anchorNode)) {
-      const range = sel.getRangeAt(0);
-      const span = document.createElement("span");
-      span.style.fontSize = `${size}px`;
-      span.style.lineHeight = "1.3";
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
-      sel.removeAllRanges();
-      const newRange = document.createRange();
-      newRange.selectNodeContents(span);
-      sel.addRange(newRange);
-      syncContent();
-    } else {
-      document.execCommand("fontSize", false, size >= 24 ? "6" : size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
-      syncContent();
+    if (savedRangeRef.current) {
+      if (!sel || sel.isCollapsed || !editorRef.current?.contains(sel.anchorNode)) {
+        sel?.removeAllRanges();
+        sel?.addRange(savedRangeRef.current);
+      }
     }
+
+    const level = size >= 32 ? "7" : size >= 24 ? "6" : size >= 18 ? "5" : size >= 16 ? "4" : size >= 14 ? "3" : "2";
+    document.execCommand("fontSize", false, level);
+
+    if (editorRef.current) {
+      editorRef.current.querySelectorAll("font[size]").forEach((fontEl: any) => {
+        const s = fontEl.getAttribute("size");
+        if (s === "7") fontEl.style.fontSize = "32px";
+        else if (s === "6") fontEl.style.fontSize = "24px";
+        else if (s === "5") fontEl.style.fontSize = "18px";
+        else if (s === "4") fontEl.style.fontSize = "16px";
+        else if (s === "3") fontEl.style.fontSize = "14px";
+        else if (s === "2") fontEl.style.fontSize = "12px";
+        fontEl.style.lineHeight = "1.35";
+      });
+    }
+
+    syncContent();
   };
 
   const handleFontFamilyChange = (font: string) => {
@@ -136,7 +191,7 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  // True CSS Page Break: Empty divider with zero text
+  // 6. Manual Page Break (Invisible divider in PDF)
   const handleInsertPageBreak = () => {
     const breakHtml = '<div class="doc-page-break" contenteditable="false" style="page-break-before: always; break-before: page; margin: 24px 0; border-top: 2px dashed #10b981; height: 0; user-select: none;"></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
@@ -150,13 +205,15 @@ export const TextToPdf: React.FC<any> = () => {
       setContent("");
       setCharCount(0);
       setDownloadUrl(null);
+      setEditorPageBreaks([]);
+      setPreviewPageBreaks([]);
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch (_) {}
     }
   };
 
-  // Multi-Page A4 PDF Generator preserving all inline font sizes
+  // 7. Multi-Page A4 PDF Generator
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -172,7 +229,7 @@ export const TextToPdf: React.FC<any> = () => {
     iframe.style.position = "fixed";
     iframe.style.left = "-9999px";
     iframe.style.top = "0";
-    iframe.style.width = "794px"; // A4 Width at 96 DPI
+    iframe.style.width = "794px";
     iframe.style.height = "1123px";
     iframe.style.border = "none";
     document.body.appendChild(iframe);
@@ -213,7 +270,6 @@ export const TextToPdf: React.FC<any> = () => {
               p { margin: 6px 0; }
               hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
               
-              /* Exact word-level font size preservation in PDF */
               font[size="1"] { font-size: 10px !important; }
               font[size="2"] { font-size: 12px !important; }
               font[size="3"] { font-size: 14px !important; }
@@ -346,6 +402,7 @@ export const TextToPdf: React.FC<any> = () => {
   };
 
   const hasContent = content && content.replace(/<[^>]*>/g, "").trim().length > 0;
+  const estimatedPages = Math.max(1, editorPageBreaks.length + 1);
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 text-white space-y-6 select-none">
@@ -356,7 +413,7 @@ export const TextToPdf: React.FC<any> = () => {
             <FileText className="w-5 h-5 text-emerald-500" />
             <span className="font-semibold text-sm text-zinc-200">Document Editor</span>
             <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
-              Auto-Saved
+              ~{estimatedPages} {estimatedPages === 1 ? "Page" : "Pages"}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -376,6 +433,7 @@ export const TextToPdf: React.FC<any> = () => {
         <div className="flex flex-wrap items-center gap-1.5 bg-zinc-950/80 border border-zinc-800 rounded-xl p-2 text-zinc-300 relative">
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("undo")}
@@ -386,6 +444,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("redo")}
@@ -413,7 +472,7 @@ export const TextToPdf: React.FC<any> = () => {
             </select>
           </div>
 
-          {/* Font Size Selector */}
+          {/* Font Size Selector (Word / Sentence Sizing) */}
           <select
             value={fontSize}
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
@@ -430,6 +489,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => handleFontSizeChange(Math.min(32, fontSize + 2))}
@@ -439,6 +499,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => handleFontSizeChange(Math.max(8, fontSize - 2))}
@@ -453,6 +514,7 @@ export const TextToPdf: React.FC<any> = () => {
           <div className="relative">
             <button
               type="button"
+              onTouchStart={(e) => e.preventDefault()}
               onPointerDown={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setShowColorPicker(!showColorPicker)}
@@ -467,6 +529,7 @@ export const TextToPdf: React.FC<any> = () => {
                   <button
                     key={c.value}
                     type="button"
+                    onTouchStart={(e) => e.preventDefault()}
                     onPointerDown={(e) => e.preventDefault()}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleApplyTextColor(c.value)}
@@ -483,6 +546,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("bold")}
@@ -493,6 +557,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("italic")}
@@ -503,6 +568,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("underline")}
@@ -516,6 +582,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyLeft")}
@@ -526,6 +593,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyCenter")}
@@ -536,6 +604,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyRight")}
@@ -546,6 +615,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyFull")}
@@ -559,6 +629,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertUnorderedList")}
@@ -570,6 +641,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertOrderedList")}
@@ -581,6 +653,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertHorizontalRule")}
@@ -590,9 +663,9 @@ export const TextToPdf: React.FC<any> = () => {
             <Minus className="w-4 h-4" />
           </button>
 
-          {/* Clean Page Break Tool */}
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={handleInsertPageBreak}
@@ -605,6 +678,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("removeFormat")}
@@ -615,27 +689,46 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor */}
-        <div
-          ref={editorRef}
-          contentEditable={true}
-          onInput={syncContent}
-          onKeyUp={syncContent}
-          onPaste={() => setTimeout(syncContent, 0)}
-          style={{ fontFamily: selectedFont }}
-          data-placeholder="Start typing your document here..."
-          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-8 sm:p-12 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
-        />
+        {/* Input Editor with Live Visual Page Break Boundaries */}
+        <div className="relative w-full rounded-xl overflow-hidden shadow-inner bg-white">
+          <div
+            ref={editorRef}
+            contentEditable={true}
+            onInput={syncContent}
+            onKeyUp={syncContent}
+            onPaste={() => setTimeout(syncContent, 0)}
+            style={{ fontFamily: selectedFont }}
+            data-placeholder="Start typing your document here..."
+            className="w-full min-h-[360px] max-h-[560px] overflow-y-auto text-zinc-900 p-8 sm:p-12 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+          />
+
+          {/* Word-Style Visual Page Seam Markers inside the Editor */}
+          {editorPageBreaks.map((topPos, idx) => (
+            <div
+              key={idx}
+              style={{ top: `${topPos}px` }}
+              className="absolute left-0 right-0 pointer-events-none z-10 flex items-center justify-center -translate-y-1/2 select-none px-4"
+            >
+              <div className="w-full border-t border-dashed border-zinc-300" />
+              <span className="shrink-0 mx-2 px-2 py-0.5 bg-zinc-100 border border-zinc-300 text-zinc-600 text-[10px] font-mono font-semibold rounded-full shadow-sm">
+                Page {idx + 2} Begins
+              </span>
+              <div className="w-full border-t border-dashed border-zinc-300" />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Bottom Live PDF Preview Card */}
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
           <span className="font-semibold text-sm text-zinc-200">PDF Preview</span>
-          <span className="text-xs text-zinc-400 font-mono">A4 Sheet Layout</span>
+          <span className="text-xs text-zinc-400 font-mono">
+            {estimatedPages} {estimatedPages === 1 ? "Page" : "Pages"} (A4 Sheets)
+          </span>
         </div>
 
-        {/* Single Centered A4 Preview Sheet */}
+        {/* Single Centered A4 Preview Sheet with Page Boundaries */}
         <div className="relative w-full min-h-[480px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-center justify-center p-6 overflow-auto">
           <div
             style={{
@@ -643,11 +736,12 @@ export const TextToPdf: React.FC<any> = () => {
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+            className="relative w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
           >
             {hasContent ? (
               <div
-                className="text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
+                ref={previewRef}
+                className="relative text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
                 dangerouslySetInnerHTML={{ __html: content }}
               />
             ) : (
@@ -655,6 +749,21 @@ export const TextToPdf: React.FC<any> = () => {
                 Type your text above to see it appear here live...
               </p>
             )}
+
+            {/* Word-Style Visual Page Seam Markers inside the Preview */}
+            {previewPageBreaks.map((topPos, idx) => (
+              <div
+                key={idx}
+                style={{ top: `${topPos}px` }}
+                className="absolute left-0 right-0 pointer-events-none z-10 flex items-center justify-center -translate-y-1/2 select-none px-6"
+              >
+                <div className="w-full border-t border-dashed border-zinc-400" />
+                <span className="shrink-0 mx-2 px-2.5 py-0.5 bg-zinc-200 border border-zinc-400 text-zinc-700 text-[10px] font-mono font-semibold rounded-full shadow-sm">
+                  Page {idx + 2} Begins
+                </span>
+                <div className="w-full border-t border-dashed border-zinc-400" />
+              </div>
+            ))}
           </div>
 
           {/* Floating Zoom Controls */}
