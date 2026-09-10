@@ -74,6 +74,7 @@ export const TextToPdf: React.FC<any> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const savedRangeRef = useRef<Range | null>(null);
 
   // Auto-restore draft from localStorage
   useEffect(() => {
@@ -109,12 +110,26 @@ export const TextToPdf: React.FC<any> = () => {
     return () => observer.disconnect();
   }, []);
 
-  // Safe formatting runner that strictly preserves mobile touch selection
-  const formatDoc = (cmd: string, val: string = "") => {
+  // Track and preserve text selection for mobile touch interactions
+  const saveSelection = () => {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editorRef.current?.contains(sel.anchorNode)) {
-      editorRef.current?.focus();
+    if (sel && sel.rangeCount > 0 && editorRef.current?.contains(sel.anchorNode)) {
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
     }
+  };
+
+  const restoreSelection = () => {
+    if (savedRangeRef.current) {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedRangeRef.current);
+      }
+    }
+  };
+
+  const formatDoc = (cmd: string, val: string = "") => {
+    restoreSelection();
     document.execCommand(cmd, false, val);
     syncContent();
   };
@@ -130,19 +145,20 @@ export const TextToPdf: React.FC<any> = () => {
   };
 
   const handleApplyTextColor = (color: string) => {
-    formatDoc("foreColor", color);
+    restoreSelection();
+    document.execCommand("styleWithCSS", false, "true");
+    document.execCommand("foreColor", false, color);
+    syncContent();
     setShowColorPicker(false);
   };
 
-  // Cross-browser mobile highlighting (hiliteColor with backColor fallback)
+  // Cross-browser mobile highlighting with styleWithCSS support
   const handleApplyHighlight = (color: string) => {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editorRef.current?.contains(sel.anchorNode)) {
-      editorRef.current?.focus();
-    }
+    restoreSelection();
     if (color === "transparent") {
       document.execCommand("removeFormat", false);
     } else {
+      document.execCommand("styleWithCSS", false, "true");
       const ok = document.execCommand("hiliteColor", false, color);
       if (!ok) {
         document.execCommand("backColor", false, color);
@@ -152,18 +168,25 @@ export const TextToPdf: React.FC<any> = () => {
     setShowHighlightPicker(false);
   };
 
-  // Visual Page Break guide with an explicit ✕ Remove button
+  // Strikethrough / word-cutting with selection restoration
+  const handleStrikethrough = () => {
+    restoreSelection();
+    document.execCommand("strikeThrough", false);
+    syncContent();
+  };
+
+  // Insert visual Page Break guide
   const handleInsertPageBreak = () => {
-    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
+    const breakHtml = '<div class="page-break-line" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
-  // Tap-to-remove handler for the Page Break button
+  // Direct tap-to-remove handler on the editor banner
   const handleEditorInteraction = (e: any) => {
     const target = e.target as HTMLElement;
     if (target) {
       const deleteBtn = target.closest(".delete-page-break-btn");
-      const breakEl = target.closest(".page-break-indicator, .page-break-line, [data-page-break]");
+      const breakEl = target.closest(".page-break-line, [data-page-break='true']");
       if (deleteBtn && breakEl) {
         e.preventDefault();
         e.stopPropagation();
@@ -187,7 +210,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export with complete purge of page break banners and support for strikethrough & highlights
+  // 1:1 WYSIWYG PDF Export: isolated clone CSS, string-level break purge, protected root container
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -218,22 +241,17 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.style.visibility = "visible";
       printContainer.style.opacity = "1";
 
-      // 1. STRING-LEVEL PURGE: Remove any page break div or text before DOM parsing
+      // 1. STRING-LEVEL PURGE: Remove any page break elements before DOM parsing
       let sanitizedHtml = content
-        .replace(/<div[^>]*?(?:page-break|PAGE BREAK)[^>]*?>[\s\S]*?<\/div>/gi, "")
-        .replace(/<[^>]+>[^<]*?PAGE BREAK[^<]*?<\/[^>]+>/gi, "")
-        .replace(/✂?\s*-*\s*PAGE BREAK[\s\S]*?---\s*/gi, "");
+        .replace(/<div[^>]*data-page-break[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*class="[^"]*(?:page-break|delete-page-break)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*>[^<]*?PAGE BREAK[\s\S]*?<\/div>/gi, "");
 
       const contentWrapper = document.createElement("div");
       contentWrapper.innerHTML = sanitizedHtml;
 
-      // 2. DOM PURGE: Remove all leftover selectors
-      contentWrapper.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], [class*='page-break']").forEach((el) => el.remove());
-      contentWrapper.querySelectorAll("*").forEach((el) => {
-        if (el.textContent && el.textContent.includes("PAGE BREAK")) {
-          el.remove();
-        }
-      });
+      // 2. DOM PURGE: Remove leftover selectors
+      contentWrapper.querySelectorAll(".page-break-line, .page-break-indicator, [data-page-break]").forEach((el) => el.remove());
 
       printContainer.appendChild(contentWrapper);
       document.body.appendChild(printContainer);
@@ -246,21 +264,22 @@ export const TextToPdf: React.FC<any> = () => {
         windowWidth: 794,
         logging: false,
         ignoreElements: (el: Element) => {
-          const txt = el.textContent || "";
+          // Never ignore the root element
+          if (el === printContainer || el.id === "privacy-pdf-print-container") {
+            return false;
+          }
           const cls = typeof el.className === "string" ? el.className : "";
           return (
             cls.includes("page-break") ||
             el.hasAttribute("data-page-break") ||
-            txt.includes("PAGE BREAK") ||
-            txt.includes("Delete Break") ||
-            txt.includes("Remove")
+            cls.includes("delete-page-break-btn")
           );
         },
         onclone: (clonedDoc: Document) => {
           // Remove all host stylesheets to eliminate CSS parser crashes (oklch, unexpected EOF)
           clonedDoc.querySelectorAll("style, link[rel='stylesheet']").forEach((el) => el.remove());
 
-          // Inject complete formatting stylesheet into clone
+          // Inject safe, isolated styling with explicit strikethrough and background highlighting
           const safeStyle = clonedDoc.createElement("style");
           safeStyle.textContent = `
             * { box-sizing: border-box !important; }
@@ -274,52 +293,40 @@ export const TextToPdf: React.FC<any> = () => {
             p { margin: 6px 0 !important; }
             hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 16px 0 !important; }
             
-            /* Strikethrough (Word Cutting) */
             s, strike, del, [style*="line-through"] {
               text-decoration: line-through !important;
               -webkit-text-decoration-line: line-through !important;
-              text-decoration-thickness: 1.8px !important;
+              text-decoration-thickness: 1.6px !important;
               text-decoration-color: currentColor !important;
             }
 
-            /* Underline */
             u, [style*="underline"] {
               text-decoration: underline !important;
               -webkit-text-decoration-line: underline !important;
               text-decoration-thickness: 1.5px !important;
             }
 
-            /* Multi-Line Background Highlighting */
             mark, [style*="background-color"], [style*="background:"] {
               box-decoration-break: clone !important;
               -webkit-box-decoration-break: clone !important;
               display: inline !important;
-              line-height: 1.45 !important;
               padding: 1px 3px !important;
               border-radius: 2px !important;
             }
 
-            /* Strip any page breaks completely */
-            .page-break-indicator, .page-break-line, [data-page-break] { display: none !important; }
+            .page-break-line, .page-break-indicator, [data-page-break] { display: none !important; }
           `;
           clonedDoc.head.appendChild(safeStyle);
 
-          // 3. CLONE PURGE: Remove any residual page break nodes inside cloned document
-          clonedDoc.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], [class*='page-break']").forEach((el) => el.remove());
-          clonedDoc.querySelectorAll("*").forEach((el) => {
-            if (el.textContent && el.textContent.includes("PAGE BREAK")) {
-              el.remove();
-            }
-          });
-
-          const targetInClone = clonedDoc.getElementById("privacy-pdf-print-container");
-          if (targetInClone) {
-            targetInClone.style.position = "static";
-            targetInClone.style.left = "0";
-            targetInClone.style.top = "0";
-            targetInClone.style.margin = "0";
-            targetInClone.style.visibility = "visible";
-            targetInClone.style.opacity = "1";
+          const target = clonedDoc.getElementById("privacy-pdf-print-container");
+          if (target) {
+            target.style.position = "static";
+            target.style.left = "0";
+            target.style.top = "0";
+            target.style.margin = "0";
+            target.style.visibility = "visible";
+            target.style.opacity = "1";
+            target.querySelectorAll(".page-break-line, .page-break-indicator, [data-page-break]").forEach((e) => e.remove());
           }
         },
       });
@@ -387,7 +394,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: contentHeightPt,
         });
 
-        // Official Page Number header in top margin
+        // Top margin official Page Number header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 24,
@@ -618,7 +625,7 @@ export const TextToPdf: React.FC<any> = () => {
             type="button"
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onClick={() => formatDoc("strikeThrough")}
+            onClick={handleStrikethrough}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Strikethrough (Word Cutting)"
           >
@@ -727,13 +734,15 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor with direct tap-to-delete on page break badges */}
+        {/* Input Editor with selection listeners */}
         <div
           ref={editorRef}
           contentEditable={true}
           onClick={handleEditorInteraction}
+          onSelect={saveSelection}
+          onPointerUp={saveSelection}
+          onKeyUp={() => { saveSelection(); syncContent(); }}
           onInput={syncContent}
-          onKeyUp={syncContent}
           onPaste={() => setTimeout(syncContent, 0)}
           style={{ fontFamily: selectedFont }}
           data-placeholder="Start typing your document here..."
@@ -756,7 +765,7 @@ export const TextToPdf: React.FC<any> = () => {
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_.page-break-indicator]:hidden [&_.page-break-line]:hidden [&_[data-page-break]]:hidden"
+            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_.page-break-line]:hidden [&_[data-page-break]]:hidden"
           >
             {hasContent ? (
               <div
