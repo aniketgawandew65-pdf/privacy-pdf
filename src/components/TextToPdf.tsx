@@ -25,16 +25,14 @@ import {
   Trash2,
   Edit3,
   Palette,
-  Type,
-  ChevronLeft,
-  ChevronRight
+  Type
 } from "lucide-react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
-const A4_PAGE_HEIGHT_PX = 1040; // Printable A4 page content height threshold
+const A4_PAGE_HEIGHT_PX = 1010; // A4 content height threshold per page
 
 const FONT_OPTIONS = [
   { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
@@ -63,8 +61,8 @@ export const TextToPdf: React.FC<any> = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pageBreaks, setPageBreaks] = useState<number[]>([]);
-  const [previewPage, setPreviewPage] = useState<number>(1);
+  const [editorPageBreaks, setEditorPageBreaks] = useState<number[]>([]);
+  const [previewPageBreaks, setPreviewPageBreaks] = useState<number[]>([]);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -84,7 +82,7 @@ export const TextToPdf: React.FC<any> = () => {
     } catch (_) {}
   }, []);
 
-  // 2. Track mobile selection range so toolbar taps never lose selected words
+  // 2. Mobile selection lock: captures selection so toolbar taps never lose highlighted words
   useEffect(() => {
     const handleSelectionChange = () => {
       const sel = window.getSelection();
@@ -102,19 +100,29 @@ export const TextToPdf: React.FC<any> = () => {
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  // 3. Dynamically calculate Word-style page break positions based on content height
+  // 3. Calculate transparent page boundary lines based on content height
   const updatePageBreaks = useCallback(() => {
-    if (!editorRef.current) return;
-    const scrollH = editorRef.current.scrollHeight;
-    const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
-    const breaks: number[] = [];
-    for (let i = 1; i < totalPages; i++) {
-      breaks.push(i * A4_PAGE_HEIGHT_PX);
+    if (editorRef.current) {
+      const scrollH = editorRef.current.scrollHeight;
+      const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
+      const breaks: number[] = [];
+      for (let i = 1; i < totalPages; i++) {
+        breaks.push(i * A4_PAGE_HEIGHT_PX);
+      }
+      setEditorPageBreaks(breaks);
     }
-    setPageBreaks(breaks);
+    if (previewRef.current) {
+      const scrollH = previewRef.current.scrollHeight;
+      const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
+      const breaks: number[] = [];
+      for (let i = 1; i < totalPages; i++) {
+        breaks.push(i * A4_PAGE_HEIGHT_PX);
+      }
+      setPreviewPageBreaks(breaks);
+    }
   }, []);
 
-  // 4. Instant 0ms synchronization + auto-save
+  // 4. 0ms instant synchronization + auto-save
   const syncContent = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
@@ -140,7 +148,7 @@ export const TextToPdf: React.FC<any> = () => {
     syncContent();
   };
 
-  // 5. Precise individual word / sentence font size application
+  // 5. Individual word/sentence font size formatting (preserves selection on mobile)
   const handleFontSizeChange = (size: number) => {
     setFontSize(size);
 
@@ -195,7 +203,7 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  // 6. Manual Page Break: Inserts an unprinted layout break
+  // 6. Manual Page Break: Invisible CSS divider
   const handleInsertPageBreak = () => {
     const breakHtml = '<div class="doc-page-break" contenteditable="false" style="page-break-before: always; break-before: page; margin: 24px 0; border-top: 2px dashed #10b981; height: 0; user-select: none;"></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
@@ -209,14 +217,15 @@ export const TextToPdf: React.FC<any> = () => {
       setContent("");
       setCharCount(0);
       setDownloadUrl(null);
-      setPageBreaks([]);
+      setEditorPageBreaks([]);
+      setPreviewPageBreaks([]);
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch (_) {}
     }
   };
 
-  // 7. Multi-Page A4 PDF Generator preserving individual word font sizes
+  // 7. Multi-Page A4 PDF Generator
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -273,7 +282,6 @@ export const TextToPdf: React.FC<any> = () => {
               p { margin: 6px 0; }
               hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
               
-              /* Explicit word font sizes mapping */
               [style*="font-size"] { line-height: 1.35; }
               font[size="1"] { font-size: 10px !important; }
               font[size="2"] { font-size: 12px !important; }
@@ -380,7 +388,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Clean page number in upper right header
+        // Top margin header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 28,
@@ -407,7 +415,7 @@ export const TextToPdf: React.FC<any> = () => {
   };
 
   const hasContent = content && content.replace(/<[^>]*>/g, "").trim().length > 0;
-  const totalPagesCount = Math.max(1, pageBreaks.length + 1);
+  const totalPagesEst = Math.max(1, editorPageBreaks.length + 1);
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 text-white space-y-6 select-none">
@@ -418,7 +426,7 @@ export const TextToPdf: React.FC<any> = () => {
             <FileText className="w-5 h-5 text-emerald-500" />
             <span className="font-semibold text-sm text-zinc-200">Document Editor</span>
             <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
-              Auto-Saved
+              ~{totalPagesEst} {totalPagesEst === 1 ? "Page" : "Pages"}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -477,7 +485,7 @@ export const TextToPdf: React.FC<any> = () => {
             </select>
           </div>
 
-          {/* Font Size Selector with word-level sizing */}
+          {/* Font Size Selector */}
           <select
             value={fontSize}
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
@@ -694,105 +702,59 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor with True MS Word Page Sheet Layout */}
-        <div className="relative w-full rounded-2xl overflow-hidden bg-zinc-950 p-4 sm:p-6 flex justify-center">
-          <div className="relative w-full max-w-[794px] bg-white rounded-lg shadow-2xl overflow-hidden border border-zinc-300">
-            
-            {/* Top margin corner crop marks (Page 1) */}
-            <div className="absolute top-4 left-6 text-zinc-400 text-sm select-none pointer-events-none font-mono">┌</div>
-            <div className="absolute top-4 right-6 text-zinc-400 text-sm select-none pointer-events-none font-mono">┐</div>
+        {/* Input Editor with Transparent Dynamic Page Guides */}
+        <div className="relative w-full rounded-xl overflow-hidden bg-white shadow-inner">
+          <div
+            ref={editorRef}
+            contentEditable={true}
+            onInput={syncContent}
+            onKeyUp={syncContent}
+            onPaste={() => setTimeout(syncContent, 0)}
+            style={{ fontFamily: selectedFont }}
+            data-placeholder="Start typing your document here..."
+            className="relative z-0 w-full min-h-[380px] max-h-[580px] overflow-y-auto text-zinc-900 p-8 sm:p-12 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+          />
 
+          {/* Dynamic Transparent Page Boundary Lines (Visible only while editing) */}
+          {editorPageBreaks.map((topPos, idx) => (
             <div
-              ref={editorRef}
-              contentEditable={true}
-              onInput={syncContent}
-              onKeyUp={syncContent}
-              onPaste={() => setTimeout(syncContent, 0)}
-              style={{ fontFamily: selectedFont }}
-              data-placeholder="Start typing your document here..."
-              className="w-full min-h-[500px] max-h-[640px] overflow-y-auto text-zinc-900 p-8 sm:p-14 focus:outline-none text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
-            />
-
-            {/* MS Word Physical Page Gutter Dividers with Margin Crop Marks */}
-            {pageBreaks.map((topPos, idx) => (
-              <div
-                key={idx}
-                style={{ top: `${topPos}px` }}
-                className="absolute left-0 right-0 pointer-events-none z-20 flex flex-col select-none -translate-y-1/2"
-              >
-                {/* Bottom of previous page corner marks */}
-                <div className="w-full px-6 flex justify-between text-zinc-400 text-sm font-mono pb-1">
-                  <span>└</span>
-                  <span>┘</span>
-                </div>
-
-                {/* Neutral gray desk gap separating the two sheets */}
-                <div className="w-full h-8 bg-zinc-900 border-y border-zinc-800 flex items-center justify-center shadow-inner">
-                  <span className="px-3 py-0.5 bg-zinc-800 text-zinc-300 text-[10px] font-mono font-semibold rounded-full border border-zinc-700 shadow">
-                    Page {idx + 2} Starts Here
-                  </span>
-                </div>
-
-                {/* Top of next page corner marks */}
-                <div className="w-full px-6 flex justify-between text-zinc-400 text-sm font-mono pt-1">
-                  <span>┌</span>
-                  <span>┐</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              key={idx}
+              style={{ top: `${topPos}px` }}
+              className="absolute left-0 right-0 pointer-events-none z-10 flex items-center select-none px-6 opacity-60 -translate-y-1/2"
+            >
+              <div className="w-full border-t border-dashed border-zinc-400" />
+              <span className="shrink-0 mx-2 px-2 py-0.5 text-[10px] font-mono text-zinc-500 bg-zinc-100/90 border border-zinc-300 rounded shadow-sm">
+                Page {idx + 2} Starts
+              </span>
+              <div className="w-full border-t border-dashed border-zinc-400" />
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Bottom Live PDF Preview Card with Page Flipper */}
+      {/* Bottom Live PDF Preview Card (Smooth Natural Scrolling) */}
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
           <span className="font-semibold text-sm text-zinc-200">PDF Preview</span>
-          <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-300 font-mono">
-            <button
-              type="button"
-              disabled={previewPage <= 1}
-              onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
-              className="hover:text-white disabled:opacity-30 transition"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <span>Page {previewPage} of {totalPagesCount}</span>
-            <button
-              type="button"
-              disabled={previewPage >= totalPagesCount}
-              onClick={() => setPreviewPage((p) => Math.min(totalPagesCount, p + 1))}
-              className="hover:text-white disabled:opacity-30 transition"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <span className="text-xs text-zinc-400 font-mono">
+            ~{totalPagesEst} {totalPagesEst === 1 ? "Page" : "Pages"} (A4 Layout)
+          </span>
         </div>
 
-        {/* Centered A4 Preview Sheet */}
-        <div className="relative w-full min-h-[500px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-center justify-center p-6 overflow-hidden">
+        {/* Scrollable A4 Preview Sheet with Matching Transparent Page Guides */}
+        <div className="relative w-full min-h-[480px] max-h-[600px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-start justify-center p-6 overflow-y-auto">
           <div
             style={{
               transform: `scale(${zoom})`,
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="relative w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-hidden text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+            className="relative w-full max-w-[580px] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
           >
-            {/* Corner marks for preview sheet */}
-            <div className="absolute top-4 left-6 text-zinc-400 text-xs select-none font-mono pointer-events-none">┌</div>
-            <div className="absolute top-4 right-6 text-zinc-400 text-xs select-none font-mono pointer-events-none">┐</div>
-            <div className="absolute bottom-4 left-6 text-zinc-400 text-xs select-none font-mono pointer-events-none">└</div>
-            <div className="absolute bottom-4 right-6 text-zinc-400 text-xs select-none font-mono pointer-events-none">┘</div>
-
             {hasContent ? (
               <div
                 ref={previewRef}
-                style={{
-                  transform: `translateY(-${(previewPage - 1) * 100}%)`,
-                  transition: "transform 0.2s ease-in-out",
-                }}
-                className="text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
+                className="relative text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
                 dangerouslySetInnerHTML={{ __html: content }}
               />
             ) : (
@@ -800,10 +762,25 @@ export const TextToPdf: React.FC<any> = () => {
                 Type your text above to see it appear here live...
               </p>
             )}
+
+            {/* Dynamic Transparent Page Boundary Lines inside the Preview */}
+            {previewPageBreaks.map((topPos, idx) => (
+              <div
+                key={idx}
+                style={{ top: `${topPos}px` }}
+                className="absolute left-0 right-0 pointer-events-none z-10 flex items-center select-none px-6 opacity-60 -translate-y-1/2"
+              >
+                <div className="w-full border-t border-dashed border-zinc-400" />
+                <span className="shrink-0 mx-2 px-2 py-0.5 text-[10px] font-mono text-zinc-500 bg-zinc-100/90 border border-zinc-300 rounded shadow-sm">
+                  Page {idx + 2} Starts
+                </span>
+                <div className="w-full border-t border-dashed border-zinc-400" />
+              </div>
+            ))}
           </div>
 
           {/* Floating Zoom Controls */}
-          <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 shadow-2xl backdrop-blur-md text-zinc-300 z-10">
+          <div className="fixed bottom-6 right-6 sm:absolute sm:bottom-4 sm:right-4 flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 shadow-2xl backdrop-blur-md text-zinc-300 z-20">
             <button
               type="button"
               onClick={() => setZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
