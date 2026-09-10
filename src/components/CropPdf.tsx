@@ -12,7 +12,8 @@ import {
   RotateCcw,
   ZoomIn,
   ZoomOut,
-  Move
+  Move,
+  Trash2
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
@@ -50,7 +51,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   const [zoom, setZoom] = useState<number>(1.0);
   const [mode, setMode] = useState<"crop" | "pan">("crop");
   const [applyToAll, setApplyToAll] = useState<boolean>(false);
-  const [crops, setCrops] = useState<Record<number, CropArea>>({});
+  const [crops, setCrops] = useState<Record<number, CropArea | null>>({});
   const [cropBox, setCropBox] = useState<CropArea | null>({ x: 25, y: 25, width: 250, height: 340 });
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -83,7 +84,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     return () => { isMounted = false; };
   }, [file]);
 
-  // Render current page to canvas
+  // Render current page to canvas with high-DPI Retina resolution
   useEffect(() => {
     if (!pdfDoc || !canvasRef.current) return;
     let renderTask: any = null;
@@ -98,15 +99,22 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         const fitScale = Math.min(availW / unscaled.width, availH / unscaled.height);
         const activeScale = Math.max(0.1, fitScale) * zoom;
         const viewport = page.getViewport({ scale: activeScale });
+
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        // High-DPI Retina scaling (matching Redact sharpness)
+        const dpr = Math.max(window.devicePixelRatio || 1, 2);
+        const renderViewport = page.getViewport({ scale: activeScale * dpr });
 
-        renderTask = page.render({ canvasContext: ctx, viewport });
+        canvas.width = Math.floor(renderViewport.width);
+        canvas.height = Math.floor(renderViewport.height);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+        renderTask = page.render({ canvasContext: ctx, viewport: renderViewport });
         await renderTask.promise;
       } catch (_) {}
     };
@@ -137,12 +145,24 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   // Sync cropBox when navigating pages
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > numPages) return;
-    if (cropBox) {
+    if (!applyToAll) {
       setCrops((prev) => ({ ...prev, [currentPage]: cropBox }));
-    }
-    setCurrentPage(newPage);
-    if (!applyToAll && crops[newPage]) {
-      setCropBox(crops[newPage]);
+      setCurrentPage(newPage);
+      if (crops[newPage] !== undefined) {
+        setCropBox(crops[newPage]);
+      } else {
+        const canvasEl = canvasRef.current;
+        const w = canvasEl ? (canvasEl.clientWidth || 250) : 250;
+        const h = canvasEl ? (canvasEl.clientHeight || 340) : 340;
+        setCropBox({
+          x: Math.round(w * 0.1),
+          y: Math.round(h * 0.1),
+          width: Math.round(w * 0.8),
+          height: Math.round(h * 0.8),
+        });
+      }
+    } else {
+      setCurrentPage(newPage);
     }
   };
 
@@ -237,9 +257,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     window.addEventListener("touchend", onUp);
   };
 
-  // Export cropped PDF with physical MediaBox resizing
+  // Export cropped PDF with physical MediaBox resizing (skips pages without cropBox)
   const handleDownload = async () => {
-    if (!file || !cropBox) return;
+    if (!file) return;
     setIsProcessing(true);
     setError(null);
 
@@ -249,12 +269,16 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       const pages = pdf.getPages();
 
       const canvasEl = canvasRef.current;
-      const dispW = canvasEl ? (canvasEl.clientWidth || canvasEl.width || 600) : 600;
-      const dispH = canvasEl ? (canvasEl.clientHeight || canvasEl.height || 800) : 800;
+      const dispW = canvasEl ? (canvasEl.clientWidth || 600) : 600;
+      const dispH = canvasEl ? (canvasEl.clientHeight || 800) : 800;
 
       pages.forEach((page, i) => {
         const pageIdx = i + 1;
-        const targetCrop = applyToAll ? cropBox : (crops[pageIdx] || (pageIdx === currentPage ? cropBox : null));
+        const targetCrop = applyToAll
+          ? cropBox
+          : (crops[pageIdx] !== undefined ? crops[pageIdx] : (pageIdx === currentPage ? cropBox : null));
+
+        // If no crop box exists on this page, preserve the original uncropped page
         if (!targetCrop) return;
 
         const mediaBox = page.getMediaBox();
@@ -424,9 +448,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             className="relative w-full h-[65vh] bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-center p-4 select-none"
           >
             <div className="relative inline-block shadow-2xl">
-              <canvas ref={canvasRef} className="block rounded shadow-2xl w-auto h-auto object-contain pointer-events-none" />
+              <canvas ref={canvasRef} className="block rounded shadow-2xl object-contain pointer-events-none" />
 
-              {cropBox && (
+              {cropBox ? (
                 <div
                   style={{
                     position: "absolute",
@@ -458,18 +482,74 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                     />
                   ))}
                 </div>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded pointer-events-none">
+                  <span className="text-xs text-zinc-200 font-medium bg-zinc-900/90 border border-zinc-700/80 px-3 py-1.5 rounded-lg shadow-lg">
+                    Page {currentPage} will not be cropped
+                  </span>
+                </div>
               )}
             </div>
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={() => setCropBox({ x: 25, y: 25, width: 250, height: 340 })}
-              className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-xl text-xs font-medium transition"
-            >
-              Reset Box
-            </button>
+            <div className="flex items-center gap-2">
+              {cropBox ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCropBox(null);
+                      setCrops((prev) => ({ ...prev, [currentPage]: null }));
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-medium transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Box</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const canvasEl = canvasRef.current;
+                      const w = canvasEl ? (canvasEl.clientWidth || 250) : 250;
+                      const h = canvasEl ? (canvasEl.clientHeight || 340) : 340;
+                      const resetBox = {
+                        x: Math.round(w * 0.1),
+                        y: Math.round(h * 0.1),
+                        width: Math.round(w * 0.8),
+                        height: Math.round(h * 0.8),
+                      };
+                      setCropBox(resetBox);
+                      setCrops((prev) => ({ ...prev, [currentPage]: resetBox }));
+                    }}
+                    className="px-3.5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 rounded-xl text-xs font-medium transition"
+                  >
+                    Reset Box
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const canvasEl = canvasRef.current;
+                    const w = canvasEl ? (canvasEl.clientWidth || 250) : 250;
+                    const h = canvasEl ? (canvasEl.clientHeight || 340) : 340;
+                    const newBox = {
+                      x: Math.round(w * 0.1),
+                      y: Math.round(h * 0.1),
+                      width: Math.round(w * 0.8),
+                      height: Math.round(h * 0.8),
+                    };
+                    setCropBox(newBox);
+                    setCrops((prev) => ({ ...prev, [currentPage]: newBox }));
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-medium transition"
+                >
+                  <CropIcon className="w-3.5 h-3.5" />
+                  <span>+ Add Crop Box</span>
+                </button>
+              )}
+            </div>
 
             {!downloadUrl ? (
               <button
