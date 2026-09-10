@@ -32,9 +32,10 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
-// Standard A4 CSS pixel dimensions matching 595.28pt x 841.89pt at 96 DPI
+
+// Exact standard A4 dimensions at 96 DPI: 595.28pt x 841.89pt -> 794px x 1123px
 const A4_WIDTH_PX = 794;
-const A4_PAGE_HEIGHT_PX = 1122.5;
+const A4_PAGE_HEIGHT_PX = 1123;
 
 const FONT_OPTIONS = [
   { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
@@ -63,7 +64,7 @@ export const TextToPdf: React.FC<any> = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [fitScale, setFitScale] = useState<number>(0.5);
   const [previewHeight, setPreviewHeight] = useState<number>(1123);
   const [pageBreaks, setPageBreaks] = useState<number[]>([]);
@@ -87,7 +88,7 @@ export const TextToPdf: React.FC<any> = () => {
     } catch (_) {}
   }, []);
 
-  // 2. Track mobile selection range for font sizing
+  // 2. Track mobile selection range so toolbar taps never lose highlighted words
   useEffect(() => {
     const handleSelectionChange = () => {
       const sel = window.getSelection();
@@ -105,7 +106,7 @@ export const TextToPdf: React.FC<any> = () => {
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  // 3. Keep Preview scale responsive and recalculate exact 1:1 page boundaries
+  // 3. Calculate 1:1 exact A4 page boundaries
   const updatePreviewLayout = useCallback(() => {
     if (previewOuterRef.current) {
       const availableW = previewOuterRef.current.clientWidth - 32;
@@ -114,11 +115,11 @@ export const TextToPdf: React.FC<any> = () => {
     }
     if (previewSheetRef.current) {
       const scrollH = previewSheetRef.current.scrollHeight;
-      setPreviewHeight(Math.max(1123, scrollH));
+      setPreviewHeight(Math.max(A4_PAGE_HEIGHT_PX, scrollH));
       const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
       const breaks: number[] = [];
       for (let i = 1; i < totalPages; i++) {
-        breaks.push(Math.round(i * A4_PAGE_HEIGHT_PX));
+        breaks.push(i * A4_PAGE_HEIGHT_PX);
       }
       setPageBreaks(breaks);
     }
@@ -232,7 +233,85 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 7. Multi-Page A4 PDF Generator matching preview dimensions 1:1
+  // Shared CSS rules applied identically to both Preview and PDF export
+  const sharedDocumentCss = `
+    .a4-doc-sheet {
+      box-sizing: border-box !important;
+      width: 794px !important;
+      padding: 56px 64px !important;
+      background-color: #ffffff !important;
+      color: #18181b !important;
+      font-family: ${selectedFont} !important;
+      font-size: ${fontSize}px !important;
+      line-height: 1.6 !important;
+      word-break: break-word !important;
+    }
+    .a4-doc-sheet * {
+      box-sizing: border-box !important;
+    }
+    .a4-doc-sheet p {
+      margin: 0 0 6px 0 !important;
+    }
+    .a4-doc-sheet h1, .a4-doc-sheet h2, .a4-doc-sheet h3 {
+      margin: 8px 0 6px 0 !important;
+      font-weight: bold !important;
+    }
+    .a4-doc-sheet table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      margin: 12px 0 !important;
+      font-size: inherit !important;
+    }
+    .a4-doc-sheet th, .a4-doc-sheet td {
+      border: 1px solid #d4d4d8 !important;
+      padding: 8px 12px !important;
+      text-align: left !important;
+    }
+    .a4-doc-sheet th {
+      background-color: #f4f4f5 !important;
+      font-weight: 600 !important;
+    }
+    .a4-doc-sheet ul {
+      list-style-type: disc !important;
+      padding-left: 28px !important;
+      margin: 8px 0 !important;
+    }
+    .a4-doc-sheet ol {
+      list-style-type: decimal !important;
+      padding-left: 28px !important;
+      margin: 8px 0 !important;
+    }
+    .a4-doc-sheet li {
+      display: list-item !important;
+      margin-bottom: 4px !important;
+    }
+    .a4-doc-sheet hr {
+      border: none !important;
+      border-top: 1px solid #e4e4e7 !important;
+      margin: 16px 0 !important;
+    }
+    .a4-doc-sheet [style*="font-size"] {
+      line-height: 1.35 !important;
+    }
+    .a4-doc-sheet font[size="1"] { font-size: 10px !important; }
+    .a4-doc-sheet font[size="2"] { font-size: 12px !important; }
+    .a4-doc-sheet font[size="3"] { font-size: 14px !important; }
+    .a4-doc-sheet font[size="4"] { font-size: 16px !important; }
+    .a4-doc-sheet font[size="5"] { font-size: 18px !important; }
+    .a4-doc-sheet font[size="6"] { font-size: 24px !important; }
+    .a4-doc-sheet font[size="7"] { font-size: 32px !important; }
+    .a4-doc-sheet .doc-page-break {
+      page-break-before: always !important;
+      break-before: page !important;
+      border: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      height: 0 !important;
+      visibility: hidden !important;
+    }
+  `;
+
+  // 7. Multi-Page A4 PDF Generator matching preview 1:1
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -268,62 +347,24 @@ export const TextToPdf: React.FC<any> = () => {
           <head>
             <meta charset="utf-8" />
             <style>
-              * { box-sizing: border-box; }
-              body {
-                margin: 0;
-                padding: 56px 64px;
-                width: 794px;
-                background: #ffffff;
-                color: #18181b;
-                font-family: ${selectedFont};
-                font-size: ${fontSize}px;
-                line-height: 1.6;
-                word-break: break-word;
-              }
-              table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: inherit; }
-              th, td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; }
-              th { background-color: #f4f4f5; font-weight: 600; }
-              ul { list-style-type: disc; padding-left: 28px; margin: 8px 0; }
-              ol { list-style-type: decimal; padding-left: 28px; margin: 8px 0; }
-              li { display: list-item; margin-bottom: 4px; }
-              p { margin: 6px 0; }
-              hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
-              
-              [style*="font-size"] { line-height: 1.35; }
-              font[size="1"] { font-size: 10px !important; }
-              font[size="2"] { font-size: 12px !important; }
-              font[size="3"] { font-size: 14px !important; }
-              font[size="4"] { font-size: 16px !important; }
-              font[size="5"] { font-size: 18px !important; }
-              font[size="6"] { font-size: 24px !important; }
-              font[size="7"] { font-size: 32px !important; }
-
-              .doc-page-break {
-                page-break-before: always !important;
-                break-before: page !important;
-                border: none !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                height: 0 !important;
-                visibility: hidden !important;
-              }
+              html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; }
+              ${sharedDocumentCss}
             </style>
           </head>
           <body>
-            <div id="render-content">${cleanHtml}</div>
+            <div id="render-content" class="a4-doc-sheet">${cleanHtml}</div>
           </body>
         </html>
       `);
       iframeDoc.close();
 
-      const renderBody = iframeDoc.body;
-      const targetEl = iframeDoc.getElementById("render-content") || renderBody;
+      const targetEl = iframeDoc.getElementById("render-content") || iframeDoc.body;
       targetEl.querySelectorAll(".doc-page-break").forEach((el: any) => {
         el.style.visibility = "hidden";
         el.style.border = "none";
       });
 
-      const canvas = await html2canvas(renderBody, {
+      const canvas = await html2canvas(targetEl, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
@@ -346,9 +387,9 @@ export const TextToPdf: React.FC<any> = () => {
 
       const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
-      const a4Ratio = pageHeightPt / pageWidthPt;
 
-      const pageCanvasHeight = Math.floor(canvas.width * a4Ratio);
+      // Exact pixel slice height matching 1123px at scale 2
+      const pageCanvasHeight = A4_PAGE_HEIGHT_PX * 2; // 2246 canvas pixels
       const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
 
       for (let p = 0; p < totalPages; p++) {
@@ -395,7 +436,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Clean page number header
+        // Top margin page number header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 28,
@@ -751,26 +792,20 @@ export const TextToPdf: React.FC<any> = () => {
             <div
               ref={previewSheetRef}
               style={{
-                width: `${A4_WIDTH_PX}px`,
-                minHeight: `${A4_PAGE_HEIGHT_PX}px`,
-                padding: "56px 64px",
-                boxSizing: "border-box",
                 transform: `scale(${effectiveScale})`,
                 transformOrigin: "top left",
                 position: "absolute",
                 top: 0,
                 left: 0,
-                backgroundColor: "#ffffff",
-                color: "#18181b",
-                fontFamily: selectedFont,
-                fontSize: `${fontSize}px`,
-                lineHeight: "1.6",
-                wordBreak: "break-word",
+                minHeight: `${A4_PAGE_HEIGHT_PX}px`,
                 boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
                 borderRadius: "8px",
               }}
-              className="text-zinc-900 text-left select-text border border-zinc-300 [&_ul]:list-disc [&_ul]:pl-7 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-7 [&_ol]:my-2 [&_li]:my-1"
+              className="a4-doc-sheet relative text-left select-text border border-zinc-300"
             >
+              {/* Injected shared styles ensure 1:1 rendering matching the PDF iframe */}
+              <style>{sharedDocumentCss}</style>
+
               {hasContent ? (
                 <div
                   dangerouslySetInnerHTML={{ __html: content }}
