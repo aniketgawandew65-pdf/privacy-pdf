@@ -7,7 +7,6 @@ import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
 import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
 import {
-  ShieldCheck,
   Sliders,
   Files,
   Scissors,
@@ -49,6 +48,7 @@ import {
   FileEdit,
   Code2,
   Receipt,
+  Zap,
 } from 'lucide-react';
 
 const Compressor = lazy(() => import('./components/Compressor').then((m) => ({ default: m.Compressor })));
@@ -165,6 +165,19 @@ function ToolFallback() {
   );
 }
 
+const WORKFLOW_CAPABILITIES = [
+  "Offline PDF Redaction & Sanitization",
+  "In-Browser Word to Vector PDF",
+  "Zero-Upload Client-Side Compression",
+  "Air-Gapped Multi-Document Merge",
+  "Private OCR & Document Text Extraction",
+  "Client-Side Page Split & Reorganizer",
+  "In-Memory PDF Crop & Deskew",
+  "Bank Statement to Excel Converter",
+  "Local PDF Password & Encryption Shield",
+  "Zero-Server Booklet & N-Up Imposition"
+];
+
 export default function App() {
   const location = useLocation();
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
@@ -173,6 +186,15 @@ export default function App() {
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
+
+  const [activeWorkflows, setActiveWorkflows] = useState<string[]>(() => {
+    return [...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6);
+  });
+  const isDevMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('pro') === 'true';
+
+  useEffect(() => {
+    setActiveWorkflows([...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6));
+  }, []);
 
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const dragCounter = useRef(0);
@@ -357,19 +379,21 @@ export default function App() {
         )}
       </div>
 
-      {/* Header: Responsive Mobile Layout */}
+      {/* Header: Scaled to Medium */}
       <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 py-3 sm:py-4 border-b border-zinc-800/80">
-        <NavLink to="/" className="flex items-center justify-center gap-3 text-center sm:text-left">
-          <img
-            src="/logo.png"
-            alt="1into1 Logo"
-            width="40"
-            height="40"
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl object-contain bg-white p-1 border border-zinc-800 shrink-0"
-          />
+        <NavLink to="/" className="flex items-center justify-center gap-3.5 text-center sm:text-left">
+          <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center p-2 shrink-0 shadow-lg">
+            <img
+              src="/logo.png"
+              alt="1into1 Logo"
+              width="48"
+              height="48"
+              className="w-full h-full object-contain"
+            />
+          </div>
           <div>
-            <p className="text-base sm:text-lg font-bold tracking-tight text-white">1into1 PDF</p>
-            <p className="text-[11px] sm:text-xs text-zinc-400">100% In-Browser Privacy Suite</p>
+            <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">1into1 PDF</p>
+            <p className="text-xs sm:text-sm font-medium text-zinc-400">100% In-Browser Privacy Suite</p>
           </div>
         </NavLink>
 
@@ -409,14 +433,15 @@ export default function App() {
 
       {/* Main Container */}
       <main className="w-full max-w-4xl my-auto text-center py-6 sm:py-8">
+        {/* Updated Privacy Pill Badge */}
         <button
           type="button"
           onClick={() => setIsAuditDrawerOpen(true)}
-          className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[11px] sm:text-xs text-zinc-300 mb-4 sm:mb-6 hover:border-zinc-700 hover:text-white transition cursor-pointer min-h-[36px]"
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer min-h-[36px] shadow-sm"
           title="Click to inspect network telemetry"
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          Zero uploads • Turn off Wi-Fi to test • 100% Private
+          <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>Lightning fast • No internet needed • 100% private • No signup</span>
         </button>
 
         <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-3 sm:mb-4 px-2">
@@ -551,34 +576,19 @@ export default function App() {
 
       {/* Footer */}
       <footer className="w-full max-w-5xl mx-auto mt-12 sm:mt-20 px-3 sm:px-6 py-6 sm:py-8 border-t border-zinc-900 flex flex-col gap-5 sm:gap-6 text-xs text-zinc-500">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 sm:gap-4 pb-5 sm:pb-6 border-b border-zinc-900/60">
-          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider shrink-0">
+        <div className="flex flex-col items-center justify-center gap-3 pb-5 sm:pb-6 border-b border-zinc-900/60 text-center">
+          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">
             Popular Workflows:
           </span>
-          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[11px]">
-            <NavLink to="/compress-pdf-to-100kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Compress to 100KB
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/compress-pdf-to-200kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Compress to 200KB
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/compress-pdf-to-500kb" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Compress to 500KB
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/bank-statement-to-excel" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Bank Statement to Excel
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/offline-pdf-redaction" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Offline PDF Redaction
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/extract-pdf-for-llm" className="text-zinc-400 hover:text-emerald-400 transition-colors whitespace-nowrap min-h-[32px] flex items-center">
-              Extract PDF for LLMs
-            </NavLink>
+          <div className="flex flex-wrap items-center justify-center gap-2 max-w-3xl">
+            {activeWorkflows.map((item, idx) => (
+              <span
+                key={idx}
+                className="px-3 py-1.5 rounded-xl bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-300 font-medium hover:border-zinc-700 hover:text-white transition shadow-sm select-none cursor-default"
+              >
+                {item}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -600,13 +610,14 @@ export default function App() {
             </NavLink>
           </div>
         </div>
-              {/* Single Live Build Indicator */}
-        
-              {/* Single Live Build Indicator */}
-        <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Live Build: 04:38 PM</span>
-        </div>
+
+        {/* Live Build: Visible ONLY when URL includes ?pro=true */}
+        {isDevMode && (
+          <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Live Build: 05:25 PM</span>
+          </div>
+        )}
       </footer>
 
       {/* Global Drag-and-Drop Dropzone Overlay */}
