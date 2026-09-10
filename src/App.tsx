@@ -190,7 +190,7 @@ export default function App() {
   const [activeWorkflows, setActiveWorkflows] = useState<string[]>(() => {
     return [...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6);
   });
-  const isDevMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('pro') === 'true';
+  
 
   useEffect(() => {
     setActiveWorkflows([...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6));
@@ -616,12 +616,12 @@ export default function App() {
         </div>
 
         {/* Live Build: Visible ONLY when URL includes ?pro=true */}
-        {isDevMode && (
+        
           <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Live Build: 12:30 AM</span>
+            <span>Live Build: 01:10 AM</span>
           </div>
-        )}
+        
       </footer>
 
       {/* Global Drag-and-Drop Dropzone Overlay */}
