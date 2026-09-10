@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 // @ts-ignore
-import html2canvas from "html2canvas";
+import * as htmlToImage from "html-to-image";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
 
@@ -132,7 +132,6 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  // Cross-browser mobile highlighting with styleWithCSS support
   const handleApplyHighlight = (color: string) => {
     if (color === "transparent") {
       document.execCommand("removeFormat", false);
@@ -184,7 +183,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // Option A: Direct Capture of the On-Screen Preview Element
+  // Option B: Native SVG/Canvas capture via html-to-image (Zero CSS parser errors)
   const handleDownload = async () => {
     const previewElement = previewRef.current;
     if (!previewElement) return;
@@ -198,80 +197,43 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
+    // Temporarily normalize preview layout for standard A4 vector export
+    const originalTransform = previewElement.style.transform;
+    const originalWidth = previewElement.style.width;
+    const originalMaxWidth = previewElement.style.maxWidth;
+    const originalPadding = previewElement.style.padding;
+    const originalShadow = previewElement.style.boxShadow;
+    const originalBorder = previewElement.style.border;
+
     try {
-      const canvas = await html2canvas(previewElement, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
+      previewElement.style.transform = "none";
+      previewElement.style.width = "794px";
+      previewElement.style.maxWidth = "794px";
+      previewElement.style.padding = "56px 64px";
+      previewElement.style.boxShadow = "none";
+      previewElement.style.border = "none";
+
+      const canvas = await htmlToImage.toCanvas(previewElement, {
+        pixelRatio: 2,
         backgroundColor: "#ffffff",
-        logging: false,
-        ignoreElements: (el: Element) => {
-          return (
-            el.classList?.contains("page-break-indicator") ||
-            el.classList?.contains("page-break-line") ||
-            el.classList?.contains("delete-page-break-btn") ||
-            el.hasAttribute?.("data-page-break")
-          );
-        },
-        onclone: (clonedDoc: Document) => {
-          // 1. Sanitize oklch rules in stylesheets so html2canvas never crashes
-          clonedDoc.querySelectorAll("style").forEach((styleTag) => {
-            if (styleTag.textContent && styleTag.textContent.includes("oklch")) {
-              styleTag.textContent = styleTag.textContent.replace(/oklch([^)]+)/g, "#18181b");
-            }
-          });
-
-          // 2. Prepare cloned preview sheet for A4 vector capture
-          const target = clonedDoc.getElementById("pdf-preview-sheet");
-          if (target) {
-            target.style.transform = "none";
-            target.style.webkitTransform = "none";
-            target.style.boxShadow = "none";
-            target.style.border = "none";
-            target.style.borderRadius = "0";
-            target.style.width = "794px";
-            target.style.maxWidth = "794px";
-            target.style.minHeight = "1123px";
-            target.style.height = "auto";
-            target.style.overflow = "visible";
-            target.style.padding = "48px 56px";
-
-            // Purge any remaining page break markers
-            target.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], .delete-page-break-btn").forEach((el) => el.remove());
+        filter: (node: HTMLElement) => {
+          if (node.classList && (node.classList.contains("page-break-indicator") || node.classList.contains("delete-page-break-btn"))) {
+            return false;
           }
-
-          // 3. Inject explicit formatting rules
-          const safeStyle = clonedDoc.createElement("style");
-          safeStyle.textContent = `
-            s, strike, del, [style*="line-through"] {
-              text-decoration: line-through !important;
-              -webkit-text-decoration-line: line-through !important;
-              text-decoration-thickness: 1.8px !important;
-              text-decoration-color: currentColor !important;
-            }
-            u, [style*="underline"] {
-              text-decoration: underline !important;
-              -webkit-text-decoration-line: underline !important;
-              text-decoration-thickness: 1.5px !important;
-            }
-            mark, [style*="background-color"], [style*="background:"] {
-              box-decoration-break: clone !important;
-              -webkit-box-decoration-break: clone !important;
-              display: inline !important;
-              padding: 1px 3px !important;
-              border-radius: 2px !important;
-            }
-            table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; font-size: inherit !important; }
-            th, td { border: 1px solid #d4d4d8 !important; padding: 8px 12px !important; text-align: left !important; }
-            th { background-color: #f4f4f5 !important; font-weight: 600 !important; }
-            ul { list-style-type: disc !important; padding-left: 28px !important; margin: 8px 0 !important; }
-            ol { list-style-type: decimal !important; padding-left: 28px !important; margin: 8px 0 !important; }
-            li { display: list-item !important; margin-bottom: 4px !important; }
-            .page-break-indicator, .page-break-line, [data-page-break] { display: none !important; }
-          `;
-          clonedDoc.head.appendChild(safeStyle);
+          if (node.getAttribute && node.getAttribute("data-page-break") === "true") {
+            return false;
+          }
+          return true;
         },
       });
+
+      // Restore preview element immediately
+      previewElement.style.transform = originalTransform;
+      previewElement.style.width = originalWidth;
+      previewElement.style.maxWidth = originalMaxWidth;
+      previewElement.style.padding = originalPadding;
+      previewElement.style.boxShadow = originalShadow;
+      previewElement.style.border = originalBorder;
 
       if (!canvas || canvas.width === 0 || canvas.height === 0) {
         throw new Error("Canvas rendering produced an empty image.");
@@ -282,7 +244,7 @@ export const TextToPdf: React.FC<any> = () => {
 
       const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
-      const a4Ratio = pageHeightPt / pageWidthPt; // Standard A4 Aspect Ratio
+      const a4Ratio = pageHeightPt / pageWidthPt; // ~1.41426
 
       const pageCanvasHeight = Math.floor(canvas.width * a4Ratio);
       const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
@@ -331,10 +293,10 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Clean page number in upper right header
+        // Top margin clean Page X of Y header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
-          y: pageHeightPt - 24,
+          y: pageHeightPt - 28,
           size: 9,
           font: font,
           color: rgb(0.5, 0.5, 0.5),
@@ -346,6 +308,13 @@ export const TextToPdf: React.FC<any> = () => {
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
     } catch (err: any) {
+      previewElement.style.transform = originalTransform;
+      previewElement.style.width = originalWidth;
+      previewElement.style.maxWidth = originalMaxWidth;
+      previewElement.style.padding = originalPadding;
+      previewElement.style.boxShadow = originalShadow;
+      previewElement.style.border = originalBorder;
+
       console.error("PDF generation failed:", err);
       const msg = err?.message || (typeof err === "string" ? err : "") || "An unexpected error occurred during PDF generation.";
       setError("Failed to create PDF: " + msg);
@@ -685,7 +654,7 @@ export const TextToPdf: React.FC<any> = () => {
           <span className="text-xs text-zinc-400 font-mono">A4 Sheet Layout</span>
         </div>
 
-        {/* Single Centered A4 Card (Direct Capture Target) */}
+        {/* Single Centered A4 Card (Native Capture Target) */}
         <div className="relative w-full min-h-[480px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-center justify-center p-6 overflow-auto">
           <div
             id="pdf-preview-sheet"
