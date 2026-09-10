@@ -579,27 +579,44 @@ export default function App() {
 
       {/* Footer */}
       <footer className="w-full max-w-5xl mx-auto mt-12 sm:mt-20 px-3 sm:px-6 py-6 sm:py-8 border-t border-zinc-900 flex flex-col gap-5 sm:gap-6 text-xs text-zinc-500">
-        <div className="flex flex-col items-center justify-center gap-3.5 pb-6 border-b border-zinc-900/80 w-full text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/90 border border-zinc-800/80 text-[10px] font-mono uppercase tracking-widest text-zinc-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="flex flex-col items-center justify-center gap-4 pb-7 border-b border-zinc-900/80 w-full text-center">
+          {/* Ambient Header Pill */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/5 border border-emerald-500/20 text-[10px] font-mono uppercase tracking-widest text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.08)]">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+            </span>
             <span>High-Capacity Workflows</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-2.5 w-full max-w-4xl px-2">
+          {/* Micro-Card Grid with Shimmer & Beacon Glow */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full max-w-4xl px-2">
             {activeWorkflows.map((item, idx) => (
               <div
                 key={idx}
-                className="group relative flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-900/40 hover:bg-zinc-900/80 border border-zinc-800/80 hover:border-emerald-500/30 transition-all duration-200 shadow-sm text-left select-none"
+                className="group relative overflow-hidden flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-zinc-900/70 via-zinc-900/40 to-zinc-950/70 hover:from-zinc-900 hover:to-zinc-900/90 border border-zinc-800/80 hover:border-emerald-500/40 transition-all duration-300 shadow-sm hover:shadow-[0_0_25px_-5px_rgba(16,185,129,0.18)] text-left select-none cursor-default"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/40 group-hover:bg-emerald-400 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.8)] transition-all shrink-0" />
+                {/* Diagonal Light Sweep Beam */}
+                <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-emerald-400/10 to-transparent pointer-events-none" />
+
+                <div className="flex items-center gap-3 min-w-0">
+                  {/* Live Radar Beacon Pulse */}
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 group-hover:opacity-100" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.9)] transition-all" />
+                  </span>
+
                   <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition-colors truncate">
                     {item}
                   </span>
                 </div>
-                <span className="text-[10px] font-mono text-zinc-600 group-hover:text-emerald-400/80 transition-colors uppercase tracking-wider shrink-0">
-                  Client-side
-                </span>
+
+                {/* Minimal Glowing Signal Bars */}
+                <div className="flex items-end gap-1 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity">
+                  <span className="w-1 h-1.5 rounded-full bg-zinc-700 group-hover:bg-emerald-400/70 transition-colors" />
+                  <span className="w-1 h-3 rounded-full bg-zinc-700 group-hover:bg-emerald-400 transition-colors group-hover:shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+                  <span className="w-1 h-2 rounded-full bg-zinc-700 group-hover:bg-emerald-500 transition-colors" />
+                </div>
               </div>
             ))}
           </div>
