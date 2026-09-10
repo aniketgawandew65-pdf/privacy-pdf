@@ -3,8 +3,6 @@ import {
   Download,
   Loader2,
   FileText,
-  ChevronLeft,
-  ChevronRight,
   RotateCcw,
   ZoomIn,
   ZoomOut,
@@ -23,11 +21,16 @@ import {
   Undo,
   Redo,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  FilePlus,
+  Trash2,
+  Edit3
 } from "lucide-react";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 // @ts-ignore
 import html2canvas from "html2canvas";
+
+const STORAGE_KEY = "privacy_pdf_text_editor_draft";
 
 export const TextToPdf: React.FC<any> = () => {
   const [content, setContent] = useState<string>("");
@@ -40,13 +43,30 @@ export const TextToPdf: React.FC<any> = () => {
 
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  // 0ms instant synchronization between editor and preview
+  // 1. Auto-restore draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved && saved.trim()) {
+        setContent(saved);
+        if (editorRef.current) {
+          editorRef.current.innerHTML = saved;
+          setCharCount(editorRef.current.innerText.trim().length);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // 2. Instant 0ms synchronization + auto-save to localStorage
   const syncContent = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
     setContent(html);
     setCharCount(editorRef.current.innerText.trim().length);
     setDownloadUrl(null);
+    try {
+      localStorage.setItem(STORAGE_KEY, html);
+    } catch (_) {}
   };
 
   useEffect(() => {
@@ -67,7 +87,27 @@ export const TextToPdf: React.FC<any> = () => {
     formatDoc("fontSize", size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
   };
 
-  // 1:1 WYSIWYG export: captures the exact rendered DOM preview into high-res vector A4 pages
+  // Insert explicit Page Break so user controls where new pages begin
+  const handleInsertPageBreak = () => {
+    const breakHtml = '<div class="page-break-line" style="margin: 20px 0; padding: 6px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.06); text-align: center; font-size: 11px; font-weight: 700; color: #10b981; letter-spacing: 0.05em; user-select: none;" contenteditable="false">--- NEW PAGE BREAK ---</div><p><br></p>';
+    formatDoc("insertHTML", breakHtml);
+  };
+
+  const handleClearDocument = () => {
+    if (window.confirm("Are you sure you want to clear your text? Make sure you have saved your PDF.")) {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = "";
+      }
+      setContent("");
+      setCharCount(0);
+      setDownloadUrl(null);
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (_) {}
+    }
+  };
+
+  // 1:1 WYSIWYG PDF Export with safety margins and page numbers on every page
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -80,7 +120,6 @@ export const TextToPdf: React.FC<any> = () => {
     setError(null);
 
     try {
-      // Create off-screen rendering container with identical A4 styling
       const printContainer = document.createElement("div");
       printContainer.style.position = "fixed";
       printContainer.style.left = "-9999px";
@@ -89,23 +128,24 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.style.minHeight = "1123px";
       printContainer.style.backgroundColor = "#ffffff";
       printContainer.style.color = "#18181b";
-      printContainer.style.padding = "48px 56px";
+      printContainer.style.padding = "40px 52px";
       printContainer.style.boxSizing = "border-box";
       printContainer.style.fontFamily = "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
       printContainer.style.fontSize = `${fontSize}px`;
-      printContainer.style.lineHeight = "1.6";
+      printContainer.style.lineHeight = "1.55";
       printContainer.style.wordBreak = "break-word";
 
       const styleEl = document.createElement("style");
       styleEl.innerHTML = `
-        .print-a4-content table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: inherit; }
-        .print-a4-content th, .print-a4-content td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; }
+        .print-a4-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: inherit; }
+        .print-a4-content th, .print-a4-content td { border: 1px solid #d4d4d8; padding: 7px 10px; text-align: left; }
         .print-a4-content th { background-color: #f4f4f5; font-weight: 600; }
-        .print-a4-content ul { list-style-type: disc; padding-left: 24px; margin: 8px 0; }
-        .print-a4-content ol { list-style-type: decimal; padding-left: 24px; margin: 8px 0; }
+        .print-a4-content ul { list-style-type: disc; padding-left: 22px; margin: 6px 0; }
+        .print-a4-content ol { list-style-type: decimal; padding-left: 22px; margin: 6px 0; }
         .print-a4-content li { margin-bottom: 4px; }
-        .print-a4-content p { margin: 6px 0; }
-        .print-a4-content hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
+        .print-a4-content p { margin: 5px 0; }
+        .print-a4-content hr { border: none; border-top: 1px solid #e4e4e7; margin: 14px 0; }
+        .print-a4-content .page-break-line { display: none; }
       `;
       printContainer.className = "print-a4-content";
       printContainer.appendChild(styleEl);
@@ -126,27 +166,32 @@ export const TextToPdf: React.FC<any> = () => {
 
       document.body.removeChild(printContainer);
 
-      // Create PDF and slice canvas cleanly into standard A4 pages
       const pdfDoc = await PDFDocument.create();
-      const pageWidthPt = 595.28;
-      const pageHeightPt = 841.89;
-      const a4Ratio = pageHeightPt / pageWidthPt; // ~1.41426
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-      const pageCanvasHeight = Math.floor(canvas.width * a4Ratio);
-      const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
+      const pageWidthPt = 595.28; // Standard A4 points
+      const pageHeightPt = 841.89;
+
+      const topMarginPt = 40;
+      const bottomMarginPt = 40;
+      const contentHeightPt = pageHeightPt - topMarginPt - bottomMarginPt;
+
+      // Calculate slice height in canvas pixels matching printable area
+      const canvasContentHeight = Math.floor((contentHeightPt / pageWidthPt) * canvas.width);
+      const totalPages = Math.max(1, Math.ceil(canvas.height / canvasContentHeight));
 
       for (let p = 0; p < totalPages; p++) {
         const pageCanvas = document.createElement("canvas");
         pageCanvas.width = canvas.width;
-        pageCanvas.height = pageCanvasHeight;
+        pageCanvas.height = canvasContentHeight;
         const ctx = pageCanvas.getContext("2d");
 
         if (ctx) {
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
 
-          const srcY = p * pageCanvasHeight;
-          const srcHeight = Math.min(pageCanvasHeight, canvas.height - srcY);
+          const srcY = p * canvasContentHeight;
+          const srcHeight = Math.min(canvasContentHeight, canvas.height - srcY);
 
           ctx.drawImage(
             canvas,
@@ -166,11 +211,30 @@ export const TextToPdf: React.FC<any> = () => {
         const embeddedImg = await pdfDoc.embedJpg(imgBytes);
 
         const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+
+        // Draw page image cleanly between top and bottom margins
         page.drawImage(embeddedImg, {
           x: 0,
-          y: 0,
+          y: bottomMarginPt,
           width: pageWidthPt,
-          height: pageHeightPt,
+          height: contentHeightPt,
+        });
+
+        // Draw official Page Number in top margin
+        page.drawText(`Page ${p + 1} of ${totalPages}`, {
+          x: pageWidthPt - 95,
+          y: pageHeightPt - 24,
+          size: 9,
+          font: font,
+          color: rgb(0.45, 0.45, 0.45),
+        });
+
+        // Top decorative border line
+        page.drawLine({
+          start: { x: 40, y: pageHeightPt - 30 },
+          end: { x: pageWidthPt - 40, y: pageHeightPt - 30 },
+          thickness: 0.5,
+          color: rgb(0.85, 0.85, 0.85),
         });
       }
 
@@ -195,8 +259,21 @@ export const TextToPdf: React.FC<any> = () => {
           <div className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-emerald-500" />
             <span className="font-semibold text-sm text-zinc-200">Document Editor</span>
+            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+              Auto-Saved
+            </span>
           </div>
-          <span className="text-xs font-mono text-zinc-400">{charCount} characters</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-mono text-zinc-400">{charCount} chars</span>
+            <button
+              type="button"
+              onClick={handleClearDocument}
+              className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-red-400 transition"
+              title="Clear Document"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Rich Text Toolbar */}
@@ -346,6 +423,15 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onClick={handleInsertPageBreak}
+            className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
+            title="Insert Page Break"
+          >
+            <FilePlus className="w-3.5 h-3.5" />
+            <span>Page Break</span>
+          </button>
+          <button
+            type="button"
             onClick={() => formatDoc("removeFormat")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Clear Formatting"
@@ -354,7 +440,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor */}
+        {/* Input Editor with auto-recovery */}
         <div
           ref={editorRef}
           contentEditable={true}
@@ -362,7 +448,7 @@ export const TextToPdf: React.FC<any> = () => {
           onKeyUp={syncContent}
           onPaste={() => setTimeout(syncContent, 0)}
           data-placeholder="Start typing your document here..."
-          className="w-full min-h-[300px] max-h-[500px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left font-sans text-sm sm:text-base leading-relaxed break-words select-text cursor-text"
+          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left font-sans text-sm sm:text-base leading-relaxed break-words select-text cursor-text"
         />
       </div>
 
@@ -370,11 +456,7 @@ export const TextToPdf: React.FC<any> = () => {
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
           <span className="font-semibold text-sm text-zinc-200">PDF Preview</span>
-          <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs text-zinc-300 font-mono">
-            <ChevronLeft className="w-3.5 h-3.5 opacity-40 cursor-not-allowed" />
-            <span>Page 1 of 1</span>
-            <ChevronRight className="w-3.5 h-3.5 opacity-40 cursor-not-allowed" />
-          </div>
+          <span className="text-xs text-zinc-400 font-mono">A4 Sheet Layout</span>
         </div>
 
         {/* Single Centered A4 Card */}
@@ -431,27 +513,40 @@ export const TextToPdf: React.FC<any> = () => {
         </div>
 
         {/* Action Footer */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          {!downloadUrl ? (
+        <div className="flex items-center justify-between gap-3 pt-2">
+          {downloadUrl && (
             <button
               type="button"
-              onClick={handleDownload}
-              disabled={isProcessing || !hasContent}
-              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl text-xs transition disabled:opacity-40"
+              onClick={() => setDownloadUrl(null)}
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 rounded-xl text-xs font-medium transition"
             >
-              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              <span>{isProcessing ? "Generating PDF..." : "Download PDF"}</span>
+              <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Edit Document</span>
             </button>
-          ) : (
-            <a
-              href={downloadUrl}
-              download="document.pdf"
-              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl text-xs transition"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Save Document PDF</span>
-            </a>
           )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {!downloadUrl ? (
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={isProcessing || !hasContent}
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl text-xs transition disabled:opacity-40"
+              >
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                <span>{isProcessing ? "Generating PDF..." : "Download PDF"}</span>
+              </button>
+            ) : (
+              <a
+                href={downloadUrl}
+                download="document.pdf"
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl text-xs transition"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save Document PDF</span>
+              </a>
+            )}
+          </div>
         </div>
 
         {error && (
