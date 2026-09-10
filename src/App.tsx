@@ -165,17 +165,23 @@ function ToolFallback() {
   );
 }
 
-const WORKFLOW_CAPABILITIES = [
-  "Offline PDF Redaction & Sanitization",
-  "In-Browser Word to Vector PDF",
-  "Zero-Upload Client-Side Compression",
-  "Air-Gapped Multi-Document Merge",
-  "Private OCR & Document Text Extraction",
-  "Client-Side Page Split & Reorganizer",
-  "In-Memory PDF Crop & Deskew",
-  "Bank Statement to Excel Converter",
-  "Local PDF Password & Encryption Shield",
-  "Zero-Server Booklet & N-Up Imposition"
+interface WorkflowItem {
+  title: string;
+  path: string;
+  tag: string;
+}
+
+const WORKFLOW_CAPABILITIES: WorkflowItem[] = [
+  { title: "Offline PDF Redaction & Sanitization", path: "/offline-pdf-redaction", tag: "Security" },
+  { title: "In-Browser Word to Vector PDF", path: "/text-to-pdf", tag: "Convert" },
+  { title: "Zero-Upload Client-Side Compression", path: "/compress-pdf", tag: "Size" },
+  { title: "Air-Gapped Multi-Document Merge", path: "/merge-pdf", tag: "Organize" },
+  { title: "Private OCR & Document Text Extraction", path: "/ocr-pdf", tag: "AI / OCR" },
+  { title: "Client-Side Page Split & Reorganizer", path: "/split-pdf", tag: "Pages" },
+  { title: "In-Memory PDF Crop & Deskew", path: "/crop-pdf", tag: "Visual" },
+  { title: "Bank Statement to Excel Converter", path: "/bank-statement-to-excel", tag: "Finance" },
+  { title: "Local PDF Password & Encryption Shield", path: "/protect-pdf", tag: "Protect" },
+  { title: "Zero-Server Booklet & N-Up Imposition", path: "/booklet-pdf", tag: "Print" },
 ];
 
 export default function App() {
@@ -188,7 +194,7 @@ export default function App() {
   const isDevMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('pro') === 'true';
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
-  const [activeWorkflows, setActiveWorkflows] = useState<string[]>(() => {
+  const [activeWorkflows, setActiveWorkflows] = useState<WorkflowItem[]>(() => {
     return [...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6);
   });
   
@@ -606,9 +612,7 @@ export default function App() {
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.9)] transition-all" />
                   </span>
 
-                  <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition-colors truncate">
-                    {item}
-                  </span>
+                  <span>{typeof item === "string" ? item : item.title}</span>
                 </div>
 
                 {/* Minimal Glowing Signal Bars */}
