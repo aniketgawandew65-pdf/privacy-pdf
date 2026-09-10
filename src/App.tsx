@@ -579,18 +579,28 @@ export default function App() {
 
       {/* Footer */}
       <footer className="w-full max-w-5xl mx-auto mt-12 sm:mt-20 px-3 sm:px-6 py-6 sm:py-8 border-t border-zinc-900 flex flex-col gap-5 sm:gap-6 text-xs text-zinc-500">
-        <div className="flex flex-col items-center justify-center gap-3 pb-5 sm:pb-6 border-b border-zinc-900/60 text-center">
-          <span className="font-semibold text-zinc-400 text-[11px] uppercase tracking-wider">
-            Popular Workflows:
-          </span>
-          <div className="flex flex-wrap items-center justify-center gap-2 max-w-3xl">
+        <div className="flex flex-col items-center justify-center gap-3.5 pb-6 border-b border-zinc-900/80 w-full text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/90 border border-zinc-800/80 text-[10px] font-mono uppercase tracking-widest text-zinc-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>High-Capacity Workflows</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-2.5 w-full max-w-4xl px-2">
             {activeWorkflows.map((item, idx) => (
-              <span
+              <div
                 key={idx}
-                className="px-3 py-1.5 rounded-xl bg-zinc-900/80 border border-zinc-800 text-xs text-zinc-300 font-medium hover:border-zinc-700 hover:text-white transition shadow-sm select-none cursor-default"
+                className="group relative flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-900/40 hover:bg-zinc-900/80 border border-zinc-800/80 hover:border-emerald-500/30 transition-all duration-200 shadow-sm text-left select-none"
               >
-                {item}
-              </span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/40 group-hover:bg-emerald-400 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.8)] transition-all shrink-0" />
+                  <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition-colors truncate">
+                    {item}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-zinc-600 group-hover:text-emerald-400/80 transition-colors uppercase tracking-wider shrink-0">
+                  Client-side
+                </span>
+              </div>
             ))}
           </div>
         </div>
