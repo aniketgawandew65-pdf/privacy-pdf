@@ -437,11 +437,11 @@ export default function App() {
         <button
           type="button"
           onClick={() => setIsAuditDrawerOpen(true)}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer min-h-[36px] shadow-sm"
+          className="inline-block max-w-[90%] px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] sm:text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer shadow-sm text-center leading-relaxed"
           title="Click to inspect network telemetry"
         >
-          <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>Lightning fast • No internet needed • 100% private • No signup</span>
+          <Zap className="w-3.5 h-3.5 inline-block align-text-bottom mr-1 mb-[1px]" />
+          Lightning fast • No internet needed • 100% private • No signup
         </button>
 
         <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-3 sm:mb-4 px-2">
