@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 // @ts-ignore
-import * as htmlToImage from "html-to-image";
+import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
 
@@ -74,7 +74,6 @@ export const TextToPdf: React.FC<any> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
-  const previewRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-restore draft from localStorage
   useEffect(() => {
@@ -183,12 +182,10 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // Option B: Native SVG/Canvas capture via html-to-image (Zero CSS parser errors)
+  // Full-Height Document Export: renders entire content unclipped, strips page break markers, and partitions into A4 pages
   const handleDownload = async () => {
-    const previewElement = previewRef.current;
-    if (!previewElement) return;
-
-    const plainText = editorRef.current?.innerText.trim() || "";
+    if (!editorRef.current) return;
+    const plainText = editorRef.current.innerText.trim();
     if (!plainText) {
       setError("Please enter some text before downloading.");
       return;
@@ -197,46 +194,99 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
-    // Temporarily normalize preview layout for standard A4 vector export
-    const originalTransform = previewElement.style.transform;
-    const originalWidth = previewElement.style.width;
-    const originalMaxWidth = previewElement.style.maxWidth;
-    const originalPadding = previewElement.style.padding;
-    const originalShadow = previewElement.style.boxShadow;
-    const originalBorder = previewElement.style.border;
+    // Create a standalone iframe to isolate rendering completely from parent Tailwind styles (fixes oklch/EOF permanently)
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-9999px";
+    iframe.style.top = "0";
+    iframe.style.width = "794px"; // Standard A4 width at 96 DPI
+    iframe.style.height = "1123px";
+    iframe.style.border = "none";
+    document.body.appendChild(iframe);
 
     try {
-      previewElement.style.transform = "none";
-      previewElement.style.width = "794px";
-      previewElement.style.maxWidth = "794px";
-      previewElement.style.padding = "56px 64px";
-      previewElement.style.boxShadow = "none";
-      previewElement.style.border = "none";
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error("Unable to create PDF render environment.");
 
-      const canvas = await htmlToImage.toCanvas(previewElement, {
-        pixelRatio: 2,
+      // Sanitize content and strip out page break indicators
+      let cleanHtml = content
+        .replace(/<div[^>]*data-page-break[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*class="[^"]*(?:page-break|delete-page-break)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
+        .replace(/<div[^>]*>[^<]*?PAGE BREAK[\s\S]*?<\/div>/gi, "");
+
+      iframeDoc.open();
+      iframeDoc.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              * { box-sizing: border-box; }
+              body {
+                margin: 0;
+                padding: 56px 64px;
+                width: 794px;
+                background-color: #ffffff;
+                color: #18181b;
+                font-family: ${selectedFont};
+                font-size: ${fontSize}px;
+                line-height: 1.6;
+                word-break: break-word;
+              }
+              table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: inherit; }
+              th, td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; }
+              th { background-color: #f4f4f5; font-weight: 600; }
+              ul { list-style-type: disc; padding-left: 28px; margin: 8px 0; }
+              ol { list-style-type: decimal; padding-left: 28px; margin: 8px 0; }
+              li { display: list-item; margin-bottom: 4px; }
+              p { margin: 6px 0; }
+              hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
+              s, strike, del, [style*="line-through"] {
+                text-decoration: line-through !important;
+                -webkit-text-decoration-line: line-through !important;
+                text-decoration-thickness: 1.8px !important;
+              }
+              u, [style*="underline"] {
+                text-decoration: underline !important;
+                -webkit-text-decoration-line: underline !important;
+                text-decoration-thickness: 1.5px !important;
+              }
+              mark, [style*="background-color"], [style*="background:"] {
+                box-decoration-break: clone !important;
+                -webkit-box-decoration-break: clone !important;
+                display: inline !important;
+                padding: 2px 4px !important;
+                border-radius: 2px !important;
+              }
+              .page-break-indicator, [data-page-break], .delete-page-break-btn { display: none !important; }
+            </style>
+          </head>
+          <body>
+            <div id="render-content">${cleanHtml}</div>
+          </body>
+        </html>
+      `);
+      iframeDoc.close();
+
+      const renderBody = iframeDoc.body;
+      const targetEl = iframeDoc.getElementById("render-content") || renderBody;
+
+      // Ensure all page break remnants are completely removed from DOM
+      targetEl.querySelectorAll(".page-break-indicator, [data-page-break], .delete-page-break-btn").forEach((el) => el.remove());
+
+      const canvas = await html2canvas(renderBody, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
         backgroundColor: "#ffffff",
-        filter: (node: HTMLElement) => {
-          if (node.classList && (node.classList.contains("page-break-indicator") || node.classList.contains("delete-page-break-btn"))) {
-            return false;
-          }
-          if (node.getAttribute && node.getAttribute("data-page-break") === "true") {
-            return false;
-          }
-          return true;
-        },
+        windowWidth: 794,
+        logging: false,
       });
 
-      // Restore preview element immediately
-      previewElement.style.transform = originalTransform;
-      previewElement.style.width = originalWidth;
-      previewElement.style.maxWidth = originalMaxWidth;
-      previewElement.style.padding = originalPadding;
-      previewElement.style.boxShadow = originalShadow;
-      previewElement.style.border = originalBorder;
+      document.body.removeChild(iframe);
 
       if (!canvas || canvas.width === 0 || canvas.height === 0) {
-        throw new Error("Canvas rendering produced an empty image.");
+        throw new Error("Render produced an empty canvas.");
       }
 
       const pdfDoc = await PDFDocument.create();
@@ -293,7 +343,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Top margin clean Page X of Y header
+        // Clean page number header in upper right
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 28,
@@ -308,13 +358,9 @@ export const TextToPdf: React.FC<any> = () => {
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
     } catch (err: any) {
-      previewElement.style.transform = originalTransform;
-      previewElement.style.width = originalWidth;
-      previewElement.style.maxWidth = originalMaxWidth;
-      previewElement.style.padding = originalPadding;
-      previewElement.style.boxShadow = originalShadow;
-      previewElement.style.border = originalBorder;
-
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
       console.error("PDF generation failed:", err);
       const msg = err?.message || (typeof err === "string" ? err : "") || "An unexpected error occurred during PDF generation.";
       setError("Failed to create PDF: " + msg);
@@ -654,11 +700,9 @@ export const TextToPdf: React.FC<any> = () => {
           <span className="text-xs text-zinc-400 font-mono">A4 Sheet Layout</span>
         </div>
 
-        {/* Single Centered A4 Card (Native Capture Target) */}
+        {/* Single Centered A4 Preview Sheet */}
         <div className="relative w-full min-h-[480px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-center justify-center p-6 overflow-auto">
           <div
-            id="pdf-preview-sheet"
-            ref={previewRef}
             style={{
               transform: `scale(${zoom})`,
               transformOrigin: "top center",
