@@ -9,7 +9,6 @@ import {
   Bold,
   Italic,
   Underline,
-  Strikethrough,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -25,7 +24,6 @@ import {
   FilePlus,
   Trash2,
   Edit3,
-  Highlighter,
   Palette,
   Type
 } from "lucide-react";
@@ -52,15 +50,6 @@ const TEXT_COLORS = [
   { label: "Orange", value: "#ea580c" },
 ];
 
-const HIGHLIGHT_COLORS = [
-  { label: "None", value: "transparent" },
-  { label: "Yellow", value: "#fef08a" },
-  { label: "Green", value: "#bbf7d0" },
-  { label: "Cyan", value: "#bae6fd" },
-  { label: "Pink", value: "#fbcfe8" },
-  { label: "Orange", value: "#fed7aa" },
-];
-
 export const TextToPdf: React.FC<any> = () => {
   const [content, setContent] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
@@ -68,14 +57,13 @@ export const TextToPdf: React.FC<any> = () => {
   const [fontSize, setFontSize] = useState<number>(14);
   const [selectedFont, setSelectedFont] = useState<string>(FONT_OPTIONS[0].value);
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
-  const [showHighlightPicker, setShowHighlightPicker] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-restore draft from localStorage
+  // 1. Auto-restore draft from localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -89,7 +77,7 @@ export const TextToPdf: React.FC<any> = () => {
     } catch (_) {}
   }, []);
 
-  // Instant 0ms synchronization + auto-save
+  // 2. Instant 0ms synchronization + auto-save
   const syncContent = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
@@ -131,41 +119,10 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  const handleApplyHighlight = (color: string) => {
-    if (color === "transparent") {
-      document.execCommand("removeFormat", false);
-    } else {
-      document.execCommand("styleWithCSS", false, "true");
-      const ok = document.execCommand("backColor", false, color);
-      if (!ok) {
-        document.execCommand("hiliteColor", false, color);
-      }
-    }
-    syncContent();
-    setShowHighlightPicker(false);
-  };
-
-  const handleStrikethrough = () => {
-    document.execCommand("strikeThrough", false);
-    syncContent();
-  };
-
+  // Pure Visual Page Break: An empty <hr> divider with zero text
   const handleInsertPageBreak = () => {
-    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;">✕ Remove</span></div><p><br></p>';
+    const breakHtml = '<hr class="doc-page-break" style="page-break-before: always; break-before: page; margin: 24px 0; border: none; border-top: 2px dashed #10b981; height: 0;" /><p><br></p>';
     formatDoc("insertHTML", breakHtml);
-  };
-
-  const handleEditorClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target && target.closest(".delete-page-break-btn")) {
-      e.preventDefault();
-      e.stopPropagation();
-      const breakEl = target.closest(".page-break-indicator, [data-page-break]");
-      if (breakEl) {
-        breakEl.remove();
-        syncContent();
-      }
-    }
   };
 
   const handleClearDocument = () => {
@@ -182,7 +139,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // Full-Height Document Export: renders entire content unclipped, strips page break markers, and partitions into A4 pages
+  // Clean Multi-Page A4 PDF Generator
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -194,25 +151,24 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
-    // Create a standalone iframe to isolate rendering completely from parent Tailwind styles (fixes oklch/EOF permanently)
+    // Isolated render container with neutral styling (completely immune to Tailwind CSS parser errors)
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.left = "-9999px";
     iframe.style.top = "0";
-    iframe.style.width = "794px"; // Standard A4 width at 96 DPI
+    iframe.style.width = "794px"; // A4 Width at 96 DPI
     iframe.style.height = "1123px";
     iframe.style.border = "none";
     document.body.appendChild(iframe);
 
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!iframeDoc) throw new Error("Unable to create PDF render environment.");
+      if (!iframeDoc) throw new Error("Unable to create document renderer.");
 
-      // Sanitize content and strip out page break indicators
-      let cleanHtml = content
-        .replace(/<div[^>]*data-page-break[^>]*>[\s\S]*?<\/div>/gi, "")
-        .replace(/<div[^>]*class="[^"]*(?:page-break|delete-page-break)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, "")
-        .replace(/<div[^>]*>[^<]*?PAGE BREAK[\s\S]*?<\/div>/gi, "");
+      // Clean out any legacy text artifacts
+      const cleanHtml = content
+        .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
+        .replace(/✂/g, "");
 
       iframeDoc.open();
       iframeDoc.write(`
@@ -226,7 +182,7 @@ export const TextToPdf: React.FC<any> = () => {
                 margin: 0;
                 padding: 56px 64px;
                 width: 794px;
-                background-color: #ffffff;
+                background: #ffffff;
                 color: #18181b;
                 font-family: ${selectedFont};
                 font-size: ${fontSize}px;
@@ -241,40 +197,25 @@ export const TextToPdf: React.FC<any> = () => {
               li { display: list-item; margin-bottom: 4px; }
               p { margin: 6px 0; }
               hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
-              s, strike, del, [style*="line-through"] {
-                text-decoration: line-through !important;
-                -webkit-text-decoration-line: line-through !important;
-                text-decoration-thickness: 1.8px !important;
+              .doc-page-break {
+                page-break-before: always !important;
+                break-before: page !important;
+                border: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                height: 0 !important;
+                visibility: hidden !important;
               }
-              u, [style*="underline"] {
-                text-decoration: underline !important;
-                -webkit-text-decoration-line: underline !important;
-                text-decoration-thickness: 1.5px !important;
-              }
-              mark, [style*="background-color"], [style*="background:"] {
-                box-decoration-break: clone !important;
-                -webkit-box-decoration-break: clone !important;
-                display: inline !important;
-                padding: 2px 4px !important;
-                border-radius: 2px !important;
-              }
-              .page-break-indicator, [data-page-break], .delete-page-break-btn { display: none !important; }
             </style>
           </head>
           <body>
-            <div id="render-content">${cleanHtml}</div>
+            <div>${cleanHtml}</div>
           </body>
         </html>
       `);
       iframeDoc.close();
 
-      const renderBody = iframeDoc.body;
-      const targetEl = iframeDoc.getElementById("render-content") || renderBody;
-
-      // Ensure all page break remnants are completely removed from DOM
-      targetEl.querySelectorAll(".page-break-indicator, [data-page-break], .delete-page-break-btn").forEach((el) => el.remove());
-
-      const canvas = await html2canvas(renderBody, {
+      const canvas = await html2canvas(iframeDoc.body, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
@@ -294,7 +235,7 @@ export const TextToPdf: React.FC<any> = () => {
 
       const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
-      const a4Ratio = pageHeightPt / pageWidthPt; // ~1.41426
+      const a4Ratio = pageHeightPt / pageWidthPt;
 
       const pageCanvasHeight = Math.floor(canvas.width * a4Ratio);
       const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
@@ -343,7 +284,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Clean page number header in upper right
+        // Clean page number in upper right header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 28,
@@ -421,7 +362,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
-          {/* Font Family Selector */}
+          {/* Font Selector */}
           <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-700/80 rounded px-1.5 py-0.5">
             <Type className="w-3 h-3 text-zinc-400" />
             <select
@@ -472,13 +413,13 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
-          {/* Text Color Popover */}
+          {/* Text Color Picker */}
           <div className="relative">
             <button
               type="button"
               onPointerDown={(e) => e.preventDefault()}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setShowColorPicker(!showColorPicker); setShowHighlightPicker(false); }}
+              onClick={() => setShowColorPicker(!showColorPicker)}
               className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               title="Text Color"
             >
@@ -497,38 +438,6 @@ export const TextToPdf: React.FC<any> = () => {
                     className="w-5 h-5 rounded-full border border-white/20 hover:scale-110 transition shadow"
                     title={c.label}
                   />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Highlighter Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              onPointerDown={(e) => e.preventDefault()}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setShowHighlightPicker(!showHighlightPicker); setShowColorPicker(false); }}
-              className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-              title="Highlighter"
-            >
-              <Highlighter className="w-4 h-4" />
-            </button>
-            {showHighlightPicker && (
-              <div className="absolute top-full left-0 mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-xl p-2 shadow-2xl flex items-center gap-1.5">
-                {HIGHLIGHT_COLORS.map((h) => (
-                  <button
-                    key={h.value}
-                    type="button"
-                    onPointerDown={(e) => e.preventDefault()}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => handleApplyHighlight(h.value)}
-                    style={{ backgroundColor: h.value === "transparent" ? "#27272a" : h.value }}
-                    className="w-5 h-5 rounded-md border border-white/20 hover:scale-110 transition flex items-center justify-center text-[10px]"
-                    title={h.label}
-                  >
-                    {h.value === "transparent" && "✕"}
-                  </button>
                 ))}
               </div>
             )}
@@ -565,16 +474,6 @@ export const TextToPdf: React.FC<any> = () => {
             title="Underline"
           >
             <Underline className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onPointerDown={(e) => e.preventDefault()}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={handleStrikethrough}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-            title="Strikethrough (Word Cutting)"
-          >
-            <Strikethrough className="w-4 h-4" />
           </button>
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
@@ -655,13 +554,14 @@ export const TextToPdf: React.FC<any> = () => {
             <Minus className="w-4 h-4" />
           </button>
 
+          {/* Clean Page Break Tool */}
           <button
             type="button"
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={handleInsertPageBreak}
-            className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
-            title="Insert Page Break Marker"
+            className="flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
+            title="Insert Clean Page Break"
           >
             <FilePlus className="w-3.5 h-3.5" />
             <span>Page Break</span>
@@ -683,13 +583,12 @@ export const TextToPdf: React.FC<any> = () => {
         <div
           ref={editorRef}
           contentEditable={true}
-          onClick={handleEditorClick}
           onInput={syncContent}
           onKeyUp={syncContent}
           onPaste={() => setTimeout(syncContent, 0)}
           style={{ fontFamily: selectedFont }}
           data-placeholder="Start typing your document here..."
-          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-8 sm:p-12 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through"
+          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-8 sm:p-12 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
         />
       </div>
 
@@ -708,7 +607,7 @@ export const TextToPdf: React.FC<any> = () => {
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_mark]:box-decoration-clone [&_mark]:inline [&_mark]:px-1 [&_.page-break-indicator]:hidden [&_[data-page-break]]:hidden [&_.page-break-line]:hidden"
+            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
           >
             {hasContent ? (
               <div
