@@ -74,6 +74,7 @@ export const TextToPdf: React.FC<any> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-restore draft from localStorage
   useEffect(() => {
@@ -131,6 +132,7 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
+  // Cross-browser mobile highlighting with styleWithCSS support
   const handleApplyHighlight = (color: string) => {
     if (color === "transparent") {
       document.execCommand("removeFormat", false);
@@ -182,10 +184,12 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export: exact A4 margins, zero borders, complete page break purge
+  // Option A: Direct Capture of the On-Screen Preview Element
   const handleDownload = async () => {
-    if (!editorRef.current) return;
-    const plainText = editorRef.current.innerText.trim();
+    const previewElement = previewRef.current;
+    if (!previewElement) return;
+
+    const plainText = editorRef.current?.innerText.trim() || "";
     if (!plainText) {
       setError("Please enter some text before downloading.");
       return;
@@ -195,106 +199,79 @@ export const TextToPdf: React.FC<any> = () => {
     setError(null);
 
     try {
-      const printContainer = document.createElement("div");
-      printContainer.id = "privacy-pdf-print-container";
-      printContainer.style.position = "fixed";
-      printContainer.style.left = "-9999px";
-      printContainer.style.top = "0";
-      printContainer.style.width = "794px"; // Standard A4 width at 96 DPI
-      printContainer.style.minHeight = "1123px";
-      printContainer.style.backgroundColor = "#ffffff";
-      printContainer.style.color = "#18181b";
-      printContainer.style.padding = "56px 64px"; // Balanced Word-style margins
-      printContainer.style.boxSizing = "border-box";
-      printContainer.style.fontFamily = selectedFont;
-      printContainer.style.fontSize = `${fontSize}px`;
-      printContainer.style.lineHeight = "1.6";
-      printContainer.style.wordBreak = "break-word";
-
-      // Clone editor and completely purge all page break elements
-      const contentClone = editorRef.current.cloneNode(true) as HTMLElement;
-      contentClone.querySelectorAll(".page-break-indicator, [data-page-break], .delete-page-break-btn").forEach((el) => el.remove());
-      contentClone.querySelectorAll("*").forEach((el) => {
-        if (el.textContent && el.textContent.includes("PAGE BREAK")) {
-          el.remove();
-        }
-      });
-
-      printContainer.appendChild(contentClone);
-      document.body.appendChild(printContainer);
-
-      const canvas = await html2canvas(printContainer, {
+      const canvas = await html2canvas(previewElement, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: "#ffffff",
-        windowWidth: 794,
         logging: false,
         ignoreElements: (el: Element) => {
-          if (el === printContainer || el.id === "privacy-pdf-print-container") return false;
           return (
             el.classList?.contains("page-break-indicator") ||
-            el.hasAttribute("data-page-break") ||
+            el.classList?.contains("page-break-line") ||
             el.classList?.contains("delete-page-break-btn") ||
-            Boolean(el.textContent && el.textContent.includes("PAGE BREAK"))
+            el.hasAttribute?.("data-page-break")
           );
         },
         onclone: (clonedDoc: Document) => {
-          clonedDoc.querySelectorAll("style, link[rel='stylesheet']").forEach((el) => el.remove());
+          // 1. Sanitize oklch rules in stylesheets so html2canvas never crashes
+          clonedDoc.querySelectorAll("style").forEach((styleTag) => {
+            if (styleTag.textContent && styleTag.textContent.includes("oklch")) {
+              styleTag.textContent = styleTag.textContent.replace(/oklch([^)]+)/g, "#18181b");
+            }
+          });
 
+          // 2. Prepare cloned preview sheet for A4 vector capture
+          const target = clonedDoc.getElementById("pdf-preview-sheet");
+          if (target) {
+            target.style.transform = "none";
+            target.style.webkitTransform = "none";
+            target.style.boxShadow = "none";
+            target.style.border = "none";
+            target.style.borderRadius = "0";
+            target.style.width = "794px";
+            target.style.maxWidth = "794px";
+            target.style.minHeight = "1123px";
+            target.style.height = "auto";
+            target.style.overflow = "visible";
+            target.style.padding = "48px 56px";
+
+            // Purge any remaining page break markers
+            target.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], .delete-page-break-btn").forEach((el) => el.remove());
+          }
+
+          // 3. Inject explicit formatting rules
           const safeStyle = clonedDoc.createElement("style");
           safeStyle.textContent = `
-            * { box-sizing: border-box !important; }
-            body { background: #ffffff !important; color: #18181b !important; margin: 0 !important; padding: 0 !important; }
-            #privacy-pdf-print-container {
-              width: 794px !important;
-              padding: 56px 64px !important;
-              background: #ffffff !important;
-              color: #18181b !important;
-            }
-            table { width: 100% !important; border-collapse: collapse !important; margin: 14px 0 !important; font-size: inherit !important; }
-            th, td { border: 1px solid #d4d4d8 !important; padding: 8px 12px !important; text-align: left !important; }
-            th { background-color: #f4f4f5 !important; font-weight: 600 !important; }
-            ul { list-style-type: disc !important; padding-left: 28px !important; margin: 8px 0 !important; }
-            ol { list-style-type: decimal !important; padding-left: 28px !important; margin: 8px 0 !important; }
-            li { display: list-item !important; margin-bottom: 4px !important; }
-            p { margin: 6px 0 !important; }
-            hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 16px 0 !important; }
-            
             s, strike, del, [style*="line-through"] {
               text-decoration: line-through !important;
               -webkit-text-decoration-line: line-through !important;
               text-decoration-thickness: 1.8px !important;
               text-decoration-color: currentColor !important;
             }
-
             u, [style*="underline"] {
               text-decoration: underline !important;
               -webkit-text-decoration-line: underline !important;
               text-decoration-thickness: 1.5px !important;
             }
-
             mark, [style*="background-color"], [style*="background:"] {
               box-decoration-break: clone !important;
               -webkit-box-decoration-break: clone !important;
               display: inline !important;
-              padding: 2px 3px !important;
+              padding: 1px 3px !important;
               border-radius: 2px !important;
             }
-
-            .page-break-indicator, [data-page-break], .delete-page-break-btn {
-              display: none !important;
-              visibility: hidden !important;
-              height: 0 !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
+            table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; font-size: inherit !important; }
+            th, td { border: 1px solid #d4d4d8 !important; padding: 8px 12px !important; text-align: left !important; }
+            th { background-color: #f4f4f5 !important; font-weight: 600 !important; }
+            ul { list-style-type: disc !important; padding-left: 28px !important; margin: 8px 0 !important; }
+            ol { list-style-type: decimal !important; padding-left: 28px !important; margin: 8px 0 !important; }
+            li { display: list-item !important; margin-bottom: 4px !important; }
+            .page-break-indicator, .page-break-line, [data-page-break] { display: none !important; }
           `;
           clonedDoc.head.appendChild(safeStyle);
         },
       });
-
-      document.body.removeChild(printContainer);
 
       if (!canvas || canvas.width === 0 || canvas.height === 0) {
         throw new Error("Canvas rendering produced an empty image.");
@@ -347,7 +324,6 @@ export const TextToPdf: React.FC<any> = () => {
         const embeddedImg = await pdfDoc.embedJpg(imgBytes);
         const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
 
-        // Draws the canvas page seamlessly using full A4 boundaries
         page.drawImage(embeddedImg, {
           x: 0,
           y: 0,
@@ -355,10 +331,10 @@ export const TextToPdf: React.FC<any> = () => {
           height: pageHeightPt,
         });
 
-        // Clean page number in the upper right header
+        // Clean page number in upper right header
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
-          y: pageHeightPt - 28,
+          y: pageHeightPt - 24,
           size: 9,
           font: font,
           color: rgb(0.5, 0.5, 0.5),
@@ -611,6 +587,7 @@ export const TextToPdf: React.FC<any> = () => {
           <button
             type="button"
             onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyRight")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Right"
@@ -708,15 +685,17 @@ export const TextToPdf: React.FC<any> = () => {
           <span className="text-xs text-zinc-400 font-mono">A4 Sheet Layout</span>
         </div>
 
-        {/* Single Centered A4 Card */}
+        {/* Single Centered A4 Card (Direct Capture Target) */}
         <div className="relative w-full min-h-[480px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-center justify-center p-6 overflow-auto">
           <div
+            id="pdf-preview-sheet"
+            ref={previewRef}
             style={{
               transform: `scale(${zoom})`,
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_.page-break-indicator]:hidden [&_[data-page-break]]:hidden"
+            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_mark]:box-decoration-clone [&_mark]:inline [&_mark]:px-1 [&_.page-break-indicator]:hidden [&_[data-page-break]]:hidden [&_.page-break-line]:hidden"
           >
             {hasContent ? (
               <div
