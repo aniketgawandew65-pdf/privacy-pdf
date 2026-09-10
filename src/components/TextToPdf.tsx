@@ -24,7 +24,10 @@ import {
   AlertCircle,
   FilePlus,
   Trash2,
-  Edit3
+  Edit3,
+  Highlighter,
+  Palette,
+  Type
 } from "lucide-react";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 // @ts-ignore
@@ -32,11 +35,40 @@ import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
 
+const FONT_OPTIONS = [
+  { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
+  { label: "Serif (Classic)", value: "'Times New Roman', Times, serif" },
+  { label: "Georgia (Editorial)", value: "Georgia, serif" },
+  { label: "Monospace (Code)", value: "'Courier New', Courier, monospace" },
+];
+
+const TEXT_COLORS = [
+  { label: "Black", value: "#18181b" },
+  { label: "Dark Gray", value: "#52525b" },
+  { label: "Red", value: "#dc2626" },
+  { label: "Blue", value: "#2563eb" },
+  { label: "Emerald", value: "#059669" },
+  { label: "Purple", value: "#7c3aed" },
+  { label: "Orange", value: "#ea580c" },
+];
+
+const HIGHLIGHT_COLORS = [
+  { label: "None", value: "transparent" },
+  { label: "Yellow", value: "#fef08a" },
+  { label: "Green", value: "#bbf7d0" },
+  { label: "Cyan", value: "#bae6fd" },
+  { label: "Pink", value: "#fbcfe8" },
+  { label: "Orange", value: "#fed7aa" },
+];
+
 export const TextToPdf: React.FC<any> = () => {
   const [content, setContent] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
   const [zoom, setZoom] = useState<number>(1.0);
   const [fontSize, setFontSize] = useState<number>(14);
+  const [selectedFont, setSelectedFont] = useState<string>(FONT_OPTIONS[0].value);
+  const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
+  const [showHighlightPicker, setShowHighlightPicker] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +110,9 @@ export const TextToPdf: React.FC<any> = () => {
   }, []);
 
   const formatDoc = (cmd: string, val: string = "") => {
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
     document.execCommand(cmd, false, val);
     syncContent();
   };
@@ -87,14 +122,29 @@ export const TextToPdf: React.FC<any> = () => {
     formatDoc("fontSize", size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
   };
 
-  // Insert explicit Page Break so user controls where new pages begin
+  const handleFontFamilyChange = (font: string) => {
+    setSelectedFont(font);
+    formatDoc("fontName", font);
+  };
+
+  const handleApplyTextColor = (color: string) => {
+    formatDoc("foreColor", color);
+    setShowColorPicker(false);
+  };
+
+  const handleApplyHighlight = (color: string) => {
+    formatDoc("hiliteColor", color);
+    setShowHighlightPicker(false);
+  };
+
+  // Insert visual Page Break marker for editor planning
   const handleInsertPageBreak = () => {
     const breakHtml = '<div class="page-break-line" style="margin: 20px 0; padding: 6px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.06); text-align: center; font-size: 11px; font-weight: 700; color: #10b981; letter-spacing: 0.05em; user-select: none;" contenteditable="false">--- NEW PAGE BREAK ---</div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
   const handleClearDocument = () => {
-    if (window.confirm("Are you sure you want to clear your text? Make sure you have saved your PDF.")) {
+    if (window.confirm("Are you sure you want to clear your document?")) {
       if (editorRef.current) {
         editorRef.current.innerHTML = "";
       }
@@ -107,7 +157,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export with safety margins and page numbers on every page
+  // 1:1 WYSIWYG PDF Export with safety margins and clean page headers
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -130,7 +180,7 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.style.color = "#18181b";
       printContainer.style.padding = "40px 52px";
       printContainer.style.boxSizing = "border-box";
-      printContainer.style.fontFamily = "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      printContainer.style.fontFamily = selectedFont;
       printContainer.style.fontSize = `${fontSize}px`;
       printContainer.style.lineHeight = "1.55";
       printContainer.style.wordBreak = "break-word";
@@ -140,18 +190,21 @@ export const TextToPdf: React.FC<any> = () => {
         .print-a4-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: inherit; }
         .print-a4-content th, .print-a4-content td { border: 1px solid #d4d4d8; padding: 7px 10px; text-align: left; }
         .print-a4-content th { background-color: #f4f4f5; font-weight: 600; }
-        .print-a4-content ul { list-style-type: disc; padding-left: 22px; margin: 6px 0; }
-        .print-a4-content ol { list-style-type: decimal; padding-left: 22px; margin: 6px 0; }
-        .print-a4-content li { margin-bottom: 4px; }
+        .print-a4-content ul { list-style-type: disc !important; padding-left: 24px !important; margin: 6px 0 !important; }
+        .print-a4-content ol { list-style-type: decimal !important; padding-left: 24px !important; margin: 6px 0 !important; }
+        .print-a4-content li { display: list-item !important; margin-bottom: 4px !important; }
         .print-a4-content p { margin: 5px 0; }
         .print-a4-content hr { border: none; border-top: 1px solid #e4e4e7; margin: 14px 0; }
-        .print-a4-content .page-break-line { display: none; }
       `;
       printContainer.className = "print-a4-content";
       printContainer.appendChild(styleEl);
 
       const contentWrapper = document.createElement("div");
       contentWrapper.innerHTML = content;
+
+      // STRIP ALL VISUAL PAGE-BREAK LINES SO THEY NEVER APPEAR IN THE EXPORTED PDF
+      contentWrapper.querySelectorAll(".page-break-line").forEach((el) => el.remove());
+
       printContainer.appendChild(contentWrapper);
       document.body.appendChild(printContainer);
 
@@ -169,14 +222,13 @@ export const TextToPdf: React.FC<any> = () => {
       const pdfDoc = await PDFDocument.create();
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-      const pageWidthPt = 595.28; // Standard A4 points
+      const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
 
       const topMarginPt = 40;
       const bottomMarginPt = 40;
       const contentHeightPt = pageHeightPt - topMarginPt - bottomMarginPt;
 
-      // Calculate slice height in canvas pixels matching printable area
       const canvasContentHeight = Math.floor((contentHeightPt / pageWidthPt) * canvas.width);
       const totalPages = Math.max(1, Math.ceil(canvas.height / canvasContentHeight));
 
@@ -212,7 +264,6 @@ export const TextToPdf: React.FC<any> = () => {
 
         const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
 
-        // Draw page image cleanly between top and bottom margins
         page.drawImage(embeddedImg, {
           x: 0,
           y: bottomMarginPt,
@@ -220,7 +271,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: contentHeightPt,
         });
 
-        // Draw official Page Number in top margin
+        // Top margin header with clean Page X of Y
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 24,
@@ -229,7 +280,6 @@ export const TextToPdf: React.FC<any> = () => {
           color: rgb(0.45, 0.45, 0.45),
         });
 
-        // Top decorative border line
         page.drawLine({
           start: { x: 40, y: pageHeightPt - 30 },
           end: { x: pageWidthPt - 40, y: pageHeightPt - 30 },
@@ -277,9 +327,10 @@ export const TextToPdf: React.FC<any> = () => {
         </div>
 
         {/* Rich Text Toolbar */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-zinc-950/80 border border-zinc-800 rounded-xl p-2 text-zinc-300">
+        <div className="flex flex-wrap items-center gap-1.5 bg-zinc-950/80 border border-zinc-800 rounded-xl p-2 text-zinc-300 relative">
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("undo")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Undo"
@@ -288,6 +339,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("redo")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Redo"
@@ -297,10 +349,27 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
+          {/* Font Family Selector */}
+          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-700/80 rounded px-1.5 py-0.5">
+            <Type className="w-3 h-3 text-zinc-400" />
+            <select
+              value={selectedFont}
+              onChange={(e) => handleFontFamilyChange(e.target.value)}
+              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+            >
+              {FONT_OPTIONS.map((f) => (
+                <option key={f.value} value={f.value} className="bg-zinc-900 text-white">
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Font Size Selector */}
           <select
             value={fontSize}
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
-            className="bg-zinc-900 border border-zinc-700/80 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none"
+            className="bg-zinc-900 border border-zinc-700/80 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer"
           >
             <option value={10}>10pt</option>
             <option value={12}>12pt</option>
@@ -312,6 +381,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => handleFontSizeChange(Math.min(32, fontSize + 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
@@ -319,6 +389,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => handleFontSizeChange(Math.max(8, fontSize - 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
@@ -327,8 +398,69 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
+          {/* Text Color Popover */}
+          <div className="relative">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setShowColorPicker(!showColorPicker); setShowHighlightPicker(false); }}
+              className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+              title="Text Color"
+            >
+              <Palette className="w-4 h-4" />
+            </button>
+            {showColorPicker && (
+              <div className="absolute top-full left-0 mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-xl p-2 shadow-2xl flex items-center gap-1.5">
+                {TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleApplyTextColor(c.value)}
+                    style={{ backgroundColor: c.value }}
+                    className="w-5 h-5 rounded-full border border-white/20 hover:scale-110 transition shadow"
+                    title={c.label}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Highlighter Popover */}
+          <div className="relative">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setShowHighlightPicker(!showHighlightPicker); setShowColorPicker(false); }}
+              className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+              title="Highlighter"
+            >
+              <Highlighter className="w-4 h-4" />
+            </button>
+            {showHighlightPicker && (
+              <div className="absolute top-full left-0 mt-1 z-30 bg-zinc-900 border border-zinc-700 rounded-xl p-2 shadow-2xl flex items-center gap-1.5">
+                {HIGHLIGHT_COLORS.map((h) => (
+                  <button
+                    key={h.value}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleApplyHighlight(h.value)}
+                    style={{ backgroundColor: h.value === "transparent" ? "#27272a" : h.value }}
+                    className="w-5 h-5 rounded-md border border-white/20 hover:scale-110 transition flex items-center justify-center text-[10px]"
+                    title={h.label}
+                  >
+                    {h.value === "transparent" && "✕"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="h-4 w-px bg-zinc-800 mx-1" />
+
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("bold")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Bold"
@@ -337,6 +469,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("italic")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Italic"
@@ -345,6 +478,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("underline")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Underline"
@@ -353,6 +487,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("strikeThrough")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Strikethrough"
@@ -364,6 +499,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyLeft")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Left"
@@ -372,6 +508,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyCenter")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Center"
@@ -380,6 +517,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyRight")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Right"
@@ -388,6 +526,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("justifyFull")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Justify"
@@ -397,41 +536,52 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
+          {/* Bullet List Button with focus retention */}
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertUnorderedList")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Bullet List"
           >
             <List className="w-4 h-4" />
           </button>
+
+          {/* Numbered List Button with focus retention */}
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertOrderedList")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Numbered List"
           >
             <ListOrdered className="w-4 h-4" />
           </button>
+
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("insertHorizontalRule")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Horizontal Line"
           >
             <Minus className="w-4 h-4" />
           </button>
+
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={handleInsertPageBreak}
             className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
-            title="Insert Page Break"
+            title="Insert Page Break Marker"
           >
             <FilePlus className="w-3.5 h-3.5" />
             <span>Page Break</span>
           </button>
+
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => formatDoc("removeFormat")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Clear Formatting"
@@ -440,15 +590,16 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor with auto-recovery */}
+        {/* Input Editor with explicit bullet and numbered list rendering */}
         <div
           ref={editorRef}
           contentEditable={true}
           onInput={syncContent}
           onKeyUp={syncContent}
           onPaste={() => setTimeout(syncContent, 0)}
+          style={{ fontFamily: selectedFont }}
           data-placeholder="Start typing your document here..."
-          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left font-sans text-sm sm:text-base leading-relaxed break-words select-text cursor-text"
+          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
         />
       </div>
 
@@ -465,12 +616,13 @@ export const TextToPdf: React.FC<any> = () => {
             style={{
               transform: `scale(${zoom})`,
               transformOrigin: "top center",
+              fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150"
+            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
           >
             {hasContent ? (
               <div
-                className="font-sans text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
+                className="text-zinc-900 text-left leading-relaxed text-sm sm:text-base break-words select-text"
                 dangerouslySetInnerHTML={{ __html: content }}
               />
             ) : (
@@ -480,7 +632,7 @@ export const TextToPdf: React.FC<any> = () => {
             )}
           </div>
 
-          {/* Zoom Controls */}
+          {/* Floating Zoom Controls */}
           <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 shadow-2xl backdrop-blur-md text-zinc-300 z-10">
             <button
               type="button"
