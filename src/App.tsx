@@ -375,7 +375,7 @@ export default function App() {
             onClick={() => setIsProModalOpen(true)}
             className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition-colors cursor-pointer"
           >
-            Unlock Unlimited Batching &amp; 150MB Files for $19/Year →
+            Unlock Unlimited Batching &amp; 150MB Files for $49/Year→
           </button>
         )}
       </div>
