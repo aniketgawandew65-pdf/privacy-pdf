@@ -244,7 +244,14 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       syncState();
     } catch (err) {
       console.error('Compression error:', err);
-      setErrorMessage('Failed to compress PDF. The document may be corrupted or password-locked.');
+      const errStr = String((err as any)?.message || err || "");
+      if (errStr.toLowerCase().includes("password") || errStr.toLowerCase().includes("encrypted")) {
+        setErrorMessage("This PDF is password-protected. Please unlock it before compressing.");
+      } else if (errStr.toLowerCase().includes("corrupt") || errStr.toLowerCase().includes("invalid pdf")) {
+        setErrorMessage("Failed to parse PDF. The document file structure may be damaged.");
+      } else {
+        setErrorMessage(errStr || "Failed to compress PDF. Please try again.");
+      }
     } finally {
       setIsCompressing(false);
       setProgressStatus('');
