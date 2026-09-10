@@ -27,15 +27,16 @@ import {
   Palette,
   Type
 } from "lucide-react";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
 const STORAGE_KEY = "privacy_pdf_text_editor_draft";
 
-// Exact standard A4 dimensions at 96 DPI: 595.28pt x 841.89pt -> 794px x 1123px
+// Exact standard A4 dimensions at 96 DPI: 794px width x 1123px height
 const A4_WIDTH_PX = 794;
 const A4_PAGE_HEIGHT_PX = 1123;
+const USABLE_PAGE_HEIGHT_PX = 1011; // 1123px - (56px top + 56px bottom padding)
 
 const FONT_OPTIONS = [
   { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
@@ -66,12 +67,10 @@ export const TextToPdf: React.FC<any> = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [fitScale, setFitScale] = useState<number>(0.5);
-  const [previewHeight, setPreviewHeight] = useState<number>(1123);
-  const [pageBreaks, setPageBreaks] = useState<number[]>([]);
+  const [pagesHtml, setPagesHtml] = useState<string[]>([""]);
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const previewOuterRef = useRef<HTMLDivElement | null>(null);
-  const previewSheetRef = useRef<HTMLDivElement | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
   // 1. Auto-restore draft from localStorage
@@ -106,26 +105,100 @@ export const TextToPdf: React.FC<any> = () => {
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  // 3. Calculate 1:1 exact A4 page boundaries
-  const updatePreviewLayout = useCallback(() => {
+  // 3. True DOM Pagination: Measures child elements and partitions them into separate A4 page containers
+  const paginateDocument = useCallback((rawHtml: string, font: string, baseSize: number) => {
+    if (!rawHtml || !rawHtml.trim()) {
+      setPagesHtml([""]);
+      return;
+    }
+
+    const cleanHtml = rawHtml
+      .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
+      .replace(/✂/g, "");
+
+    const measuringSandbox = document.createElement("div");
+    measuringSandbox.style.position = "absolute";
+    measuringSandbox.style.left = "-9999px";
+    measuringSandbox.style.top = "0";
+    measuringSandbox.style.width = `${A4_WIDTH_PX}px`;
+    measuringSandbox.style.padding = "56px 64px";
+    measuringSandbox.style.boxSizing = "border-box";
+    measuringSandbox.style.fontFamily = font;
+    measuringSandbox.style.fontSize = `${baseSize}px`;
+    measuringSandbox.style.lineHeight = "1.6";
+    measuringSandbox.style.wordBreak = "break-word";
+    measuringSandbox.innerHTML = cleanHtml;
+    document.body.appendChild(measuringSandbox);
+
+    const testContainer = document.createElement("div");
+    testContainer.style.position = "absolute";
+    testContainer.style.left = "-9999px";
+    testContainer.style.top = "0";
+    testContainer.style.width = `${A4_WIDTH_PX}px`;
+    testContainer.style.padding = "56px 64px";
+    testContainer.style.boxSizing = "border-box";
+    testContainer.style.fontFamily = font;
+    testContainer.style.fontSize = `${baseSize}px`;
+    testContainer.style.lineHeight = "1.6";
+    testContainer.style.wordBreak = "break-word";
+    document.body.appendChild(testContainer);
+
+    const pages: string[] = [];
+    let curPageContainer = document.createElement("div");
+
+    const nodes = Array.from(measuringSandbox.childNodes);
+
+    for (const node of nodes) {
+      const isManualBreak =
+        node.nodeType === Node.ELEMENT_NODE &&
+        ((node as HTMLElement).classList?.contains("doc-page-break") ||
+          (node as HTMLElement).style?.pageBreakBefore === "always" ||
+          (node as HTMLElement).style?.breakBefore === "page");
+
+      if (isManualBreak) {
+        if (curPageContainer.childNodes.length > 0) {
+          pages.push(curPageContainer.innerHTML);
+          curPageContainer = document.createElement("div");
+        }
+        continue;
+      }
+
+      const clone = node.cloneNode(true);
+      curPageContainer.appendChild(clone);
+
+      testContainer.innerHTML = curPageContainer.innerHTML;
+      const totalH = testContainer.scrollHeight - 112; // exclude padding
+
+      if (totalH > USABLE_PAGE_HEIGHT_PX && curPageContainer.childNodes.length > 1) {
+        curPageContainer.removeChild(clone);
+        pages.push(curPageContainer.innerHTML);
+
+        curPageContainer = document.createElement("div");
+        curPageContainer.appendChild(clone);
+        testContainer.innerHTML = curPageContainer.innerHTML;
+      }
+    }
+
+    if (curPageContainer.childNodes.length > 0) {
+      pages.push(curPageContainer.innerHTML);
+    }
+
+    document.body.removeChild(measuringSandbox);
+    document.body.removeChild(testContainer);
+
+    setPagesHtml(pages.length > 0 ? pages : [""]);
+  }, []);
+
+  // 4. Update preview scale responsive to mobile screen width
+  const updateScale = useCallback(() => {
     if (previewOuterRef.current) {
       const availableW = previewOuterRef.current.clientWidth - 32;
       const baseScale = Math.min(1, Math.max(0.2, availableW / A4_WIDTH_PX));
       setFitScale(baseScale);
     }
-    if (previewSheetRef.current) {
-      const scrollH = previewSheetRef.current.scrollHeight;
-      setPreviewHeight(Math.max(A4_PAGE_HEIGHT_PX, scrollH));
-      const totalPages = Math.max(1, Math.ceil(scrollH / A4_PAGE_HEIGHT_PX));
-      const breaks: number[] = [];
-      for (let i = 1; i < totalPages; i++) {
-        breaks.push(i * A4_PAGE_HEIGHT_PX);
-      }
-      setPageBreaks(breaks);
-    }
   }, []);
 
-  // 4. Instant 0ms synchronization + auto-save
+  // 5. Instant 0ms synchronization + auto-save
   const syncContent = () => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
@@ -135,7 +208,7 @@ export const TextToPdf: React.FC<any> = () => {
     try {
       localStorage.setItem(STORAGE_KEY, html);
     } catch (_) {}
-    setTimeout(updatePreviewLayout, 40);
+    paginateDocument(html, selectedFont, fontSize);
   };
 
   useEffect(() => {
@@ -144,20 +217,21 @@ export const TextToPdf: React.FC<any> = () => {
     const observer = new MutationObserver(() => syncContent());
     observer.observe(el, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
-  }, [updatePreviewLayout]);
+  }, [paginateDocument, selectedFont, fontSize]);
 
   useEffect(() => {
-    updatePreviewLayout();
-    window.addEventListener("resize", updatePreviewLayout);
-    return () => window.removeEventListener("resize", updatePreviewLayout);
-  }, [content, fontSize, selectedFont, updatePreviewLayout]);
+    updateScale();
+    paginateDocument(content, selectedFont, fontSize);
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, [content, fontSize, selectedFont, updateScale, paginateDocument]);
 
   const formatDoc = (cmd: string, val: string = "") => {
     document.execCommand(cmd, false, val);
     syncContent();
   };
 
-  // 5. Individual word/sentence font size formatting
+  // 6. Word-level font size formatting
   const handleFontSizeChange = (size: number) => {
     setFontSize(size);
 
@@ -212,7 +286,7 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  // 6. Manual Page Break
+  // 7. Manual Page Break
   const handleInsertPageBreak = () => {
     const breakHtml = '<div class="doc-page-break" contenteditable="false" style="page-break-before: always; break-before: page; margin: 24px 0; border-top: 2px dashed #10b981; height: 0; user-select: none;"></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
@@ -226,92 +300,14 @@ export const TextToPdf: React.FC<any> = () => {
       setContent("");
       setCharCount(0);
       setDownloadUrl(null);
-      setPageBreaks([]);
+      setPagesHtml([""]);
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch (_) {}
     }
   };
 
-  // Shared CSS rules applied identically to both Preview and PDF export
-  const sharedDocumentCss = `
-    .a4-doc-sheet {
-      box-sizing: border-box !important;
-      width: 794px !important;
-      padding: 56px 64px !important;
-      background-color: #ffffff !important;
-      color: #18181b !important;
-      font-family: ${selectedFont} !important;
-      font-size: ${fontSize}px !important;
-      line-height: 1.6 !important;
-      word-break: break-word !important;
-    }
-    .a4-doc-sheet * {
-      box-sizing: border-box !important;
-    }
-    .a4-doc-sheet p {
-      margin: 0 0 6px 0 !important;
-    }
-    .a4-doc-sheet h1, .a4-doc-sheet h2, .a4-doc-sheet h3 {
-      margin: 8px 0 6px 0 !important;
-      font-weight: bold !important;
-    }
-    .a4-doc-sheet table {
-      width: 100% !important;
-      border-collapse: collapse !important;
-      margin: 12px 0 !important;
-      font-size: inherit !important;
-    }
-    .a4-doc-sheet th, .a4-doc-sheet td {
-      border: 1px solid #d4d4d8 !important;
-      padding: 8px 12px !important;
-      text-align: left !important;
-    }
-    .a4-doc-sheet th {
-      background-color: #f4f4f5 !important;
-      font-weight: 600 !important;
-    }
-    .a4-doc-sheet ul {
-      list-style-type: disc !important;
-      padding-left: 28px !important;
-      margin: 8px 0 !important;
-    }
-    .a4-doc-sheet ol {
-      list-style-type: decimal !important;
-      padding-left: 28px !important;
-      margin: 8px 0 !important;
-    }
-    .a4-doc-sheet li {
-      display: list-item !important;
-      margin-bottom: 4px !important;
-    }
-    .a4-doc-sheet hr {
-      border: none !important;
-      border-top: 1px solid #e4e4e7 !important;
-      margin: 16px 0 !important;
-    }
-    .a4-doc-sheet [style*="font-size"] {
-      line-height: 1.35 !important;
-    }
-    .a4-doc-sheet font[size="1"] { font-size: 10px !important; }
-    .a4-doc-sheet font[size="2"] { font-size: 12px !important; }
-    .a4-doc-sheet font[size="3"] { font-size: 14px !important; }
-    .a4-doc-sheet font[size="4"] { font-size: 16px !important; }
-    .a4-doc-sheet font[size="5"] { font-size: 18px !important; }
-    .a4-doc-sheet font[size="6"] { font-size: 24px !important; }
-    .a4-doc-sheet font[size="7"] { font-size: 32px !important; }
-    .a4-doc-sheet .doc-page-break {
-      page-break-before: always !important;
-      break-before: page !important;
-      border: none !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      height: 0 !important;
-      visibility: hidden !important;
-    }
-  `;
-
-  // 7. Multi-Page A4 PDF Generator matching preview 1:1
+  // 8. 1:1 Page-to-Page PDF Generation: Captures each preview page directly
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -323,126 +319,46 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed";
-    iframe.style.left = "-9999px";
-    iframe.style.top = "0";
-    iframe.style.width = "794px";
-    iframe.style.height = "1123px";
-    iframe.style.border = "none";
-    document.body.appendChild(iframe);
-
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!iframeDoc) throw new Error("Unable to create document renderer.");
-
-      let cleanHtml = content
-        .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
-        .replace(/✂/g, "");
-
-      iframeDoc.open();
-      iframeDoc.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <style>
-              html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; }
-              ${sharedDocumentCss}
-            </style>
-          </head>
-          <body>
-            <div id="render-content" class="a4-doc-sheet">${cleanHtml}</div>
-          </body>
-        </html>
-      `);
-      iframeDoc.close();
-
-      const targetEl = iframeDoc.getElementById("render-content") || iframeDoc.body;
-      targetEl.querySelectorAll(".doc-page-break").forEach((el: any) => {
-        el.style.visibility = "hidden";
-        el.style.border = "none";
-      });
-
-      const canvas = await html2canvas(targetEl, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: "#ffffff",
-        windowWidth: 794,
-        logging: false,
-        ignoreElements: (el: Element) => {
-          return el.classList?.contains("doc-page-break") && !el.innerHTML;
-        },
-      });
-
-      document.body.removeChild(iframe);
-
-      if (!canvas || canvas.width === 0 || canvas.height === 0) {
-        throw new Error("Render produced an empty canvas.");
-      }
-
       const pdfDoc = await PDFDocument.create();
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
       const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
 
-      // Exact pixel slice height matching 1123px at scale 2
-      const pageCanvasHeight = A4_PAGE_HEIGHT_PX * 2; // 2246 canvas pixels
-      const totalPages = Math.max(1, Math.ceil(canvas.height / pageCanvasHeight));
+      for (let i = 0; i < pagesHtml.length; i++) {
+        const pageElement = document.getElementById(`preview-page-sheet-${i}`);
+        if (!pageElement) continue;
 
-      for (let p = 0; p < totalPages; p++) {
-        const pageCanvas = document.createElement("canvas");
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = pageCanvasHeight;
-        const ctx = pageCanvas.getContext("2d");
+        // Temporarily reset transform for 1:1 canvas capture
+        const origTransform = pageElement.style.transform;
+        pageElement.style.transform = "none";
 
-        if (ctx) {
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        const canvas = await html2canvas(pageElement, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: "#ffffff",
+          width: A4_WIDTH_PX,
+          height: A4_PAGE_HEIGHT_PX,
+          logging: false,
+        });
 
-          const srcY = p * pageCanvasHeight;
-          const srcHeight = Math.min(pageCanvasHeight, canvas.height - srcY);
+        pageElement.style.transform = origTransform;
 
-          ctx.drawImage(
-            canvas,
-            0,
-            srcY,
-            canvas.width,
-            srcHeight,
-            0,
-            0,
-            canvas.width,
-            srcHeight
-          );
-        }
-
-        const imgDataUrl = pageCanvas.toDataURL("image/jpeg", 0.95);
+        const imgDataUrl = canvas.toDataURL("image/jpeg", 0.95);
         const base64Str = imgDataUrl.split(",")[1];
         const binaryStr = window.atob(base64Str);
         const imgBytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          imgBytes[i] = binaryStr.charCodeAt(i);
+        for (let b = 0; b < binaryStr.length; b++) {
+          imgBytes[b] = binaryStr.charCodeAt(b);
         }
 
         const embeddedImg = await pdfDoc.embedJpg(imgBytes);
-        const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-
-        page.drawImage(embeddedImg, {
+        const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+        pdfPage.drawImage(embeddedImg, {
           x: 0,
           y: 0,
           width: pageWidthPt,
           height: pageHeightPt,
-        });
-
-        // Top margin page number header
-        page.drawText(`Page ${p + 1} of ${totalPages}`, {
-          x: pageWidthPt - 95,
-          y: pageHeightPt - 28,
-          size: 9,
-          font: font,
-          color: rgb(0.5, 0.5, 0.5),
         });
       }
 
@@ -451,9 +367,6 @@ export const TextToPdf: React.FC<any> = () => {
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
     } catch (err: any) {
-      if (document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
-      }
       console.error("PDF generation failed:", err);
       const msg = err?.message || (typeof err === "string" ? err : "") || "An unexpected error occurred during PDF generation.";
       setError("Failed to create PDF: " + msg);
@@ -463,7 +376,6 @@ export const TextToPdf: React.FC<any> = () => {
   };
 
   const hasContent = content && content.replace(/<[^>]*>/g, "").trim().length > 0;
-  const totalPagesEst = Math.max(1, pageBreaks.length + 1);
   const effectiveScale = fitScale * zoom;
 
   return (
@@ -475,7 +387,7 @@ export const TextToPdf: React.FC<any> = () => {
             <FileText className="w-5 h-5 text-emerald-500" />
             <span className="font-semibold text-sm text-zinc-200">Document Editor</span>
             <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
-              ~{totalPagesEst} {totalPagesEst === 1 ? "Page" : "Pages"}
+              {pagesHtml.length} {pagesHtml.length === 1 ? "Page" : "Pages"}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -766,73 +678,80 @@ export const TextToPdf: React.FC<any> = () => {
         </div>
       </div>
 
-      {/* Bottom Live PDF Preview Card with 1:1 Aligned A4 Dimensions */}
+      {/* Bottom Live PDF Preview Card (Physical Stacked A4 Sheets) */}
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
           <span className="font-semibold text-sm text-zinc-200">PDF Preview</span>
           <span className="text-xs text-zinc-400 font-mono">
-            {totalPagesEst} {totalPagesEst === 1 ? "Page" : "Pages"} (Exact A4 Slices)
+            {pagesHtml.length} {pagesHtml.length === 1 ? "Page" : "Pages"} (Discrete A4 Sheets)
           </span>
         </div>
 
-        {/* Responsive Outer Shell that scales the 794px A4 sheet */}
+        {/* Vertical Stack of Real A4 Sheets */}
         <div
           ref={previewOuterRef}
-          className="relative w-full min-h-[480px] max-h-[640px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex items-start justify-center p-4 overflow-y-auto overflow-x-hidden"
+          className="relative w-full min-h-[500px] max-h-[700px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex flex-col items-center gap-8 p-6 overflow-y-auto overflow-x-hidden"
         >
-          <div
-            style={{
-              width: `${A4_WIDTH_PX * effectiveScale}px`,
-              height: `${previewHeight * effectiveScale}px`,
-              position: "relative",
-              flexShrink: 0,
-            }}
-          >
-            {/* Exactly 794px wide container matching PDF export engine 1:1 */}
+          {pagesHtml.map((pageHtml, index) => (
             <div
-              ref={previewSheetRef}
+              key={index}
               style={{
-                transform: `scale(${effectiveScale})`,
-                transformOrigin: "top left",
-                position: "absolute",
-                top: 0,
-                left: 0,
-                minHeight: `${A4_PAGE_HEIGHT_PX}px`,
-                boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-                borderRadius: "8px",
+                width: `${A4_WIDTH_PX * effectiveScale}px`,
+                height: `${A4_PAGE_HEIGHT_PX * effectiveScale}px`,
+                position: "relative",
+                flexShrink: 0,
               }}
-              className="a4-doc-sheet relative text-left select-text border border-zinc-300"
             >
-              {/* Injected shared styles ensure 1:1 rendering matching the PDF iframe */}
-              <style>{sharedDocumentCss}</style>
-
-              {hasContent ? (
+              {/* Discrete A4 Sheet (Direct 1:1 Capture Target) */}
+              <div
+                id={`preview-page-sheet-${index}`}
+                style={{
+                  width: `${A4_WIDTH_PX}px`,
+                  height: `${A4_PAGE_HEIGHT_PX}px`,
+                  padding: "56px 64px",
+                  boxSizing: "border-box",
+                  transform: `scale(${effectiveScale})`,
+                  transformOrigin: "top left",
+                  backgroundColor: "#ffffff",
+                  color: "#18181b",
+                  fontFamily: selectedFont,
+                  fontSize: `${fontSize}px`,
+                  lineHeight: "1.6",
+                  wordBreak: "break-word",
+                  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)",
+                  borderRadius: "6px",
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  overflow: "hidden",
+                }}
+                className="text-zinc-900 text-left select-text border border-zinc-300 [&_p]:mb-1.5 [&_ul]:list-disc [&_ul]:pl-7 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-7 [&_ol]:my-2 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_th]:border [&_th]:border-zinc-300 [&_th]:p-2 [&_th]:bg-zinc-100 [&_th]:font-semibold [&_td]:border [&_td]:border-zinc-300 [&_td]:p-2"
+              >
+                {/* Official Page Number Header */}
                 <div
-                  dangerouslySetInnerHTML={{ __html: content }}
-                  className="relative"
-                />
-              ) : (
-                <p className="text-zinc-400 italic text-sm select-none">
-                  Type your text above to see it appear here live...
-                </p>
-              )}
-
-              {/* Dynamic Transparent Page Boundary Lines (1:1 with PDF Canvas Page Slices) */}
-              {pageBreaks.map((topPos, idx) => (
-                <div
-                  key={idx}
-                  style={{ top: `${topPos}px` }}
-                  className="absolute left-0 right-0 pointer-events-none z-10 flex items-center select-none px-8 -translate-y-1/2"
+                  style={{
+                    position: "absolute",
+                    top: "24px",
+                    right: "64px",
+                    fontSize: "9px",
+                    fontFamily: "Helvetica, Arial, sans-serif",
+                    color: "#71717a",
+                  }}
                 >
-                  <div className="w-full border-t-2 border-dashed border-emerald-500/60" />
-                  <span className="shrink-0 mx-2 px-3 py-0.5 text-[11px] font-mono font-semibold text-emerald-700 bg-emerald-50 border border-emerald-300 rounded-full shadow-sm">
-                    Page {idx + 2} Starts Here
-                  </span>
-                  <div className="w-full border-t-2 border-dashed border-emerald-500/60" />
+                  Page {index + 1} of {pagesHtml.length}
                 </div>
-              ))}
+
+                {/* Page Content */}
+                {hasContent ? (
+                  <div dangerouslySetInnerHTML={{ __html: pageHtml }} />
+                ) : (
+                  <p className="text-zinc-400 italic text-sm select-none">
+                    Type your text above to see it appear here live...
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          ))}
 
           {/* Floating Zoom Controls */}
           <div className="fixed bottom-6 right-6 sm:absolute sm:bottom-4 sm:right-4 flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 shadow-2xl backdrop-blur-md text-zinc-300 z-20">
