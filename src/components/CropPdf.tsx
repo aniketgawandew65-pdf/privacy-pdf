@@ -105,7 +105,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        // High-DPI Retina scaling (matching Redact sharpness)
+        // High-DPI Retina scaling (sharp rendering)
         const dpr = Math.max(window.devicePixelRatio || 1, 2);
         const renderViewport = page.getViewport({ scale: activeScale * dpr });
 
@@ -122,7 +122,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     return () => { if (renderTask) renderTask.cancel(); };
   }, [pdfDoc, currentPage, zoom]);
 
-  // Lock container scroll engine completely during Crop mode
+  // Lock container scroll engine during Crop mode
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -166,6 +166,37 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     }
   };
 
+  // 1:1 Active Drag-to-Pan Handler in Pan Mode
+  const handlePanPointerDown = (e: any) => {
+    if (mode !== "pan") return;
+    const container = containerRef.current;
+    if (!container) return;
+    const startX = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
+    const startY = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
+    const startScrollLeft = container.scrollLeft;
+    const startScrollTop = container.scrollTop;
+
+    const onMove = (me: any) => {
+      if (me.cancelable) me.preventDefault();
+      const curX = me.clientX ?? (me.touches && me.touches[0]?.clientX) ?? startX;
+      const curY = me.clientY ?? (me.touches && me.touches[0]?.clientY) ?? startY;
+      container.scrollLeft = startScrollLeft - (curX - startX);
+      container.scrollTop = startScrollTop - (curY - startY);
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+  };
+
   // 8-Handle Move Handler
   const handleBoxPointerDown = (e: any) => {
     e.stopPropagation();
@@ -200,7 +231,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     window.addEventListener("touchend", onUp);
   };
 
-  // 8-Handle Resize Handler
+  // 8-Handle Resize Handler with Micro-Height/Width Support (Down to 6px)
   const handleHandlePointerDown = (e: any, handle: string) => {
     e.stopPropagation();
     if (!cropBox) return;
@@ -224,21 +255,22 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       let w = initBox.width;
       let h = initBox.height;
 
+      // Allow micro resizing down to 8px width and 6px height for tight text lines
       if (handle.includes("w")) {
-        const newW = Math.max(30, initBox.width - dx);
+        const newW = Math.max(8, initBox.width - dx);
         const newX = initBox.x + (initBox.width - newW);
         if (newX >= 0) { x = newX; w = newW; }
       }
       if (handle.includes("e")) {
-        w = Math.max(30, Math.min(maxW - x, initBox.width + dx));
+        w = Math.max(8, Math.min(maxW - x, initBox.width + dx));
       }
       if (handle.includes("n")) {
-        const newH = Math.max(30, initBox.height - dy);
+        const newH = Math.max(6, initBox.height - dy);
         const newY = initBox.y + (initBox.height - newH);
         if (newY >= 0) { y = newY; h = newH; }
       }
       if (handle.includes("s")) {
-        h = Math.max(30, Math.min(maxH - y, initBox.height + dy));
+        h = Math.max(6, Math.min(maxH - y, initBox.height + dy));
       }
 
       setCropBox({ x, y, width: w, height: h });
@@ -257,7 +289,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     window.addEventListener("touchend", onUp);
   };
 
-  // Export cropped PDF with physical MediaBox resizing (skips pages without cropBox)
+  // Export cropped PDF with physical MediaBox resizing
   const handleDownload = async () => {
     if (!file) return;
     setIsProcessing(true);
@@ -278,7 +310,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
           ? cropBox
           : (crops[pageIdx] !== undefined ? crops[pageIdx] : (pageIdx === currentPage ? cropBox : null));
 
-        // If no crop box exists on this page, preserve the original uncropped page
         if (!targetCrop) return;
 
         const mediaBox = page.getMediaBox();
@@ -293,8 +324,8 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         const fracH = Math.min(1 - fracY, targetCrop.height / dispH);
 
         const pdfCropX = originX + fracX * pageWidth;
-        const pdfCropW = Math.max(10, fracW * pageWidth);
-        const pdfCropH = Math.max(10, fracH * pageHeight);
+        const pdfCropW = Math.max(2, fracW * pageWidth);
+        const pdfCropH = Math.max(2, fracH * pageHeight);
         const pdfCropY = originY + (pageHeight - (fracY + fracH) * pageHeight);
 
         page.setMediaBox(pdfCropX, pdfCropY, pdfCropW, pdfCropH);
@@ -413,7 +444,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </span>
               <button
                 type="button"
-                onClick={() => setZoom((prev) => Math.min(2.5, Math.round((prev + 0.1) * 10) / 10))}
+                onClick={() => setZoom((prev) => Math.min(3.0, Math.round((prev + 0.1) * 10) / 10))}
                 className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
@@ -438,16 +469,20 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             </label>
           </div>
 
+          {/* Interactive Document Viewport - Scroll & Pan all the way to extreme edges */}
           <div
             ref={containerRef}
+            onPointerDown={handlePanPointerDown}
             style={{
               overflow: mode === "crop" ? "hidden" : "auto",
               touchAction: mode === "crop" ? "none" : "pan-x pan-y",
               overscrollBehavior: "none",
             }}
-            className="relative w-full h-[65vh] bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-center p-4 select-none"
+            className={`relative w-full h-[65vh] bg-zinc-950 border border-zinc-800 rounded-2xl flex p-10 sm:p-16 select-none ${
+              mode === "pan" ? "cursor-grab active:cursor-grabbing" : ""
+            }`}
           >
-            <div className="relative inline-block shadow-2xl">
+            <div className="relative inline-block shadow-2xl m-auto shrink-0">
               <canvas ref={canvasRef} className="block rounded shadow-2xl object-contain pointer-events-none" />
 
               {cropBox ? (
