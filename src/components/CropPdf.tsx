@@ -17,8 +17,8 @@ import {
 import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Set pdfjs worker source
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// PDF.js worker setup
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface CropArea {
   x: number;
@@ -285,7 +285,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 text-white space-y-6 select-none">
-      {/* Upload Zone */}
       {!file && (
         <div className="border-2 border-dashed border-zinc-800 hover:border-zinc-700 rounded-2xl p-10 text-center transition cursor-pointer bg-zinc-900/30">
           <input
@@ -305,10 +304,8 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         </div>
       )}
 
-      {/* Main Workspace */}
       {file && (
         <div className="flex flex-col gap-4">
-          {/* File Top Bar */}
           <div className="flex items-center justify-between bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3">
             <div className="flex items-center gap-3 min-w-0">
               <FileText className="w-5 h-5 text-emerald-500 shrink-0" />
@@ -326,9 +323,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             </button>
           </div>
 
-          {/* Controls Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-3">
-            {/* Page Navigation */}
             <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
               <button
                 type="button"
@@ -351,7 +346,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </button>
             </div>
 
-            {/* Mode Toggle (Crop / Pan) */}
             <div className="flex items-center bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
               <button
                 type="button"
@@ -375,7 +369,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </button>
             </div>
 
-            {/* Standard Zoom Bar */}
             <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
               <button
                 type="button"
@@ -403,7 +396,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </button>
             </div>
 
-            {/* Apply to All Pages Checkbox */}
             <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300">
               <input
                 type="checkbox"
@@ -415,7 +407,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             </label>
           </div>
 
-          {/* Interactive Document Viewport */}
           <div
             ref={containerRef}
             style={{
@@ -428,7 +419,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             <div className="relative inline-block shadow-2xl">
               <canvas ref={canvasRef} className="block rounded shadow-2xl w-auto h-auto object-contain pointer-events-none" />
 
-              {/* Redact-Style 8-Handle Crop Box */}
               {cropBox && (
                 <div
                   style={{
@@ -465,7 +455,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             </div>
           </div>
 
-          {/* Action Footer */}
           <div className="flex items-center justify-between gap-4">
             <button
               type="button"
