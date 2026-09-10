@@ -421,27 +421,37 @@ export default function App() {
           )}
 
           <button
-            type="button"
-            onClick={() => setIsAuditDrawerOpen(true)}
-            className="cursor-pointer transition hover:opacity-85 focus:outline-none min-h-[44px] flex items-center"
-            title="Click to view real-time privacy & network telemetry audit"
-          >
-            <TrustBadge />
-          </button>
+          type="button"
+          onClick={() => setIsAuditDrawerOpen(true)}
+          className="inline-flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-4 py-2 sm:py-1.5 rounded-2xl sm:rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer shadow-sm text-center"
+          title="Click to inspect network telemetry"
+        >
+          <span className="flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Lightning fast • No internet needed</span>
+          </span>
+          <span className="hidden sm:inline text-emerald-500/40">•</span>
+          <span>100% private • No signup</span>
+        </button>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="w-full max-w-4xl my-auto text-center py-6 sm:py-8">
         {/* Updated Privacy Pill Badge */}
+
         <button
           type="button"
           onClick={() => setIsAuditDrawerOpen(true)}
-          className="inline-block max-w-[90%] px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] sm:text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer shadow-sm text-center leading-relaxed"
+          className="inline-flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-4 py-2 sm:py-1.5 rounded-2xl sm:rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer shadow-sm text-center"
           title="Click to inspect network telemetry"
         >
-          <Zap className="w-3.5 h-3.5 inline-block align-text-bottom mr-1 mb-[1px]" />
-          Lightning fast • No internet needed • 100% private • No signup
+          <span className="flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Lightning fast • No internet needed</span>
+          </span>
+          <span className="hidden sm:inline text-emerald-500/40">•</span>
+          <span>100% private • No signup</span>
         </button>
 
         <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-3 sm:mb-4 px-2">
