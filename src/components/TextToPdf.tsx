@@ -104,7 +104,19 @@ export const TextToPdf: React.FC<any> = () => {
 
   const handleFontSizeChange = (size: number) => {
     setFontSize(size);
-    formatDoc("fontSize", size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed && editorRef.current?.contains(selection.anchorNode)) {
+      const range = selection.getRangeAt(0);
+      const span = document.createElement("span");
+      span.style.fontSize = `${size}px`;
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      syncContent();
+    } else {
+      formatDoc("fontSize", size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
+    }
   };
 
   const handleFontFamilyChange = (font: string) => {
