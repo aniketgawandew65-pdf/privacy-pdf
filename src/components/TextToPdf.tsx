@@ -137,19 +137,23 @@ export const TextToPdf: React.FC<any> = () => {
     setShowHighlightPicker(false);
   };
 
-  // Insert visual Page Break marker with a tap-to-delete badge
+  // Insert visual Page Break marker with an explicit Remove button
   const handleInsertPageBreak = () => {
-    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none; cursor: pointer;"><span>✂ --- PAGE BREAK (Not visible in PDF) ---</span><span class="delete-page-break-btn" style="background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); padding: 2px 8px; border-radius: 6px; font-size: 10px; cursor: pointer;">✕ Delete Break</span></div><p><br></p>';
+    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
-  // Handle direct tap on the "✕ Delete Break" badge in the editor
-  const handleEditorClick = (e: React.MouseEvent) => {
+  // Handle direct tap/click on the "✕ Remove" button inside the editor
+  const handleEditorInteraction = (e: any) => {
     const target = e.target as HTMLElement;
-    const breakEl = target.closest(".page-break-indicator, [data-page-break]");
-    if (breakEl) {
-      breakEl.remove();
-      syncContent();
+    if (target && (target.classList.contains("delete-page-break-btn") || target.closest(".delete-page-break-btn"))) {
+      e.preventDefault();
+      e.stopPropagation();
+      const breakEl = target.closest(".page-break-indicator, [data-page-break]");
+      if (breakEl) {
+        breakEl.remove();
+        syncContent();
+      }
     }
   };
 
@@ -167,7 +171,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export with oklch sanitize and stripped page break text
+  // 1:1 WYSIWYG PDF Export: removes app styles to avoid CSS parse errors and strips page break markers
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -209,27 +213,29 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.appendChild(contentWrapper);
       document.body.appendChild(printContainer);
 
-      // High-resolution canvas capture with oklch stylesheet purge
+      // High-resolution canvas capture with isolated styling
       const canvas = await html2canvas(printContainer, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: "#ffffff",
         windowWidth: 794,
+        ignoreElements: (el: Element) => {
+          return (
+            el.classList?.contains("page-break-indicator") ||
+            el.hasAttribute?.("data-page-break") ||
+            Boolean(el.textContent && el.textContent.includes("PAGE BREAK"))
+          );
+        },
         onclone: (clonedDoc: Document) => {
-          // Remove all Tailwind style tags that contain oklch to prevent parser crashes
-          const styles = clonedDoc.querySelectorAll("style, link[rel='stylesheet']");
-          styles.forEach((s) => {
-            if (s.textContent && s.textContent.includes("oklch")) {
-              s.remove();
-            }
-          });
+          // Remove all application stylesheets in the clone to prevent CSS parser errors (oklch, unexpected EOF)
+          clonedDoc.querySelectorAll("style, link[rel='stylesheet']").forEach((el) => el.remove());
 
-          // Inject clean RGB/Hex stylesheet into clone
-          const cleanStyle = clonedDoc.createElement("style");
-          cleanStyle.textContent = `
+          // Inject safe, isolated standard CSS rules
+          const safeStyle = clonedDoc.createElement("style");
+          safeStyle.textContent = `
             * { box-sizing: border-box !important; }
-            body, .print-a4-content { background-color: #ffffff !important; color: #18181b !important; }
+            body { background: #ffffff !important; color: #18181b !important; }
             table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; font-size: inherit !important; }
             th, td { border: 1px solid #d4d4d8 !important; padding: 7px 10px !important; text-align: left !important; }
             th { background-color: #f4f4f5 !important; font-weight: 600 !important; }
@@ -240,23 +246,7 @@ export const TextToPdf: React.FC<any> = () => {
             hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 14px 0 !important; }
             .page-break-indicator, [data-page-break] { display: none !important; }
           `;
-          clonedDoc.head.appendChild(cleanStyle);
-
-          // Purge any remaining page breaks in clone
-          clonedDoc.querySelectorAll(".page-break-indicator, [data-page-break]").forEach((el) => el.remove());
-          clonedDoc.querySelectorAll("*").forEach((el: any) => {
-            if (el.textContent && el.textContent.includes("PAGE BREAK")) {
-              el.remove();
-            }
-            if (el.style) {
-              ["color", "backgroundColor", "borderColor"].forEach((prop) => {
-                const val = el.style[prop];
-                if (val && val.includes("oklch")) {
-                  el.style[prop] = prop === "backgroundColor" ? "#ffffff" : "#18181b";
-                }
-              });
-            }
-          });
+          clonedDoc.head.appendChild(safeStyle);
         },
       });
 
@@ -579,7 +569,6 @@ export const TextToPdf: React.FC<any> = () => {
 
           <div className="h-4 w-px bg-zinc-800 mx-1" />
 
-          {/* Bullet List Button with pointer retention */}
           <button
             type="button"
             onPointerDown={(e) => e.preventDefault()}
@@ -590,7 +579,6 @@ export const TextToPdf: React.FC<any> = () => {
             <List className="w-4 h-4" />
           </button>
 
-          {/* Numbered List Button with pointer retention */}
           <button
             type="button"
             onPointerDown={(e) => e.preventDefault()}
@@ -616,7 +604,7 @@ export const TextToPdf: React.FC<any> = () => {
             onPointerDown={(e) => e.preventDefault()}
             onClick={handleInsertPageBreak}
             className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
-            title="Insert Page Break"
+            title="Insert Page Break Marker"
           >
             <FilePlus className="w-3.5 h-3.5" />
             <span>Page Break</span>
@@ -633,11 +621,11 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
-        {/* Input Editor with click removal for page breaks */}
+        {/* Input Editor with direct tap-to-delete on page break badges */}
         <div
           ref={editorRef}
           contentEditable={true}
-          onClick={handleEditorClick}
+          onClick={handleEditorInteraction}
           onInput={syncContent}
           onKeyUp={syncContent}
           onPaste={() => setTimeout(syncContent, 0)}
