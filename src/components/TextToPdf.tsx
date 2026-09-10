@@ -105,7 +105,7 @@ export const TextToPdf: React.FC<any> = () => {
     return () => document.removeEventListener("selectionchange", handleSelectionChange);
   }, []);
 
-  // 3. True DOM Pagination: Measures child elements and partitions them into separate A4 page containers
+  // 3. True DOM Pagination: Measures elements and partitions them into separate A4 page containers
   const paginateDocument = useCallback((rawHtml: string, font: string, baseSize: number) => {
     if (!rawHtml || !rawHtml.trim()) {
       setPagesHtml([""]);
@@ -167,7 +167,7 @@ export const TextToPdf: React.FC<any> = () => {
       curPageContainer.appendChild(clone);
 
       testContainer.innerHTML = curPageContainer.innerHTML;
-      const totalH = testContainer.scrollHeight - 112; // exclude padding
+      const totalH = testContainer.scrollHeight - 112; // exclude top + bottom padding
 
       if (totalH > USABLE_PAGE_HEIGHT_PX && curPageContainer.childNodes.length > 1) {
         curPageContainer.removeChild(clone);
@@ -307,7 +307,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 8. 1:1 Page-to-Page PDF Generation: Captures each preview page directly
+  // 8. Isolated Iframe PDF Export (Bypasses oklch errors completely while matching preview 1:1)
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -319,20 +319,76 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
+    // Create an isolated iframe so html2canvas never encounters host Tailwind oklch styles
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-9999px";
+    iframe.style.top = "0";
+    iframe.style.width = `${A4_WIDTH_PX}px`;
+    iframe.style.height = `${A4_PAGE_HEIGHT_PX}px`;
+    iframe.style.border = "none";
+    document.body.appendChild(iframe);
+
     try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error("Unable to create document renderer.");
+
       const pdfDoc = await PDFDocument.create();
       const pageWidthPt = 595.28;
       const pageHeightPt = 841.89;
 
       for (let i = 0; i < pagesHtml.length; i++) {
-        const pageElement = document.getElementById(`preview-page-sheet-${i}`);
-        if (!pageElement) continue;
+        iframeDoc.open();
+        iframeDoc.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8" />
+              <style>
+                * { box-sizing: border-box; }
+                body {
+                  margin: 0;
+                  padding: 56px 64px;
+                  width: ${A4_WIDTH_PX}px;
+                  height: ${A4_PAGE_HEIGHT_PX}px;
+                  background-color: #ffffff;
+                  color: #18181b;
+                  font-family: ${selectedFont};
+                  font-size: ${fontSize}px;
+                  line-height: 1.6;
+                  word-break: break-word;
+                  overflow: hidden;
+                  position: relative;
+                }
+                p { margin: 0 0 6px 0; }
+                table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: inherit; }
+                th, td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; }
+                th { background-color: #f4f4f5; font-weight: 600; }
+                ul { list-style-type: disc; padding-left: 28px; margin: 8px 0; }
+                ol { list-style-type: decimal; padding-left: 28px; margin: 8px 0; }
+                li { display: list-item; margin-bottom: 4px; }
+                hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
+                [style*="font-size"] { line-height: 1.35; }
+                font[size="1"] { font-size: 10px !important; }
+                font[size="2"] { font-size: 12px !important; }
+                font[size="3"] { font-size: 14px !important; }
+                font[size="4"] { font-size: 16px !important; }
+                font[size="5"] { font-size: 18px !important; }
+                font[size="6"] { font-size: 24px !important; }
+                font[size="7"] { font-size: 32px !important; }
+              </style>
+            </head>
+            <body>
+              <div style="position: absolute; top: 24px; right: 64px; font-size: 9px; font-family: Helvetica, Arial, sans-serif; color: #71717a;">
+                Page ${i + 1} of ${pagesHtml.length}
+              </div>
+              ${pagesHtml[i]}
+            </body>
+          </html>
+        `);
+        iframeDoc.close();
 
-        // Temporarily reset transform for 1:1 canvas capture
-        const origTransform = pageElement.style.transform;
-        pageElement.style.transform = "none";
-
-        const canvas = await html2canvas(pageElement, {
+        const canvas = await html2canvas(iframeDoc.body, {
           scale: 2,
           useCORS: true,
           allowTaint: true,
@@ -341,8 +397,6 @@ export const TextToPdf: React.FC<any> = () => {
           height: A4_PAGE_HEIGHT_PX,
           logging: false,
         });
-
-        pageElement.style.transform = origTransform;
 
         const imgDataUrl = canvas.toDataURL("image/jpeg", 0.95);
         const base64Str = imgDataUrl.split(",")[1];
@@ -362,11 +416,16 @@ export const TextToPdf: React.FC<any> = () => {
         });
       }
 
+      document.body.removeChild(iframe);
+
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes as any], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
     } catch (err: any) {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
       console.error("PDF generation failed:", err);
       const msg = err?.message || (typeof err === "string" ? err : "") || "An unexpected error occurred during PDF generation.";
       setError("Failed to create PDF: " + msg);
@@ -702,9 +761,8 @@ export const TextToPdf: React.FC<any> = () => {
                 flexShrink: 0,
               }}
             >
-              {/* Discrete A4 Sheet (Direct 1:1 Capture Target) */}
+              {/* Discrete A4 Sheet matching PDF layout 1:1 */}
               <div
-                id={`preview-page-sheet-${index}`}
                 style={{
                   width: `${A4_WIDTH_PX}px`,
                   height: `${A4_PAGE_HEIGHT_PX}px`,
