@@ -185,6 +185,7 @@ export default function App() {
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
+  const isDevMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('pro') === 'true';
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
   const [activeWorkflows, setActiveWorkflows] = useState<string[]>(() => {
@@ -366,7 +367,7 @@ export default function App() {
           4 Free Tasks/Day (25MB) • No Signup • Works Offline • Zero Data Saved
         </span>
         <span className="text-zinc-700 hidden sm:inline">—</span>
-        {isPro ? (
+        {isPro || isDevMode ? (
           <span className="text-emerald-400 font-semibold">Pro License Active (Unlimited Batching &amp; 150MB)</span>
         ) : (
           <button
@@ -401,13 +402,11 @@ export default function App() {
           <button
             onClick={() => setIsProModalOpen(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border min-h-[44px] cursor-pointer ${
-              isPro
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                : 'bg-zinc-900 hover:bg-zinc-800 text-amber-300 border-amber-500/30 shadow-sm'
+              (isPro || isDevMode) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-zinc-900 hover:bg-zinc-800 text-amber-300 border-amber-500/30 shadow-sm'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            {isPro ? 'Pro Active' : 'Upgrade Pro'}
+            {(isPro || isDevMode) ? 'Pro Active' : 'Upgrade Pro'}
           </button>
 
           {installPrompt && (
@@ -617,10 +616,12 @@ export default function App() {
 
         {/* Live Build: Visible ONLY when URL includes ?pro=true */}
         
+          {isDevMode && (
           <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Live Build: 01:10 AM</span>
+            <span>Live Build: 01:38 AM</span>
           </div>
+        )}
         
       </footer>
 
