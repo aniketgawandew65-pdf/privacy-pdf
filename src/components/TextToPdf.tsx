@@ -102,20 +102,25 @@ export const TextToPdf: React.FC<any> = () => {
     syncContent();
   };
 
+  // Precise inline font size application on selected words/sentences
   const handleFontSizeChange = (size: number) => {
     setFontSize(size);
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && !selection.isCollapsed && editorRef.current?.contains(selection.anchorNode)) {
-      const range = selection.getRangeAt(0);
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && editorRef.current?.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
       const span = document.createElement("span");
       span.style.fontSize = `${size}px`;
+      span.style.lineHeight = "1.3";
       span.appendChild(range.extractContents());
       range.insertNode(span);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      sel.removeAllRanges();
+      const newRange = document.createRange();
+      newRange.selectNodeContents(span);
+      sel.addRange(newRange);
       syncContent();
     } else {
-      formatDoc("fontSize", size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
+      document.execCommand("fontSize", false, size >= 24 ? "6" : size >= 18 ? "5" : size >= 14 ? "4" : size >= 12 ? "3" : "2");
+      syncContent();
     }
   };
 
@@ -131,9 +136,9 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
-  // Pure Visual Page Break: An empty <hr> divider with zero text
+  // True CSS Page Break: Empty divider with zero text
   const handleInsertPageBreak = () => {
-    const breakHtml = '<hr class="doc-page-break" style="page-break-before: always; break-before: page; margin: 24px 0; border: none; border-top: 2px dashed #10b981; height: 0;" /><p><br></p>';
+    const breakHtml = '<div class="doc-page-break" contenteditable="false" style="page-break-before: always; break-before: page; margin: 24px 0; border-top: 2px dashed #10b981; height: 0; user-select: none;"></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
@@ -151,7 +156,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // Clean Multi-Page A4 PDF Generator
+  // Multi-Page A4 PDF Generator preserving all inline font sizes
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -163,7 +168,6 @@ export const TextToPdf: React.FC<any> = () => {
     setIsProcessing(true);
     setError(null);
 
-    // Isolated render container with neutral styling (completely immune to Tailwind CSS parser errors)
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.left = "-9999px";
@@ -177,8 +181,7 @@ export const TextToPdf: React.FC<any> = () => {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
       if (!iframeDoc) throw new Error("Unable to create document renderer.");
 
-      // Clean out any legacy text artifacts
-      const cleanHtml = content
+      let cleanHtml = content
         .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
         .replace(/✂/g, "");
 
@@ -209,6 +212,16 @@ export const TextToPdf: React.FC<any> = () => {
               li { display: list-item; margin-bottom: 4px; }
               p { margin: 6px 0; }
               hr { border: none; border-top: 1px solid #e4e4e7; margin: 16px 0; }
+              
+              /* Exact word-level font size preservation in PDF */
+              font[size="1"] { font-size: 10px !important; }
+              font[size="2"] { font-size: 12px !important; }
+              font[size="3"] { font-size: 14px !important; }
+              font[size="4"] { font-size: 16px !important; }
+              font[size="5"] { font-size: 18px !important; }
+              font[size="6"] { font-size: 24px !important; }
+              font[size="7"] { font-size: 32px !important; }
+
               .doc-page-break {
                 page-break-before: always !important;
                 break-before: page !important;
@@ -227,13 +240,23 @@ export const TextToPdf: React.FC<any> = () => {
       `);
       iframeDoc.close();
 
-      const canvas = await html2canvas(iframeDoc.body, {
+      const renderBody = iframeDoc.body;
+      const targetEl = iframeDoc.getElementById("render-content") || renderBody;
+      targetEl.querySelectorAll(".doc-page-break").forEach((el: any) => {
+        el.style.visibility = "hidden";
+        el.style.border = "none";
+      });
+
+      const canvas = await html2canvas(renderBody, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: "#ffffff",
         windowWidth: 794,
         logging: false,
+        ignoreElements: (el: Element) => {
+          return el.classList?.contains("doc-page-break") && !el.innerHTML;
+        },
       });
 
       document.body.removeChild(iframe);
@@ -402,6 +425,7 @@ export const TextToPdf: React.FC<any> = () => {
             <option value={16}>16pt</option>
             <option value={18}>18pt</option>
             <option value={24}>24pt</option>
+            <option value={32}>32pt</option>
           </select>
 
           <button
