@@ -60,6 +60,12 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Invalidate generated download URL whenever crop changes occur
+  const updateCropBox = (updater: any) => {
+    setDownloadUrl(null);
+    setCropBox(updater);
+  };
+
   // Load PDF file
   useEffect(() => {
     if (!file) return;
@@ -67,6 +73,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     const loadPdf = async () => {
       try {
         setError(null);
+        setDownloadUrl(null);
         const arrayBuffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const doc = await loadingTask.promise;
@@ -105,7 +112,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        // High-DPI Retina scaling (sharp rendering)
+        // High-DPI Retina scaling
         const dpr = Math.max(window.devicePixelRatio || 1, 2);
         const renderViewport = page.getViewport({ scale: activeScale * dpr });
 
@@ -131,7 +138,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       el.style.touchAction = "none";
     } else {
       el.style.overflow = "auto";
-      el.style.touchAction = "pan-x pan-y";
+      el.style.touchAction = "none";
     }
     const blockTouch = (e: TouchEvent) => {
       if (mode === "crop" && e.cancelable) {
@@ -145,6 +152,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   // Sync cropBox when navigating pages
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > numPages) return;
+    setDownloadUrl(null);
     if (!applyToAll) {
       setCrops((prev) => ({ ...prev, [currentPage]: cropBox }));
       setCurrentPage(newPage);
@@ -166,7 +174,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     }
   };
 
-  // 1:1 Active Drag-to-Pan Handler in Pan Mode
+  // 1:1 Active Drag-to-Pan Handler (covers top, bottom, left, right in Pan mode)
   const handlePanPointerDown = (e: any) => {
     if (mode !== "pan") return;
     const container = containerRef.current;
@@ -215,7 +223,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
       const nextX = Math.max(0, Math.min(maxW - initBox.width, initBox.x + (curX - startX)));
       const nextY = Math.max(0, Math.min(maxH - initBox.height, initBox.y + (curY - startY)));
-      setCropBox((prev) => (prev ? { ...prev, x: nextX, y: nextY } : null));
+      updateCropBox((prev: any) => (prev ? { ...prev, x: nextX, y: nextY } : null));
     };
 
     const onUp = () => {
@@ -231,7 +239,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     window.addEventListener("touchend", onUp);
   };
 
-  // 8-Handle Resize Handler with Micro-Height/Width Support (Down to 6px)
+  // 8-Handle Resize Handler (Supports micro-resizing down to 6px height)
   const handleHandlePointerDown = (e: any, handle: string) => {
     e.stopPropagation();
     if (!cropBox) return;
@@ -255,7 +263,6 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       let w = initBox.width;
       let h = initBox.height;
 
-      // Allow micro resizing down to 8px width and 6px height for tight text lines
       if (handle.includes("w")) {
         const newW = Math.max(8, initBox.width - dx);
         const newX = initBox.x + (initBox.width - newW);
@@ -273,7 +280,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         h = Math.max(6, Math.min(maxH - y, initBox.height + dy));
       }
 
-      setCropBox({ x, y, width: w, height: h });
+      updateCropBox({ x, y, width: w, height: h });
     };
 
     const onUp = () => {
@@ -306,9 +313,12 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
       pages.forEach((page, i) => {
         const pageIdx = i + 1;
+        // Priority 1: Apply to all pages uses active cropBox
+        // Priority 2: Current page ALWAYS uses active screen cropBox
+        // Priority 3: Stored crops dictionary for other pages
         const targetCrop = applyToAll
           ? cropBox
-          : (crops[pageIdx] !== undefined ? crops[pageIdx] : (pageIdx === currentPage ? cropBox : null));
+          : (pageIdx === currentPage ? cropBox : (crops[pageIdx] ?? null));
 
         if (!targetCrop) return;
 
@@ -344,6 +354,10 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       setIsProcessing(false);
     }
   };
+
+  // Dynamic stage padding calculation: expands with zoom so extreme edges are 100% accessible
+  const stagePadY = zoom > 1.05 ? Math.max(120, Math.round(zoom * 110)) : 32;
+  const stagePadX = zoom > 1.05 ? Math.max(80, Math.round(zoom * 80)) : 32;
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 text-white space-y-6 select-none">
@@ -434,7 +448,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
               <button
                 type="button"
-                onClick={() => setZoom((prev) => Math.max(0.5, Math.round((prev - 0.1) * 10) / 10))}
+                onClick={() => { setDownloadUrl(null); setZoom((prev) => Math.max(0.5, Math.round((prev - 0.1) * 10) / 10)); }}
                 className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
@@ -444,14 +458,14 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </span>
               <button
                 type="button"
-                onClick={() => setZoom((prev) => Math.min(3.0, Math.round((prev + 0.1) * 10) / 10))}
+                onClick={() => { setDownloadUrl(null); setZoom((prev) => Math.min(3.0, Math.round((prev + 0.1) * 10) / 10)); }}
                 className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                onClick={() => setZoom(1.0)}
+                onClick={() => { setDownloadUrl(null); setZoom(1.0); }}
                 className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -462,68 +476,82 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               <input
                 type="checkbox"
                 checked={applyToAll}
-                onChange={(e) => setApplyToAll(e.target.checked)}
+                onChange={(e) => { setDownloadUrl(null); setApplyToAll(e.target.checked); }}
                 className="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-0"
               />
               <span>Apply to all {numPages} pages</span>
             </label>
           </div>
 
-          {/* Interactive Document Viewport - Scroll & Pan all the way to extreme edges */}
+          {/* Interactive Document Viewport (Non-flex parent eliminates negative space clipping) */}
           <div
             ref={containerRef}
             onPointerDown={handlePanPointerDown}
             style={{
               overflow: mode === "crop" ? "hidden" : "auto",
-              touchAction: mode === "crop" ? "none" : "pan-x pan-y",
+              touchAction: "none",
               overscrollBehavior: "none",
             }}
-            className={`relative w-full h-[65vh] bg-zinc-950 border border-zinc-800 rounded-2xl flex p-10 sm:p-16 select-none ${
+            className={`relative w-full h-[65vh] bg-zinc-950 border border-zinc-800 rounded-2xl overflow-auto select-none ${
               mode === "pan" ? "cursor-grab active:cursor-grabbing" : ""
             }`}
           >
-            <div className="relative inline-block shadow-2xl m-auto shrink-0">
-              <canvas ref={canvasRef} className="block rounded shadow-2xl object-contain pointer-events-none" />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: "100%",
+                minHeight: "100%",
+                width: "max-content",
+                height: "max-content",
+                padding: `${stagePadY}px ${stagePadX}px`,
+                boxSizing: "border-box",
+              }}
+            >
+              <div className="relative inline-block shadow-2xl shrink-0">
+                <canvas ref={canvasRef} className="block rounded shadow-2xl object-contain pointer-events-none" />
 
-              {cropBox ? (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: `${cropBox.x}px`,
-                    top: `${cropBox.y}px`,
-                    width: `${cropBox.width}px`,
-                    height: `${cropBox.height}px`,
-                  }}
-                  className="absolute border-2 border-emerald-500 bg-emerald-500/10 cursor-move z-20 select-none touch-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
-                  onPointerDown={handleBoxPointerDown}
-                  onMouseDown={handleBoxPointerDown}
-                >
-                  {[
-                    { id: "nw", style: { top: 0, left: 0, transform: "translate(-50%, -50%)", cursor: "nwse-resize" } },
-                    { id: "n",  style: { top: 0, left: "50%", transform: "translate(-50%, -50%)", cursor: "ns-resize" } },
-                    { id: "ne", style: { top: 0, right: 0, transform: "translate(50%, -50%)", cursor: "nesw-resize" } },
-                    { id: "e",  style: { top: "50%", right: 0, transform: "translate(50%, -50%)", cursor: "ew-resize" } },
-                    { id: "se", style: { bottom: 0, right: 0, transform: "translate(50%, 50%)", cursor: "nwse-resize" } },
-                    { id: "s",  style: { bottom: 0, left: "50%", transform: "translate(-50%, 50%)", cursor: "ns-resize" } },
-                    { id: "sw", style: { bottom: 0, left: 0, transform: "translate(-50%, 50%)", cursor: "nesw-resize" } },
-                    { id: "w",  style: { top: "50%", left: 0, transform: "translate(-50%, -50%)", cursor: "ew-resize" } },
-                  ].map((h) => (
-                    <div
-                      key={h.id}
-                      style={h.style as any}
-                      onPointerDown={(e: any) => handleHandlePointerDown(e, h.id)}
-                      onMouseDown={(e: any) => handleHandlePointerDown(e, h.id)}
-                      className="absolute w-3 h-3 bg-white border-2 border-emerald-500 rounded-sm shadow-md touch-none z-30"
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded pointer-events-none">
-                  <span className="text-xs text-zinc-200 font-medium bg-zinc-900/90 border border-zinc-700/80 px-3 py-1.5 rounded-lg shadow-lg">
-                    Page {currentPage} will not be cropped
-                  </span>
-                </div>
-              )}
+                {cropBox ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: `${cropBox.x}px`,
+                      top: `${cropBox.y}px`,
+                      width: `${cropBox.width}px`,
+                      height: `${cropBox.height}px`,
+                    }}
+                    className="absolute border-2 border-emerald-500 bg-emerald-500/10 cursor-move z-20 select-none touch-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
+                    onPointerDown={handleBoxPointerDown}
+                    onMouseDown={handleBoxPointerDown}
+                  >
+                    {[
+                      { id: "nw", style: { top: 0, left: 0, transform: "translate(-50%, -50%)", cursor: "nwse-resize" } },
+                      { id: "n",  style: { top: 0, left: "50%", transform: "translate(-50%, -50%)", cursor: "ns-resize" } },
+                      { id: "ne", style: { top: 0, right: 0, transform: "translate(50%, -50%)", cursor: "nesw-resize" } },
+                      { id: "e",  style: { top: "50%", right: 0, transform: "translate(50%, -50%)", cursor: "ew-resize" } },
+                      { id: "se", style: { bottom: 0, right: 0, transform: "translate(50%, 50%)", cursor: "nwse-resize" } },
+                      { id: "s",  style: { bottom: 0, left: "50%", transform: "translate(-50%, 50%)", cursor: "ns-resize" } },
+                      { id: "sw", style: { bottom: 0, left: 0, transform: "translate(-50%, 50%)", cursor: "nesw-resize" } },
+                      { id: "w",  style: { top: "50%", left: 0, transform: "translate(-50%, -50%)", cursor: "ew-resize" } },
+                    ].map((h) => (
+                      <div
+                        key={h.id}
+                        style={h.style as any}
+                        onPointerDown={(e: any) => handleHandlePointerDown(e, h.id)}
+                        onMouseDown={(e: any) => handleHandlePointerDown(e, h.id)}
+                        className="absolute w-3 h-3 bg-white border-2 border-emerald-500 rounded-sm shadow-md touch-none z-30"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded pointer-events-none">
+                    <span className="text-xs text-zinc-200 font-medium bg-zinc-900/90 border border-zinc-700/80 px-3 py-1.5 rounded-lg shadow-lg">
+                      Page {currentPage} will not be cropped
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -534,6 +562,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                   <button
                     type="button"
                     onClick={() => {
+                      setDownloadUrl(null);
                       setCropBox(null);
                       setCrops((prev) => ({ ...prev, [currentPage]: null }));
                     }}
@@ -545,6 +574,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                   <button
                     type="button"
                     onClick={() => {
+                      setDownloadUrl(null);
                       const canvasEl = canvasRef.current;
                       const w = canvasEl ? (canvasEl.clientWidth || 250) : 250;
                       const h = canvasEl ? (canvasEl.clientHeight || 340) : 340;
@@ -566,6 +596,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                 <button
                   type="button"
                   onClick={() => {
+                    setDownloadUrl(null);
                     const canvasEl = canvasRef.current;
                     const w = canvasEl ? (canvasEl.clientWidth || 250) : 250;
                     const h = canvasEl ? (canvasEl.clientHeight || 340) : 340;
