@@ -16,7 +16,7 @@ import {
 import JSZip from 'jszip';
 import { getLicenseStatus } from '../utils/license';
 import { useObjectUrl } from '../utils/useObjectUrl';
-import { compressPDF, getPDFPageCount, type CompressionProgress } from '../utils/pdfEngine';
+import { compressPDF, getPDFPageCount, type CompressionProgress } from '../utils/exactCompressor';
 import { checkActionAllowed, recordActionExecution, getDailyUsage } from '../utils/usageTracker';
 import { ProModal } from './ProModal';
 import { useBatchQueue } from '../utils/useBatchQueue';
