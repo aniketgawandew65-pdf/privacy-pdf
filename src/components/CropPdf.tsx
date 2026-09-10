@@ -304,7 +304,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await PDFDocument.load(arrayBuffer);
+      const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
       const pages = pdf.getPages();
 
       const canvasEl = canvasRef.current;

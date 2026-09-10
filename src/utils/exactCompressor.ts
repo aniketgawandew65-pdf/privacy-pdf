@@ -109,7 +109,6 @@ export async function compressPDF(
       targetScale = Math.min(1.5, Math.max(1.0, targetScale));
     }
 
-    // PDF.js renders safely onto canvas without sub-pixel underflows
     const maxDim = Math.max(unscaledViewport.width, unscaledViewport.height);
     const safeRenderScale = Math.max(0.65, Math.min(1.0, 1024 / maxDim));
     const renderViewport = page.getViewport({ scale: safeRenderScale });
@@ -132,7 +131,6 @@ export async function compressPDF(
         } as any) as any
       ).promise;
 
-      // Browser native 2D canvas handles dimension downscaling outside WebAssembly
       const finalWidth = Math.max(32, Math.floor(unscaledViewport.width * targetScale));
       const finalHeight = Math.max(32, Math.floor(unscaledViewport.height * targetScale));
 
@@ -196,19 +194,18 @@ export async function compressPDF(
 
   let outputBytes: Uint8Array = await newPdfDoc.save({ useObjectStreams: false });
 
-  // Exact Byte-Padding: Matches user target down to the exact byte via neutral PDF comments
   if (level === 'target' && targetBytes && outputBytes.byteLength < targetBytes) {
     const diff = targetBytes - outputBytes.byteLength;
     if (diff > 0) {
       const padded = new Uint8Array(targetBytes);
       padded.set(outputBytes, 0);
-      padded[outputBytes.byteLength] = 0x0A; // newline
-      padded[outputBytes.byteLength + 1] = 0x25; // '%' comment marker
+      padded[outputBytes.byteLength] = 0x0A;
+      padded[outputBytes.byteLength + 1] = 0x25;
       for (let i = outputBytes.byteLength + 2; i < targetBytes - 1; i++) {
-        padded[i] = 0x20; // space
+        padded[i] = 0x20;
       }
       if (diff > 2) {
-        padded[targetBytes - 1] = 0x0A; // newline
+        padded[targetBytes - 1] = 0x0A;
       }
       outputBytes = padded;
     }
