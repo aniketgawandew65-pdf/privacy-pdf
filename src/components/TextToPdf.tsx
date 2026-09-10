@@ -137,20 +137,21 @@ export const TextToPdf: React.FC<any> = () => {
     setShowHighlightPicker(false);
   };
 
-  // Insert visual Page Break marker with an explicit Remove button
+  // Insert visual Page Break marker with an explicit Remove tap button
   const handleInsertPageBreak = () => {
-    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
+    const breakHtml = '<div class="page-break-line" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
-  // Handle direct tap/click on the "✕ Remove" button inside the editor
+  // Tap-to-remove handler for the Page Break button
   const handleEditorInteraction = (e: any) => {
     const target = e.target as HTMLElement;
-    if (target && (target.classList.contains("delete-page-break-btn") || target.closest(".delete-page-break-btn"))) {
-      e.preventDefault();
-      e.stopPropagation();
-      const breakEl = target.closest(".page-break-indicator, [data-page-break]");
-      if (breakEl) {
+    if (target) {
+      const deleteBtn = target.closest(".delete-page-break-btn");
+      const breakEl = target.closest(".page-break-line, [data-page-break='true']");
+      if (deleteBtn && breakEl) {
+        e.preventDefault();
+        e.stopPropagation();
         breakEl.remove();
         syncContent();
       }
@@ -171,7 +172,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export: removes app styles to avoid CSS parse errors and strips page break markers
+  // 1:1 WYSIWYG PDF Export with complete isolation from host CSS and binary buffer parsing
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -185,8 +186,9 @@ export const TextToPdf: React.FC<any> = () => {
 
     try {
       const printContainer = document.createElement("div");
-      printContainer.style.position = "fixed";
-      printContainer.style.left = "-9999px";
+      printContainer.id = "privacy-pdf-print-container";
+      printContainer.style.position = "absolute";
+      printContainer.style.left = "-10000px";
       printContainer.style.top = "0";
       printContainer.style.width = "794px"; // Standard A4 width at 96 DPI
       printContainer.style.minHeight = "1123px";
@@ -198,59 +200,69 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.style.fontSize = `${fontSize}px`;
       printContainer.style.lineHeight = "1.55";
       printContainer.style.wordBreak = "break-word";
+      printContainer.style.visibility = "visible";
+      printContainer.style.opacity = "1";
 
       const contentWrapper = document.createElement("div");
       contentWrapper.innerHTML = content;
 
-      // 1. STRIP ALL PAGE-BREAK ELEMENTS SO THEY NEVER APPEAR IN THE PDF
-      contentWrapper.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break]").forEach((el) => el.remove());
-      contentWrapper.querySelectorAll("*").forEach((el) => {
-        if (el.textContent && el.textContent.includes("PAGE BREAK")) {
-          el.remove();
-        }
-      });
+      // Strip page break elements from print container
+      contentWrapper.querySelectorAll(".page-break-line, [data-page-break='true']").forEach((el) => el.remove());
 
       printContainer.appendChild(contentWrapper);
       document.body.appendChild(printContainer);
 
-      // High-resolution canvas capture with isolated styling
       const canvas = await html2canvas(printContainer, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: "#ffffff",
         windowWidth: 794,
+        logging: false,
         ignoreElements: (el: Element) => {
-          return (
-            el.classList?.contains("page-break-indicator") ||
-            el.hasAttribute?.("data-page-break") ||
-            Boolean(el.textContent && el.textContent.includes("PAGE BREAK"))
-          );
+          return el.classList?.contains("page-break-line") || el.getAttribute?.("data-page-break") === "true";
         },
         onclone: (clonedDoc: Document) => {
-          // Remove all application stylesheets in the clone to prevent CSS parser errors (oklch, unexpected EOF)
+          // Remove all application stylesheets to prevent CSS parsing crashes (oklch, unexpected EOF)
           clonedDoc.querySelectorAll("style, link[rel='stylesheet']").forEach((el) => el.remove());
 
           // Inject safe, isolated standard CSS rules
           const safeStyle = clonedDoc.createElement("style");
           safeStyle.textContent = `
             * { box-sizing: border-box !important; }
-            body { background: #ffffff !important; color: #18181b !important; }
+            body { background: #ffffff !important; color: #18181b !important; margin: 0 !important; padding: 0 !important; }
             table { width: 100% !important; border-collapse: collapse !important; margin: 12px 0 !important; font-size: inherit !important; }
-            th, td { border: 1px solid #d4d4d8 !important; padding: 7px 10px !important; text-align: left !important; }
+            th, td { border: 1px solid #d4d4d8 !important; padding: 8px 12px !important; text-align: left !important; }
             th { background-color: #f4f4f5 !important; font-weight: 600 !important; }
-            ul { list-style-type: disc !important; padding-left: 24px !important; margin: 6px 0 !important; }
-            ol { list-style-type: decimal !important; padding-left: 24px !important; margin: 6px 0 !important; }
+            ul { list-style-type: disc !important; padding-left: 28px !important; margin: 8px 0 !important; }
+            ol { list-style-type: decimal !important; padding-left: 28px !important; margin: 8px 0 !important; }
             li { display: list-item !important; margin-bottom: 4px !important; }
-            p { margin: 5px 0 !important; }
-            hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 14px 0 !important; }
-            .page-break-indicator, [data-page-break] { display: none !important; }
+            p { margin: 6px 0 !important; }
+            hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 16px 0 !important; }
+            .page-break-line, [data-page-break="true"] { display: none !important; }
           `;
           clonedDoc.head.appendChild(safeStyle);
+
+          // Strip any residual page break nodes from clone
+          clonedDoc.querySelectorAll(".page-break-line, [data-page-break='true']").forEach((el) => el.remove());
+
+          const targetInClone = clonedDoc.getElementById("privacy-pdf-print-container");
+          if (targetInClone) {
+            targetInClone.style.position = "static";
+            targetInClone.style.left = "0";
+            targetInClone.style.top = "0";
+            targetInClone.style.margin = "0";
+            targetInClone.style.visibility = "visible";
+            targetInClone.style.opacity = "1";
+          }
         },
       });
 
       document.body.removeChild(printContainer);
+
+      if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        throw new Error("Canvas rendering produced an empty image.");
+      }
 
       const pdfDoc = await PDFDocument.create();
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -291,10 +303,16 @@ export const TextToPdf: React.FC<any> = () => {
           );
         }
 
+        // Direct synchronous base64-to-byte conversion (bypasses mobile fetch restrictions)
         const imgDataUrl = pageCanvas.toDataURL("image/jpeg", 0.95);
-        const imgBytes = await fetch(imgDataUrl).then((r) => r.arrayBuffer());
-        const embeddedImg = await pdfDoc.embedJpg(imgBytes);
+        const base64Str = imgDataUrl.split(",")[1];
+        const binaryStr = window.atob(base64Str);
+        const imgBytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          imgBytes[i] = binaryStr.charCodeAt(i);
+        }
 
+        const embeddedImg = await pdfDoc.embedJpg(imgBytes);
         const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
 
         page.drawImage(embeddedImg, {
@@ -326,7 +344,9 @@ export const TextToPdf: React.FC<any> = () => {
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
     } catch (err: any) {
-      setError("Failed to create PDF: " + err.message);
+      console.error("PDF generation failed:", err);
+      const msg = err?.message || (typeof err === "string" ? err : "") || "An unexpected error occurred during PDF generation.";
+      setError("Failed to create PDF: " + msg);
     } finally {
       setIsProcessing(false);
     }
