@@ -109,9 +109,11 @@ export const TextToPdf: React.FC<any> = () => {
     return () => observer.disconnect();
   }, []);
 
+  // Safe formatting runner that strictly preserves mobile touch selection
   const formatDoc = (cmd: string, val: string = "") => {
-    if (editorRef.current) {
-      editorRef.current.focus();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editorRef.current?.contains(sel.anchorNode)) {
+      editorRef.current?.focus();
     }
     document.execCommand(cmd, false, val);
     syncContent();
@@ -132,14 +134,27 @@ export const TextToPdf: React.FC<any> = () => {
     setShowColorPicker(false);
   };
 
+  // Cross-browser mobile highlighting (hiliteColor with backColor fallback)
   const handleApplyHighlight = (color: string) => {
-    formatDoc("hiliteColor", color);
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !editorRef.current?.contains(sel.anchorNode)) {
+      editorRef.current?.focus();
+    }
+    if (color === "transparent") {
+      document.execCommand("removeFormat", false);
+    } else {
+      const ok = document.execCommand("hiliteColor", false, color);
+      if (!ok) {
+        document.execCommand("backColor", false, color);
+      }
+    }
+    syncContent();
     setShowHighlightPicker(false);
   };
 
-  // Insert visual Page Break marker with an explicit Remove tap button
+  // Visual Page Break guide with an explicit ✕ Remove button
   const handleInsertPageBreak = () => {
-    const breakHtml = '<div class="page-break-line" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
+    const breakHtml = '<div class="page-break-indicator" data-page-break="true" contenteditable="false" style="margin: 18px 0; padding: 8px 12px; border-top: 2px dashed #10b981; border-bottom: 2px dashed #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #10b981; user-select: none;"><span>✂ --- PAGE BREAK (Guide Only - Won\'t appear in PDF) ---</span><span class="delete-page-break-btn" style="background: #ef4444; color: #ffffff; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;">✕ Remove</span></div><p><br></p>';
     formatDoc("insertHTML", breakHtml);
   };
 
@@ -148,7 +163,7 @@ export const TextToPdf: React.FC<any> = () => {
     const target = e.target as HTMLElement;
     if (target) {
       const deleteBtn = target.closest(".delete-page-break-btn");
-      const breakEl = target.closest(".page-break-line, [data-page-break='true']");
+      const breakEl = target.closest(".page-break-indicator, .page-break-line, [data-page-break]");
       if (deleteBtn && breakEl) {
         e.preventDefault();
         e.stopPropagation();
@@ -172,7 +187,7 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  // 1:1 WYSIWYG PDF Export with complete isolation from host CSS and binary buffer parsing
+  // 1:1 WYSIWYG PDF Export with complete purge of page break banners and support for strikethrough & highlights
   const handleDownload = async () => {
     if (!editorRef.current) return;
     const plainText = editorRef.current.innerText.trim();
@@ -203,11 +218,22 @@ export const TextToPdf: React.FC<any> = () => {
       printContainer.style.visibility = "visible";
       printContainer.style.opacity = "1";
 
-      const contentWrapper = document.createElement("div");
-      contentWrapper.innerHTML = content;
+      // 1. STRING-LEVEL PURGE: Remove any page break div or text before DOM parsing
+      let sanitizedHtml = content
+        .replace(/<div[^>]*?(?:page-break|PAGE BREAK)[^>]*?>[\s\S]*?<\/div>/gi, "")
+        .replace(/<[^>]+>[^<]*?PAGE BREAK[^<]*?<\/[^>]+>/gi, "")
+        .replace(/✂?\s*-*\s*PAGE BREAK[\s\S]*?---\s*/gi, "");
 
-      // Strip page break elements from print container
-      contentWrapper.querySelectorAll(".page-break-line, [data-page-break='true']").forEach((el) => el.remove());
+      const contentWrapper = document.createElement("div");
+      contentWrapper.innerHTML = sanitizedHtml;
+
+      // 2. DOM PURGE: Remove all leftover selectors
+      contentWrapper.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], [class*='page-break']").forEach((el) => el.remove());
+      contentWrapper.querySelectorAll("*").forEach((el) => {
+        if (el.textContent && el.textContent.includes("PAGE BREAK")) {
+          el.remove();
+        }
+      });
 
       printContainer.appendChild(contentWrapper);
       document.body.appendChild(printContainer);
@@ -220,13 +246,21 @@ export const TextToPdf: React.FC<any> = () => {
         windowWidth: 794,
         logging: false,
         ignoreElements: (el: Element) => {
-          return el.classList?.contains("page-break-line") || el.getAttribute?.("data-page-break") === "true";
+          const txt = el.textContent || "";
+          const cls = typeof el.className === "string" ? el.className : "";
+          return (
+            cls.includes("page-break") ||
+            el.hasAttribute("data-page-break") ||
+            txt.includes("PAGE BREAK") ||
+            txt.includes("Delete Break") ||
+            txt.includes("Remove")
+          );
         },
         onclone: (clonedDoc: Document) => {
-          // Remove all application stylesheets to prevent CSS parsing crashes (oklch, unexpected EOF)
+          // Remove all host stylesheets to eliminate CSS parser crashes (oklch, unexpected EOF)
           clonedDoc.querySelectorAll("style, link[rel='stylesheet']").forEach((el) => el.remove());
 
-          // Inject safe, isolated standard CSS rules
+          // Inject complete formatting stylesheet into clone
           const safeStyle = clonedDoc.createElement("style");
           safeStyle.textContent = `
             * { box-sizing: border-box !important; }
@@ -239,12 +273,44 @@ export const TextToPdf: React.FC<any> = () => {
             li { display: list-item !important; margin-bottom: 4px !important; }
             p { margin: 6px 0 !important; }
             hr { border: none !important; border-top: 1px solid #e4e4e7 !important; margin: 16px 0 !important; }
-            .page-break-line, [data-page-break="true"] { display: none !important; }
+            
+            /* Strikethrough (Word Cutting) */
+            s, strike, del, [style*="line-through"] {
+              text-decoration: line-through !important;
+              -webkit-text-decoration-line: line-through !important;
+              text-decoration-thickness: 1.8px !important;
+              text-decoration-color: currentColor !important;
+            }
+
+            /* Underline */
+            u, [style*="underline"] {
+              text-decoration: underline !important;
+              -webkit-text-decoration-line: underline !important;
+              text-decoration-thickness: 1.5px !important;
+            }
+
+            /* Multi-Line Background Highlighting */
+            mark, [style*="background-color"], [style*="background:"] {
+              box-decoration-break: clone !important;
+              -webkit-box-decoration-break: clone !important;
+              display: inline !important;
+              line-height: 1.45 !important;
+              padding: 1px 3px !important;
+              border-radius: 2px !important;
+            }
+
+            /* Strip any page breaks completely */
+            .page-break-indicator, .page-break-line, [data-page-break] { display: none !important; }
           `;
           clonedDoc.head.appendChild(safeStyle);
 
-          // Strip any residual page break nodes from clone
-          clonedDoc.querySelectorAll(".page-break-line, [data-page-break='true']").forEach((el) => el.remove());
+          // 3. CLONE PURGE: Remove any residual page break nodes inside cloned document
+          clonedDoc.querySelectorAll(".page-break-indicator, .page-break-line, [data-page-break], [class*='page-break']").forEach((el) => el.remove());
+          clonedDoc.querySelectorAll("*").forEach((el) => {
+            if (el.textContent && el.textContent.includes("PAGE BREAK")) {
+              el.remove();
+            }
+          });
 
           const targetInClone = clonedDoc.getElementById("privacy-pdf-print-container");
           if (targetInClone) {
@@ -303,7 +369,6 @@ export const TextToPdf: React.FC<any> = () => {
           );
         }
 
-        // Direct synchronous base64-to-byte conversion (bypasses mobile fetch restrictions)
         const imgDataUrl = pageCanvas.toDataURL("image/jpeg", 0.95);
         const base64Str = imgDataUrl.split(",")[1];
         const binaryStr = window.atob(base64Str);
@@ -322,7 +387,7 @@ export const TextToPdf: React.FC<any> = () => {
           height: contentHeightPt,
         });
 
-        // Top margin official Page Number header
+        // Official Page Number header in top margin
         page.drawText(`Page ${p + 1} of ${totalPages}`, {
           x: pageWidthPt - 95,
           y: pageHeightPt - 24,
@@ -383,7 +448,8 @@ export const TextToPdf: React.FC<any> = () => {
         <div className="flex flex-wrap items-center gap-1.5 bg-zinc-950/80 border border-zinc-800 rounded-xl p-2 text-zinc-300 relative">
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("undo")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Undo"
@@ -392,7 +458,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("redo")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Redo"
@@ -434,7 +501,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => handleFontSizeChange(Math.min(32, fontSize + 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
@@ -442,7 +510,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => handleFontSizeChange(Math.max(8, fontSize - 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
@@ -455,7 +524,8 @@ export const TextToPdf: React.FC<any> = () => {
           <div className="relative">
             <button
               type="button"
-              onPointerDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onClick={() => { setShowColorPicker(!showColorPicker); setShowHighlightPicker(false); }}
               className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               title="Text Color"
@@ -468,7 +538,8 @@ export const TextToPdf: React.FC<any> = () => {
                   <button
                     key={c.value}
                     type="button"
-                    onPointerDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={() => handleApplyTextColor(c.value)}
                     style={{ backgroundColor: c.value }}
                     className="w-5 h-5 rounded-full border border-white/20 hover:scale-110 transition shadow"
@@ -483,7 +554,8 @@ export const TextToPdf: React.FC<any> = () => {
           <div className="relative">
             <button
               type="button"
-              onPointerDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onClick={() => { setShowHighlightPicker(!showHighlightPicker); setShowColorPicker(false); }}
               className="flex items-center gap-1 p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
               title="Highlighter"
@@ -496,7 +568,8 @@ export const TextToPdf: React.FC<any> = () => {
                   <button
                     key={h.value}
                     type="button"
-                    onPointerDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={() => handleApplyHighlight(h.value)}
                     style={{ backgroundColor: h.value === "transparent" ? "#27272a" : h.value }}
                     className="w-5 h-5 rounded-md border border-white/20 hover:scale-110 transition flex items-center justify-center text-[10px]"
@@ -513,7 +586,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("bold")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Bold"
@@ -522,7 +596,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("italic")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Italic"
@@ -531,7 +606,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("underline")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Underline"
@@ -540,10 +616,11 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("strikeThrough")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-            title="Strikethrough"
+            title="Strikethrough (Word Cutting)"
           >
             <Strikethrough className="w-4 h-4" />
           </button>
@@ -552,7 +629,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("justifyLeft")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Left"
@@ -561,7 +639,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("justifyCenter")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Center"
@@ -570,7 +649,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("justifyRight")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Align Right"
@@ -579,7 +659,8 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("justifyFull")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Justify"
@@ -591,7 +672,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("insertUnorderedList")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Bullet List"
@@ -601,7 +683,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("insertOrderedList")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Numbered List"
@@ -611,7 +694,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("insertHorizontalRule")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Horizontal Line"
@@ -621,7 +705,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={handleInsertPageBreak}
             className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-xs font-semibold transition"
             title="Insert Page Break Marker"
@@ -632,7 +717,8 @@ export const TextToPdf: React.FC<any> = () => {
 
           <button
             type="button"
-            onPointerDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={() => formatDoc("removeFormat")}
             className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
             title="Clear Formatting"
@@ -651,7 +737,7 @@ export const TextToPdf: React.FC<any> = () => {
           onPaste={() => setTimeout(syncContent, 0)}
           style={{ fontFamily: selectedFont }}
           data-placeholder="Start typing your document here..."
-          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+          className="w-full min-h-[320px] max-h-[520px] overflow-y-auto bg-white text-zinc-900 rounded-xl p-6 shadow-inner focus:outline-none focus:ring-2 focus:ring-emerald-500/50 text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_mark]:box-decoration-clone [&_mark]:inline [&_mark]:px-1"
         />
       </div>
 
@@ -670,7 +756,7 @@ export const TextToPdf: React.FC<any> = () => {
               transformOrigin: "top center",
               fontFamily: selectedFont,
             }}
-            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+            className="w-full max-w-[580px] aspect-[1/1.414] bg-white text-zinc-900 shadow-2xl rounded-lg p-8 sm:p-12 overflow-y-auto text-left border border-zinc-700 select-text transition-transform duration-150 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1 [&_s]:line-through [&_strike]:line-through [&_del]:line-through [&_.page-break-indicator]:hidden [&_.page-break-line]:hidden [&_[data-page-break]]:hidden"
           >
             {hasContent ? (
               <div
