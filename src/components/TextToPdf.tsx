@@ -92,7 +92,17 @@ export const TextToPdf: React.FC<any> = () => {
       let currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
       let currentY = pageHeight - margin;
 
-      const rawParagraphs = plainText.split("\n");
+      // Convert WinAnsi incompatible characters (₹, curly quotes, dashes, bullets)
+      const safeText = plainText
+        .replace(/₹\s*/g, "Rs. ")
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2013\u2014]/g, "-")
+        .replace(/\u2026/g, "...")
+        .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, "- ")
+        .replace(/[^\x00-\x7F]/g, "");
+
+      const rawParagraphs = safeText.split("\n");
 
       for (const para of rawParagraphs) {
         if (para.trim().length === 0) {
