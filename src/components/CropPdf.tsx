@@ -51,7 +51,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   const [mode, setMode] = useState<"crop" | "pan">("crop");
   const [applyToAll, setApplyToAll] = useState<boolean>(false);
   const [crops, setCrops] = useState<Record<number, CropArea>>({});
-  const [cropBox, setCropBox] = useState<CropArea | null>({ x: 30, y: 30, width: 280, height: 360 });
+  const [cropBox, setCropBox] = useState<CropArea | null>({ x: 25, y: 25, width: 250, height: 340 });
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         setNumPages(doc.numPages);
         setCurrentPage(1);
         setCrops({});
-        setCropBox({ x: 30, y: 30, width: 280, height: 360 });
+        setCropBox({ x: 25, y: 25, width: 250, height: 340 });
       } catch (err: any) {
         if (isMounted) setError("Failed to load PDF file: " + err.message);
       }
@@ -90,7 +90,14 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     const renderPage = async () => {
       try {
         const page = await pdfDoc.getPage(currentPage);
-        const viewport = page.getViewport({ scale: zoom * 1.5 });
+        const container = containerRef.current;
+        const padding = 32;
+        const availW = Math.max(200, (container ? container.clientWidth : window.innerWidth) - padding);
+        const availH = Math.max(300, (container ? container.clientHeight : window.innerHeight * 0.65) - padding);
+        const unscaled = page.getViewport({ scale: 1.0 });
+        const fitScale = Math.min(availW / unscaled.width, availH / unscaled.height);
+        const activeScale = Math.max(0.1, fitScale) * zoom;
+        const viewport = page.getViewport({ scale: activeScale });
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
@@ -458,7 +465,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
           <div className="flex items-center justify-between gap-4">
             <button
               type="button"
-              onClick={() => setCropBox({ x: 30, y: 30, width: 280, height: 360 })}
+              onClick={() => setCropBox({ x: 25, y: 25, width: 250, height: 340 })}
               className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-xl text-xs font-medium transition"
             >
               Reset Box
