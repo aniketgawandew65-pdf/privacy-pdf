@@ -7,6 +7,11 @@ export interface ToolMeta {
 }
 
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
+  '/compress-pdf-to-50kb': {
+    path: '/compress-pdf-to-50kb', title: 'Compress PDF to 50 KB on Your Device | 1into1',
+    description: 'Set a 50 KB PDF target with local compression. Understand quality tradeoffs, check the result and download without uploading your PDF.',
+    heading: 'Compress PDF to 50 KB', subheading: 'A small target for strict upload limits. Check text readability before sharing.',
+  },
   '/': {
     path: '/',
     title: '1into1 PDF — Free, Private PDF & Image Tools (Zero Uploads)',

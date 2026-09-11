@@ -5,6 +5,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
 import { TOOL_COPY } from './toolCopy';
+import { blogMeta, renderBlog, renderGuide } from './seoContent';
 import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
 import {
   Sliders,
@@ -263,7 +264,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const meta = TOOLS_METADATA[location.pathname] || { title: 'Page not found | 1into1 PDF', description: 'Find the right PDF tool at 1into1.', heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
+    const meta = blogMeta(location.pathname) || TOOLS_METADATA[location.pathname] || { title: 'Page not found | 1into1 PDF', description: 'Find the right PDF tool at 1into1.', heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
     document.title = meta.title;
 
     const descMeta = document.querySelector('meta[name="description"]');
@@ -295,7 +296,11 @@ export default function App() {
       document.head.appendChild(scriptTag);
     }
 
-    scriptTag.textContent = JSON.stringify({
+    scriptTag.textContent = JSON.stringify(location.pathname.startsWith('/blog') ? {
+      '@context': 'https://schema.org', '@type': location.pathname === '/blog' ? 'CollectionPage' : 'Article',
+      headline: meta.heading, name: meta.heading, description: meta.description, url: pageUrl,
+      author: { '@type': 'Organization', name: '1into1', url: 'https://www.1into1.com/' },
+    } : {
       '@context': 'https://schema.org',
       '@type': 'WebApplication',
       name: meta.title,
@@ -346,14 +351,15 @@ export default function App() {
     }
   };
 
-  const currentMeta = TOOLS_METADATA[location.pathname] || { heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
+  const currentMeta = blogMeta(location.pathname) || TOOLS_METADATA[location.pathname] || { heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
 
   const visibleTools = TOOLS_LIST.filter(tool =>
     (selectedCategory === 'all' || tool.category === selectedCategory) &&
     `${tool.name} ${tool.path} ${TOOLS_METADATA[tool.path]?.description || ''}`.toLowerCase().includes(search.toLowerCase().trim())
   );
   const isHome = location.pathname === '/';
-  const isInfo = ['/privacy', '/terms'].includes(location.pathname);
+  const isBlog = Boolean(blogMeta(location.pathname));
+  const isInfo = ['/privacy', '/terms'].includes(location.pathname) || isBlog;
   const closeDirectory = () => { setDirectoryOpen(false); setSearch(''); };
   const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/merge-pdf','/split-pdf','/sign-pdf','/image-to-pdf'].includes(tool.path));
 
@@ -378,13 +384,13 @@ export default function App() {
           <div className="eyebrow"><ShieldCheck size={14} /> YOUR FILES. YOUR DEVICE.</div>
           <h1>{isHome ? <>All tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
           <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
-          <div className="trust-points" aria-label="Local PDF tool benefits">
+          {!isInfo && <div className="trust-points" aria-label="Local PDF tool benefits">
             <span><Zap size={14} />Lightning fast</span>
             <span><WifiOff size={14} />No internet needed</span>
             <span><ShieldCheck size={14} />100% private</span>
             <span><UserRoundCheck size={14} />No signup</span>
-          </div>
-          <p className="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>
+          </div>}
+          {!isInfo && <p className="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>}
         </section>
 
         <nav className="quick-tools" aria-label="Popular PDF tools">
@@ -454,6 +460,7 @@ export default function App() {
               <Route path="/offline-pdf-redaction" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/extract-pdf-for-llm" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-100kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-50kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
@@ -462,6 +469,8 @@ export default function App() {
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
               <Route path="/html-to-pdf" element={<HtmlToPdf />} />
 
+              <Route path="/blog" element={<div dangerouslySetInnerHTML={{ __html: renderBlog('/blog') }} />} />
+              <Route path="/blog/:slug" element={isBlog ? <div dangerouslySetInnerHTML={{ __html: renderBlog(location.pathname) }} /> : <NotFound />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
             </Suspense>
@@ -469,10 +478,11 @@ export default function App() {
         </section>
         {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device. Cloud AI is optional.</span><NavLink to="/privacy">How it works</NavLink></div>}
         {isHome && <section className="benefits" aria-label="Why 1into1"><div><span>01</span><h2>Pick a file.</h2><p>No account needed to use the local tools.</p></div><div><span>02</span><h2>Make it yours.</h2><p>Simple controls. No upload queue.</p></div><div><span>03</span><h2>Keep moving.</h2><p>Download your result and get on with your day.</p></div></section>}
+        {!isInfo && <div dangerouslySetInnerHTML={{ __html: renderGuide(location.pathname) }} />}
       </main>
 
       <footer className="site-footer">
-        <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><p>A little less friction. A little more privacy.</p></div>
+        <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><NavLink to="/blog">PDF guides</NavLink></div>
         <details className="footer-directory"><summary>Explore all 40 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
         <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
       
