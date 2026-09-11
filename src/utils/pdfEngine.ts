@@ -1862,6 +1862,770 @@ export async function fillAndFlattenPDF(
   return await pdfDoc.save({ useObjectStreams: true });
 }
 
+
+export type FillableFieldType =
+  | 'text'
+  | 'checkbox'
+  | 'dropdown'
+  | 'radio'
+  | 'date'
+  | 'signature';
+
+export interface FillableFieldSpec {
+  id: string;
+  name: string;
+  type: FillableFieldType;
+
+  // Zero-based PDF page index
+  pageIndex: number;
+
+  // Normalized coordinates from 0 to 1.
+  // x/y use TOP-LEFT browser coordinates.
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+
+  options?: string[];
+  defaultValue?: string | boolean;
+}
+
+/**
+ * Creates interactive AcroForm fields directly inside the PDF.
+ *
+ * Everything runs locally with pdf-lib.
+ * No document upload or server processing is required.
+ */
+export async function createFillablePDF(
+  file: File,
+  fields: FillableFieldSpec[]
+): Promise<Uint8Array> {
+  const buffer = await file.arrayBuffer();
+  const sourceBytes = new Uint8Array(buffer);
+
+  const isRealPasswordError = (error: any) => {
+    const name = String(error?.name || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+    const code = error?.code;
+
+    const passwordResponses =
+      (pdfjsLib as any).PasswordResponses;
+
+    return (
+      name.includes('passwordexception') ||
+      name === 'passwordexception' ||
+      code === passwordResponses?.NEED_PASSWORD ||
+      code === passwordResponses?.INCORRECT_PASSWORD ||
+      message.includes('password required') ||
+      message.includes('incorrect password')
+    );
+  };
+
+  /*
+   * REAL PASSWORD CHECK
+   *
+   * We use PDF.js as the authority here because it is also
+   * the engine that successfully renders PDFs in the browser.
+   *
+   * If PDF.js can open the document without requesting a
+   * password, the document is considered usable.
+   *
+   * An encryption dictionary / owner permissions alone do
+   * NOT mean the user must be blocked.
+   */
+  const assertReadableWithoutPassword =
+    async () => {
+      try {
+        const loadingTask =
+          pdfjsLib.getDocument({
+            isEvalSupported: false,
+            data: sourceBytes.slice(),
+            stopAtErrors: false,
+          });
+
+        const readablePdf =
+          await loadingTask.promise;
+
+        await readablePdf.destroy();
+      } catch (error: any) {
+        if (isRealPasswordError(error)) {
+          throw new Error(
+            'This PDF requires a password. Unlock it first, then create fillable fields.'
+          );
+        }
+
+        throw new Error(
+          'This PDF could not be opened for editing.'
+        );
+      }
+    };
+
+  await assertReadableWithoutPassword();
+
+  /*
+   * Compatibility fallback.
+   *
+   * If the document is readable but pdf-lib cannot safely
+   * modify its internal structure, render every visible page
+   * locally and rebuild a clean PDF.
+   *
+   * Still 100% browser-side.
+   */
+  const rebuildFromRenderedPages =
+    async (): Promise<PDFDocument> => {
+      const loadingTask =
+        pdfjsLib.getDocument({
+          isEvalSupported: false,
+          data: sourceBytes.slice(),
+          stopAtErrors: false,
+        });
+
+      const sourcePdf =
+        await loadingTask.promise;
+
+      const rebuilt =
+        await PDFDocument.create();
+
+      try {
+        for (
+          let pageNumber = 1;
+          pageNumber <= sourcePdf.numPages;
+          pageNumber++
+        ) {
+          const sourcePage =
+            await sourcePdf.getPage(
+              pageNumber
+            );
+
+          const {
+            imgBytes,
+            width,
+            height,
+          } = await renderPageAsJpg(
+            sourcePage,
+            1.5
+          );
+
+          const image =
+            await rebuilt.embedJpg(
+              imgBytes
+            );
+
+          const page =
+            rebuilt.addPage([
+              width,
+              height,
+            ]);
+
+          page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          });
+        }
+      } finally {
+        await sourcePdf.destroy();
+      }
+
+      return rebuilt;
+    };
+
+  /*
+   * Try to preserve the original PDF structure first.
+   *
+   * If it contains encryption/permission structures but does
+   * NOT actually require a password, we rebuild instead of
+   * falsely rejecting it.
+   */
+  const loadWorkingDocument =
+    async (): Promise<PDFDocument> => {
+      try {
+        const pdfDoc =
+          await PDFDocument.load(
+            buffer
+          );
+
+        if (pdfDoc.isEncrypted) {
+          console.info(
+            'Readable PDF contains encryption/permission structures. Using local compatibility rebuild.'
+          );
+
+          return await rebuildFromRenderedPages();
+        }
+
+        return pdfDoc;
+      } catch (error) {
+        /*
+         * Some readable PDFs make pdf-lib reject the source
+         * structure even though PDF.js can display them.
+         */
+        try {
+          const pdfDoc =
+            await PDFDocument.load(
+              buffer,
+              {
+                ignoreEncryption: true,
+              }
+            );
+
+          if (pdfDoc.isEncrypted) {
+            return await rebuildFromRenderedPages();
+          }
+
+          return pdfDoc;
+        } catch {
+          return await rebuildFromRenderedPages();
+        }
+      }
+    };
+
+  const applyFields = async (
+    pdfDoc: PDFDocument
+  ) => {
+    const pages =
+      pdfDoc.getPages();
+
+    const form =
+      pdfDoc.getForm();
+
+    const appearanceFont =
+      await pdfDoc.embedFont(
+        StandardFonts.Helvetica
+      );
+
+    const usedNames =
+      new Set<string>(
+        form
+          .getFields()
+          .map((field) =>
+            field.getName()
+          )
+      );
+
+    const uniqueFieldName = (
+      requested: string,
+      index: number
+    ) => {
+      const base =
+        requested.trim() ||
+        `field_${index + 1}`;
+
+      if (!usedNames.has(base)) {
+        usedNames.add(base);
+        return base;
+      }
+
+      let suffix = 2;
+
+      while (
+        usedNames.has(
+          `${base}_${suffix}`
+        )
+      ) {
+        suffix += 1;
+      }
+
+      const result =
+        `${base}_${suffix}`;
+
+      usedNames.add(result);
+
+      return result;
+    };
+
+    for (
+      let index = 0;
+      index < fields.length;
+      index++
+    ) {
+      const fieldSpec =
+        fields[index];
+
+      const page =
+        pages[fieldSpec.pageIndex];
+
+      if (!page) continue;
+
+      const {
+        width: pageWidth,
+        height: pageHeight,
+      } = page.getSize();
+
+      const x =
+        Math.max(
+          0,
+          Math.min(
+            pageWidth,
+            fieldSpec.x *
+              pageWidth
+          )
+        );
+
+      const width =
+        Math.max(
+          8,
+          Math.min(
+            pageWidth - x,
+            fieldSpec.width *
+              pageWidth
+          )
+        );
+
+      const height =
+        Math.max(
+          8,
+          Math.min(
+            pageHeight,
+            fieldSpec.height *
+              pageHeight
+          )
+        );
+
+      /*
+       * Browser editor:
+       * top-left origin.
+       *
+       * PDF:
+       * bottom-left origin.
+       */
+      const y =
+        Math.max(
+          0,
+          Math.min(
+            pageHeight -
+              height,
+            pageHeight -
+              fieldSpec.y *
+                pageHeight -
+              height
+          )
+        );
+
+      const fieldName =
+        uniqueFieldName(
+          fieldSpec.name,
+          index
+        );
+
+      const commonStyle = {
+        borderColor: rgb(
+          0.35,
+          0.35,
+          0.38
+        ),
+        borderWidth: 1,
+        backgroundColor: rgb(
+          1,
+          1,
+          1
+        ),
+      };
+
+      if (
+        fieldSpec.type === 'text' ||
+        fieldSpec.type === 'date'
+      ) {
+        const textField =
+          form.createTextField(
+            fieldName
+          );
+
+        if (
+          typeof fieldSpec.defaultValue ===
+          'string'
+        ) {
+          textField.setText(
+            fieldSpec.defaultValue
+          );
+        }
+
+        textField.addToPage(
+          page,
+          {
+            x,
+            y,
+            width,
+            height,
+            textColor: rgb(
+              0,
+              0,
+              0
+            ),
+            ...commonStyle,
+          }
+        );
+
+        continue;
+      }
+
+      if (
+        fieldSpec.type ===
+        'checkbox'
+      ) {
+        const checkbox =
+          form.createCheckBox(
+            fieldName
+          );
+
+        const size =
+          Math.max(
+            10,
+            Math.min(
+              width,
+              height
+            )
+          );
+
+        checkbox.addToPage(
+          page,
+          {
+            x,
+            y:
+              y +
+              Math.max(
+                0,
+                (height -
+                  size) /
+                  2
+              ),
+            width: size,
+            height: size,
+            ...commonStyle,
+          }
+        );
+
+        if (
+          fieldSpec.defaultValue ===
+          true
+        ) {
+          checkbox.check();
+        }
+
+        continue;
+      }
+
+      if (
+        fieldSpec.type ===
+        'dropdown'
+      ) {
+        const dropdown =
+          form.createDropdown(
+            fieldName
+          );
+
+        const options =
+          (
+            fieldSpec.options ||
+            []
+          )
+            .map(
+              (option) =>
+                option.trim()
+            )
+            .filter(Boolean)
+            .filter(
+              (
+                option,
+                optionIndex,
+                array
+              ) =>
+                array.indexOf(
+                  option
+                ) === optionIndex
+            );
+
+        const safeOptions =
+          options.length
+            ? options
+            : [
+                'Option 1',
+                'Option 2',
+              ];
+
+        dropdown.addOptions(
+          safeOptions
+        );
+
+        if (
+          typeof fieldSpec.defaultValue ===
+            'string' &&
+          safeOptions.includes(
+            fieldSpec.defaultValue
+          )
+        ) {
+          dropdown.select(
+            fieldSpec.defaultValue
+          );
+        }
+
+        dropdown.addToPage(
+          page,
+          {
+            x,
+            y,
+            width,
+            height,
+            textColor: rgb(
+              0,
+              0,
+              0
+            ),
+            ...commonStyle,
+          }
+        );
+
+        continue;
+      }
+
+      if (
+        fieldSpec.type ===
+        'radio'
+      ) {
+        const radio =
+          form.createRadioGroup(
+            fieldName
+          );
+
+        const options =
+          (
+            fieldSpec.options ||
+            []
+          )
+            .map(
+              (option) =>
+                option.trim()
+            )
+            .filter(Boolean)
+            .filter(
+              (
+                option,
+                optionIndex,
+                array
+              ) =>
+                array.indexOf(
+                  option
+                ) === optionIndex
+            );
+
+        const safeOptions =
+          options.length
+            ? options
+            : [
+                'Option 1',
+                'Option 2',
+              ];
+
+        const rowHeight =
+          height /
+          safeOptions.length;
+
+        safeOptions.forEach(
+          (
+            option,
+            optionIndex
+          ) => {
+            const buttonSize =
+              Math.max(
+                9,
+                Math.min(
+                  14,
+                  rowHeight *
+                    0.55
+                )
+              );
+
+            const optionY =
+              y +
+              height -
+              rowHeight *
+                (optionIndex +
+                  1) +
+              Math.max(
+                0,
+                (rowHeight -
+                  buttonSize) /
+                  2
+              );
+
+            radio.addOptionToPage(
+              option,
+              page,
+              {
+                x,
+                y: optionY,
+                width:
+                  buttonSize,
+                height:
+                  buttonSize,
+
+                borderColor:
+                  rgb(
+                    0.35,
+                    0.35,
+                    0.38
+                  ),
+
+                borderWidth: 1,
+
+                backgroundColor:
+                  rgb(
+                    1,
+                    1,
+                    1
+                  ),
+              }
+            );
+
+            page.drawText(
+              option,
+              {
+                x:
+                  x +
+                  buttonSize +
+                  5,
+
+                y:
+                  optionY +
+                  Math.max(
+                    0,
+                    buttonSize *
+                      0.15
+                  ),
+
+                size:
+                  Math.max(
+                    7,
+                    Math.min(
+                      11,
+                      buttonSize *
+                        0.7
+                    )
+                  ),
+
+                font:
+                  appearanceFont,
+
+                color:
+                  rgb(
+                    0,
+                    0,
+                    0
+                  ),
+              }
+            );
+          }
+        );
+
+        continue;
+      }
+
+      if (
+        fieldSpec.type ===
+        'signature'
+      ) {
+        /*
+         * Visual signature placeholder.
+         * NOT a certificate-based digital signature.
+         */
+        page.drawRectangle({
+          x,
+          y,
+          width,
+          height,
+
+          borderColor: rgb(
+            0.35,
+            0.35,
+            0.38
+          ),
+
+          borderWidth: 1,
+
+          color: rgb(
+            0.98,
+            0.98,
+            0.98
+          ),
+        });
+
+        const labelSize =
+          Math.max(
+            7,
+            Math.min(
+              11,
+              height *
+                0.23
+            )
+          );
+
+        page.drawText(
+          'Sign here',
+          {
+            x:
+              x + 6,
+
+            y:
+              y +
+              Math.max(
+                4,
+                (height -
+                  labelSize) /
+                  2
+              ),
+
+            size:
+              labelSize,
+
+            font:
+              appearanceFont,
+
+            color:
+              rgb(
+                0.45,
+                0.45,
+                0.48
+              ),
+          }
+        );
+      }
+    }
+
+    form.updateFieldAppearances(
+      appearanceFont
+    );
+  };
+
+  let pdfDoc =
+    await loadWorkingDocument();
+
+  try {
+    await applyFields(pdfDoc);
+
+    return await pdfDoc.save({
+      useObjectStreams: true,
+    });
+  } catch (error) {
+    /*
+     * One final safety path:
+     * readable PDF + unusual internals = rebuild locally.
+     */
+    console.warn(
+      'Rebuilding readable PDF for form compatibility:',
+      error
+    );
+
+    pdfDoc =
+      await rebuildFromRenderedPages();
+
+    await applyFields(pdfDoc);
+
+    return await pdfDoc.save({
+      useObjectStreams: true,
+    });
+  }
+}
+
 export interface GrayscaleOptions {
   mode: 'grayscale' | 'pure-bw';
   threshold?: number;

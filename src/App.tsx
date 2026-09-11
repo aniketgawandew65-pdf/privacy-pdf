@@ -82,6 +82,7 @@ const BatesNumbering = lazy(() => import('./components/BatesNumbering').then((m)
 const ComparePdf = lazy(() => import('./components/ComparePdf').then((m) => ({ default: m.ComparePdf })));
 const RepairPdf = lazy(() => import('./components/RepairPdf').then((m) => ({ default: m.RepairPdf })));
 
+const CreateFillablePdf = lazy(() => import('./components/CreateFillablePdf').then((m) => ({ default: m.CreateFillablePdf })));
 const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({ default: m.FillFormPdf })));
 const ScanToPdf = lazy(() => import('./components/ScanToPdf').then((m) => ({ default: m.ScanToPdf })));
 const ImageToPdf = lazy(() => import('./components/ImageToPdf'));
@@ -149,6 +150,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Text to PDF', path: '/text-to-pdf', category: 'convert', icon: Type },
   { name: 'AI Summary & Chat', path: '/ai-summary-pdf', category: 'convert', icon: Bot },
   { name: 'OCR Searchable', path: '/ocr-pdf', category: 'convert', icon: ScanText },
+  { name: 'Create Fillable PDF', path: '/create-fillable-pdf', category: 'convert', icon: FileCheck2 },
   { name: 'Fill & Flatten', path: '/fill-pdf', category: 'convert', icon: FileCheck2 },
   { name: 'Extract Images', path: '/extract-images', category: 'convert', icon: Images },
   { name: 'Dark Mode', path: '/dark-mode-pdf', category: 'convert', icon: Moon },
@@ -444,6 +446,7 @@ export default function App() {
               <Route path="/text-to-pdf" element={<TextToPdf />} />
               <Route path="/ai-summary-pdf" element={<AiSummaryPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/ocr-pdf" element={<OcrPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/create-fillable-pdf" element={<CreateFillablePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/fill-pdf" element={<FillFormPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/scan-to-pdf" element={<ScanToPdf />} />
               <Route path="/image-to-pdf" element={<ImageToPdf />} />
@@ -486,7 +489,7 @@ export default function App() {
 
       <footer className="site-footer">
         <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><NavLink to="/blog">PDF guides</NavLink></div>
-        <details className="footer-directory"><summary>Explore all 41 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
+        <details className="footer-directory"><summary>Explore all 42 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
         <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
       
         {isDevMode && (
