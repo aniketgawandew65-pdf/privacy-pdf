@@ -805,6 +805,40 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 </div>
               </div>
 
+              {/* Sign PDF Zoom Controls — Top Toolbar */}
+              <div className="flex justify-center sm:justify-end px-1">
+                <div className="flex items-center gap-1.5 bg-zinc-950 border border-zinc-800/80 px-2.5 py-1.5 rounded-lg shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
+                    disabled={zoomLevel <= 0.75}
+                    className="p-1.5 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                    title="Zoom Out (-)"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel(1.0)}
+                    className="text-xs font-mono font-medium text-zinc-300 hover:text-emerald-400 min-w-[52px] text-center transition cursor-pointer px-2 py-1 rounded hover:bg-zinc-800/60"
+                    title="Reset to 100%"
+                  >
+                    {Math.round(zoomLevel * 100)}%
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.min(2.5, parseFloat((z + 0.25).toFixed(2))))}
+                    disabled={zoomLevel >= 2.5}
+                    className="p-1.5 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
+                    title="Zoom In (+)"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
               {/* Document Surface & Zoom Viewport */}
               <div className="relative bg-zinc-950/80 rounded-xl border border-zinc-800 overflow-hidden shadow-inner">
                 {isLoadingPage && (
@@ -865,35 +899,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                   </div>
                 </div>
 
-                {/* Floating Zoom Bar Pinned to Bottom-Right */}
-                <div className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-700/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg shadow-2xl z-30">
-                  <button
-                    type="button"
-                    onClick={() => setZoomLevel((z) => Math.max(0.75, parseFloat((z - 0.25).toFixed(2))))}
-                    disabled={zoomLevel <= 0.75}
-                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
-                    title="Zoom Out (-)"
-                  >
-                    <ZoomOut className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setZoomLevel(1.0)}
-                    className="text-[11px] font-mono font-medium text-zinc-300 hover:text-emerald-400 min-w-[42px] text-center transition cursor-pointer px-1 py-0.5 rounded hover:bg-zinc-800/60"
-                    title="Reset to 100%"
-                  >
-                    {Math.round(zoomLevel * 100)}%
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setZoomLevel((z) => Math.min(2.5, parseFloat((z + 0.25).toFixed(2))))}
-                    disabled={zoomLevel >= 2.5}
-                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800 transition cursor-pointer"
-                    title="Zoom In (+)"
-                  >
-                    <ZoomIn className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+
               </div>
 
               <p className="text-[11px] text-zinc-500 text-center">
