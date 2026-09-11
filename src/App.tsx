@@ -481,7 +481,15 @@ export default function App() {
         <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><p>A little less friction. A little more privacy.</p></div>
         <details className="footer-directory"><summary>Explore all 39 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
         <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
-      </footer>
+      
+        {isDevMode && (
+          <div className="live-build-status">
+            <span className="live-build-dot" />
+            <span>Live Build: {__BUILD_TIME__}</span>
+          </div>
+        )}
+
+</footer>
       {isDraggingFile && <div className="drop-overlay"><Upload size={36} /><h2>Drop your PDF here</h2><p>Your file opens on this device.</p></div>}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
       <NetworkAuditDrawer isOpen={isAuditDrawerOpen} onClose={() => setIsAuditDrawerOpen(false)} />
