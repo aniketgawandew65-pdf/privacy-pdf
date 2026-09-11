@@ -60,7 +60,31 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will the JPG be smaller?', 'Not necessarily. HEIC is an efficient format, so the JPG may be larger. Conversion improves compatibility; compression is a separate step.'],
       ['Can I turn the photo into a PDF?', 'Yes. Convert to JPG first if needed, then open Image to PDF to arrange your photos into a document.']
     ], related: [['/compress-image','Reduce the JPG size'], ['/image-to-pdf','Turn photos into a PDF'], ['/pdf-to-jpg','Convert PDF pages into images']]
+  },
+  '/scan-to-pdf': {
+    title: 'How to scan documents into a PDF on your device',
+    intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
+    steps: [
+      'Use Scan with camera on a phone or tablet, or choose existing document photos from your device.',
+      'Rotate pages that are sideways and move pages up or down until the document is in the correct reading order.',
+      'Choose Original, Grayscale or B&W depending on the document, then create and download the PDF.'
+    ],
+    example: 'For a three-page signed form, photograph each page in order, rotate any sideways image, use Grayscale or B&W if the paper has uneven lighting, and check the downloaded PDF before submitting it.',
+    questions: [
+      ['Are my scanned documents uploaded?', 'No document-processing upload is required. The selected images are processed in your browser and assembled into the PDF on your device.'],
+      ['Can I scan multiple pages?', 'Yes. Add several camera captures or photos, then reorder them before creating the PDF.'],
+      ['What is the difference between Grayscale and B&W?', 'Grayscale removes colour while keeping shades of grey. B&W increases contrast more strongly and can work well for receipts and text documents, but always check the downloaded result for readability.'],
+      ['Can I use this on a computer?', 'Yes. On a computer you can choose existing document photos. Direct camera capture depends on the browser and device, so it is most useful on phones and tablets.'],
+      ['Does scanning automatically remove the background or straighten perspective?', 'This version converts and enhances the captured page but does not automatically detect document edges or correct perspective. Keep the document reasonably straight when taking the photo.']
+    ],
+    related: [
+      ['/image-to-pdf','Turn existing images into a PDF'],
+      ['/compress-pdf','Reduce the scanned PDF size'],
+      ['/ocr-pdf','Make scanned text searchable'],
+      ['/grayscale-pdf','Convert an existing PDF to grayscale']
+    ]
   }
+
 };
 
 export interface Article { slug: string; title: string; description: string; tool: string; toolLabel: string; sections: { title: string; paragraphs: string[] }[] }

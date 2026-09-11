@@ -40,6 +40,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Split PDF Documents',
     subheading: 'Separate individual pages or ranges locally on your device.',
   },
+  '/scan-to-pdf': {
+    path: '/scan-to-pdf',
+    title: 'Scan to PDF Online — Private Camera & Photo Scanner | 1into1',
+    description: 'Scan documents with your camera or photos and create a PDF directly in your browser. Rotate, reorder, use grayscale or B&W, and process files without uploading them.',
+    heading: 'Scan Documents to PDF',
+    subheading: 'Turn camera scans and photos into an ordered PDF directly on your device.',
+  },
   '/image-to-pdf': {
     path: '/image-to-pdf',
     title: 'Convert Images to PDF — JPG, PNG to PDF Locally',
