@@ -85,29 +85,6 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   }
 ,
-  '/create-fillable-pdf': {
-    title: 'How to turn a regular PDF into a fillable form',
-    intro: 'Place interactive fields on an existing PDF and create a reusable form directly in your browser. The document is processed locally on your device.',
-    steps: [
-      'Open the PDF and choose the page where a field belongs.',
-      'Add a text field, checkbox, dropdown, radio group, date field or signature placeholder, then drag and resize it into position.',
-      'Give each field a meaningful name, configure dropdown or radio options when needed, then create and download the fillable PDF.'
-    ],
-    example: 'For an application form, you might add text fields for name and email, a date field for the application date, a dropdown for department, radio choices for Yes or No, and a signature placeholder at the bottom.',
-    questions: [
-      ['Is the downloaded PDF actually fillable?', 'Yes. Text fields, checkboxes, dropdowns, radio groups and date fields are written as interactive PDF form fields rather than being flattened into page text.'],
-      ['Are my documents uploaded?', 'No document-processing upload is required. Field placement and PDF generation happen in your browser using local PDF processing.'],
-      ['What does the Signature field do?', 'It creates a visible signature placeholder, not a certificate-based cryptographic digital-signature field. Use the Sign PDF tool if you want to place a drawn signature afterward.'],
-      ['Can I add fields on several pages?', 'Yes. Move between pages and add fields wherever they are required. Fields placed on other pages are preserved while you continue editing.'],
-      ['Can I resize fields on a phone?', 'Yes. The editor uses pointer controls that work with mouse, touch and supported styluses. For precise placement on a small screen, zooming the browser or using landscape orientation can help.']
-    ],
-    related: [
-      ['/fill-pdf','Fill and flatten an existing PDF form'],
-      ['/sign-pdf','Place a drawn signature'],
-      ['/edit-pdf','Add or replace visible PDF text'],
-      ['/protect-pdf','Password-protect the finished form']
-    ]
-  }
 
 };
 

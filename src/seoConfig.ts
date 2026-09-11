@@ -166,13 +166,6 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Crop PDF Margins',
     subheading: 'Trim margins and unwanted borders visually while keeping 100% crisp vector text.',
   },
-  '/create-fillable-pdf': {
-    path: '/create-fillable-pdf',
-    title: 'Create Fillable PDF Online — Add Form Fields Privately | 1into1',
-    description: 'Turn a regular PDF into a fillable form directly in your browser. Add text fields, checkboxes, dropdowns, radio options, date fields and signature placeholders without uploading your PDF.',
-    heading: 'Create a Fillable PDF Form',
-    subheading: 'Add interactive form fields visually and download a fillable PDF without sending the document to a processing server.',
-  },
   '/fill-pdf': {
     path: '/fill-pdf',
     title: 'Fill & Flatten PDF Forms Online Free — 100% In-Browser',
