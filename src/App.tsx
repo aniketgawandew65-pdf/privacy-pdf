@@ -57,6 +57,8 @@ import {
   Receipt,
 } from 'lucide-react';
 
+declare const __BUILD_TIME__: string;
+
 const Compressor = lazy(() => import('./components/Compressor').then((m) => ({ default: m.Compressor })));
 const Merger = lazy(() => import('./components/Merger').then((m) => ({ default: m.Merger })));
 const Splitter = lazy(() => import('./components/Splitter').then((m) => ({ default: m.Splitter })));
