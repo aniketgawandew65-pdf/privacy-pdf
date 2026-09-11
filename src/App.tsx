@@ -368,7 +368,7 @@ export default function App() {
       <main className="site-main">
         <section className={`page-intro ${isHome ? 'home-intro' : ''}`}>
           <div className="eyebrow"><ShieldCheck size={14} /> YOUR FILES. YOUR DEVICE.</div>
-          <h1>{isHome ? <>Small tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
+          <h1>{isHome ? <>All tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
           <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
           <div className="trust-points" aria-label="Local PDF tool benefits">
             <span><Zap size={14} />Lightning fast</span>
