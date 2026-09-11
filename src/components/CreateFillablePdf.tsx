@@ -61,26 +61,38 @@ const defaultSize = (
   switch (type) {
     case 'checkbox':
       return {
-        width: 0.06,
-        height: 0.045,
+        width: 0.075,
+        height: 0.06,
       };
 
     case 'radio':
       return {
-        width: 0.24,
-        height: 0.13,
+        width: 0.30,
+        height: 0.16,
       };
 
     case 'signature':
       return {
-        width: 0.3,
-        height: 0.08,
+        width: 0.34,
+        height: 0.09,
+      };
+
+    case 'dropdown':
+      return {
+        width: 0.34,
+        height: 0.065,
+      };
+
+    case 'date':
+      return {
+        width: 0.30,
+        height: 0.06,
       };
 
     default:
       return {
-        width: 0.28,
-        height: 0.045,
+        width: 0.32,
+        height: 0.06,
       };
   }
 };
