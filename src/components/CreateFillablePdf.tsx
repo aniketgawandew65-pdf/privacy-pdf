@@ -1245,6 +1245,10 @@ export const CreateFillablePdf: React.FC<
             Drag fields to position them. Drag the corner handles to resize. Fields on other pages are preserved.
           </div>
 
+          <div className="rounded-xl border border-amber-300/40 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+            Interactive form fields work best on desktop PDF viewers or Adobe Acrobat. Built-in mobile PDF viewers may not support every field type.
+          </div>
+
           {error && (
             <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-3 flex items-start gap-2 text-xs text-red-300">
               <AlertCircle className="w-4 h-4 shrink-0" />
