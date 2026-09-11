@@ -136,16 +136,6 @@ async function processPage(
     ctx.scale(-1, 1);
   }
 
-  if (mode === 'grayscale') {
-    ctx.filter =
-      'grayscale(1) contrast(1.08)';
-  }
-
-  if (mode === 'bw') {
-    ctx.filter =
-      'grayscale(1) contrast(1.55) brightness(1.08)';
-  }
-
   ctx.drawImage(
     img,
     -img.naturalWidth / 2,
@@ -153,6 +143,64 @@ async function processPage(
   );
 
   ctx.restore();
+
+  /*
+   * IMPORTANT:
+   * Do not use ctx.filter for exported scans.
+   * Canvas filters are inconsistent on mobile Safari/iOS.
+   *
+   * Instead, modify the actual pixels so Grayscale and B&W
+   * are permanently written into the JPEG before PDF creation.
+   * This works across iOS, Android and desktop browsers.
+   */
+  if (mode !== 'original') {
+    const imageData = ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const red = data[i];
+      const green = data[i + 1];
+      const blue = data[i + 2];
+
+      // Perceptual luminance
+      const luminance =
+        0.299 * red +
+        0.587 * green +
+        0.114 * blue;
+
+      if (mode === 'grayscale') {
+        // Slight contrast enhancement for document readability
+        const contrasted =
+          (luminance - 128) * 1.08 + 128;
+
+        const gray = Math.max(
+          0,
+          Math.min(255, Math.round(contrasted))
+        );
+
+        data[i] = gray;
+        data[i + 1] = gray;
+        data[i + 2] = gray;
+      } else {
+        // High-contrast true black & white
+        const threshold = 165;
+        const bw =
+          luminance >= threshold ? 255 : 0;
+
+        data[i] = bw;
+        data[i + 1] = bw;
+        data[i + 2] = bw;
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  }
 
   const blob = await new Promise<Blob>(
     (resolve, reject) => {
