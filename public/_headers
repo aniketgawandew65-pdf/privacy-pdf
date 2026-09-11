@@ -4,3 +4,17 @@
 /pdf.worker.min.js
   Content-Type: application/javascript; charset=utf-8
   Access-Control-Allow-Origin: *
+
+# === 1into1 PWA UPDATE RULES ===
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -18,7 +18,7 @@ export default defineConfig({
     tailwindcss(),
     react(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       injectRegister: null,
       includeAssets: ['logo.png', 'robots.txt'],
       manifest: {
@@ -43,11 +43,12 @@ export default defineConfig({
         ],
       },
       workbox: {
+        navigateFallback: null,
         // Exclude HTML from precache so browsers ALWAYS fetch the latest index.html
-        globPatterns: ['**/*.{html,js,css,ico,png,svg,wasm,mjs}'],
+        globPatterns: ['**/*.{js,css,ico,png,svg,wasm,mjs}'],
         globIgnores: ['tessdata/**'],
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        skipWaiting: false,
+        skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
