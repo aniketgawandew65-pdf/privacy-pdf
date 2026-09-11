@@ -186,17 +186,6 @@ export default function App() {
   const isDevMode = proRequested;
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-
-    if (
-      !import.meta.env.DEV &&
-      location.pathname === '/' &&
-      params.get('pro') === 'true'
-    ) {
-      window.location.replace('/admin?pro=true');
-    }
-  }, [location.pathname, location.search]);
 
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [search, setSearch] = useState('');

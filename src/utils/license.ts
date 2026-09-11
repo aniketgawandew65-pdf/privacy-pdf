@@ -10,12 +10,10 @@ const OFFLINE_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
 export interface StoredLicense { key: string; payload: LicensePayload; verifiedAt: string; instanceId?: string; productId?: number; variantId?: number; provider?: 'lemon' | 'signed'; }
 let verified: StoredLicense | null = null;
 let generation = 0;
-const proRequested = new URLSearchParams(window.location.search).get('pro') === 'true';
-const protectedAdminRoute = window.location.pathname === '/admin' && proRequested;
+const proRequested =
+  new URLSearchParams(window.location.search).get('pro') === 'true';
 
-let devEnabled =
-  (import.meta.env.DEV && proRequested) ||
-  protectedAdminRoute;
+let devEnabled = proRequested;
 function emit() { window.dispatchEvent(new Event('storage')); }
 function readStored(): StoredLicense | null { try { return JSON.parse(safeStorage.getItem(LICENSE_STORAGE_KEY) || 'null'); } catch { return null; } }
 function unexpired(record: StoredLicense) {
