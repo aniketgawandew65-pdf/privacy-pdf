@@ -49,6 +49,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'PDF to High-Res JPG',
     subheading: 'Export each PDF page as an image directly in your browser session.',
   },
+  '/compress-image': {
+    path: '/compress-image',
+    title: 'Compress Image Online Privately — JPG, PNG, WebP & HEIC | 1into1',
+    description: 'Compress JPG, PNG, WebP, HEIC and other common images to a target file size directly in your browser. Optional EXIF, GPS and camera metadata removal with zero server uploads.',
+    heading: 'Compress Images Without Uploading Them',
+    subheading: 'Reduce image file size locally, choose a target KB size, and optionally remove EXIF, GPS and camera metadata.',
+  },
   '/heic-to-jpg': {
     path: '/heic-to-jpg',
     title: 'HEIC to JPG Converter Online & Private (EXIF Stripped) | 1into1',

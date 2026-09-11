@@ -85,6 +85,7 @@ const FillFormPdf = lazy(() => import('./components/FillFormPdf').then((m) => ({
 const ImageToPdf = lazy(() => import('./components/ImageToPdf'));
 const TextToPdf = lazy(() => import('./components/TextToPdf').then((m) => ({ default: m.TextToPdf })));
 const PdfToImages = lazy(() => import('./components/PdfToImages').then((m) => ({ default: m.PdfToImages })));
+const CompressImage = lazy(() => import('./components/CompressImage').then((m) => ({ default: m.CompressImage })));
 const HeicToJpg = lazy(() => import('./components/HeicToJpg').then((m) => ({ default: m.HeicToJpg })));
 const ExtractImages = lazy(() => import('./components/ExtractImages').then((m) => ({ default: m.ExtractImages })));
 const PdfToText = lazy(() => import('./components/PdfToText').then((m) => ({ default: m.PdfToText })));
@@ -153,6 +154,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Image to PDF', path: '/image-to-pdf', category: 'convert', icon: ImageIcon },
   { name: 'PDF to JPG', path: '/pdf-to-jpg', category: 'convert', icon: FileImage },
   { name: 'HEIC to JPG', path: '/heic-to-jpg', category: 'convert', icon: Camera },
+  { name: 'Compress Image', path: '/compress-image', category: 'convert', icon: ImageIcon },
   { name: 'PDF to Text', path: '/pdf-to-text', category: 'convert', icon: AlignLeft },
   { name: 'Edit Metadata', path: '/edit-metadata', category: 'convert', icon: Tag },
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
@@ -438,6 +440,7 @@ export default function App() {
               <Route path="/image-to-pdf" element={<ImageToPdf />} />
               <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/heic-to-jpg" element={<HeicToJpg />} />
+              <Route path="/compress-image" element={<CompressImage />} />
               <Route path="/extract-images" element={<ExtractImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-text" element={<PdfToText file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/grayscale-pdf" element={<GrayscalePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
@@ -470,7 +473,7 @@ export default function App() {
 
       <footer className="site-footer">
         <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><p>A little less friction. A little more privacy.</p></div>
-        <details className="footer-directory"><summary>Explore all 39 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
+        <details className="footer-directory"><summary>Explore all 40 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
         <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
       
         {isDevMode && (
