@@ -372,7 +372,7 @@ export default function App() {
           <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
           <div className="trust-points" aria-label="Local PDF tool benefits">
             <span><Zap size={14} />Lightning fast</span>
-            <span><WifiOff size={14} />No internet needed*</span>
+            <span><WifiOff size={14} />No internet needed</span>
             <span><ShieldCheck size={14} />100% private*</span>
             <span><UserRoundCheck size={14} />No signup</span>
           </div>
