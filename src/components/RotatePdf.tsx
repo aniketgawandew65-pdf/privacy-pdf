@@ -47,7 +47,7 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
     (async () => {
       try {
         const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer).slice() }).promise;
+        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
         const page = await pdf.getPage(1);
 
         const dpr = Math.max(window.devicePixelRatio || 1, 2.0);

@@ -8,25 +8,25 @@ export default defineConfig({
     tailwindcss(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      includeAssets: ['favicon.ico', 'logo.png', 'robots.txt', 'tessdata/*'],
+      registerType: 'prompt',
+      injectRegister: null,
+      includeAssets: ['logo.png', 'robots.txt'],
       manifest: {
         name: '1into1 PDF - Offline Privacy Suite',
         short_name: '1into1 PDF',
         description: 'Zero-upload, 100% in-browser PDF suite that works offline.',
-        theme_color: '#09090b',
-        background_color: '#09090b',
+        theme_color: '#fafaf9',
+        background_color: '#fafaf9',
         display: 'standalone',
         orientation: 'portrait-primary',
         icons: [
           {
-            src: '/logo.png',
+            src: '/pwa-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/logo.png',
+            src: '/pwa-512.png',
             sizes: '512x512',
             type: 'image/png',
           },
@@ -34,9 +34,10 @@ export default defineConfig({
       },
       workbox: {
         // Exclude HTML from precache so browsers ALWAYS fetch the latest index.html
-        globPatterns: ['**/*.{js,css,ico,png,svg,wasm,mjs,gz,traineddata}'],
+        globPatterns: ['**/*.{html,js,css,ico,png,svg,wasm,mjs}'],
+        globIgnores: ['tessdata/**'],
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        skipWaiting: true,
+        skipWaiting: false,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
@@ -59,7 +60,7 @@ export default defineConfig({
             options: {
               cacheName: 'tesseract-offline-data',
               expiration: {
-                maxEntries: 5,
+                maxEntries: 12,
                 maxAgeSeconds: 60 * 60 * 24 * 90,
               },
               cacheableResponse: {

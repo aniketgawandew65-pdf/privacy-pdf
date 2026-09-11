@@ -67,7 +67,7 @@ export const ComparePdf: React.FC = () => {
       try {
         setErrorMessage(null);
         const buffer = await fileA.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
         setPdfDocA(doc);
         setPageCountA(doc.numPages);
@@ -95,7 +95,7 @@ export const ComparePdf: React.FC = () => {
       try {
         setErrorMessage(null);
         const buffer = await fileB.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
         setPdfDocB(doc);
         setPageCountB(doc.numPages);

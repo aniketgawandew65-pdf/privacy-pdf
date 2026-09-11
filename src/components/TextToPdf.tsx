@@ -1,3 +1,5 @@
+import { sanitizeRichHtml } from '../utils/sanitizeHtml';
+import { safeStorage } from '../utils/safeStorage';
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Download,
@@ -76,11 +78,11 @@ export const TextToPdf: React.FC<any> = () => {
   // 1. Auto-restore draft from localStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = safeStorage.getItem(STORAGE_KEY);
       if (saved && saved.trim()) {
-        setContent(saved);
+        setContent(sanitizeRichHtml(saved));
         if (editorRef.current) {
-          editorRef.current.innerHTML = saved;
+          editorRef.current.innerHTML = sanitizeRichHtml(saved);
           setCharCount(editorRef.current.innerText.trim().length);
         }
       }
@@ -112,7 +114,7 @@ export const TextToPdf: React.FC<any> = () => {
       return;
     }
 
-    const cleanHtml = rawHtml
+    const cleanHtml = sanitizeRichHtml(rawHtml)
       .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
       .replace(/✂/g, "");
 
@@ -201,12 +203,12 @@ export const TextToPdf: React.FC<any> = () => {
   // 5. Instant 0ms synchronization + auto-save
   const syncContent = () => {
     if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML;
+    const html = sanitizeRichHtml(editorRef.current.innerHTML);
     setContent(html);
     setCharCount(editorRef.current.innerText.trim().length);
     setDownloadUrl(null);
     try {
-      localStorage.setItem(STORAGE_KEY, html);
+      safeStorage.setItem(STORAGE_KEY, html);
     } catch (_) {}
     paginateDocument(html, selectedFont, fontSize);
   };
@@ -302,7 +304,7 @@ export const TextToPdf: React.FC<any> = () => {
       setDownloadUrl(null);
       setPagesHtml([""]);
       try {
-        localStorage.removeItem(STORAGE_KEY);
+        safeStorage.removeItem(STORAGE_KEY);
       } catch (_) {}
     }
   };
@@ -722,6 +724,7 @@ export const TextToPdf: React.FC<any> = () => {
           </button>
         </div>
 
+        <p className="text-xs text-zinc-400">Your draft is saved in this browser. Clear the document to remove the saved draft.</p>
         {/* Input Editor */}
         <div className="relative w-full rounded-xl overflow-hidden bg-white shadow-inner">
           <div
@@ -729,8 +732,14 @@ export const TextToPdf: React.FC<any> = () => {
             contentEditable={true}
             onInput={syncContent}
             onKeyUp={syncContent}
-            onPaste={() => setTimeout(syncContent, 0)}
-            style={{ fontFamily: selectedFont }}
+            onPaste={(event) => {
+              event.preventDefault();
+              const rich = event.clipboardData.getData('text/html');
+              if (rich) document.execCommand('insertHTML', false, sanitizeRichHtml(rich));
+              else document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+              syncContent();
+            }}
+            style={{ fontFamily: selectedFont, color: "#18181b" }}
             data-placeholder="Start typing your document here..."
             className="relative z-0 w-full min-h-[360px] max-h-[540px] overflow-y-auto text-zinc-900 p-8 sm:p-12 focus:outline-none text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
           />

@@ -57,7 +57,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     (async () => {
       try {
         const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
 
         setTotalPages(pdf.numPages);

@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef, useMemo, type DragEvent } from 'react';
 import {
   Upload,
@@ -34,8 +35,10 @@ const MAX_FREE_BYTES = 25 * 1024 * 1024;
 const MAX_PRO_BYTES = 150 * 1024 * 1024;
 
 export function Compressor({ file, onFileChange }: CompressorProps) {
+  const { pathname } = useLocation();
+  const routeTarget = Number(pathname.match(/compress-pdf-to-(\d+)kb/)?.[1]) || null;
   const [level, setLevel] = useState<CompressionLevel>('target');
-  const [targetKb, setTargetKb] = useState(100);
+  const [targetKb, setTargetKb] = useState(routeTarget || 100);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
@@ -85,7 +88,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             Math.max(50, Math.round(pages * 75)),
             Math.max(50, Math.round(origKb * 0.85))
           );
-          setTargetKb(balancedDefault);
+          setTargetKb(routeTarget || balancedDefault);
         }
       })
       .catch(() => {
@@ -94,7 +97,9 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     return () => {
       isMounted = false;
     };
-  }, [file]);
+  }, [file, routeTarget]);
+
+  useEffect(() => { if (routeTarget) { setTargetKb(routeTarget); setLevel('target'); } }, [routeTarget]);
 
   const originalSizeKb = useMemo(() => (file ? Math.round(file.size / 1024) : 0), [file]);
 
@@ -195,8 +200,8 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const initiateBatch = (files: File[]) => {
     revokeZipUrl();
     const tasks: BatchTask<{ file: File; level: CompressionLevel; targetKb: number }, Blob>[] =
-      files.map((f) => ({
-        id: f.name,
+      files.map((f, index) => ({
+        id: `${index + 1}_${f.name}`,
         input: { file: f, level, targetKb },
         run: async (input, signal) => {
           if (signal.aborted) throw new Error('Task aborted');
@@ -453,7 +458,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             }`}
           >
             <p className="text-xs font-semibold">Standard</p>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Lossless vector cleanup</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Balanced image compression</p>
           </button>
         </div>
 

@@ -19,7 +19,7 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 
 // PDF.js worker setup
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 interface CropArea {
   x: number;
@@ -76,7 +76,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         setError(null);
         setDownloadUrl(null);
         const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: arrayBuffer });
         const doc = await loadingTask.promise;
         if (!isMounted) return;
         setPdfDoc(doc);
@@ -361,7 +361,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
       // Pipeline 2: High-speed decrypted canvas pipeline for locked receipts
       if (needsDecryptedRender) {
-        const loadingTask = pdfjsLib.getDocument({
+        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
           data: new Uint8Array(arrayBuffer),
           stopAtErrors: false,
         });

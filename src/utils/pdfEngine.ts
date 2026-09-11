@@ -1,3 +1,4 @@
+import { sanitizeRichHtml } from './sanitizeHtml';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -145,7 +146,7 @@ export async function mergePDFs(files: File[]): Promise<Uint8Array> {
     } catch (err) {
       console.warn(`Vector merge bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-      const loadingTask = pdfjsLib.getDocument({
+      const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
         data: uint8.slice(),
         stopAtErrors: false,
       });
@@ -181,7 +182,7 @@ export async function compressPDFToTarget(
     return new Uint8Array(fileBytes);
   }
 
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -295,7 +296,7 @@ export async function rotatePDF(
   // If the document has internal encryption, pdf-lib cannot re-encrypt or save
   // vector streams without corruption. Route through the clean rendering path.
   if (isEncrypted) {
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
     const pdf = await loadingTask.promise;
     const totalPages = pdf.numPages;
     const newPdfDoc = await PDFDocument.create();
@@ -359,7 +360,7 @@ export async function rotatePDF(
 
 export async function pdfToImages(file: File): Promise<string[]> {
   const fileBytes = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
   const pdfDoc = await loadingTask.promise;
   const imageUrls: string[] = [];
 
@@ -469,7 +470,7 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
 
   // 2. High-Res Visual Pipeline (The exact engine that works in Compressor)
   // Renders all bank transactions, stamps, barcodes, and logos at 2.0x Retina resolution
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     stopAtErrors: false,
   });
@@ -545,7 +546,7 @@ export async function splitPdfToZip(
   }
 
   // Visual Fallback
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     stopAtErrors: false,
   });
@@ -619,7 +620,7 @@ export async function removePagesFromPDF(
   } catch (err) {
     console.warn(`Vector removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-    const loadingTask = pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
       data: uint8.slice(),
       stopAtErrors: false,
     });
@@ -654,7 +655,7 @@ export async function getPDFPageCount(file: File): Promise<number> {
     const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
     return pdfDoc.getPageCount();
   } catch {
-    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes).slice() }).promise;
+    const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(bytes).slice() }).promise;
     return doc.numPages;
   }
 }
@@ -679,7 +680,7 @@ export async function addWatermarkToPDF(
   const bytes = await file.arrayBuffer();
   const uint8 = new Uint8Array(bytes);
 
-  const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
   const newPdfDoc = await PDFDocument.create();
@@ -863,7 +864,7 @@ export async function addPageNumbersToPDF(
   // =========================================================================
   // PATH B: Encrypted Bank Statements & Scanned Agreements (Universal Reconstruction)
   // =========================================================================
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: new Uint8Array(arrayBuffer.slice(0)),
   });
   const pdf = await loadingTask.promise;
@@ -952,7 +953,7 @@ export async function extractTextFromPDF(
   onProgress?: (status: string) => void
 ): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -1036,7 +1037,7 @@ export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
 
   try {
     // Read directly via pdfjsLib which reads info on ALL PDFs (even bank statements)
-    const loadingTask = pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
       data: new Uint8Array(arrayBuffer.slice(0)),
     });
     const pdf = await loadingTask.promise;
@@ -1131,7 +1132,7 @@ export async function signPDF(
 
   // 1. Decryption & High-Res Rendering Path (for protected or complex documents)
   if (password || isComplexOrProtectedPdf(uint8)) {
-    const loadingTask = pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
       data: uint8.slice(),
       password: password || undefined,
       stopAtErrors: false,
@@ -1219,7 +1220,7 @@ export async function signPDF(
     return await pdfDoc.save({ useObjectStreams: false });
   } catch (err) {
     console.warn('Native vector sign fallback to visual engine:', err);
-    const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
     const fallbackDoc = await loadingTask.promise;
     const newPdfDoc = await PDFDocument.create();
     const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
@@ -1257,7 +1258,7 @@ export async function encryptPDF(
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() }).promise;
+  const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() }).promise;
   const numPages = pdf.numPages;
 
   let doc: jsPDF | null = null;
@@ -1328,7 +1329,7 @@ export async function unlockPDF(
   const uint8 = new Uint8Array(arrayBuffer);
 
   // 1. Authenticate and decrypt stream via pdfjsLib
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     password,
   });
@@ -1401,7 +1402,7 @@ export async function compressPDF(
 
   // 2. Universal PDF.js Engine (Handles any government, signed, scanned, or registered PDF)
   // ✅ To this:
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: new Uint8Array(rawBytes.slice(0)),
     stopAtErrors: false,
   });
@@ -1565,7 +1566,7 @@ export async function reorderAndProcessPDF(
   } catch (err) {
     console.warn(`Vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
 
-    const loadingTask = pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
       data: uint8.slice(),
       stopAtErrors: false,
     });
@@ -1643,7 +1644,7 @@ export async function redactPDF(
   onProgress?: (current: number, total: number) => void
 ): Promise<Uint8Array> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
   const sourcePdf = await loadingTask.promise;
   const totalPages = sourcePdf.numPages;
 
@@ -1730,7 +1731,7 @@ export async function cropPDF(
   const firstBox = pageBoxes[1] || Object.values(pageBoxes)[0];
 
   if (isEncrypted) {
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
     const pdf = await loadingTask.promise;
     const totalPages = pdf.numPages;
     const newPdfDoc = await PDFDocument.create();
@@ -1873,7 +1874,7 @@ export async function convertToGrayscalePDF(
 ): Promise<Uint8Array> {
   const { mode = 'grayscale', threshold = 135, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -2038,7 +2039,7 @@ export async function resizePDF(
   }
 
   // 2. High-Res Rendering Fallback (decrypts and resizes bank statements & legal forms)
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     stopAtErrors: false,
   });
@@ -2193,7 +2194,7 @@ export async function createNUpPDF(
   }
 
   // 2. High-Res Rendering Fallback (decrypts and arranges bank statements & legal forms)
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     stopAtErrors: false,
   });
@@ -2289,7 +2290,7 @@ export async function addBatesNumberingToPDF(
   const position = options.position || 'bottom-right';
 
   // 1. Analyze PDF structure with pdfjs to determine the document profile
-  const loadingTask = pdfjsLib.getDocument({ data: uint8.slice(), stopAtErrors: false });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
 
@@ -2467,7 +2468,7 @@ export async function extractImagesFromPDF(
   onProgress?: (current: number, total: number) => void
 ): Promise<ExtractedImage[]> {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
   const images: ExtractedImage[] = [];
@@ -2675,7 +2676,7 @@ export async function ocrPDFToSearchable(
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const pdfJsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+    const pdfJsDoc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
     const pdfLibDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     const helveticaFont = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
 
@@ -2822,7 +2823,7 @@ export async function repairPDF(
   }
 
   onProgress?.('Extracting raw page streams via salvage worker...');
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: new Uint8Array(arrayBuffer).slice(),
     stopAtErrors: false,
   });
@@ -2903,7 +2904,7 @@ export async function invertPDF(
 ): Promise<Uint8Array> {
   const { filter = 'invert', onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -3106,7 +3107,7 @@ export async function createBookletPDF(
   }
 
   // 2. High-Res Rendering Fallback (decrypts bank statements, signed docs, and rent agreements)
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: uint8.slice(),
     stopAtErrors: false,
   });
@@ -3273,7 +3274,7 @@ export async function deskewPDF(
 ): Promise<Uint8Array> {
   const { angle = 0, onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer).slice() });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -3372,7 +3373,7 @@ export async function extractTableFromPDF(
 ): Promise<ExtractedTableResult> {
   const { yTolerance = 4, minColumnGap = 12, delimiter = ',', onProgress } = options;
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -3658,7 +3659,7 @@ export async function extractMarkdownFromPDF(
   } = options;
 
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdfDoc = await loadingTask.promise;
   const totalPages = pdfDoc.numPages;
 
@@ -4325,7 +4326,7 @@ export async function applyVisualOverlays(
   // =========================================================================
   // PATH B: Universal Canvas Reconstruction (For Encrypted Bank Statements)
   // =========================================================================
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
   const pdf = await loadingTask.promise;
   const reconstructedDoc = await PDFDocument.create();
 
@@ -4843,7 +4844,7 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
   // 794px is exact standard 96-DPI A4 width
   const renderWidthPx = isReceipt ? 340 : isLandscape ? 1123 : 794;
-  const sanitizedHtml = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  const sanitizedHtml = sanitizeRichHtml(html);
 
   // Strict 1:1 Document Flow CSS (No flex, no squishing, full-width coverage)
   const NORMALIZATION_CSS = `

@@ -22,7 +22,7 @@ export class HardwareWorkerPool<TInput, TOutput> {
   constructor(customConcurrency?: number) {
     const detectedCores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
     // Leave at least 1 core free for UI rendering thread
-    this.maxConcurrency = customConcurrency || Math.max(1, Math.min(detectedCores - 1, 8));
+    this.maxConcurrency = customConcurrency || Math.max(1, Math.min(detectedCores - 1, 2));
   }
 
   public setListener(listener: (status: TaskProgress<TOutput>) => void) {
@@ -40,8 +40,8 @@ export class HardwareWorkerPool<TInput, TOutput> {
 
   public cancelAll() {
     this.abortController.abort();
+    this.queue.forEach(task => this.onTaskUpdate?.({ id: task.id, status: 'aborted' }));
     this.queue = [];
-    this.activeCount = 0;
   }
 
   private async processNext() {
@@ -56,16 +56,19 @@ export class HardwareWorkerPool<TInput, TOutput> {
     const task = this.queue.shift();
     if (!task) return;
 
+    const signal = this.abortController.signal;
     this.activeCount++;
     this.onTaskUpdate?.({ id: task.id, status: 'processing' });
 
     try {
-      const result = await task.run(task.input, this.abortController.signal);
-      if (!this.abortController.signal.aborted) {
+      const result = await task.run(task.input, signal);
+      if (!signal.aborted) {
         this.onTaskUpdate?.({ id: task.id, status: 'completed', result });
+      } else {
+        this.onTaskUpdate?.({ id: task.id, status: 'aborted' });
       }
     } catch (err: any) {
-      if (this.abortController.signal.aborted) {
+      if (signal.aborted) {
         this.onTaskUpdate?.({ id: task.id, status: 'aborted' });
       } else {
         this.onTaskUpdate?.({

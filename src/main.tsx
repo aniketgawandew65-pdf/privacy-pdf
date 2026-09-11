@@ -1,3 +1,4 @@
+import { refreshLicense } from './utils/license';
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -10,16 +11,12 @@ if (typeof window !== "undefined") {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 }
 
-if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-    navigator.serviceWorker.getRegistrations().then(regs => {
-      for (const reg of regs) reg.unregister();
-    });
-    caches.keys().then(keys => {
-      for (const k of keys) caches.delete(k);
-    });
-  }
-  // @ts-ignore
-  void registerSW;
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  registerSW({ immediate: true });
+}
+
+void refreshLicense();
+window.addEventListener('online', () => { void refreshLicense(); });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

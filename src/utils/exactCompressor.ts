@@ -3,7 +3,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 try {
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
   }
 } catch (_) {}
 
@@ -23,7 +23,7 @@ export interface CompressOptions {
 
 export async function getPDFPageCount(file: File): Promise<number> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer) }).promise;
   const count = pdf.numPages;
   if (typeof (pdf as any).destroy === 'function') {
     (pdf as any).destroy();
@@ -52,12 +52,16 @@ export async function compressPDF(
   }
 
   const rawBytes = await file.arrayBuffer();
+  if (level === 'target' && (!Number.isFinite(targetKb) || !targetKb || targetKb <= 0)) {
+    throw new Error('Choose a valid target size in KB.');
+  }
 
-  const loadingTask = pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
     data: new Uint8Array(rawBytes),
     stopAtErrors: false,
   });
   const pdf = await loadingTask.promise;
+  try {
   const totalPages = pdf.numPages;
 
   const targetBytes = (level === 'extreme'
@@ -178,7 +182,7 @@ export async function compressPDF(
     }
 
     if (!validBlob || validBlob.size === 0) {
-      validBlob = new Blob([new Uint8Array(100)], { type: 'image/jpeg' });
+      throw new Error('This device could not render a PDF page. Try a smaller document.');
     }
 
     const imageBytes = await validBlob.arrayBuffer();
@@ -193,6 +197,9 @@ export async function compressPDF(
   }
 
   let outputBytes: Uint8Array = await newPdfDoc.save({ useObjectStreams: false });
+  if (level === 'target' && outputBytes.byteLength > targetBytes) {
+    throw new Error(`This PDF cannot fit within ${targetKb} KB at the current settings. Choose a larger target size.`);
+  }
 
   if (level === 'target' && targetBytes && outputBytes.byteLength < targetBytes) {
     const diff = targetBytes - outputBytes.byteLength;
@@ -212,4 +219,7 @@ export async function compressPDF(
   }
 
   return outputBytes;
+  } finally {
+    await pdf.destroy();
+  }
 }

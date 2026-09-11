@@ -101,7 +101,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     (async () => {
       try {
         const fileBytes = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBytes).slice() });
+        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
         const pdf = await loadingTask.promise;
         if (!isMounted) return;
 

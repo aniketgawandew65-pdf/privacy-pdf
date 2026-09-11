@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
-import { TrustBadge } from './components/TrustBadge';
 import { ProModal } from './components/ProModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLicenseStatus } from './utils/license';
 import { TOOLS_METADATA } from './seoConfig';
+import { TOOL_COPY } from './toolCopy';
 import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
 import {
   Sliders,
@@ -23,7 +23,14 @@ import {
   PenTool,
   Lock,
   Unlock,
-  Sparkles,
+  Search,
+  ArrowRight,
+  ChevronDown,
+  ShieldCheck,
+  Zap,
+  WifiOff,
+  UserRoundCheck,
+  X,
   Camera,
   Loader2,
   LayoutGrid,
@@ -48,7 +55,6 @@ import {
   FileEdit,
   Code2,
   Receipt,
-  Zap,
 } from 'lucide-react';
 
 const Compressor = lazy(() => import('./components/Compressor').then((m) => ({ default: m.Compressor })));
@@ -109,7 +115,7 @@ interface NavTool {
   name: string;
   path: string;
   category: 'organize' | 'security' | 'convert';
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; size?: number }>;
 }
 
 const TOOLS_LIST: NavTool[] = [
@@ -165,25 +171,6 @@ function ToolFallback() {
   );
 }
 
-interface WorkflowItem {
-  title: string;
-  path: string;
-  tag: string;
-}
-
-const WORKFLOW_CAPABILITIES: WorkflowItem[] = [
-  { title: "Offline PDF Redaction & Sanitization", path: "/offline-pdf-redaction", tag: "Security" },
-  { title: "In-Browser Word to Vector PDF", path: "/text-to-pdf", tag: "Convert" },
-  { title: "Zero-Upload Client-Side Compression", path: "/compress-pdf", tag: "Size" },
-  { title: "Air-Gapped Multi-Document Merge", path: "/merge-pdf", tag: "Organize" },
-  { title: "Private OCR & Document Text Extraction", path: "/ocr-pdf", tag: "AI / OCR" },
-  { title: "Client-Side Page Split & Reorganizer", path: "/split-pdf", tag: "Pages" },
-  { title: "In-Memory PDF Crop & Deskew", path: "/crop-pdf", tag: "Visual" },
-  { title: "Bank Statement to Excel Converter", path: "/bank-statement-to-excel", tag: "Finance" },
-  { title: "Local PDF Password & Encryption Shield", path: "/protect-pdf", tag: "Protect" },
-  { title: "Zero-Server Booklet & N-Up Imposition", path: "/booklet-pdf", tag: "Print" },
-];
-
 export default function App() {
   const location = useLocation();
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
@@ -191,17 +178,11 @@ export default function App() {
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
-  const isDevMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('pro') === 'true';
+  const isDevMode = import.meta.env.DEV && new URLSearchParams(location.search).get('pro') === 'true';
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
-  const [activeWorkflows, setActiveWorkflows] = useState<WorkflowItem[]>(() => {
-    return [...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6);
-  });
-  
-
-  useEffect(() => {
-    setActiveWorkflows([...WORKFLOW_CAPABILITIES].sort(() => 0.5 - Math.random()).slice(0, 6));
-  }, []);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const dragCounter = useRef(0);
@@ -274,7 +255,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const meta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
+    const meta = TOOLS_METADATA[location.pathname] || { title: 'Page not found | 1into1 PDF', description: 'Find the right PDF tool at 1into1.', heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
     document.title = meta.title;
 
     const descMeta = document.querySelector('meta[name="description"]');
@@ -288,9 +269,15 @@ export default function App() {
       canonicalLink.rel = 'canonical';
       document.head.appendChild(canonicalLink);
     }
-    const cleanPath = location.pathname === '/' ? '' : location.pathname;
+    const cleanPath = location.pathname === '/' ? '' : location.pathname === '/visual-editor' ? '/edit-pdf' : location.pathname;
     const pageUrl = `https://www.1into1.com${cleanPath}`;
     canonicalLink.href = pageUrl;
+    for (const [selector, value] of [
+      ['meta[property="og:title"]', meta.title], ['meta[property="og:description"]', meta.description],
+      ['meta[property="og:url"]', pageUrl], ['meta[name="twitter:title"]', meta.title],
+      ['meta[name="twitter:description"]', meta.description], ['meta[name="twitter:url"]', pageUrl],
+    ]) document.querySelector(selector)?.setAttribute('content', value);
+
 
     let scriptTag = document.querySelector<HTMLScriptElement>('#schema-org-ld');
     if (!scriptTag) {
@@ -317,16 +304,9 @@ export default function App() {
       featureList: [
         '100% Client-Side Processing',
         'Zero Server Uploads',
-        'Fully Offline Compatible',
+        'Local PDF tools; optional cloud AI',
       ],
     });
-  }, [location.pathname]);
-
-  useEffect(() => {
-    const currentTool = TOOLS_LIST.find((t) => t.path === location.pathname);
-    if (currentTool && selectedCategory !== 'all' && selectedCategory !== currentTool.category) {
-      setSelectedCategory(currentTool.category);
-    }
   }, [location.pathname]);
 
   useEffect(() => {
@@ -358,170 +338,66 @@ export default function App() {
     }
   };
 
-  const currentMeta = TOOLS_METADATA[location.pathname] || TOOLS_METADATA['/'];
+  const currentMeta = TOOLS_METADATA[location.pathname] || { heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
 
-  const visibleTools =
-    selectedCategory === 'all'
-      ? TOOLS_LIST
-      : TOOLS_LIST.filter((tool) => tool.category === selectedCategory);
+  const visibleTools = TOOLS_LIST.filter(tool =>
+    (selectedCategory === 'all' || tool.category === selectedCategory) &&
+    `${tool.name} ${tool.path} ${TOOLS_METADATA[tool.path]?.description || ''}`.toLowerCase().includes(search.toLowerCase().trim())
+  );
+  const isHome = location.pathname === '/';
+  const isInfo = ['/privacy', '/terms'].includes(location.pathname);
+  const closeDirectory = () => { setDirectoryOpen(false); setSearch(''); };
+  const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/merge-pdf','/split-pdf','/sign-pdf','/image-to-pdf'].includes(tool.path));
+
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-between p-3 sm:p-6 selection:bg-emerald-500 selection:text-black">
-      {/* Top Value / Announcement Banner */}
-      <div className="w-full max-w-5xl mb-2 py-2 px-3 sm:px-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-center text-[10px] sm:text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        <span className="text-zinc-300 font-medium">
-          4 Free Tasks/Day (25MB) • No Signup • Works Offline • Zero Data Saved
-        </span>
-        <span className="text-zinc-700 hidden sm:inline">—</span>
-        {isPro || isDevMode ? (
-          <span className="text-emerald-400 font-semibold">Pro License Active (Unlimited Batching &amp; 150MB)</span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsProModalOpen(true)}
-            className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition-colors cursor-pointer"
-          >
-            Unlock Unlimited Batching &amp; 150MB Files for $49/Year→
-          </button>
-        )}
-      </div>
-
-      {/* Header: Scaled to Medium */}
-      <header className="w-full max-w-5xl flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 py-3 sm:py-4 border-b border-zinc-800/80">
-        <NavLink to="/" className="flex items-center justify-center gap-3.5 text-center sm:text-left">
-          <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center p-2 shrink-0 shadow-lg">
-            <img
-              src="/logo.png"
-              alt="1into1 Logo"
-              width="48"
-              height="48"
-              className="w-full h-full object-contain"
-            />
-          </div>
-          <div>
-            <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">1into1 PDF</p>
-            <p className="text-xs sm:text-sm font-medium text-zinc-400">100% In-Browser Privacy Suite</p>
-          </div>
+    <div className="app-shell">
+      <a className="skip-link" href="#workspace">Skip to tool</a>
+      <header className="site-header">
+        <NavLink to="/" className="brand" aria-label="1into1 PDF home" onClick={closeDirectory}>
+          <img src="/logo.png" alt="" width="40" height="40" />
+          <span>1into1<span className="brand-light"> PDF</span></span>
         </NavLink>
-
-        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-2.5">
-          <button
-            onClick={() => setIsProModalOpen(true)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border min-h-[44px] cursor-pointer ${
-              (isPro || isDevMode) ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-zinc-900 hover:bg-zinc-800 text-amber-300 border-amber-500/30 shadow-sm'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            {(isPro || isDevMode) ? 'Pro Active' : 'Upgrade Pro'}
-          </button>
-
-          {installPrompt && (
-            <button
-              onClick={handleInstallApp}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-all shadow-md shadow-emerald-500/20 min-h-[44px] cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 stroke-[2.5]" />
-              Install App
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setIsAuditDrawerOpen(true)}
-            className="cursor-pointer transition hover:opacity-85 focus:outline-none min-h-[44px] flex items-center"
-            title="Click to view real-time privacy & network telemetry audit"
-          >
-            <TrustBadge />
-          </button>
+        <div className="header-actions">
+          <button className="quiet-button tools-toggle" onClick={() => setDirectoryOpen(!directoryOpen)} aria-expanded={directoryOpen} aria-controls="tool-directory"><LayoutGrid size={17} /><span>All tools</span><ChevronDown size={14} /></button>
+          {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
+          <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Dev Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="w-full max-w-4xl my-auto text-center py-6 sm:py-8">
-        {/* 2-Up 2-Down Mobile Balanced Privacy Pill Badge */}
-        <button
-          type="button"
-          onClick={() => setIsAuditDrawerOpen(true)}
-          className="inline-flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-4 py-2 sm:py-1.5 rounded-2xl sm:rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-400 mb-4 sm:mb-6 hover:bg-emerald-500/15 hover:border-emerald-500/30 transition cursor-pointer shadow-sm text-center"
-          title="Click to inspect network telemetry"
-        >
-          <span className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>Lightning fast • No internet needed</span>
-          </span>
-          <span className="hidden sm:inline text-emerald-500/40">•</span>
-          <span>100% private • No signup</span>
-        </button>
-
-        <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-3 sm:mb-4 px-2">
-          {currentMeta.heading.includes('Never Upload Your Files') ? (
-            <>
-              Free PDF Tools That{' '}
-              <span className="text-emerald-400">Never Upload Your Files</span>
-            </>
-          ) : (
-            currentMeta.heading
-          )}
-        </h1>
-
-        <p className="text-zinc-400 text-sm sm:text-base max-w-lg mx-auto mb-5 sm:mb-6 px-3">
-          {currentMeta.subheading}
-        </p>
-
-        {/* Categorized Navigation Suite: Touch Smooth In-Browser Scroll */}
-        <div className="flex flex-col items-center gap-3 mb-6 sm:mb-8 w-full max-w-5xl mx-auto px-1 sm:px-2">
-          {/* Filter Pills */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 p-1 bg-zinc-950/80 border border-zinc-800 rounded-2xl backdrop-blur-md max-w-full">
-            {[
-              { id: 'organize', label: 'Organize & Size' },
-              { id: 'security', label: 'Security & Privacy' },
-              { id: 'convert', label: 'Convert, AI & Text' },
-              { id: 'all', label: 'All Tools' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setSelectedCategory(tab.id as ToolCategory)}
-                className={`px-3 py-2 sm:py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all min-h-[40px] cursor-pointer ${
-                  selectedCategory === tab.id
-                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200 border border-transparent hover:bg-zinc-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+      <main className="site-main">
+        <section className={`page-intro ${isHome ? 'home-intro' : ''}`}>
+          <div className="eyebrow"><ShieldCheck size={14} /> YOUR FILES. YOUR DEVICE.</div>
+          <h1>{isHome ? <>Small tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
+          <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
+          <div className="trust-points" aria-label="Local PDF tool benefits">
+            <span><Zap size={14} />Lightning fast</span>
+            <span><WifiOff size={14} />No internet needed*</span>
+            <span><ShieldCheck size={14} />100% private*</span>
+            <span><UserRoundCheck size={14} />No signup</span>
           </div>
+          <p className="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>
+        </section>
 
-          {/* Tool Navigation Bar: Native Touch Scrolling & 44px Tap Height */}
-          <nav 
-            aria-label="PDF Tools" 
-            className="flex flex-wrap items-center justify-center gap-2 max-w-full px-2 py-1"
-          >
-            {visibleTools.map((tool) => {
-              const Icon = tool.icon;
-              return (
-                <NavLink
-                  key={tool.path}
-                  to={tool.path}
-                  className={({ isActive }) =>
-                    `px-3.5 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border whitespace-nowrap transition-all min-h-[44px] shrink-0 ${
-                      isActive || (tool.path === '/compress-pdf' && location.pathname === '/')
-                        ? 'bg-zinc-800 text-emerald-400 border-zinc-700 shadow-sm'
-                        : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900'
-                    }`
-                  }
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{tool.name}</span>
-                </NavLink>
-              );
-            })}
-          </nav>
-        </div>
+        <nav className="quick-tools" aria-label="Popular PDF tools">
+          {popular.map(tool => { const Icon = tool.icon; return <NavLink key={tool.path} to={tool.path} onClick={closeDirectory} className={({isActive}) => `quick-tool ${isActive || (isHome && tool.path === '/compress-pdf') ? 'is-active' : ''}`}><Icon size={17} />{tool.name}</NavLink>; })}
+          <button className="quick-tool more-tools" onClick={() => setDirectoryOpen(!directoryOpen)} aria-expanded={directoryOpen} aria-controls="tool-directory"><Search size={17} />Find a tool</button>
+        </nav>
 
-        {/* Dynamic Tool Routing */}
-        <ErrorBoundary>
-          <Suspense fallback={<ToolFallback />}>
+        {directoryOpen && <section id="tool-directory" className="tool-directory" aria-label="All PDF tools">
+          <div className="directory-heading"><div><span className="eyebrow">THE TOOLKIT</span><h2>What would you like to do?</h2></div><button className="icon-button" aria-label="Close tool directory" onClick={closeDirectory}><X size={20} /></button></div>
+          <div className="tool-search"><Search size={19} /><input type="search" aria-label="Search PDF tools" placeholder="Search tools — crop, OCR, convert…" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="category-tabs" role="group" aria-label="Filter tools">
+            {([{id:'all',label:'All tools'},{id:'organize',label:'Organize'},{id:'security',label:'Protect & sign'},{id:'convert',label:'Convert & create'}] as const).map(category => <button key={category.id} aria-pressed={selectedCategory === category.id} onClick={() => setSelectedCategory(category.id)}>{category.label}</button>)}
+          </div>
+          <p className="search-count" aria-live="polite">{visibleTools.length} tools</p>
+          <div className="directory-grid">{visibleTools.map(tool => {const Icon = tool.icon; return <NavLink key={tool.path} to={tool.path} onClick={closeDirectory} className="directory-card"><Icon size={20} /><div><strong>{tool.name}</strong><span>{TOOL_COPY[tool.path] || TOOLS_METADATA[tool.path]?.subheading}</span></div><ArrowRight size={15} /></NavLink>;})}</div>
+          {visibleTools.length === 0 && <p className="empty-search">No matching tools. Try “merge”, “image” or “text”.</p>}
+        </section>}
+
+        <section id="workspace" className="tool-workspace" aria-label="Document workspace" tabIndex={-1}>
+          <ErrorBoundary key={location.pathname}>
+            <Suspense fallback={<ToolFallback />}>
             <Routes>
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/terms" element={<Terms />} />
@@ -579,102 +455,21 @@ export default function App() {
 
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </Suspense>
-        </ErrorBoundary>
+            </Suspense>
+          </ErrorBoundary>
+        </section>
+        {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device. Cloud AI is optional.</span><NavLink to="/privacy">How it works</NavLink></div>}
+        {isHome && <section className="benefits" aria-label="Why 1into1"><div><span>01</span><h2>Pick a file.</h2><p>No account needed to use the local tools.</p></div><div><span>02</span><h2>Make it yours.</h2><p>Simple controls. No upload queue.</p></div><div><span>03</span><h2>Keep moving.</h2><p>Download your result and get on with your day.</p></div></section>}
       </main>
 
-      {/* Footer */}
-      <footer className="w-full max-w-5xl mx-auto mt-12 sm:mt-20 px-3 sm:px-6 py-6 sm:py-8 border-t border-zinc-900 flex flex-col gap-5 sm:gap-6 text-xs text-zinc-500">
-        <div className="flex flex-col items-center justify-center gap-4 pb-7 border-b border-zinc-900/80 w-full text-center">
-          {/* Ambient Header Pill */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/5 border border-emerald-500/20 text-[10px] font-mono uppercase tracking-widest text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.08)]">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
-            </span>
-            <span>High-Capacity Workflows</span>
-          </div>
-
-          {/* Micro-Card Grid with Shimmer & Beacon Glow */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full max-w-4xl px-2">
-            {activeWorkflows.map((item, idx) => (
-              <div
-                key={idx}
-                className="group relative overflow-hidden flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-zinc-900/70 via-zinc-900/40 to-zinc-950/70 hover:from-zinc-900 hover:to-zinc-900/90 border border-zinc-800/80 hover:border-emerald-500/40 transition-all duration-300 shadow-sm hover:shadow-[0_0_25px_-5px_rgba(16,185,129,0.18)] text-left select-none cursor-default"
-              >
-                {/* Diagonal Light Sweep Beam */}
-                <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-emerald-400/10 to-transparent pointer-events-none" />
-
-                <div className="flex items-center gap-3 min-w-0">
-                  {/* Live Radar Beacon Pulse */}
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 group-hover:opacity-100" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 group-hover:shadow-[0_0_8px_rgba(52,211,153,0.9)] transition-all" />
-                  </span>
-
-                  <span>{typeof item === "string" ? item : item.title}</span>
-                </div>
-
-                {/* Minimal Glowing Signal Bars */}
-                <div className="flex items-end gap-1 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity">
-                  <span className="w-1 h-1.5 rounded-full bg-zinc-700 group-hover:bg-emerald-400/70 transition-colors" />
-                  <span className="w-1 h-3 rounded-full bg-zinc-700 group-hover:bg-emerald-400 transition-colors group-hover:shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-                  <span className="w-1 h-2 rounded-full bg-zinc-700 group-hover:bg-emerald-500 transition-colors" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-          <div className="leading-relaxed text-[11px]">
-            <span>100% In-Browser. Zero Server Processing. Powered by </span>
-            <span className="text-zinc-400">pdf-lib</span>,{' '}
-            <span className="text-zinc-400">PDF.js</span> &amp;{' '}
-            <span className="text-zinc-400">Tesseract.js</span>
-          </div>
-
-          <div className="flex items-center gap-4 shrink-0 text-[11px]">
-            <NavLink to="/privacy" className="hover:text-zinc-300 transition-colors min-h-[36px] flex items-center">
-              Privacy Policy
-            </NavLink>
-            <span className="text-zinc-800 select-none">•</span>
-            <NavLink to="/terms" className="hover:text-zinc-300 transition-colors min-h-[36px] flex items-center">
-              Terms of Service
-            </NavLink>
-          </div>
-        </div>
-
-        {/* Live Build: Visible ONLY when URL includes ?pro=true */}
-        
-          {isDevMode && (
-          <div className="flex items-center justify-center gap-1.5 py-3 text-[11px] text-zinc-500 font-mono select-none border-t border-zinc-900 mt-6">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Live Build: 01:38 AM</span>
-          </div>
-        )}
-        
+      <footer className="site-footer">
+        <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><p>A little less friction. A little more privacy.</p></div>
+        <details className="footer-directory"><summary>Explore all 39 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
+        <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
       </footer>
-
-      {/* Global Drag-and-Drop Dropzone Overlay */}
-      {isDraggingFile && (
-        <div className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 pointer-events-none select-none transition-all">
-          <div className="w-full max-w-lg p-8 sm:p-12 rounded-3xl border-2 border-dashed border-emerald-500 bg-zinc-900/90 shadow-2xl flex flex-col items-center text-center animate-pulse">
-            <Upload className="w-10 h-10 sm:w-14 sm:h-14 text-emerald-400 mb-3 sm:mb-4 stroke-[1.75]" />
-            <p className="text-lg sm:text-xl font-bold text-white mb-1">Drop your file anywhere</p>
-            <p className="text-xs text-zinc-400 max-w-xs">
-              Direct in-browser loading • Zero cloud transfer • 100% private
-            </p>
-          </div>
-        </div>
-      )}
-      
+      {isDraggingFile && <div className="drop-overlay"><Upload size={36} /><h2>Drop your PDF here</h2><p>Your file opens on this device.</p></div>}
       <ProModal isOpen={isProModalOpen} onClose={() => setIsProModalOpen(false)} />
-
-      <NetworkAuditDrawer
-        isOpen={isAuditDrawerOpen}
-        onClose={() => setIsAuditDrawerOpen(false)}
-      />
+      <NetworkAuditDrawer isOpen={isAuditDrawerOpen} onClose={() => setIsAuditDrawerOpen(false)} />
     </div>
   );
 }

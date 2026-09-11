@@ -60,6 +60,10 @@ export async function verifyLicenseKey(licenseKey: string): Promise<Verification
     const rawPayloadJson = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'));
     const payload: LicensePayload = JSON.parse(rawPayloadJson);
 
+    if (!payload || typeof payload.email !== 'string' || !['lifetime', 'subscription'].includes(payload.type) || !Number.isFinite(Date.parse(payload.issuedAt))) return {valid:false,error:'Invalid license details.'};
+    if (payload.type === 'subscription' && !payload.expiresAt) return {valid:false,error:'Missing subscription expiry.'};
+    if (payload.expiresAt && !Number.isFinite(Date.parse(payload.expiresAt))) return {valid:false,error:'Invalid expiry date.'};
+
     // Check expiration if subscription
     if (payload.expiresAt) {
       const expirationDate = new Date(payload.expiresAt);

@@ -1,3 +1,4 @@
+import { safeStorage } from './safeStorage';
 import { getLicenseStatus } from './license';
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
@@ -22,7 +23,7 @@ export function getDailyUsage(): { count: number; remaining: number; max: number
   }
 
   const today = getTodayString();
-  const raw = localStorage.getItem(DAILY_LIMIT_KEY);
+  const raw = safeStorage.getItem(DAILY_LIMIT_KEY);
 
   if (!raw) {
     return { count: 0, remaining: MAX_FREE_DAILY_TASKS, max: MAX_FREE_DAILY_TASKS, isPro: false };
@@ -32,7 +33,7 @@ export function getDailyUsage(): { count: number; remaining: number; max: number
     const record: DailyUsageRecord = JSON.parse(raw);
     if (record.date !== today) {
       // New day: reset usage counter
-      localStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: 0 }));
+      safeStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: 0 }));
       return { count: 0, remaining: MAX_FREE_DAILY_TASKS, max: MAX_FREE_DAILY_TASKS, isPro: false };
     }
 
@@ -88,7 +89,7 @@ export function recordActionExecution(): void {
   if (isPro) return;
 
   const today = getTodayString();
-  const raw = localStorage.getItem(DAILY_LIMIT_KEY);
+  const raw = safeStorage.getItem(DAILY_LIMIT_KEY);
   let currentCount = 0;
 
   if (raw) {
@@ -102,5 +103,5 @@ export function recordActionExecution(): void {
     }
   }
 
-  localStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: currentCount + 1 }));
+  safeStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: currentCount + 1 }));
 }

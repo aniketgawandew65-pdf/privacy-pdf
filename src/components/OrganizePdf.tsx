@@ -66,7 +66,7 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
     (async () => {
       try {
         const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer).slice() }).promise;
+        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
         const total = pdf.numPages;
         const thumbs: PageThumbnail[] = [];
 

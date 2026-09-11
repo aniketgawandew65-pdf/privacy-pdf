@@ -35,21 +35,6 @@ export class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error in tool component:', error, errorInfo);
 
-    const isChunk =
-      error?.message?.includes('Failed to fetch dynamically imported module') ||
-      error?.message?.includes('Importing a module script failed') ||
-      error?.name === 'ChunkLoadError';
-
-    if (isChunk) {
-      const storageKey = 'last_chunk_reload';
-      const lastReload = sessionStorage.getItem(storageKey);
-      const now = Date.now();
-
-      if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
-        sessionStorage.setItem(storageKey, now.toString());
-        window.location.reload();
-      }
-    }
   }
 
   public handleReset = () => {

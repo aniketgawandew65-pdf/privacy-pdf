@@ -1,46 +1,11 @@
 export function PrivacyPolicy() {
-  return (
-    <div className="w-full max-w-3xl mx-auto p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-left text-zinc-300 space-y-6 text-sm">
-      <h2 className="text-2xl font-bold text-white">Privacy Policy</h2>
-      <p className="text-xs text-zinc-400">Last updated: September 2026</p>
-
-      <section className="space-y-2">
-        <h3 className="text-base font-semibold text-zinc-100">1. Zero-Upload Architecture</h3>
-        <p>
-          1into1 operates on a local-first, zero-knowledge architecture. All document and image
-          operations (including compression, conversion, optical character recognition, merging, and
-          signing) are executed entirely inside your browser using client-side WebAssembly and Web
-          Workers.
-        </p>
-        <p className="text-emerald-400 font-medium">
-          Your files never touch our servers or any third-party infrastructure.
-        </p>
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-base font-semibold text-zinc-100">2. Analytics & Tracking</h3>
-        <p>
-          We do not track, profile, or log your document contents. We do not use third-party behavioral
-          tracking scripts, telemetry pixels, or intrusive tracking cookies.
-        </p>
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-base font-semibold text-zinc-100">3. Payment Processing</h3>
-        <p>
-          Pro upgrades and billing transactions are processed securely by Lemon Squeezy (our Merchant
-          of Record). We do not store or process credit card numbers on our servers.
-        </p>
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-base font-semibold text-zinc-100">4. Local Storage</h3>
-        <p>
-          We only store your Pro activation status and license validation hash locally in your
-          browser's <code className="text-zinc-200 bg-zinc-800 px-1 py-0.5 rounded">localStorage</code>{' '}
-          to retain your unlocked features across sessions.
-        </p>
-      </section>
-    </div>
-  );
+  return <div className="w-full max-w-3xl mx-auto p-8 rounded-2xl bg-zinc-900 border border-zinc-800 text-left text-zinc-300 space-y-6 text-sm">
+    <h2 className="text-xl font-semibold">Your documents, and your choices.</h2>
+    <section className="space-y-2"><h3 className="font-semibold">Local PDF tools</h3><p>PDF compression, merging, editing, conversion, signing and OCR process your documents inside your browser. These tools do not upload your documents to our servers. Application files and OCR language resources are downloaded when needed.</p></section>
+    <section className="space-y-2"><h3 className="font-semibold">Optional cloud AI</h3><p>AI Summary &amp; Chat sends an excerpt of extracted text and your chat messages directly to the provider you choose, after you agree to the sharing notice. That provider processes the information under its own terms and privacy policy. A custom endpoint may be local or remote; check its address before using it.</p></section>
+    <section className="space-y-2"><h3 className="font-semibold">Browser storage</h3><p>The app stores daily compression usage, license information, AI settings and API keys, and Text-to-PDF drafts in your browser. Clear the AI key field or clear the text document to remove those items. Clearing this site's browser data removes stored preferences and drafts; deactivate a paid license first to release its activation where possible.</p></section>
+    <section className="space-y-2"><h3 className="font-semibold">Payments and licensing</h3><p>Lemon Squeezy handles checkout, billing and emailed license keys. Activation, validation and deactivation send your license key and browser activation identifier to Lemon Squeezy, not your documents. Online validation checks access; a previously validated license can work offline for a limited period.</p></section>
+    <section className="space-y-2"><h3 className="font-semibold">Hosting and network activity</h3><p>Cloudflare serves this site and may process connection information for delivery and security. The in-app network counter is a partial view of requests made by this page, not an independent privacy certification or a record of every browser request.</p></section>
+    <section className="space-y-2"><h3 className="font-semibold">Shared devices</h3><p>Clear saved drafts and API keys when you finish on a shared device. Private browsing generally removes its stored data when the private session ends.</p></section>
+  </div>;
 }

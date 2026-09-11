@@ -1,3 +1,4 @@
+import { safeStorage } from '../utils/safeStorage';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Loader2,
@@ -86,17 +87,19 @@ const PROVIDERS: ProviderOption[] = [
 ];
 
 export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }) => {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('1into1_user_ai_key') || '');
+  const [apiKey, setApiKey] = useState(() => safeStorage.getItem('1into1_user_ai_key') || '');
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
-    return localStorage.getItem('1into1_user_ai_provider') || 'groq';
+    return safeStorage.getItem('1into1_user_ai_provider') || 'groq';
   });
   const [activeWorkingModel, setActiveWorkingModel] = useState<string>('');
   const [customModel, setCustomModel] = useState<string>(() => {
-    return localStorage.getItem('1into1_user_ai_model') || '';
+    return safeStorage.getItem('1into1_user_ai_model') || '';
   });
   const [customEndpointUrl, setCustomEndpointUrl] = useState<string>(() => {
-    return localStorage.getItem('1into1_user_ai_endpoint') || '';
+    return safeStorage.getItem('1into1_user_ai_endpoint') || '';
   });
+  const [cloudConsent, setCloudConsent] = useState(false);
+  useEffect(() => setCloudConsent(false), [file, selectedProvider, customEndpointUrl]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [extractedText, setExtractedText] = useState<string>('');
@@ -114,7 +117,7 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const handleKeyChange = (key: string) => {
     const trimmed = key.trim();
     setApiKey(trimmed);
-    localStorage.setItem('1into1_user_ai_key', trimmed);
+    safeStorage.setItem('1into1_user_ai_key', trimmed);
     setErrorMessage(null);
 
     if (trimmed.startsWith('gsk_') && selectedProvider !== 'groq') {
@@ -126,7 +129,7 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
 
   const handleProviderChange = (providerId: string) => {
     setSelectedProvider(providerId);
-    localStorage.setItem('1into1_user_ai_provider', providerId);
+    safeStorage.setItem('1into1_user_ai_provider', providerId);
     setActiveWorkingModel('');
     setErrorMessage(null);
 
@@ -181,7 +184,8 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   }, [messages, isStreaming]);
 
   const sendPrompt = async (userPrompt: string) => {
-    if (!navigator.onLine) {
+    if (!cloudConsent) { setErrorMessage('Please confirm the AI data-sharing notice before continuing.'); return; }
+    if (!navigator.onLine && selectedProvider !== 'custom') {
       setErrorMessage('No internet connection. Please reconnect.');
       return;
     }
@@ -395,6 +399,7 @@ ${contextText}`;
 
   return (
     <div className="w-full max-w-3xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+      <label className="ai-consent"><input type="checkbox" checked={cloudConsent} onChange={event => setCloudConsent(event.target.checked)} /><span>I agree to send up to 30,000 characters of extracted text and my chat messages to <strong>{currentProvider.name || selectedProvider}</strong>{selectedProvider === 'custom' ? ` at ${customEndpointUrl || currentProvider.endpoint}` : ''}. Provider terms and charges apply. My API key and settings are saved in this browser; clear the key field to remove it.</span></label>
       {!file ? (
         <div
           role="button"
@@ -420,7 +425,7 @@ ${contextText}`;
           <Bot className="w-9 h-9 text-emerald-400 mx-auto mb-2 stroke-[1.5]" />
           <p className="text-sm font-semibold text-zinc-200">Drop a PDF here to summarize &amp; chat</p>
           <p className="text-xs text-zinc-500 mt-1">
-            Auto-Detecting Models • Client-to-Provider Streaming • Zero Cloud Storage
+            Optional AI • Sends extracted text to your chosen provider
           </p>
           <input
             ref={fileInputRef}
@@ -522,7 +527,7 @@ ${contextText}`;
                     value={customModel}
                     onChange={(e) => {
                       setCustomModel(e.target.value);
-                      localStorage.setItem('1into1_user_ai_model', e.target.value);
+                      safeStorage.setItem('1into1_user_ai_model', e.target.value);
                     }}
                     placeholder="Leave empty for auto-detection"
                     className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
@@ -539,7 +544,7 @@ ${contextText}`;
                       value={customEndpointUrl}
                       onChange={(e) => {
                         setCustomEndpointUrl(e.target.value);
-                        localStorage.setItem('1into1_user_ai_endpoint', e.target.value);
+                        safeStorage.setItem('1into1_user_ai_endpoint', e.target.value);
                       }}
                       placeholder="http://localhost:11434/v1/chat/completions"
                       className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500"

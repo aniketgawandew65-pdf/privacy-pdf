@@ -172,7 +172,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
         const uint8 = new Uint8Array(buffer);
 
         try {
-          const loadingTask = pdfjsLib.getDocument({ data: uint8.slice() });
+          const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice() });
           const doc = await loadingTask.promise;
           if (isMounted) {
             pdfDocRef.current = doc;
@@ -229,7 +229,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       const buffer = await file.arrayBuffer();
       const uint8 = new Uint8Array(buffer);
 
-      const loadingTask = pdfjsLib.getDocument({
+      const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
         data: uint8.slice(),
         password: password.trim(),
       });

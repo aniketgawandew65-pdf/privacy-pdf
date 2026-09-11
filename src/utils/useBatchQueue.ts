@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { HardwareWorkerPool, type BatchTask, type TaskProgress } from './workerPool';
 
 export function useBatchQueue<TInput, TOutput>() {
@@ -7,7 +7,8 @@ export function useBatchQueue<TInput, TOutput>() {
   const poolRef = useRef<HardwareWorkerPool<TInput, TOutput> | null>(null);
 
   const startBatch = useCallback((tasks: BatchTask<TInput, TOutput>[]) => {
-    setIsProcessing(true);
+    poolRef.current?.cancelAll();
+    setIsProcessing(tasks.length > 0);
     const initialStates: Record<string, TaskProgress<TOutput>> = {};
     tasks.forEach((t) => {
       initialStates[t.id] = { id: t.id, status: 'pending' };
@@ -16,18 +17,13 @@ export function useBatchQueue<TInput, TOutput>() {
 
     const pool = new HardwareWorkerPool<TInput, TOutput>();
     poolRef.current = pool;
+    const unfinished = new Set(tasks.map(task => task.id));
 
     pool.setListener((updatedTask) => {
-      setTasksState((prev) => {
-        const next = { ...prev, [updatedTask.id]: updatedTask };
-        const allDone = Object.values(next).every(
-          (t) => t.status === 'completed' || t.status === 'error' || t.status === 'aborted'
-        );
-        if (allDone) {
-          setIsProcessing(false);
-        }
-        return next;
-      });
+      if (poolRef.current !== pool) return;
+      if (['completed', 'error', 'aborted'].includes(updatedTask.status)) unfinished.delete(updatedTask.id);
+      if (unfinished.size === 0) setIsProcessing(false);
+      setTasksState(prev => ({ ...prev, [updatedTask.id]: updatedTask }));
     });
 
     pool.enqueue(tasks);
@@ -37,6 +33,8 @@ export function useBatchQueue<TInput, TOutput>() {
     poolRef.current?.cancelAll();
     setIsProcessing(false);
   }, []);
+
+  useEffect(() => () => { poolRef.current?.setListener(() => {}); poolRef.current?.cancelAll(); }, []);
 
   return {
     tasksState,
