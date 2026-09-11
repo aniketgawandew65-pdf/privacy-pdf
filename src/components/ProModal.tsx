@@ -45,10 +45,9 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
       <p className="pro-description">For the PDFs that need more. Keep your document processing on your own device.</p>
       <div className="pro-price"><strong>$49</strong><span>/ year</span></div>
       <ul className="pro-features">
-        <li><Check size={17} />Unlimited compression tasks</li>
-        <li><Check size={17} />Batch PDF compression</li>
-        <li><Check size={17} />Compression files up to 150MB*</li>
-        <li><Check size={17} />Your existing local PDF tools included</li>
+        <li><Check size={17} />Unlimited tasks</li>
+        <li><Check size={17} />Lightening fast results</li>
+        <li><Check size={17} />All tools included</li>
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
         <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Continue to checkout</span><ArrowRight size={16} /></a>
@@ -60,7 +59,7 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
         </form>
       </>}
       {message && <p className={hasError ? 'form-error' : 'form-success'} role={hasError ? 'alert' : 'status'}>{message}</p>}
-      <p className="pro-fineprint">Free compression: 4 tasks per day, up to 25MB per file. *Large files depend on your device’s available memory. Start smaller on mobile.</p>
+     
     </div>
   </div>;
 }
