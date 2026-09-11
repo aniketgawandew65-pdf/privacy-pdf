@@ -373,7 +373,7 @@ export default function App() {
           <div className="trust-points" aria-label="Local PDF tool benefits">
             <span><Zap size={14} />Lightning fast</span>
             <span><WifiOff size={14} />No internet needed</span>
-            <span><ShieldCheck size={14} />100% private*</span>
+            <span><ShieldCheck size={14} />100% private</span>
             <span><UserRoundCheck size={14} />No signup</span>
           </div>
           <p className="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>
