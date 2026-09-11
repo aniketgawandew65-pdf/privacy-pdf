@@ -64,10 +64,12 @@ export async function compressPDF(
   try {
   const totalPages = pdf.numPages;
 
-  const targetBytes = (level === 'extreme'
+  const targetBytes = Math.floor((level === 'extreme'
     ? Math.max(15 * totalPages, 40)
-    : (targetKb || Math.max(50, Math.round(file.size / (1024 * 2))))) * 1024;
+    : (targetKb || Math.max(50, Math.round(file.size / (1024 * 2))))) * 1024);
 
+  let fitScale = 1;
+  for (let attempt = 0; attempt < 12; attempt++) {
   const newPdfDoc = await PDFDocument.create();
   const pdfOverhead = 1024 + totalPages * 200;
   let remainingImageBudget = Math.max(Math.floor(targetBytes * 0.88) - pdfOverhead, totalPages * 1000);
@@ -76,7 +78,7 @@ export async function compressPDF(
     onProgress?.({
       currentPage: pageNum,
       totalPages,
-      stage: `Compressing page ${pageNum} of ${totalPages}...`,
+      stage: attempt === 0 ? `Compressing page ${pageNum} of ${totalPages}...` : `Fitting to ${targetKb} KB: pass ${attempt + 1}, page ${pageNum} of ${totalPages}...`,
     });
 
     const page = await pdf.getPage(pageNum);
@@ -114,7 +116,9 @@ export async function compressPDF(
     }
 
     const maxDim = Math.max(unscaledViewport.width, unscaledViewport.height);
-    const safeRenderScale = Math.max(0.65, Math.min(1.0, 1024 / maxDim));
+    targetScale *= fitScale;
+    targetQuality = Math.max(0.03, targetQuality * Math.sqrt(fitScale));
+    const safeRenderScale = Math.min(1.0, 1024 / maxDim, Math.max(targetScale, 0.05));
     const renderViewport = page.getViewport({ scale: safeRenderScale });
 
     const pdfCanvas = document.createElement('canvas');
@@ -135,8 +139,8 @@ export async function compressPDF(
         } as any) as any
       ).promise;
 
-      const finalWidth = Math.max(32, Math.floor(unscaledViewport.width * targetScale));
-      const finalHeight = Math.max(32, Math.floor(unscaledViewport.height * targetScale));
+      const finalWidth = Math.max(1, Math.floor(unscaledViewport.width * targetScale));
+      const finalHeight = Math.max(1, Math.floor(unscaledViewport.height * targetScale));
 
       const outCanvas = document.createElement('canvas');
       outCanvas.width = finalWidth;
@@ -196,9 +200,12 @@ export async function compressPDF(
     });
   }
 
-  let outputBytes: Uint8Array = await newPdfDoc.save({ useObjectStreams: false });
+  let outputBytes: Uint8Array = await newPdfDoc.save({ useObjectStreams: true });
   if (level === 'target' && outputBytes.byteLength > targetBytes) {
-    throw new Error(`This PDF cannot fit within ${targetKb} KB at the current settings. Choose a larger target size.`);
+    // Measure the complete PDF, including container overhead, before accepting it.
+    // Rebuild one page at a time at lower resolution; never truncate PDF bytes.
+    fitScale *= Math.min(0.7, Math.sqrt(targetBytes / outputBytes.byteLength) * 0.8);
+    continue;
   }
 
   if (level === 'target' && targetBytes && outputBytes.byteLength < targetBytes) {
@@ -219,6 +226,8 @@ export async function compressPDF(
   }
 
   return outputBytes;
+  }
+  throw new Error(`Could not fit all ${totalPages} pages into ${targetKb} KB after maximum image reduction. PDF structure also needs space. Split the PDF or choose a larger size.`);
   } finally {
     await pdf.destroy();
   }
