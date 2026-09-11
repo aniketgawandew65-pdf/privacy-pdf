@@ -802,11 +802,17 @@ export const ScanToPdf = () => {
               <a
                 href={downloadUrl}
                 download="scanned-document.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-full min-h-14 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold flex items-center justify-center gap-2 transition"
               >
                 <Download className="w-5 h-5" />
                 Download scanned PDF
               </a>
+
+              <p className="text-[11px] text-zinc-500 text-center">
+                On mobile, the PDF preview opens separately so your scans and edits stay here when you return.
+              </p>
 
             </div>
           )}
