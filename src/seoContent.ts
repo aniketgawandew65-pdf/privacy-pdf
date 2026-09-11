@@ -61,6 +61,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Can I turn the photo into a PDF?', 'Yes. Convert to JPG first if needed, then open Image to PDF to arrange your photos into a document.']
     ], related: [['/compress-image','Reduce the JPG size'], ['/image-to-pdf','Turn photos into a PDF'], ['/pdf-to-jpg','Convert PDF pages into images']]
   },
+  '/annotate-pdf': {
+    title: 'How to annotate a PDF with text, highlights and drawings',
+    intro: 'Add notes, freehand drawings, highlights, rectangles, circles and arrows directly to a PDF in your browser without sending the document to a processing server.',
+    steps: [
+      'Choose the PDF you want to annotate.',
+      'Select Text, Pen, Highlight, Rectangle, Circle or Arrow.',
+      'Place or draw the annotation directly on the PDF page.',
+      'Move, resize or delete annotations until the page looks right.',
+      'Use the page controls to annotate additional pages.',
+      'Create and download the annotated PDF, then reopen it to check the final placement.'
+    ],
+    example: 'For a contract that needs review notes, highlight an important sentence, add an arrow beside a clause and place a short text note next to it. The downloaded PDF keeps those annotations visibly applied to the page.',
+    questions: [
+      ['Are my PDF files uploaded to a server?', 'No document-processing upload is required. Annotation is performed locally in your browser.'],
+      ['Can I annotate scanned PDFs?', 'Yes. You can add text, drawings, highlights and shapes over scanned PDF pages as long as the document can be opened in your browser.'],
+      ['Will the annotations appear on mobile?', 'The annotations are applied directly to the downloaded PDF page instead of relying on viewer-specific interactive form controls, which improves consistency across desktop and mobile PDF viewers.'],
+      ['Can I annotate multiple pages?', 'Yes. Move between pages with the page controls and add different annotations to each page.'],
+      ['What tools are available?', 'The editor supports text, freehand pen drawing, highlighting, rectangles, circles and arrows.']
+    ],
+    related: [
+      ['/edit-pdf','Add or replace visible text'],
+      ['/sign-pdf','Add a drawn signature'],
+      ['/watermark-pdf','Add a watermark'],
+      ['/scan-to-pdf','Turn photos into a PDF']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',

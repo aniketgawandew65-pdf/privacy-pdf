@@ -40,6 +40,14 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Split PDF Documents',
     subheading: 'Separate individual pages or ranges locally on your device.',
   },
+  '/annotate-pdf': {
+    path: '/annotate-pdf',
+    title: 'Annotate PDF Online — Draw, Highlight & Add Text Privately | 1into1',
+    description: 'Annotate PDF files directly in your browser. Add text, freehand drawings, highlights, rectangles, circles and arrows without uploading your document.',
+    heading: 'Annotate PDF Online',
+    subheading: 'Add text, highlights, drawings, shapes and arrows to PDF pages privately in your browser.',
+  },
+
   '/scan-to-pdf': {
     path: '/scan-to-pdf',
     title: 'Scan to PDF Online — Private Camera & Photo Scanner | 1into1',

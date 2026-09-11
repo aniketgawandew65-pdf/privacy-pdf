@@ -1997,14 +1997,73 @@ export async function createFillablePDF(
               pageNumber
             );
 
+          /*
+           * Render at high resolution for visual quality,
+           * but NEVER use image pixels as PDF page points.
+           *
+           * A scanned document can be 2000-4000 pixels tall.
+           * Using those numbers as PDF points makes AcroForm
+           * controls microscopic or inconsistent in viewers.
+           */
           const {
             imgBytes,
-            width,
-            height,
           } = await renderPageAsJpg(
             sourcePage,
             1.5
           );
+
+          const sourceViewport =
+            sourcePage.getViewport({
+              scale: 1,
+            });
+
+          const sourceWidth =
+            sourceViewport.width;
+
+          const sourceHeight =
+            sourceViewport.height;
+
+          const aspectRatio =
+            sourceWidth /
+            sourceHeight;
+
+          /*
+           * Normalize unusually large scanned/image PDFs to
+           * a normal PDF physical size.
+           *
+           * 842pt is approximately the long edge of A4.
+           * Aspect ratio is preserved, so Letter, A4,
+           * photographs and other page shapes still look
+           * correct.
+           */
+          let pageWidth =
+            sourceWidth;
+
+          let pageHeight =
+            sourceHeight;
+
+          const longestEdge =
+            Math.max(
+              sourceWidth,
+              sourceHeight
+            );
+
+          if (longestEdge > 1000) {
+            if (
+              sourceHeight >=
+              sourceWidth
+            ) {
+              pageHeight = 842;
+              pageWidth =
+                842 *
+                aspectRatio;
+            } else {
+              pageWidth = 842;
+              pageHeight =
+                842 /
+                aspectRatio;
+            }
+          }
 
           const image =
             await rebuilt.embedJpg(
@@ -2013,15 +2072,17 @@ export async function createFillablePDF(
 
           const page =
             rebuilt.addPage([
-              width,
-              height,
+              pageWidth,
+              pageHeight,
             ]);
 
           page.drawImage(image, {
             x: 0,
             y: 0,
-            width,
-            height,
+            width:
+              pageWidth,
+            height:
+              pageHeight,
           });
         }
       } finally {
@@ -5756,4 +5817,694 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
   } finally {
     if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
   }
+}
+
+// ============================================================================
+// ANNOTATE PDF ENGINE
+// Flattened annotations for consistent desktop/mobile PDF viewing
+// ============================================================================
+
+export type PdfAnnotationType =
+  | 'text'
+  | 'highlight'
+  | 'rectangle'
+  | 'ellipse'
+  | 'arrow'
+  | 'pen';
+
+export interface PdfAnnotationPoint {
+  x: number;
+  y: number;
+}
+
+export interface PdfAnnotationItem {
+  id: string;
+  type: PdfAnnotationType;
+  pageIndex: number;
+
+  // Normalized coordinates: 0 → 1, browser top-left origin
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+
+  text?: string;
+  color?: string;
+  fillColor?: string;
+
+  fontSize?: number;
+  strokeWidth?: number;
+  opacity?: number;
+
+  // Pen points use normalized whole-page coordinates
+  points?: PdfAnnotationPoint[];
+}
+
+function annotationHexToRgb(
+  value: string | undefined,
+  fallback: [number, number, number] = [0, 0, 0]
+): [number, number, number] {
+  if (!value || !/^#[0-9a-fA-F]{6}$/.test(value)) {
+    return fallback;
+  }
+
+  return [
+    parseInt(value.slice(1, 3), 16) / 255,
+    parseInt(value.slice(3, 5), 16) / 255,
+    parseInt(value.slice(5, 7), 16) / 255,
+  ];
+}
+
+async function drawFlattenedAnnotations(
+  pdfDoc: PDFDocument,
+  annotations: PdfAnnotationItem[]
+): Promise<void> {
+  const pages = pdfDoc.getPages();
+
+  const helvetica =
+    await pdfDoc.embedFont(
+      StandardFonts.Helvetica
+    );
+
+  for (const item of annotations) {
+    const page = pages[item.pageIndex];
+
+    if (!page) continue;
+
+    const {
+      width: pageWidth,
+      height: pageHeight,
+    } = page.getSize();
+
+    const x =
+      item.x * pageWidth;
+
+    const boxWidth =
+      Math.max(
+        1,
+        item.width * pageWidth
+      );
+
+    const boxHeight =
+      Math.max(
+        1,
+        item.height * pageHeight
+      );
+
+    const y =
+      pageHeight -
+      item.y * pageHeight -
+      boxHeight;
+
+    const [
+      red,
+      green,
+      blue,
+    ] = annotationHexToRgb(
+      item.color,
+      [0.9, 0.1, 0.1]
+    );
+
+    const annotationColor =
+      rgb(
+        red,
+        green,
+        blue
+      );
+
+    const strokeWidth =
+      Math.max(
+        0.5,
+        item.strokeWidth || 2
+      );
+
+    const opacity =
+      Math.max(
+        0.05,
+        Math.min(
+          1,
+          item.opacity ?? 1
+        )
+      );
+
+    // ------------------------------------------------------------------------
+    // TEXT
+    // ------------------------------------------------------------------------
+
+    if (item.type === 'text') {
+      const safeText =
+        (item.text || '')
+          .replace(
+            /[^\x20-\x7E]/g,
+            ''
+          );
+
+      if (!safeText.trim()) {
+        continue;
+      }
+
+      const fontSize =
+        Math.max(
+          6,
+          item.fontSize || 16
+        );
+
+      const lines =
+        safeText.split('\n');
+
+      const lineHeight =
+        fontSize * 1.2;
+
+      lines.forEach(
+        (
+          line,
+          lineIndex
+        ) => {
+          const textY =
+            y +
+            boxHeight -
+            fontSize -
+            lineIndex *
+              lineHeight;
+
+          if (
+            textY <
+            y - lineHeight
+          ) {
+            return;
+          }
+
+          page.drawText(
+            line,
+            {
+              x:
+                x + 2,
+
+              y:
+                textY,
+
+              size:
+                fontSize,
+
+              font:
+                helvetica,
+
+              color:
+                annotationColor,
+
+              opacity,
+            }
+          );
+        }
+      );
+
+      continue;
+    }
+
+    // ------------------------------------------------------------------------
+    // HIGHLIGHTER
+    // ------------------------------------------------------------------------
+
+    if (
+      item.type ===
+      'highlight'
+    ) {
+      const [
+        fillRed,
+        fillGreen,
+        fillBlue,
+      ] =
+        annotationHexToRgb(
+          item.fillColor ||
+            item.color ||
+            '#ffff00',
+          [1, 1, 0]
+        );
+
+      page.drawRectangle({
+        x,
+        y,
+
+        width:
+          boxWidth,
+
+        height:
+          boxHeight,
+
+        color:
+          rgb(
+            fillRed,
+            fillGreen,
+            fillBlue
+          ),
+
+        opacity:
+          Math.min(
+            0.45,
+            item.opacity ??
+              0.28
+          ),
+      });
+
+      continue;
+    }
+
+    // ------------------------------------------------------------------------
+    // RECTANGLE
+    // ------------------------------------------------------------------------
+
+    if (
+      item.type ===
+      'rectangle'
+    ) {
+      page.drawRectangle({
+        x,
+        y,
+
+        width:
+          boxWidth,
+
+        height:
+          boxHeight,
+
+        borderColor:
+          annotationColor,
+
+        borderWidth:
+          strokeWidth,
+
+        borderOpacity:
+          opacity,
+      });
+
+      continue;
+    }
+
+    // ------------------------------------------------------------------------
+    // CIRCLE / ELLIPSE
+    // ------------------------------------------------------------------------
+
+    if (
+      item.type ===
+      'ellipse'
+    ) {
+      page.drawEllipse({
+        x:
+          x +
+          boxWidth / 2,
+
+        y:
+          y +
+          boxHeight / 2,
+
+        xScale:
+          boxWidth / 2,
+
+        yScale:
+          boxHeight / 2,
+
+        borderColor:
+          annotationColor,
+
+        borderWidth:
+          strokeWidth,
+
+        borderOpacity:
+          opacity,
+      });
+
+      continue;
+    }
+
+    // ------------------------------------------------------------------------
+    // ARROW
+    // ------------------------------------------------------------------------
+
+    if (
+      item.type ===
+      'arrow'
+    ) {
+      const startX =
+        x;
+
+      const startY =
+        y +
+        boxHeight;
+
+      const endX =
+        x +
+        boxWidth;
+
+      const endY =
+        y;
+
+      page.drawLine({
+        start: {
+          x: startX,
+          y: startY,
+        },
+
+        end: {
+          x: endX,
+          y: endY,
+        },
+
+        thickness:
+          strokeWidth,
+
+        color:
+          annotationColor,
+
+        opacity,
+      });
+
+      const angle =
+        Math.atan2(
+          endY - startY,
+          endX - startX
+        );
+
+      const arrowSize =
+        Math.max(
+          7,
+          strokeWidth * 4
+        );
+
+      const leftAngle =
+        angle +
+        Math.PI -
+        Math.PI / 6;
+
+      const rightAngle =
+        angle +
+        Math.PI +
+        Math.PI / 6;
+
+      page.drawLine({
+        start: {
+          x: endX,
+          y: endY,
+        },
+
+        end: {
+          x:
+            endX +
+            Math.cos(
+              leftAngle
+            ) *
+              arrowSize,
+
+          y:
+            endY +
+            Math.sin(
+              leftAngle
+            ) *
+              arrowSize,
+        },
+
+        thickness:
+          strokeWidth,
+
+        color:
+          annotationColor,
+
+        opacity,
+      });
+
+      page.drawLine({
+        start: {
+          x: endX,
+          y: endY,
+        },
+
+        end: {
+          x:
+            endX +
+            Math.cos(
+              rightAngle
+            ) *
+              arrowSize,
+
+          y:
+            endY +
+            Math.sin(
+              rightAngle
+            ) *
+              arrowSize,
+        },
+
+        thickness:
+          strokeWidth,
+
+        color:
+          annotationColor,
+
+        opacity,
+      });
+
+      continue;
+    }
+
+    // ------------------------------------------------------------------------
+    // FREEHAND PEN
+    // ------------------------------------------------------------------------
+
+    if (
+      item.type === 'pen' &&
+      item.points &&
+      item.points.length >
+        1
+    ) {
+      for (
+        let pointIndex = 1;
+        pointIndex <
+        item.points.length;
+        pointIndex++
+      ) {
+        const previous =
+          item.points[
+            pointIndex - 1
+          ];
+
+        const current =
+          item.points[
+            pointIndex
+          ];
+
+        page.drawLine({
+          start: {
+            x:
+              previous.x *
+              pageWidth,
+
+            y:
+              pageHeight -
+              previous.y *
+                pageHeight,
+          },
+
+          end: {
+            x:
+              current.x *
+              pageWidth,
+
+            y:
+              pageHeight -
+              current.y *
+                pageHeight,
+          },
+
+          thickness:
+            strokeWidth,
+
+          color:
+            annotationColor,
+
+          opacity,
+        });
+      }
+    }
+  }
+}
+
+
+/**
+ * Apply annotations permanently to a PDF.
+ *
+ * Normal PDFs:
+ *   keep original vector/text PDF structure.
+ *
+ * Complex/readable restricted PDFs:
+ *   rebuild pages locally through PDF.js and then flatten annotations.
+ *
+ * Result:
+ *   annotations are part of the page itself rather than viewer-dependent
+ *   interactive annotation widgets.
+ */
+export async function annotatePDF(
+  file: File,
+  annotations: PdfAnnotationItem[]
+): Promise<Uint8Array> {
+  const arrayBuffer =
+    await file.arrayBuffer();
+
+  // ==========================================================================
+  // PATH A — Preserve original PDF whenever pdf-lib can edit it safely
+  // ==========================================================================
+
+  try {
+    const pdfDoc =
+      await PDFDocument.load(
+        arrayBuffer
+      );
+
+    if (!pdfDoc.isEncrypted) {
+      await drawFlattenedAnnotations(
+        pdfDoc,
+        annotations
+      );
+
+      return await pdfDoc.save({
+        useObjectStreams:
+          false,
+      });
+    }
+  } catch (error) {
+    console.warn(
+      'Annotate PDF native path unavailable. Using compatibility renderer.',
+      error
+    );
+  }
+
+  // ==========================================================================
+  // PATH B — Universal readable-PDF fallback
+  // ==========================================================================
+
+  let sourcePdf:
+    | Awaited<
+        ReturnType<
+          typeof pdfjsLib.getDocument
+        >
+      >['promise']
+    | any;
+
+  try {
+    const loadingTask =
+      pdfjsLib.getDocument({
+        isEvalSupported:
+          false,
+
+        data:
+          new Uint8Array(
+            arrayBuffer.slice(0)
+          ),
+
+        stopAtErrors:
+          false,
+      });
+
+    sourcePdf =
+      await loadingTask.promise;
+  } catch (error: any) {
+    const passwordResponses =
+      (pdfjsLib as any)
+        .PasswordResponses;
+
+    if (
+      error?.name ===
+        'PasswordException' ||
+      error?.code ===
+        passwordResponses
+          ?.NEED_PASSWORD ||
+      error?.code ===
+        passwordResponses
+          ?.INCORRECT_PASSWORD
+    ) {
+      throw new Error(
+        'This PDF requires a password. Unlock it first, then annotate it.'
+      );
+    }
+
+    throw new Error(
+      'This PDF could not be opened for annotation.'
+    );
+  }
+
+  const rebuilt =
+    await PDFDocument.create();
+
+  try {
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+      sourcePdf.numPages;
+      pageNumber++
+    ) {
+      const sourcePage =
+        await sourcePdf.getPage(
+          pageNumber
+        );
+
+      /*
+       * Preserve the real PDF page dimensions.
+       * Render resolution stays high, but image pixels are
+       * NOT used as PDF points.
+       */
+      const viewport =
+        sourcePage.getViewport({
+          scale: 1,
+        });
+
+      const {
+        imgBytes,
+      } =
+        await renderPageAsJpg(
+          sourcePage,
+          2
+        );
+
+      const embedded =
+        await rebuilt.embedJpg(
+          imgBytes
+        );
+
+      const page =
+        rebuilt.addPage([
+          viewport.width,
+          viewport.height,
+        ]);
+
+      page.drawImage(
+        embedded,
+        {
+          x: 0,
+          y: 0,
+
+          width:
+            viewport.width,
+
+          height:
+            viewport.height,
+        }
+      );
+
+      try {
+        sourcePage.cleanup();
+      } catch {}
+    }
+  } finally {
+    try {
+      await sourcePdf.destroy();
+    } catch {}
+  }
+
+  await drawFlattenedAnnotations(
+    rebuilt,
+    annotations
+  );
+
+  return await rebuilt.save({
+    useObjectStreams:
+      false,
+  });
 }
