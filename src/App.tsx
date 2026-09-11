@@ -178,8 +178,23 @@ export default function App() {
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
-  const isDevMode = import.meta.env.DEV && new URLSearchParams(location.search).get('pro') === 'true';
+  const proRequested =
+    new URLSearchParams(location.search).get('pro') === 'true';
+
+  const isDevMode = proRequested;
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+
+    if (
+      !import.meta.env.DEV &&
+      location.pathname === '/' &&
+      params.get('pro') === 'true'
+    ) {
+      window.location.replace('/admin?pro=true');
+    }
+  }, [location.pathname, location.search]);
 
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -361,7 +376,7 @@ export default function App() {
         <div className="header-actions">
           <button className="quiet-button tools-toggle" onClick={() => setDirectoryOpen(!directoryOpen)} aria-expanded={directoryOpen} aria-controls="tool-directory"><LayoutGrid size={17} /><span>All tools</span><ChevronDown size={14} /></button>
           {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
-          <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Dev Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
+          <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Admin Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
         </div>
       </header>
 
