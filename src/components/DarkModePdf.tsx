@@ -12,7 +12,7 @@ import {
   ZoomOut,
   RotateCcw,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { invertPDF, type DarkModeFilter } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

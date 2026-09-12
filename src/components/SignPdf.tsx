@@ -23,7 +23,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

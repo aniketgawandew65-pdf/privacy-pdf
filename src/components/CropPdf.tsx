@@ -16,7 +16,7 @@ import {
   Trash2
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
-import * as pdfjsLib from "pdfjs-dist";
+import { pdfjsLib } from '../utils/pdfjs';
 
 // PDF.js worker setup
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";

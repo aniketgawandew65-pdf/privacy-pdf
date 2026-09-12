@@ -12,7 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { reorderAndProcessPDF, type PageConfig } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

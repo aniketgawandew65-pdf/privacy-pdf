@@ -12,7 +12,7 @@ import {
   PDFCheckBox,
   PDFDropdown,
 } from 'pdf-lib';
-import * as pdfjsLib from "pdfjs-dist";
+import { pdfjsLib } from './pdfjs';
 if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
   
 }
@@ -5083,6 +5083,7 @@ export interface VisualOverlayItem {
   isItalic?: boolean;        // <--- ADD
   isUnderline?: boolean;     // <--- ADD
   isStrikethrough?: boolean; // <--- ADD
+  textAlign?: 'left' | 'center' | 'right';
 }
 
 export async function applyVisualOverlays(
@@ -5209,25 +5210,38 @@ export async function applyVisualOverlays(
             boxH / 2 -
             fSize * 0.28;
 
-          page.drawText(safeText, {
-            x: boxX + textPaddingX,
-            y: textY,
-            size: fSize,
-            font,
-            color: textColor,
-          });
-
           const textW =
             font.widthOfTextAtSize(
               safeText,
               fSize
             );
 
+          const innerLeft = boxX + textPaddingX;
+          const innerRight = boxX + boxW - textPaddingX;
+
+          let textX = innerLeft;
+
+          if (item.textAlign === 'center') {
+            textX = boxX + (boxW - textW) / 2;
+          } else if (item.textAlign === 'right') {
+            textX = innerRight - textW;
+          }
+
+          textX = Math.max(innerLeft, textX);
+
+          page.drawText(safeText, {
+            x: textX,
+            y: textY,
+            size: fSize,
+            font,
+            color: textColor,
+          });
+
           // Underline
           if (item.isUnderline) {
             page.drawLine({
-              start: { x: boxX + textPaddingX, y: textY - 1.5 },
-              end: { x: boxX + textPaddingX + textW, y: textY - 1.5 },
+              start: { x: textX, y: textY - 1.5 },
+              end: { x: textX + textW, y: textY - 1.5 },
               thickness: Math.max(0.8, fSize * 0.07),
               color: textColor,
             });
@@ -5236,8 +5250,8 @@ export async function applyVisualOverlays(
           // Strikethrough (cross between text)
           if (item.isStrikethrough) {
             page.drawLine({
-              start: { x: boxX + textPaddingX, y: textY + fSize * 0.32 },
-              end: { x: boxX + textPaddingX + textW, y: textY + fSize * 0.32 },
+              start: { x: textX, y: textY + fSize * 0.32 },
+              end: { x: textX + textW, y: textY + fSize * 0.32 },
               thickness: Math.max(0.8, fSize * 0.07),
               color: textColor,
             });
@@ -5347,14 +5361,27 @@ export async function applyVisualOverlays(
         const textY =
           y + h / 2;
 
-        ctx.fillText(
-          item.text,
-          x + canvasPaddingX,
-          textY
-        );
-
         const textMetrics =
           ctx.measureText(item.text);
+
+        const innerLeft = x + canvasPaddingX;
+        const innerRight = x + w - canvasPaddingX;
+
+        let textX = innerLeft;
+
+        if (item.textAlign === 'center') {
+          textX = x + (w - textMetrics.width) / 2;
+        } else if (item.textAlign === 'right') {
+          textX = innerRight - textMetrics.width;
+        }
+
+        textX = Math.max(innerLeft, textX);
+
+        ctx.fillText(
+          item.text,
+          textX,
+          textY
+        );
         ctx.strokeStyle = item.color || '#000000';
         ctx.lineWidth = Math.max(1.5, fSize * 0.07);
 
@@ -5362,11 +5389,11 @@ export async function applyVisualOverlays(
         if (item.isUnderline) {
           ctx.beginPath();
           ctx.moveTo(
-            x + canvasPaddingX,
+            textX,
             textY + fSize * 0.45
           );
           ctx.lineTo(
-            x + canvasPaddingX + textMetrics.width,
+            textX + textMetrics.width,
             textY + fSize * 0.45
           );
           ctx.stroke();
@@ -5376,11 +5403,11 @@ export async function applyVisualOverlays(
         if (item.isStrikethrough) {
           ctx.beginPath();
           ctx.moveTo(
-            x + canvasPaddingX,
+            textX,
             textY
           );
           ctx.lineTo(
-            x + canvasPaddingX + textMetrics.width,
+            textX + textMetrics.width,
             textY
           );
           ctx.stroke();

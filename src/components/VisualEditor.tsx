@@ -16,8 +16,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Save,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import {
   applyVisualOverlays,
   type VisualOverlayItem,
@@ -212,6 +215,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 viewport,
               } as any) as any
             ).promise;
+            if (isMounted) setErrorMessage(null);
           }
         }
       } catch (err: any) {
@@ -600,7 +604,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       value={activeItem.text || ''}
                       onChange={(e) => handleUpdateItem(activeItem.id, { text: e.target.value })}
                       placeholder="Type replacement text..."
-                      className="flex-1 min-w-[150px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                      className="flex-1 min-w-[150px] md:min-w-[260px] lg:min-w-[320px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
                     />
 
                     {/* Font Selector */}
@@ -667,6 +671,48 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                         title="Strikethrough (Cross-out)"
                       >
                         S
+                      </button>
+                    </div>
+
+                    {/* Text Alignment */}
+                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { textAlign: 'left' })}
+                        className={`w-7 h-6 rounded flex items-center justify-center transition-colors ${
+                          (activeItem.textAlign || 'left') === 'left'
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Align left"
+                      >
+                        <AlignLeft size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { textAlign: 'center' })}
+                        className={`w-7 h-6 rounded flex items-center justify-center transition-colors ${
+                          activeItem.textAlign === 'center'
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Align center"
+                      >
+                        <AlignCenter size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(activeItem.id, { textAlign: 'right' })}
+                        className={`w-7 h-6 rounded flex items-center justify-center transition-colors ${
+                          activeItem.textAlign === 'right'
+                            ? 'bg-zinc-800 text-emerald-400 border border-emerald-500/40'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                        title="Align right"
+                      >
+                        <AlignRight size={14} />
                       </button>
                     </div>
 
@@ -982,8 +1028,15 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                                 item.isUnderline ? 'underline' : '',
                                 item.isStrikethrough ? 'line-through' : '',
                               ].filter(Boolean).join(' ') || 'none',
+                              textAlign: item.textAlign || 'left',
+                              justifyContent:
+                                item.textAlign === 'center'
+                                  ? 'center'
+                                  : item.textAlign === 'right'
+                                    ? 'flex-end'
+                                    : 'flex-start',
                             }}
-                            className="w-full h-full flex items-center justify-start overflow-hidden select-none"
+                            className="w-full h-full flex items-center overflow-hidden select-none"
                           >
                             {item.text || ''}
                           </div>

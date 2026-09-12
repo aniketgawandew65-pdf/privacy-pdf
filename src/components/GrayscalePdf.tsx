@@ -13,7 +13,7 @@ import {
   ZoomOut,
   RotateCcw,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { convertToGrayscalePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

@@ -13,7 +13,7 @@ import {
   ChevronRight,
   AlertCircle,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { addWatermarkToPDF, type WatermarkOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

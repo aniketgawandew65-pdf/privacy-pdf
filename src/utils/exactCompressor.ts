@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from './pdfjs';
 
 try {
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {

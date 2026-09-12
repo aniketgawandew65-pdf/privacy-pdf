@@ -14,10 +14,9 @@ import {
   AlertTriangle,
   ArrowRight,
 } from 'lucide-react';
-import JSZip from 'jszip';
 import { getLicenseStatus } from '../utils/license';
 import { useObjectUrl } from '../utils/useObjectUrl';
-import { compressPDF, getPDFPageCount, type CompressionProgress } from '../utils/exactCompressor';
+import type { CompressionProgress } from '../utils/exactCompressor';
 import { checkActionAllowed, recordActionExecution, getDailyUsage } from '../utils/usageTracker';
 import { ProModal } from './ProModal';
 import { useBatchQueue } from '../utils/useBatchQueue';
@@ -78,7 +77,8 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       return;
     }
     let isMounted = true;
-    getPDFPageCount(file)
+    import('../utils/exactCompressor')
+      .then(({ getPDFPageCount }) => getPDFPageCount(file))
       .then((count) => {
         if (isMounted) {
           const pages = Math.max(1, count);
@@ -205,6 +205,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         input: { file: f, level, targetKb },
         run: async (input, signal) => {
           if (signal.aborted) throw new Error('Task aborted');
+          const { compressPDF } = await import('../utils/exactCompressor');
           const outputBytes = await compressPDF(input.file, {
             level: input.level,
             targetKb: input.targetKb,
@@ -234,6 +235,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
     revokeDownloadUrl();
 
     try {
+      const { compressPDF } = await import('../utils/exactCompressor');
       const outputBytes = await compressPDF(file, {
         level,
         targetKb,
@@ -266,6 +268,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   
 
   const handleDownloadBatchZip = async () => {
+    const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
     Object.entries(tasksState).forEach(([fileName, task]) => {
       if (task.status === 'completed' && task.result) {

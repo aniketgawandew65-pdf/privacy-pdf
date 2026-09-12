@@ -14,7 +14,7 @@ import {
   ZoomOut,
   Trash2,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 

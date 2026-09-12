@@ -28,7 +28,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 
-import * as pdfjsLib from 'pdfjs-dist';
+import { pdfjsLib } from '../utils/pdfjs';
 
 import {
   annotatePDF,
