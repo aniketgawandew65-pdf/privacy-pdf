@@ -298,28 +298,102 @@ export default function App() {
       document.head.appendChild(scriptTag);
     }
 
-    scriptTag.textContent = JSON.stringify(location.pathname.startsWith('/blog') ? {
-      '@context': 'https://schema.org', '@type': location.pathname === '/blog' ? 'CollectionPage' : 'Article',
-      headline: meta.heading, name: meta.heading, description: meta.description, url: pageUrl,
-      author: { '@type': 'Organization', name: '1into1', url: 'https://www.1into1.com/' },
-    } : {
+    const organization = {
+      '@type': 'Organization',
+      '@id': 'https://www.1into1.com/#organization',
+      name: '1into1 PDF',
+      url: 'https://www.1into1.com/',
+    };
+
+    const breadcrumbItems = location.pathname.startsWith('/blog/')
+      ? [
+          { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://www.1into1.com/' },
+          { '@type': 'ListItem', position: 2, name: 'PDF Guides', item: 'https://www.1into1.com/blog' },
+          { '@type': 'ListItem', position: 3, name: meta.heading, item: pageUrl },
+        ]
+      : location.pathname === '/'
+        ? []
+        : [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://www.1into1.com/' },
+            { '@type': 'ListItem', position: 2, name: meta.heading, item: pageUrl },
+          ];
+
+    let primaryEntity: Record<string, unknown>;
+
+    if (location.pathname === '/') {
+      primaryEntity = {
+        '@type': 'WebSite',
+        '@id': 'https://www.1into1.com/#website',
+        name: '1into1 PDF',
+        url: pageUrl,
+        description: meta.description,
+        publisher: { '@id': 'https://www.1into1.com/#organization' },
+      };
+    } else if (location.pathname === '/blog') {
+      primaryEntity = {
+        '@type': 'CollectionPage',
+        '@id': `${pageUrl}#page`,
+        name: meta.heading,
+        description: meta.description,
+        url: pageUrl,
+        isPartOf: { '@id': 'https://www.1into1.com/#website' },
+      };
+    } else if (location.pathname.startsWith('/blog/')) {
+      primaryEntity = {
+        '@type': 'Article',
+        '@id': `${pageUrl}#article`,
+        headline: meta.heading,
+        name: meta.heading,
+        description: meta.description,
+        url: pageUrl,
+        author: { '@id': 'https://www.1into1.com/#organization' },
+        publisher: { '@id': 'https://www.1into1.com/#organization' },
+        mainEntityOfPage: pageUrl,
+      };
+    } else if (['/privacy', '/terms'].includes(location.pathname)) {
+      primaryEntity = {
+        '@type': 'WebPage',
+        '@id': `${pageUrl}#page`,
+        name: meta.heading,
+        description: meta.description,
+        url: pageUrl,
+        isPartOf: { '@id': 'https://www.1into1.com/#website' },
+      };
+    } else {
+      primaryEntity = {
+        '@type': 'WebApplication',
+        '@id': `${pageUrl}#app`,
+        name: meta.heading,
+        url: pageUrl,
+        description: meta.description,
+        applicationCategory: 'UtilitiesApplication',
+        operatingSystem: 'Any',
+        browserRequirements: 'Requires a modern web browser with HTML5 support',
+        provider: { '@id': 'https://www.1into1.com/#organization' },
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD',
+        },
+        featureList: [
+          'Local-first PDF processing',
+          'Browser-based document tools',
+          'No account required for core tools',
+          'Offline-capable PWA for supported local workflows',
+        ],
+      };
+    }
+
+    scriptTag.textContent = JSON.stringify({
       '@context': 'https://schema.org',
-      '@type': 'WebApplication',
-      name: meta.title,
-      url: pageUrl,
-      description: meta.description,
-      applicationCategory: 'UtilitiesApplication',
-      operatingSystem: 'Any',
-      browserRequirements: 'Requires HTML5 and WebAssembly support',
-      offers: {
-        '@type': 'Offer',
-        price: '0',
-        priceCurrency: 'USD',
-      },
-      featureList: [
-        '100% Client-Side Processing',
-        'Zero Server Uploads',
-        'Local PDF tools; optional cloud AI',
+      '@graph': [
+        organization,
+        primaryEntity,
+        ...(breadcrumbItems.length ? [{
+          '@type': 'BreadcrumbList',
+          '@id': `${pageUrl}#breadcrumb`,
+          itemListElement: breadcrumbItems,
+        }] : []),
       ],
     });
   }, [location.pathname]);

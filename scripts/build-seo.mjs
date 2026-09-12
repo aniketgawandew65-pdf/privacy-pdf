@@ -25,7 +25,45 @@ function headFor(meta,path) {
   const values={'name="description"':meta.description,'property="og:title"':meta.title,'property="og:description"':meta.description,'property="og:url"':url,'name="twitter:title"':meta.title,'name="twitter:description"':meta.description,'name="twitter:url"':url};
   for(const [attr,value] of Object.entries(values)) html=html.replace(new RegExp(`<meta ${attr} content="[^"]*"\\s*/?>`),`<meta ${attr} content="${e(value)}" />`);
   const isArticle=articlePaths.includes(path);
-  const schema={'@context':'https://schema.org','@type':isArticle?'Article':path==='/blog'?'CollectionPage':['/privacy','/terms'].includes(path)?'WebPage':'WebApplication',name:meta.heading,description:meta.description,url,...(isArticle?{headline:meta.heading,author:{'@type':'Organization',name:'1into1',url:origin+'/'}}:{})};
+  const organization={'@type':'Organization','@id':origin+'/#organization',name:'1into1 PDF',url:origin+'/'};
+
+  let primaryEntity;
+  if(path==='/') {
+    primaryEntity={'@type':'WebSite','@id':origin+'/#website',name:'1into1 PDF',url,description:meta.description,publisher:{'@id':origin+'/#organization'}};
+  } else if(path==='/blog') {
+    primaryEntity={'@type':'CollectionPage','@id':url+'#page',name:meta.heading,description:meta.description,url,isPartOf:{'@id':origin+'/#website'}};
+  } else if(isArticle) {
+    primaryEntity={'@type':'Article','@id':url+'#article',headline:meta.heading,name:meta.heading,description:meta.description,url,author:{'@id':origin+'/#organization'},publisher:{'@id':origin+'/#organization'},mainEntityOfPage:url};
+  } else if(['/privacy','/terms'].includes(path)) {
+    primaryEntity={'@type':'WebPage','@id':url+'#page',name:meta.heading,description:meta.description,url,isPartOf:{'@id':origin+'/#website'}};
+  } else {
+    primaryEntity={
+      '@type':'WebApplication','@id':url+'#app',name:meta.heading,url,description:meta.description,
+      applicationCategory:'UtilitiesApplication',operatingSystem:'Any',
+      browserRequirements:'Requires a modern web browser with HTML5 support',
+      provider:{'@id':origin+'/#organization'},
+      offers:{'@type':'Offer',price:'0',priceCurrency:'USD'},
+      featureList:['Local-first PDF processing','Browser-based document tools','No account required for core tools','Offline-capable PWA for supported local workflows']
+    };
+  }
+
+  const breadcrumbItems=isArticle
+    ? [
+        {'@type':'ListItem',position:1,name:'Home',item:origin+'/'},
+        {'@type':'ListItem',position:2,name:'PDF Guides',item:origin+'/blog'},
+        {'@type':'ListItem',position:3,name:meta.heading,item:url}
+      ]
+    : path==='/' ? [] : [
+        {'@type':'ListItem',position:1,name:'Home',item:origin+'/'},
+        {'@type':'ListItem',position:2,name:meta.heading,item:url}
+      ];
+
+  const schema={'@context':'https://schema.org','@graph':[
+    organization,
+    primaryEntity,
+    ...(breadcrumbItems.length?[{'@type':'BreadcrumbList','@id':url+'#breadcrumb',itemListElement:breadcrumbItems}]:[])
+  ]};
+
   return html.replace('</head>',`<link rel="canonical" href="${url}" /><script id="schema-org-ld" type="application/ld+json">${JSON.stringify(schema).replace(/</g,'\\u003c')}</script></head>`);
 }
 for(const path of allPaths) {
