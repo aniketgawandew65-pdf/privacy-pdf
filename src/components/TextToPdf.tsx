@@ -62,6 +62,7 @@ export const TextToPdf: React.FC<any> = () => {
   const [charCount, setCharCount] = useState<number>(0);
   const [zoom, setZoom] = useState<number>(1.0);
   const [fontSize, setFontSize] = useState<number>(14);
+  const [toolbarFontSize, setToolbarFontSize] = useState<number>(14);
   const [selectedFont, setSelectedFont] = useState<string>(FONT_OPTIONS[0].value);
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -96,7 +97,6 @@ export const TextToPdf: React.FC<any> = () => {
       if (
         sel &&
         sel.rangeCount > 0 &&
-        !sel.isCollapsed &&
         editorRef.current &&
         editorRef.current.contains(sel.anchorNode)
       ) {
@@ -118,7 +118,63 @@ export const TextToPdf: React.FC<any> = () => {
       .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
       .replace(/✂/g, "");
 
+    // Match pagination measurements to the real PDF/preview rendering.
+    // Without this, a line can be assigned to the previous page and then
+    // get clipped by the final fixed-height A4 sheet.
+    const measurementStyle = document.createElement("style");
+    measurementStyle.textContent = `
+      .text-to-pdf-measure p {
+        margin: 0 0 6px 0;
+      }
+      .text-to-pdf-measure table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0;
+        font-size: inherit;
+      }
+      .text-to-pdf-measure th,
+      .text-to-pdf-measure td {
+        border: 1px solid #d4d4d8;
+        padding: 8px 12px;
+        text-align: left;
+      }
+      .text-to-pdf-measure th {
+        font-weight: 600;
+      }
+      .text-to-pdf-measure ul {
+        list-style-type: disc;
+        padding-left: 28px;
+        margin: 8px 0;
+      }
+      .text-to-pdf-measure ol {
+        list-style-type: decimal;
+        padding-left: 28px;
+        margin: 8px 0;
+      }
+      .text-to-pdf-measure li {
+        display: list-item;
+        margin-bottom: 4px;
+      }
+      .text-to-pdf-measure hr {
+        border: none;
+        border-top: 1px solid #e4e4e7;
+        margin: 16px 0;
+      }
+      .text-to-pdf-measure [style*="font-size"] {
+        line-height: 1.35;
+      }
+      .text-to-pdf-measure font[size="1"] { font-size: 10px !important; }
+      .text-to-pdf-measure font[size="2"] { font-size: 12px !important; }
+      .text-to-pdf-measure font[size="3"] { font-size: 14px !important; }
+      .text-to-pdf-measure font[size="4"] { font-size: 16px !important; }
+      .text-to-pdf-measure font[size="5"] { font-size: 18px !important; }
+      .text-to-pdf-measure font[size="6"] { font-size: 24px !important; }
+      .text-to-pdf-measure font[size="7"] { font-size: 32px !important; }
+    `;
+    document.head.appendChild(measurementStyle);
+
     const measuringSandbox = document.createElement("div");
+    measuringSandbox.className = "text-to-pdf-measure";
     measuringSandbox.style.position = "absolute";
     measuringSandbox.style.left = "-9999px";
     measuringSandbox.style.top = "0";
@@ -133,6 +189,7 @@ export const TextToPdf: React.FC<any> = () => {
     document.body.appendChild(measuringSandbox);
 
     const testContainer = document.createElement("div");
+    testContainer.className = "text-to-pdf-measure";
     testContainer.style.position = "absolute";
     testContainer.style.left = "-9999px";
     testContainer.style.top = "0";
@@ -146,6 +203,7 @@ export const TextToPdf: React.FC<any> = () => {
     document.body.appendChild(testContainer);
 
     const pages: string[] = [];
+    const PAGE_RENDER_SAFETY_PX = 12;
     let curPageContainer = document.createElement("div");
 
     const nodes = Array.from(measuringSandbox.childNodes);
@@ -171,7 +229,10 @@ export const TextToPdf: React.FC<any> = () => {
       testContainer.innerHTML = curPageContainer.innerHTML;
       const totalH = testContainer.scrollHeight - 112; // exclude top + bottom padding
 
-      if (totalH > USABLE_PAGE_HEIGHT_PX && curPageContainer.childNodes.length > 1) {
+      if (
+        totalH > USABLE_PAGE_HEIGHT_PX - PAGE_RENDER_SAFETY_PX &&
+        curPageContainer.childNodes.length > 1
+      ) {
         curPageContainer.removeChild(clone);
         pages.push(curPageContainer.innerHTML);
 
@@ -187,6 +248,7 @@ export const TextToPdf: React.FC<any> = () => {
 
     document.body.removeChild(measuringSandbox);
     document.body.removeChild(testContainer);
+    measurementStyle.remove();
 
     setPagesHtml(pages.length > 0 ? pages : [""]);
   }, []);
@@ -235,7 +297,7 @@ export const TextToPdf: React.FC<any> = () => {
 
   // 6. Word-level font size formatting
   const handleFontSizeChange = (size: number) => {
-    setFontSize(size);
+    setToolbarFontSize(size);
 
     const sel = window.getSelection();
     if (savedRangeRef.current) {
@@ -258,6 +320,9 @@ export const TextToPdf: React.FC<any> = () => {
       sel.addRange(newRange);
       syncContent();
     } else {
+      // No text selection: this becomes the normal/base typing size.
+      setFontSize(size);
+
       const level = size >= 32 ? "7" : size >= 24 ? "6" : size >= 18 ? "5" : size >= 16 ? "4" : size >= 14 ? "3" : "2";
       document.execCommand("fontSize", false, level);
       if (editorRef.current) {
@@ -509,7 +574,7 @@ export const TextToPdf: React.FC<any> = () => {
 
           {/* Font Size Selector */}
           <select
-            value={fontSize}
+            value={toolbarFontSize}
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
             className="bg-zinc-900 border border-zinc-700/80 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer"
           >
@@ -527,7 +592,7 @@ export const TextToPdf: React.FC<any> = () => {
             onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFontSizeChange(Math.min(32, fontSize + 2))}
+            onClick={() => handleFontSizeChange(Math.min(32, toolbarFontSize + 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
             A+
@@ -537,7 +602,7 @@ export const TextToPdf: React.FC<any> = () => {
             onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFontSizeChange(Math.max(8, fontSize - 2))}
+            onClick={() => handleFontSizeChange(Math.max(8, toolbarFontSize - 2))}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
             A-
@@ -748,11 +813,47 @@ export const TextToPdf: React.FC<any> = () => {
 
       {/* Bottom Live PDF Preview Card (Physical Stacked A4 Sheets) */}
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
-        <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-800/80">
           <span className="font-semibold text-sm text-zinc-200">PDF Preview</span>
-          <span className="text-xs text-zinc-400 font-mono">
-            {pagesHtml.length} {pagesHtml.length === 1 ? "Page" : "Pages"} (Discrete A4 Sheets)
-          </span>
+
+          <div className="flex items-center gap-2">
+            <span className="hidden sm:inline text-xs text-zinc-400 font-mono">
+              {pagesHtml.length} {pagesHtml.length === 1 ? "Page" : "Pages"} (Discrete A4 Sheets)
+            </span>
+
+            <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1 text-zinc-300">
+              <button
+                type="button"
+                onClick={() => setZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Zoom Out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+
+              <span className="text-xs font-mono px-1 min-w-[3rem] text-center text-zinc-300">
+                {Math.round(zoom * 100)}%
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setZoom((prev) => Math.min(2.0, Math.round((prev + 0.1) * 10) / 10))}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Zoom In"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setZoom(1.0)}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                title="Reset Zoom"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Vertical Stack of Real A4 Sheets */}
@@ -820,36 +921,6 @@ export const TextToPdf: React.FC<any> = () => {
             </div>
           ))}
 
-          {/* Floating Zoom Controls */}
-          <div className="fixed bottom-6 right-6 sm:absolute sm:bottom-4 sm:right-4 flex items-center gap-1 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 shadow-2xl backdrop-blur-md text-zinc-300 z-20">
-            <button
-              type="button"
-              onClick={() => setZoom((prev) => Math.max(0.6, Math.round((prev - 0.1) * 10) / 10))}
-              className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-              title="Zoom Out"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="text-xs font-mono px-2 text-zinc-300 min-w-[3rem] text-center">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={() => setZoom((prev) => Math.min(2.0, Math.round((prev + 0.1) * 10) / 10))}
-              className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setZoom(1.0)}
-              className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
-              title="Reset Zoom"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          </div>
         </div>
 
         {/* Action Footer */}
