@@ -560,6 +560,306 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/crop-pdf','Crop unnecessary margins'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
+  },
+
+  "/split-pdf": {
+    title: "How to split a PDF into separate pages or ranges",
+    intro: "Split a PDF when you only need certain pages, want smaller separate files, or need to divide one document into logical sections.",
+    steps: [
+      "Choose the PDF you want to split.",
+      "Select individual pages or page ranges.",
+      "Create the separate PDF files.",
+      "Download the results and open them to confirm the correct pages were included.",
+      "Keep the original PDF until you have verified every output file."
+    ],
+    example: "A 20-page report can be divided into pages 1–5, 6–12 and 13–20 so each section can be shared separately.",
+    questions: [
+      ["Can I extract only one page?", "Yes. Select a single page when you only need one part of the original document."],
+      ["Can I split by page range?", "Yes. Page ranges are useful when the document contains several sections that should become separate PDFs."],
+      ["Will splitting reduce file size?", "Each output may be smaller because it contains fewer pages, although the exact size depends on the original PDF."],
+      ["Should I keep the original file?", "Yes. Keep the complete source document until you confirm all split files are correct."]
+    ],
+    related: [
+      ["/merge-pdf","Merge PDF files again"],
+      ["/remove-pages","Delete unwanted pages"],
+      ["/organize-pdf","Reorder PDF pages"],
+      ["/compress-pdf","Compress the resulting PDF"]
+    ]
+  },
+
+  "/protect-pdf": {
+    title: "How to password protect a PDF",
+    intro: "Add password protection when a PDF contains information that should not be opened freely by anyone who receives the file.",
+    steps: [
+      "Choose the PDF you want to protect.",
+      "Enter a strong password that you can remember or store securely.",
+      "Create the protected PDF.",
+      "Download the new file.",
+      "Reopen it and confirm the password is required before sharing it."
+    ],
+    example: "A confidential document can be password protected before it is sent by email, with the password shared separately through another channel.",
+    questions: [
+      ["What makes a good PDF password?", "Use a long, unique password that is difficult to guess and avoid reusing an important account password."],
+      ["Should I send the password in the same email?", "For sensitive documents, sharing the password through a separate communication channel can reduce accidental exposure."],
+      ["Can I remove the password later?", "If you know the password, you can use an unlock workflow to create an unprotected copy when appropriate."],
+      ["Should I keep an unprotected original?", "Keep your source file securely if you may need to edit or recreate the protected document later."]
+    ],
+    related: [
+      ["/unlock-pdf","Unlock a PDF you have permission to open"],
+      ["/offline-pdf-redaction","Remove sensitive information"],
+      ["/sanitize-pdf","Remove PDF metadata"],
+      ["/watermark-pdf","Add a document watermark"]
+    ]
+  },
+
+  "/redact-pdf": {
+    title: "How to permanently redact information from a PDF",
+    intro: "Use PDF redaction when sensitive text, numbers or images must be removed from the shared copy rather than simply covered visually.",
+    steps: [
+      "Choose the PDF that contains sensitive information.",
+      "Mark every area that must be removed.",
+      "Create the redacted output.",
+      "Download and reopen the new PDF.",
+      "Inspect every redacted area before sending the document to anyone else."
+    ],
+    example: "Before sharing a statement, account numbers and private identifiers can be redacted while leaving the transactions the recipient needs to review.",
+    questions: [
+      ["Is drawing a black rectangle enough?", "Not always. A visual box can leave underlying content recoverable, which is why a dedicated redaction workflow is preferable for sensitive material."],
+      ["What should I verify after redaction?", "Reopen the output and check every page, including text around the redacted areas and any information that may appear elsewhere in the document."],
+      ["Should I redact metadata too?", "Visible redaction and metadata removal solve different problems. Use a sanitization tool when hidden document metadata also needs attention."],
+      ["Should I keep the original?", "Yes. Store the original securely and share only the verified redacted copy."]
+    ],
+    related: [
+      ["/offline-pdf-redaction","Use the privacy-focused redaction workflow"],
+      ["/sanitize-pdf","Remove PDF metadata"],
+      ["/protect-pdf","Password protect a PDF"],
+      ["/edit-pdf","Make non-sensitive visual edits"]
+    ]
+  },
+
+  "/repair-pdf": {
+    title: "How to repair a damaged or unreadable PDF",
+    intro: "A repair workflow can help rebuild a PDF that no longer opens correctly because its internal structure has become damaged or inconsistent.",
+    steps: [
+      "Choose the damaged PDF.",
+      "Run the repair or rebuild process.",
+      "Download the reconstructed PDF.",
+      "Open the new file and check every page.",
+      "Compare important content with the original source if another copy is available."
+    ],
+    example: "A PDF that fails to open after an interrupted transfer may sometimes be rebuilt into a readable copy if enough of the original document structure remains intact.",
+    questions: [
+      ["Can every corrupted PDF be repaired?", "No. Recovery depends on what parts of the file are damaged and whether enough readable document data remains."],
+      ["Will repaired pages always look identical?", "Not necessarily. Always inspect the repaired file carefully because damaged content may be incomplete."],
+      ["Should I overwrite the original?", "No. Keep the original damaged file separately until you have confirmed the repaired copy is usable."],
+      ["What if repair does not work?", "Try obtaining another copy from the original source, backup, sender or export process."]
+    ],
+    related: [
+      ["/compare-pdf","Compare the repaired PDF with another copy"],
+      ["/pdf-to-image","Render PDF pages as images"],
+      ["/pdf-to-text","Check whether text can be extracted"],
+      ["/compress-pdf","Create a smaller verified copy"]
+    ]
+  },
+
+  "/compare-pdf": {
+    title: "How to compare two PDF files for visual changes",
+    intro: "Compare two PDF versions when you need to inspect revisions, layout changes, altered text areas or other visible differences.",
+    steps: [
+      "Choose the first PDF as the reference version.",
+      "Choose the second PDF you want to compare.",
+      "Review pages side by side or use the available visual difference view.",
+      "Inspect every highlighted or visible change.",
+      "Confirm important revisions against the source documents before relying on the comparison."
+    ],
+    example: "Two versions of a contract can be compared to identify pages where wording, signatures, tables or formatting may have changed.",
+    questions: [
+      ["Can a visual comparison detect every textual change?", "Visual comparison is useful for spotting visible differences, but important legal or financial changes should still be reviewed manually."],
+      ["Do both PDFs need the same number of pages?", "Matching layouts usually make comparison easier, but differences in page count or formatting can themselves be meaningful."],
+      ["Can I compare scanned PDFs?", "Yes for visible page differences, although scan quality, alignment and resolution can affect the comparison."],
+      ["Should I rely on comparison alone for contracts?", "No. Use it as a review aid and verify important wording directly in both source documents."]
+    ],
+    related: [
+      ["/pdf-to-text","Extract text for manual comparison"],
+      ["/repair-pdf","Repair a damaged PDF before comparing"],
+      ["/annotate-pdf","Mark differences on a PDF"],
+      ["/offline-pdf-redaction","Redact sensitive content before sharing"]
+    ]
+  },
+
+  "/pdf-to-text": {
+    title: "How to extract text from a PDF",
+    intro: "Extract PDF text when you need reusable plain text for notes, search, analysis or another document workflow.",
+    steps: [
+      "Choose the PDF containing the text you need.",
+      "Run the text extraction process.",
+      "Review the extracted text for missing sections or unusual reading order.",
+      "Copy or save the text you need.",
+      "Check important names, numbers and paragraphs against the original PDF."
+    ],
+    example: "A long report can be converted into plain text so selected paragraphs can be searched, copied into notes or processed further.",
+    questions: [
+      ["Why is some text missing?", "Scanned PDFs may contain page images instead of selectable text and may require OCR first."],
+      ["Why is the reading order different?", "Complex columns, tables and positioned text can be stored in an order that differs from the visible page layout."],
+      ["Should I use Markdown instead?", "Use Markdown when lightweight structure such as headings and lists is useful. Plain text is better when you only need the words."],
+      ["Can I extract text from a scan?", "Use OCR first when the document contains images of text rather than an actual text layer."]
+    ],
+    related: [
+      ["/ocr-pdf","Recognize text in scanned PDFs"],
+      ["/pdf-to-markdown","Convert PDF to structured Markdown"],
+      ["/extract-pdf-for-llm","Prepare PDF text for LLM workflows"],
+      ["/pdf-to-csv","Extract table-style data"]
+    ]
+  },
+
+  "/image-to-pdf": {
+    title: "How to convert images to a PDF",
+    intro: "Combine images into a PDF when you want photos, scans, receipts or screenshots stored and shared as one document.",
+    steps: [
+      "Choose the images you want to include.",
+      "Arrange them in the correct order.",
+      "Create the PDF.",
+      "Download and open the result.",
+      "Check page order, orientation and image clarity."
+    ],
+    example: "Several photographed pages of a signed document can be arranged in reading order and combined into one PDF for easier sharing.",
+    questions: [
+      ["Can I combine multiple images into one PDF?", "Yes. Arrange the images in the order you want before creating the PDF."],
+      ["What image formats can I use?", "The available image workflows support common browser-friendly formats, and the main Image Converter provides additional format options."],
+      ["Will image quality change?", "PDF creation may affect image dimensions or compression depending on the workflow, so inspect the final document."],
+      ["What if I photographed a paper document?", "Use the Scan to PDF workflow when you want document-photo features designed specifically for scanned pages."]
+    ],
+    related: [
+      ["/image-converter","Convert image formats"],
+      ["/scan-to-pdf","Turn document photos into PDF"],
+      ["/compress-image","Reduce image size first"],
+      ["/pdf-to-image","Convert PDF pages back to images"]
+    ]
+  },
+
+  "/pdf-to-jpg": {
+    title: "How to convert PDF pages to JPG images",
+    intro: "Convert PDF pages to JPG when you need individual page images for previews, sharing, presentations or image-based workflows.",
+    steps: [
+      "Choose the PDF you want to convert.",
+      "Render the PDF pages as JPG images.",
+      "Review the image quality.",
+      "Download the page images you need.",
+      "Check small text and detailed graphics before using the images."
+    ],
+    example: "A brochure PDF can be converted page by page into JPG images for use in a presentation or social preview.",
+    questions: [
+      ["Does each PDF page become a separate JPG?", "Yes. Page-based conversion creates an image representation of each converted PDF page."],
+      ["Should I use JPG or PNG?", "JPG is useful for photographs and smaller image files, while PNG can preserve sharper graphics and text at the cost of larger files."],
+      ["Can I convert to formats other than JPG?", "Use the PDF to Image tool when you want JPG, PNG or WebP options."],
+      ["Will text remain selectable?", "No. A JPG is an image representation of the PDF page rather than a selectable PDF text layer."]
+    ],
+    related: [
+      ["/pdf-to-image","Convert PDF to JPG, PNG or WebP"],
+      ["/image-converter","Convert between image formats"],
+      ["/compress-image","Reduce exported image size"],
+      ["/pdf-to-text","Extract selectable PDF text instead"]
+    ]
+  },
+
+  "/compress-image": {
+    title: "How to compress an image to a smaller file size",
+    intro: "Compress images when a website, form, email or application requires a smaller JPG, PNG, WebP or supported image file.",
+    steps: [
+      "Choose the image you want to reduce.",
+      "Select the available quality or target-size option.",
+      "Compress the image.",
+      "Download and reopen the result.",
+      "Check text, faces and fine detail before uploading or sharing it."
+    ],
+    example: "A large phone photo can be reduced before uploading it to a form that accepts only a small image attachment.",
+    questions: [
+      ["Why does image compression reduce quality?", "Smaller files often require removing image detail or increasing lossy compression, especially when the target is much smaller than the source."],
+      ["Should I use the smallest possible file?", "Use the largest size the destination allows when visual clarity matters."],
+      ["What is EXIF metadata?", "EXIF can contain camera details, timestamps and sometimes location information. Remove it when that information is unnecessary or sensitive."],
+      ["Can I compress several image formats?", "The image tools support common image formats including JPG, PNG, WebP and supported HEIC workflows."]
+    ],
+    related: [
+      ["/image-converter","Convert image formats"],
+      ["/heic-to-jpg","Convert HEIC to JPG"],
+      ["/image-to-pdf","Combine images into a PDF"],
+      ["/scan-to-pdf","Create PDFs from document photos"]
+    ]
+  },
+
+  "/remove-pages": {
+    title: "How to remove unwanted pages from a PDF",
+    intro: "Delete pages from a PDF when you only want to keep the relevant parts of a document before sharing, storing or compressing it.",
+    steps: [
+      "Choose the PDF you want to edit.",
+      "Select the pages you want to remove.",
+      "Create the new PDF.",
+      "Download and reopen the result.",
+      "Confirm that every required page is still present."
+    ],
+    example: "A 12-page document can be reduced to the six pages needed for an application by removing blank, duplicate or irrelevant pages.",
+    questions: [
+      ["Can I remove several pages at once?", "Yes. Select the unwanted pages before creating the cleaned PDF."],
+      ["Will page removal reduce file size?", "Usually, because the new PDF contains fewer pages, although the exact reduction depends on the removed content."],
+      ["Can I recover a deleted page afterward?", "Create the edited PDF from a copy and keep the original source so you can restore pages if needed."],
+      ["Should I use Split PDF instead?", "Use Split PDF when you want several separate files. Use Remove Pages when you want one PDF with selected pages deleted."]
+    ],
+    related: [
+      ["/split-pdf","Split a PDF into separate files"],
+      ["/organize-pdf","Reorder PDF pages"],
+      ["/merge-pdf","Combine PDFs"],
+      ["/compress-pdf","Compress the cleaned PDF"]
+    ]
+  },
+
+  "/page-numbers": {
+    title: "How to add page numbers to a PDF",
+    intro: "Add page numbers when a PDF needs clear pagination for printing, review, references or document organization.",
+    steps: [
+      "Choose the PDF you want to number.",
+      "Select the available page-number position and formatting options.",
+      "Apply the numbering.",
+      "Download and inspect the new PDF.",
+      "Check that numbers do not overlap important document content."
+    ],
+    example: "A report assembled from several source files can receive consistent page numbering before it is circulated for review.",
+    questions: [
+      ["Can page numbers cover existing text?", "They can if the chosen position overlaps existing page content, so inspect several pages after applying them."],
+      ["Should the first page always be numbered?", "That depends on your document. Some reports omit visible numbering on title pages while others number every page."],
+      ["Can I number a PDF after merging files?", "Yes. Numbering after the final merge can provide one continuous sequence across the complete document."],
+      ["Should I keep the unnumbered original?", "Yes. Keeping the source gives you flexibility if you later need a different numbering style."]
+    ],
+    related: [
+      ["/merge-pdf","Merge files before numbering"],
+      ["/bates-numbering","Add Bates numbers to document sets"],
+      ["/booklet-pdf","Create a printable booklet"],
+      ["/nup-pdf","Place several pages on one sheet"]
+    ]
+  },
+
+  "/watermark-pdf": {
+    title: "How to add a text watermark to a PDF",
+    intro: "Add a watermark when a PDF needs a visible label such as Confidential, Draft, Sample or another document status.",
+    steps: [
+      "Choose the PDF you want to watermark.",
+      "Enter the watermark text.",
+      "Apply the watermark to the document.",
+      "Download the new PDF.",
+      "Review several pages to make sure the watermark is visible without hiding important content."
+    ],
+    example: "A draft proposal can be marked DRAFT on each page before it is circulated internally for review.",
+    questions: [
+      ["Does a watermark prevent copying?", "No. A watermark is primarily a visible document label and should not be treated as access control."],
+      ["Can I use a watermark for confidential files?", "Yes as a visible warning, but use password protection and appropriate sharing controls when access itself must be restricted."],
+      ["Should the watermark cover the document text?", "It should remain visible without making the underlying content difficult to read."],
+      ["Can I remove a watermark later?", "Keep an original unwatermarked copy so you can create a different version when needed."]
+    ],
+    related: [
+      ["/protect-pdf","Password protect the PDF"],
+      ["/page-numbers","Add page numbers"],
+      ["/edit-pdf","Make other visual edits"],
+      ["/sanitize-pdf","Remove document metadata"]
+    ]
   }
 
 };
