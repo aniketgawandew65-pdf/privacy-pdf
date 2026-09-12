@@ -460,6 +460,106 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/page-numbers','Add page numbers'],
       ['/compress-pdf','Compress the final booklet PDF']
     ]
+  },
+
+  '/compress-pdf-to-50kb': {
+    title: 'How to compress a PDF to a 50 KB target',
+    intro: 'A 50 KB PDF is an extremely small target, useful when an upload portal enforces a strict file-size limit. Expect stronger quality reduction, especially on multi-page scans.',
+    steps: [
+      'Choose the PDF you need to submit.',
+      'Select the 50 KB target.',
+      'Run compression and download the result.',
+      'Zoom in on names, numbers, signatures and stamps.',
+      'If important content becomes unreadable, remove unnecessary pages or use a larger limit when the receiving portal allows it.'
+    ],
+    example: 'A one-page application form has much more room for readable detail at 50 KB than a ten-page scanned document. The more pages you squeeze into the same 50 KB budget, the less image data is available per page.',
+    questions: [
+      ['Is 50 KB suitable for a multi-page PDF?', 'Sometimes, but it is a very restrictive target. Longer scanned documents can lose substantial clarity because the available file-size budget is shared across all pages.'],
+      ['Why does a 50 KB PDF look blurry?', 'Reaching such a small target can require reducing image resolution and JPEG quality aggressively.'],
+      ['What should I check before uploading?', 'Reopen the downloaded PDF and inspect small text, identification numbers, signatures, stamps and every page.'],
+      ['What if 50 KB is too small for my document?', 'Remove unnecessary pages, split the PDF if permitted, or use a larger accepted limit such as 100 KB or 200 KB.']
+    ],
+    related: [
+      ['/compress-pdf-to-100kb','Try a 100 KB target'],
+      ['/remove-pages','Remove unnecessary pages'],
+      ['/split-pdf','Split a large document'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
+  },
+
+  '/compress-pdf-to-100kb': {
+    title: 'How to compress a PDF to a 100 KB target',
+    intro: 'A 100 KB target is commonly useful for application forms, certificates and other documents submitted to portals with strict upload limits.',
+    steps: [
+      'Choose the PDF you need to reduce.',
+      'Select the 100 KB target.',
+      'Compress and download the new PDF.',
+      'Check that text, photographs, signatures and stamps are still readable.',
+      'Submit the verified copy while keeping your original document separately.'
+    ],
+    example: 'A two-page certificate or application document can often tolerate a 100 KB target better than a large scanned report. Always judge the downloaded result rather than only checking its file size.',
+    questions: [
+      ['Is 100 KB enough for a PDF?', 'It depends on page count and content. Text-heavy or short documents generally have an easier quality trade-off than long image-heavy scans.'],
+      ['Can I use this for application portals?', 'Yes when the portal accepts PDF and specifies a size around 100 KB. Always follow the portal’s exact file-type and size rules.'],
+      ['Why should I reopen the result?', 'Meeting the file-size limit does not guarantee that small text, stamps or photographs remain clear enough for the recipient.'],
+      ['Should I choose 50 KB instead?', 'Only when the portal requires it. If 100 KB is allowed, using the larger permitted size generally leaves more room for readable detail.']
+    ],
+    related: [
+      ['/compress-pdf-to-50kb','Use a stricter 50 KB target'],
+      ['/compress-pdf-to-200kb','Try a 200 KB target'],
+      ['/scan-to-pdf','Create a PDF from document photos'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
+  },
+
+  '/compress-pdf-to-200kb': {
+    title: 'How to compress a PDF to a 200 KB target',
+    intro: 'A 200 KB target gives documents more room for readable text and images while still meeting many restricted upload-size requirements.',
+    steps: [
+      'Choose the PDF you want to reduce.',
+      'Select the 200 KB target.',
+      'Run compression and download the result.',
+      'Inspect image quality and small text.',
+      'Confirm the final file meets the receiving website’s stated limit before uploading.'
+    ],
+    example: 'For a several-page application PDF containing text and a few scanned images, 200 KB may preserve noticeably more detail than a 50 KB or 100 KB target.',
+    questions: [
+      ['When should I choose 200 KB instead of 100 KB?', 'Choose the largest size the receiving portal permits. A larger target usually provides more room for document clarity.'],
+      ['Can a long PDF fit into 200 KB?', 'It may, but page count, scans, photographs and graphics affect how much quality reduction is required.'],
+      ['Will compression preserve interactive PDF features?', 'The target-size compressor may rasterize pages, so selectable text, form fields or existing digital-signature validation may not survive. Keep the original.'],
+      ['What if the portal says maximum 200 KB?', 'Check how the portal defines KB and leave some headroom if necessary. Different systems can calculate kilobytes differently.']
+    ],
+    related: [
+      ['/compress-pdf-to-100kb','Use a 100 KB target'],
+      ['/compress-pdf-to-500kb','Use a 500 KB target'],
+      ['/remove-pages','Remove pages before compression'],
+      ['/compress-pdf','Choose a custom PDF size']
+    ]
+  },
+
+  '/compress-pdf-to-500kb': {
+    title: 'How to compress a PDF to a 500 KB target',
+    intro: 'A 500 KB target provides substantially more room for page detail than very small limits, making it more suitable for longer PDFs, scanned pages and documents containing images.',
+    steps: [
+      'Choose the PDF you need to reduce.',
+      'Select the 500 KB target.',
+      'Compress and download the result.',
+      'Review the first, middle and final pages.',
+      'Check photographs, tables, signatures and fine text before sending the file.'
+    ],
+    example: 'A multi-page document with scanned signatures or photographs may remain much more readable at 500 KB than at 100 KB, while still fitting a portal or email attachment restriction.',
+    questions: [
+      ['Why choose 500 KB when smaller options exist?', 'Use the largest size your destination permits. More available bytes generally allow the compressor to preserve more detail.'],
+      ['Is 500 KB good for scanned PDFs?', 'It can provide a more practical quality budget than very small targets, although results still depend on page count, resolution and image complexity.'],
+      ['Will the output always look identical to the original?', 'No. File-size reduction can change image quality and resolution, so inspect the downloaded copy.'],
+      ['Can I choose a size other than 500 KB?', 'Yes. Use the main Compress PDF tool when you need another supported target or standard compression instead.']
+    ],
+    related: [
+      ['/compress-pdf-to-200kb','Use a smaller 200 KB target'],
+      ['/compress-pdf','Choose another PDF target size'],
+      ['/crop-pdf','Crop unnecessary margins'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
   }
 
 };
@@ -495,7 +595,7 @@ export const ARTICLES: Article[] = [
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const link = (path: string, label: string) => `<a href="${escapeHtml(path)}">${escapeHtml(label)}</a>`;
 export function renderGuide(path: string): string {
-  const guide = TOOL_GUIDES[path.startsWith('/compress-pdf-to-') ? '/compress-pdf' : path];
+  const guide = TOOL_GUIDES[path] || TOOL_GUIDES[path.startsWith('/compress-pdf-to-') ? '/compress-pdf' : path];
   if (!guide) return '';
   return `<section class="seo-guide" aria-label="Tool instructions"><h2>${escapeHtml(guide.title)}</h2><p>${escapeHtml(guide.intro)}</p><ol>${guide.steps.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ol><div class="guide-example"><h3>A practical example</h3><p>${escapeHtml(guide.example)}</p></div><h3>Common questions</h3>${guide.questions.map(([q,a])=>`<details><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join('')}<nav class="guide-related" aria-label="Related tools and guides">${guide.related.map(([p,l])=>link(p,l)).join('')}</nav></section>`;
 }
