@@ -140,6 +140,328 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   }
 ,
 
+  '/pdf-to-markdown': {
+    title: 'How to convert a PDF to Markdown for AI and LLM workflows',
+    intro: 'Extract readable PDF content into Markdown that is easier to use in notes, documentation and AI workflows. Processing happens in your browser.',
+    steps: [
+      'Choose the PDF you want to convert.',
+      'Let the tool extract the document text and structure.',
+      'Review the generated Markdown for headings, paragraphs and formatting.',
+      'Copy or download the Markdown and check important sections against the original PDF.'
+    ],
+    example: 'A research report can be converted to Markdown before pasting selected sections into an LLM. This gives you cleaner text than repeatedly copying individual PDF pages.',
+    questions: [
+      ['Why use Markdown instead of plain text?', 'Markdown keeps lightweight structure such as headings and paragraphs, which can make extracted content easier to read and reuse.'],
+      ['Can I use the output with ChatGPT or other LLMs?', 'Yes. Review the extracted content first, then use the sections you need with the AI service of your choice.'],
+      ['Is the PDF uploaded for conversion?', 'The PDF-to-Markdown extraction workflow runs locally in your browser.'],
+      ['Will every PDF convert perfectly?', 'No. Complex layouts, scans, columns and unusual fonts can require manual review. OCR may help when the PDF contains scanned images instead of selectable text.']
+    ],
+    related: [
+      ['/extract-pdf-for-llm','Prepare PDF text for LLM use'],
+      ['/ocr-pdf','Make scanned PDF text searchable'],
+      ['/pdf-to-text','Extract plain PDF text'],
+      ['/ai-summary-pdf','Summarize or chat with a PDF']
+    ]
+  },
+
+  '/extract-pdf-for-llm': {
+    title: 'How to prepare PDF content for an LLM',
+    intro: 'Turn PDF content into cleaner Markdown before using it with an AI or LLM workflow. This helps separate document extraction from the AI step.',
+    steps: [
+      'Choose the PDF you want to prepare.',
+      'Extract the document into Markdown.',
+      'Review the output and remove sections you do not need.',
+      'Use only the relevant text with your chosen LLM or AI workflow.'
+    ],
+    example: 'Instead of uploading a 70-page PDF directly to an AI service, extract the document locally, select the relevant chapters and use only that text in your prompt.',
+    questions: [
+      ['Does this automatically send my PDF to an AI provider?', 'No. The extraction step prepares document text locally. Sending content to an external AI service is a separate action.'],
+      ['Why reduce the document before using an LLM?', 'Removing irrelevant pages or sections can make prompts easier to manage and keeps the AI input focused on the material you actually need.'],
+      ['What if the PDF is scanned?', 'Run OCR first when the PDF contains page images without a usable text layer.'],
+      ['Can I download the result?', 'Use the available Markdown output controls to save or copy the extracted content for your workflow.']
+    ],
+    related: [
+      ['/pdf-to-markdown','Convert PDF to Markdown'],
+      ['/ocr-pdf','OCR a scanned PDF'],
+      ['/pdf-to-text','Extract plain text'],
+      ['/sanitize-pdf','Remove PDF metadata before sharing']
+    ]
+  },
+
+  '/bank-statement-to-excel': {
+    title: 'How to convert a bank statement PDF to spreadsheet data',
+    intro: 'Extract table-style information from a PDF statement into spreadsheet-friendly data. Always verify financial values against the original statement before relying on the result.',
+    steps: [
+      'Choose the bank statement PDF.',
+      'Run the table extraction process.',
+      'Review dates, descriptions, debit, credit and balance fields where available.',
+      'Export the structured result and open it in your spreadsheet application.',
+      'Compare totals and sample transactions against the original PDF.'
+    ],
+    example: 'For a monthly statement, check the opening balance, several transactions and the closing balance after extraction before using the spreadsheet for analysis or reconciliation.',
+    questions: [
+      ['Will every bank statement have the same columns?', 'No. Banks use different layouts, column names and statement formats, so extracted results should always be reviewed.'],
+      ['Can it work with scanned statements?', 'A scanned statement may require OCR before table extraction can identify usable text.'],
+      ['Should I trust extracted financial values automatically?', 'No. Verify important amounts, dates and balances against the original statement before accounting, reporting or financial decisions.'],
+      ['Is the statement processed locally?', 'The PDF extraction workflow is designed to process the document in your browser rather than requiring a normal server-side document upload.']
+    ],
+    related: [
+      ['/pdf-to-csv','Extract PDF tables to CSV'],
+      ['/ocr-pdf','OCR a scanned statement'],
+      ['/sanitize-pdf','Remove metadata from a PDF'],
+      ['/pdf-to-markdown','Convert document text to Markdown']
+    ]
+  },
+
+  '/pdf-to-csv': {
+    title: 'How to extract PDF tables into CSV or Excel-ready data',
+    intro: 'Convert table-style PDF content into structured spreadsheet data that can be reviewed in Excel, Google Sheets or another spreadsheet application.',
+    steps: [
+      'Choose a PDF containing table-style data.',
+      'Run the extraction process.',
+      'Review the detected rows and columns.',
+      'Export the result to a spreadsheet-friendly format.',
+      'Check important values against the source PDF.'
+    ],
+    example: 'An invoice or financial report with rows of dates and amounts can be extracted into structured data, then checked and sorted in a spreadsheet.',
+    questions: [
+      ['Does this convert every visual PDF table perfectly?', 'No. Table extraction depends on the PDF layout. Merged cells, unusual spacing, scans and complex multi-column designs can require cleanup.'],
+      ['What if the PDF contains scanned pages?', 'Use OCR first so text can be detected before attempting structured extraction.'],
+      ['Can I use it for bank statements?', 'Yes, and the dedicated Bank Statement to Excel page provides a workflow focused on financial statement extraction.'],
+      ['Should I verify the exported data?', 'Yes. Always compare important rows, totals and values with the original PDF.']
+    ],
+    related: [
+      ['/bank-statement-to-excel','Convert a bank statement to spreadsheet data'],
+      ['/ocr-pdf','OCR scanned tables'],
+      ['/pdf-to-text','Extract raw PDF text'],
+      ['/pdf-to-markdown','Convert PDF to Markdown']
+    ]
+  },
+
+  '/offline-pdf-redaction': {
+    title: 'How to permanently redact sensitive information from a PDF',
+    intro: 'Remove sensitive visible information from a PDF using a browser-based redaction workflow. Review the downloaded copy carefully before sharing it.',
+    steps: [
+      'Choose the PDF containing the information you need to remove.',
+      'Mark each sensitive area for redaction.',
+      'Check every page for names, account numbers, addresses or other confidential content.',
+      'Create the redacted PDF.',
+      'Download and reopen the result to confirm the information is no longer visible.'
+    ],
+    example: 'Before sending a bank statement to a third party, redact account numbers and other information that the recipient does not need, then inspect the exported PDF before sharing it.',
+    questions: [
+      ['Is covering text with a white box the same as redaction?', 'No. A visual cover can leave the underlying information recoverable. Use a dedicated redaction workflow when information must be removed from the output.'],
+      ['Is my PDF uploaded for redaction?', 'The redaction workflow is designed to process the document locally in your browser.'],
+      ['Should I keep the original PDF?', 'Yes. Keep the unmodified source separately until you have verified the redacted copy.'],
+      ['What should I check after redacting?', 'Reopen the downloaded PDF and inspect every redacted area and every page before sharing the file.']
+    ],
+    related: [
+      ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
+      ['/edit-pdf','Make visual PDF edits'],
+      ['/protect-pdf','Password-protect a PDF'],
+      ['/bates-numbering','Add Bates numbers to legal documents']
+    ]
+  },
+
+  '/sanitize-pdf': {
+    title: 'How to sanitize a PDF before sharing it',
+    intro: 'Create a cleaner copy of a PDF by removing metadata and other document traces that may not be needed by the recipient.',
+    steps: [
+      'Choose the PDF you plan to share.',
+      'Run the sanitization process.',
+      'Download the cleaned copy.',
+      'Check the document content and appearance.',
+      'Share the sanitized copy rather than your original file.'
+    ],
+    example: 'Before sending a document outside your organisation, sanitize the PDF to reduce unnecessary metadata, then separately redact any confidential information that appears on the pages.',
+    questions: [
+      ['Is sanitizing the same as redacting?', 'No. Sanitizing targets metadata or document traces, while redaction removes sensitive visible content. Use both when both types of information matter.'],
+      ['Does sanitizing change the visible document?', 'The goal is to preserve the useful document while removing unnecessary metadata or hidden traces, but always inspect the downloaded result.'],
+      ['Should I sanitize sensitive documents before sharing?', 'It can be a useful privacy step, but it does not replace reviewing the visible content of the PDF.'],
+      ['Does processing require a normal server upload?', 'The core sanitization workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/offline-pdf-redaction','Redact sensitive visible content'],
+      ['/edit-metadata','Review or edit PDF metadata'],
+      ['/protect-pdf','Password-protect a copy'],
+      ['/pdf-to-markdown','Extract document content locally']
+    ]
+  },
+
+  '/bates-numbering': {
+    title: 'How to add Bates numbers to PDF documents',
+    intro: 'Apply sequential Bates numbering to PDF pages for legal, discovery, compliance or document-review workflows.',
+    steps: [
+      'Choose the PDF you need to number.',
+      'Set the Bates numbering options and starting value.',
+      'Review the placement so numbers do not cover important page content.',
+      'Create the numbered PDF.',
+      'Check the first, middle and final pages to confirm the sequence.'
+    ],
+    example: 'A document set beginning at 000001 can be numbered sequentially so each page has a stable reference during legal review or document exchange.',
+    questions: [
+      ['What are Bates numbers used for?', 'Bates numbering gives document pages sequential identifiers that can make referencing large legal or review sets easier.'],
+      ['Should I verify the complete sequence?', 'Yes. Check the beginning, several middle pages and the final page before relying on the numbered document set.'],
+      ['Can Bates numbers cover existing content?', 'Poor placement can overlap page content, so review the position before generating the final file.'],
+      ['Is the document processed locally?', 'The Bates-numbering workflow runs in your browser rather than requiring a normal document-processing upload.']
+    ],
+    related: [
+      ['/offline-pdf-redaction','Redact confidential information'],
+      ['/sanitize-pdf','Sanitize PDF metadata'],
+      ['/page-numbers','Add ordinary page numbers'],
+      ['/compare-pdf','Compare PDF versions']
+    ]
+  },
+
+  '/dark-mode-pdf': {
+    title: 'How to create a dark mode PDF for easier night reading',
+    intro: 'Create a dark-reading copy of a PDF instead of only changing the appearance of the viewer. Keep your original file alongside the converted version.',
+    steps: [
+      'Choose the PDF you want to read in dark mode.',
+      'Run the dark-mode conversion.',
+      'Download the converted copy.',
+      'Inspect text, images, diagrams and contrast before using it for extended reading.'
+    ],
+    example: 'A bright study PDF can be converted into a darker reading copy for use at night while the original document remains unchanged.',
+    questions: [
+      ['Is this just a browser dark theme?', 'No. The tool creates a converted PDF output rather than only changing the surrounding website interface.'],
+      ['Will every colour look perfect after conversion?', 'Not necessarily. Images, charts and coloured text can behave differently, so inspect the final file.'],
+      ['Does this modify my original PDF?', 'The tool creates a separate output. Keep the original file if you need the original colours or appearance later.'],
+      ['Is the PDF uploaded for the conversion?', 'The transformation is performed locally in your browser.']
+    ],
+    related: [
+      ['/grayscale-pdf','Create a grayscale PDF'],
+      ['/pdf-to-image','Convert PDF pages to images'],
+      ['/ocr-pdf','Make scanned PDF text searchable'],
+      ['/compress-pdf','Reduce PDF file size']
+    ]
+  },
+
+  '/image-converter': {
+    title: 'How to convert images between JPG, PNG, WebP, HEIC and PDF',
+    intro: 'Convert common image formats directly in your browser. Create PDF files from images or convert supported images into JPG, PNG or WebP without a normal server-side file upload.',
+    steps: [
+      'Choose one or more supported images from your device.',
+      'Select the output format you need.',
+      'Reorder multiple images when creating a combined document.',
+      'Adjust quality when the selected output format supports it.',
+      'Convert and download the result, then check image quality and orientation.'
+    ],
+    example: 'Several iPhone HEIC photos can be converted into JPG files for compatibility, or arranged in order and combined into a single PDF.',
+    questions: [
+      ['Which image formats are supported?', 'The converter supports common formats including JPG, PNG, WebP and supported HEIC or HEIF images. Available output options depend on the selected workflow.'],
+      ['Can I convert several images together?', 'Yes. Multiple images can be selected and reordered, especially when creating a PDF from a group of images.'],
+      ['Can I control image quality?', 'Quality controls are available for supported lossy image formats such as JPG and WebP.'],
+      ['Are the images uploaded for normal conversion?', 'The conversion workflow runs in your browser after the required local resources have loaded.']
+    ],
+    related: [
+      ['/pdf-to-image','Convert PDF pages into images'],
+      ['/scan-to-pdf','Create a PDF from document photos'],
+      ['/compress-image','Reduce image file size'],
+      ['/grayscale-pdf','Create a grayscale PDF']
+    ]
+  },
+
+  '/pdf-to-image': {
+    title: 'How to convert PDF pages to JPG, PNG or WebP images',
+    intro: 'Render PDF pages into image files directly in your browser. Choose a suitable image format depending on compatibility, quality and file-size needs.',
+    steps: [
+      'Choose the PDF you want to convert.',
+      'Select JPG, PNG or WebP as the image output format.',
+      'Adjust quality where the selected format supports it.',
+      'Convert the PDF pages.',
+      'Download individual page images or the available grouped download.'
+    ],
+    example: 'A three-page PDF can be rendered into three PNG images for a presentation, or into JPG files when smaller image size and broad compatibility matter more.',
+    questions: [
+      ['Should I choose JPG, PNG or WebP?', 'JPG is widely compatible and useful for photographic pages, PNG is useful when lossless image quality matters, and WebP can provide efficient modern image compression.'],
+      ['Does each PDF page become a separate image?', 'Yes. PDF pages are rendered individually so you can download the page images you need.'],
+      ['Can scanned PDFs be converted?', 'Yes. Scanned pages can be rendered as images because the conversion works from the visual PDF page.'],
+      ['Is the PDF uploaded for conversion?', 'Page rendering is performed locally in your browser.']
+    ],
+    related: [
+      ['/image-converter','Convert images to other formats or PDF'],
+      ['/ocr-pdf','Make scanned PDF text searchable'],
+      ['/dark-mode-pdf','Create a dark-reading PDF'],
+      ['/compress-pdf','Reduce PDF file size']
+    ]
+  },
+
+  '/ocr-pdf': {
+    title: 'How to make a scanned PDF searchable with OCR',
+    intro: 'Use optical character recognition to detect text in scanned PDF pages and create a more searchable document workflow locally in your browser.',
+    steps: [
+      'Choose a scanned PDF or image-based document.',
+      'Start the OCR process and allow the required OCR resources to load.',
+      'Review the recognised text or searchable output.',
+      'Check names, numbers and important terms against the original scan.',
+      'Download or continue with the recognised document workflow.'
+    ],
+    example: 'A scanned invoice that contains only page images can be processed with OCR before extracting text or attempting table conversion.',
+    questions: [
+      ['What does OCR do?', 'OCR analyses page images and attempts to recognise the visible characters as text.'],
+      ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan quality, resolution, language, fonts, handwriting, skew and image clarity. Important values should always be checked manually.'],
+      ['When should I use OCR before another tool?', 'OCR can help before text extraction, Markdown conversion or table extraction when the original PDF contains scanned images instead of selectable text.'],
+      ['Does OCR require uploading my document?', 'The OCR workflow uses browser-based processing. Required OCR resources may need to load before local recognition can run.']
+    ],
+    related: [
+      ['/pdf-to-markdown','Convert recognised text to Markdown'],
+      ['/pdf-to-csv','Extract table-style data'],
+      ['/bank-statement-to-excel','Extract statement data'],
+      ['/scan-to-pdf','Create a PDF from document photos']
+    ]
+  },
+
+  '/nup-pdf': {
+    title: 'How to place multiple PDF pages on one sheet',
+    intro: 'Create an N-Up PDF by arranging multiple document pages onto each output sheet. This can reduce printed sheet count or create compact reference copies.',
+    steps: [
+      'Choose the PDF you want to arrange.',
+      'Select how many source pages should appear on each output sheet.',
+      'Review the page order and layout.',
+      'Create the N-Up PDF.',
+      'Open the result and check readability before printing.'
+    ],
+    example: 'A presentation can be arranged four pages per sheet to create a compact handout while preserving the original slide order.',
+    questions: [
+      ['What does N-Up mean?', 'N-Up places multiple original pages onto one output sheet, such as two or four pages per sheet.'],
+      ['Will text become smaller?', 'Yes. Fitting multiple pages onto one sheet reduces each page visually, so check small text before printing.'],
+      ['Is N-Up the same as booklet layout?', 'No. N-Up simply places several pages on a sheet, while booklet imposition rearranges pages specifically for folding and booklet printing.'],
+      ['Does the PDF need to be uploaded?', 'The N-Up transformation runs locally in your browser.']
+    ],
+    related: [
+      ['/booklet-pdf','Create a booklet layout'],
+      ['/resize-pdf','Change PDF paper size'],
+      ['/page-numbers','Add page numbers'],
+      ['/compress-pdf','Reduce the finished PDF size']
+    ]
+  },
+
+  '/booklet-pdf': {
+    title: 'How to create a printable booklet from a PDF',
+    intro: 'Rearrange PDF pages into booklet imposition order for double-sided printing and folding. Always test the final print layout before producing many copies.',
+    steps: [
+      'Choose the PDF you want to turn into a booklet.',
+      'Generate the booklet page arrangement.',
+      'Download and review the imposed PDF.',
+      'Check page pairing and orientation.',
+      'Print a small test copy before printing the complete booklet.'
+    ],
+    example: 'An eight-page document can be reordered into booklet spreads so that, after duplex printing and folding, the pages appear in normal reading order.',
+    questions: [
+      ['Why are booklet pages rearranged?', 'Booklet printing requires pages to be placed in a different order on the printed sheets so they appear correctly after folding.'],
+      ['Should I test-print first?', 'Yes. Printer duplex settings, binding edge and orientation can affect the result, so a short test is recommended.'],
+      ['Is booklet layout the same as N-Up?', 'No. N-Up reduces several pages onto a sheet without necessarily creating the page order required for folding a booklet.'],
+      ['Is the document processed locally?', 'The booklet arrangement is created in your browser without requiring a normal server-side document upload.']
+    ],
+    related: [
+      ['/nup-pdf','Place multiple pages on each sheet'],
+      ['/resize-pdf','Resize PDF pages'],
+      ['/page-numbers','Add page numbers'],
+      ['/compress-pdf','Compress the final booklet PDF']
+    ]
+  }
+
 };
 
 export interface Article { slug: string; title: string; description: string; tool: string; toolLabel: string; sections: { title: string; paragraphs: string[] }[] }
