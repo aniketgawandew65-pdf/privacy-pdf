@@ -6,6 +6,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Hand,
   ChevronLeft,
   ChevronRight,
   Square,
@@ -37,6 +38,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   const [totalPages, setTotalPages] = useState<number>(1);
 
   const [zoom, setZoom] = useState<number>(1.0);
+  const [isPanMode, setIsPanMode] = useState<boolean>(false);
 
   // The editor always uses a stable 500px-wide coordinate system.
   // Only the outer visual scale changes.
@@ -410,6 +412,54 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     window.addEventListener('pointerup', onPointerUp);
   };
 
+  // PDF page can move only when Pan mode is explicitly enabled.
+  const handlePanPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPanMode) return;
+
+    const scroller = canvasScrollRef.current;
+    if (!scroller) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const target = e.currentTarget;
+    target.setPointerCapture?.(e.pointerId);
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = scroller.scrollLeft;
+    const startTop = scroller.scrollTop;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+
+      scroller.scrollLeft =
+        startLeft - (moveEvent.clientX - startX);
+
+      scroller.scrollTop =
+        startTop - (moveEvent.clientY - startY);
+    };
+
+    const finish = (upEvent: PointerEvent) => {
+      try {
+        target.releasePointerCapture?.(upEvent.pointerId);
+      } catch {}
+
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+
+    window.addEventListener(
+      'pointermove',
+      onPointerMove,
+      { passive: false }
+    );
+
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+  };
+
   const currentPageItems = items.filter((item) => item.pageIndex === currentPage - 1);
   const activeItem = items.find((i) => i.id === selectedId);
 
@@ -741,6 +791,26 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                   {currentPageItems.length} active
                 </span>
 
+                {/* Explicit Pan Mode */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPanMode((current) => !current);
+                    setSelectedId(null);
+                  }}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    isPanMode
+                      ? 'bg-emerald-500 text-black'
+                      : 'hover:bg-zinc-800 hover:text-white'
+                  }`}
+                  title={isPanMode ? "Exit Pan Mode" : "Pan PDF"}
+                  aria-pressed={isPanMode}
+                >
+                  <Hand className="w-4 h-4" />
+                </button>
+
+                <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+
                 <button
                   type="button"
                   onClick={() =>
@@ -792,9 +862,14 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
             <div
               ref={canvasScrollRef}
-              className="flex-1 overflow-auto p-3 sm:p-6 bg-zinc-950/60 overscroll-contain"
+              onPointerDown={handlePanPointerDown}
+              className={`flex-1 p-3 sm:p-6 bg-zinc-950/60 overscroll-contain ${
+                isPanMode
+                  ? 'overflow-auto cursor-grab active:cursor-grabbing'
+                  : 'overflow-hidden cursor-default'
+              }`}
               style={{
-                touchAction: 'pan-x pan-y',
+                touchAction: 'none',
               }}
             >
               {/* 
@@ -839,7 +914,9 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 {/* Overlay Interactive Elements */}
                 <div
                   ref={workspaceRef}
-                  className="absolute inset-0 select-none overflow-hidden"
+                  className={`absolute inset-0 select-none overflow-hidden ${
+                    isPanMode ? 'pointer-events-none' : ''
+                  }`}
                 >
                   {currentPageItems.map((item) => {
                     const isSelected = item.id === selectedId;
