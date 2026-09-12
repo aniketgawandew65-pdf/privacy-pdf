@@ -280,7 +280,7 @@ export default function App() {
       canonicalLink.rel = 'canonical';
       document.head.appendChild(canonicalLink);
     }
-    const cleanPath = location.pathname === '/' ? '' : location.pathname === '/visual-editor' ? '/add-text-to-pdf' : location.pathname;
+    const cleanPath = location.pathname === '/' ? '' : location.pathname === '/visual-editor' ? '/edit-pdf' : location.pathname;
     const pageUrl = `https://www.1into1.com${cleanPath}`;
     canonicalLink.href = pageUrl;
     for (const [selector, value] of [

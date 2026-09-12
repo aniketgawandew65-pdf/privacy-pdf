@@ -1,7 +1,6 @@
 /pdf.worker.min.js  /pdf.worker.min.js  200
 /assets/*  /assets/:splat  200
-/visual-editor /add-text-to-pdf 301
 
-/add-text-to-pdf /edit-pdf 301
 
 /visual-editor /edit-pdf 301
+/add-text-to-pdf /edit-pdf 301
