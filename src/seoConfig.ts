@@ -48,6 +48,14 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     subheading: 'Add text, highlights, drawings, shapes and arrows to PDF pages privately in your browser.',
   },
 
+  '/edit-pdf': {
+    path: '/edit-pdf',
+    title: 'Edit PDF Online — Add Text, Whiteout & Shapes Privately | 1into1',
+    description: 'Edit PDF files directly in your browser. Add text, cover existing content, place shapes, move and resize edits without uploading your document.',
+    heading: 'Edit PDF Online',
+    subheading: 'Add text, whiteout areas and visual edits directly to PDF pages with private browser-based processing.',
+  },
+
   '/scan-to-pdf': {
     path: '/scan-to-pdf',
     title: 'Scan to PDF Online — Private Camera & Photo Scanner | 1into1',
@@ -313,7 +321,6 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   "/text-to-pdf": {"path": "/text-to-pdf", "title": "Text to PDF | 1into1 PDF", "description": "Write, format and turn your text into a PDF in your browser.", "heading": "Text to PDF", "subheading": "Write, format and turn your text into a PDF in your browser."},
   "/ocr-pdf": {"path": "/ocr-pdf", "title": "Make a PDF searchable | 1into1 PDF", "description": "Recognize text in scanned pages using local OCR. Language files download on first use.", "heading": "Make a PDF searchable", "subheading": "Recognize text in scanned pages using local OCR. Language files download on first use."},
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF | 1into1 PDF", "description": "Turn spreadsheet data into a clear, shareable PDF table.", "heading": "CSV to PDF", "subheading": "Turn spreadsheet data into a clear, shareable PDF table."},
-  "/edit-pdf": {"path": "/edit-pdf", "title": "Edit Existing PDF Text Locally — Beta | 1into1", "description": "Edit supported computer-generated PDF text using its original font. Preview changes locally before downloading. Scans and unsupported fonts remain read-only.", "heading": "Edit existing PDF text", "subheading": "Original fonts. Local processing. Preview each change before downloading."},
   "/add-text-to-pdf": {"path": "/add-text-to-pdf", "title": "Add Text & Shapes to PDF | 1into1", "description": "Place new text, images and shapes on PDF pages without uploading your document.", "heading": "Add text & shapes", "subheading": "Place new content on your PDF with a live page preview."},
   "/visual-editor": {"path": "/visual-editor", "title": "Add Text & Shapes to PDF | 1into1", "description": "Add text, images and shapes to a PDF without uploading it.", "heading": "Add text & shapes", "subheading": "Add text, images and shapes to a PDF without uploading it."},
   "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF | 1into1 PDF", "description": "Create a readable PDF of your code with syntax highlighting.", "heading": "Code to PDF", "subheading": "Create a readable PDF of your code with syntax highlighting."},

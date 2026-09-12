@@ -37,14 +37,95 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   const [totalPages, setTotalPages] = useState<number>(1);
 
   const [zoom, setZoom] = useState<number>(1.0);
+
+  // The editor always uses a stable 500px-wide coordinate system.
+  // Only the outer visual scale changes.
+  const [pageDisplayHeight, setPageDisplayHeight] = useState<number>(700);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const canvasScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Preserve viewport position while the mobile keyboard opens/closes.
+  const mobileFocusScrollRef = useRef<{
+    x: number;
+    y: number;
+    canvasLeft: number;
+    canvasTop: number;
+  } | null>(null);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+
+  // Mobile Safari:
+  // 1. 16px inputs prevent automatic browser zoom.
+  // 2. Restore the document position after the keyboard closes.
+  useEffect(() => {
+    document.documentElement.classList.add('visual-editor-open');
+
+    const isMobile = () =>
+      window.matchMedia('(max-width: 767px)').matches;
+
+    const isFormControl = (target: EventTarget | null) =>
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement;
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!isMobile() || !isFormControl(event.target)) return;
+
+      const canvasScroller = canvasScrollRef.current;
+
+      mobileFocusScrollRef.current = {
+        x: window.scrollX,
+        y: window.scrollY,
+        canvasLeft: canvasScroller?.scrollLeft ?? 0,
+        canvasTop: canvasScroller?.scrollTop ?? 0,
+      };
+    };
+
+    const restoreScroll = () => {
+      if (!isMobile()) return;
+
+      const saved = mobileFocusScrollRef.current;
+      if (!saved) return;
+
+      window.scrollTo({
+        left: saved.x,
+        top: saved.y,
+        behavior: 'auto',
+      });
+
+      const canvasScroller = canvasScrollRef.current;
+
+      if (canvasScroller) {
+        canvasScroller.scrollLeft = saved.canvasLeft;
+        canvasScroller.scrollTop = saved.canvasTop;
+      }
+    };
+
+    const handleFocusOut = (event: FocusEvent) => {
+      if (!isMobile() || !isFormControl(event.target)) return;
+
+      // iOS changes the visual viewport in stages while
+      // closing its keyboard, so restore twice.
+      window.setTimeout(restoreScroll, 80);
+      window.setTimeout(restoreScroll, 320);
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      document.documentElement.classList.remove('visual-editor-open');
+
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
 
   // Keyboard Delete & Sub-Pixel Arrow Key Nudging
   useEffect(() => {
@@ -109,6 +190,13 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         const page = await pdf.getPage(currentPage);
         const retinaScale = 2.0;
         const viewport = page.getViewport({ scale: retinaScale });
+
+        // Canvas is displayed at a fixed base width of 500px.
+        // Store the matching height so the zoom sizing wrapper
+        // always has the exact same aspect ratio as the PDF.
+        setPageDisplayHeight(
+          500 * (viewport.height / viewport.width)
+        );
 
         const canvas = canvasRef.current;
         if (canvas) {
@@ -643,21 +731,101 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
           >
             <div className="p-3 border-b border-zinc-800 text-xs text-zinc-400 flex items-center justify-between bg-zinc-950/40">
               <span>PDF Canvas (Page {currentPage})</span>
-              <span className="text-zinc-500">
-                {currentPageItems.length} active • Use Arrow Keys to nudge • Hold Shift for faster movement
-              </span>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1.5"
+              >
+                <span className="hidden sm:inline text-zinc-500 mr-2">
+                  {currentPageItems.length} active
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setZoom((z) =>
+                      Math.max(
+                        0.5,
+                        Number((z - 0.15).toFixed(2))
+                      )
+                    )
+                  }
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+
+                <span className="text-[11px] font-mono px-1 text-zinc-400 min-w-[42px] text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setZoom((z) =>
+                      Math.min(
+                        2.5,
+                        Number((z + 0.15).toFixed(2))
+                      )
+                    )
+                  }
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+
+                <div className="w-px h-4 bg-zinc-800" />
+
+                <button
+                  type="button"
+                  onClick={() => setZoom(1)}
+                  className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-emerald-400 transition-colors"
+                  title="Reset Zoom"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-zinc-950/60">
+            <div
+              ref={canvasScrollRef}
+              className="flex-1 overflow-auto p-3 sm:p-6 bg-zinc-950/60 overscroll-contain"
+              style={{
+                touchAction: 'pan-x pan-y',
+              }}
+            >
+              {/* 
+                  ZOOM SIZER
+
+                  This outer box tells the scroll container the REAL
+                  visual size of the zoomed PDF.
+
+                  The PDF itself keeps one permanent coordinate system,
+                  so Text and Whiteout overlays never shift.
+              */}
               <div
                 style={{
-                  transform: `scale(${zoom})`,
-                  transformOrigin: 'top center',
-                  transition: 'transform 0.15s ease-out',
+                  width: `${500 * zoom}px`,
+                  height: `${pageDisplayHeight * zoom}px`,
+                  margin:
+                    zoom <= 1
+                      ? '0 auto'
+                      : '0',
+                  position: 'relative',
+                  flexShrink: 0,
                 }}
-                className="relative shadow-2xl rounded-sm border border-zinc-800/80 bg-white"
               >
-                <canvas
+                <div
+                  style={{
+                    width: '500px',
+                    height: `${pageDisplayHeight}px`,
+                    transform: `scale(${zoom})`,
+                    transformOrigin: 'top left',
+                  }}
+                  className="relative shadow-2xl rounded-sm border border-zinc-800/80 bg-white"
+                >
+                  <canvas
                   ref={canvasRef}
                   style={{
                     width: '500px',
@@ -757,39 +925,11 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                   })}
                 </div>
               </div>
+
+              </div>
             </div>
 
-            {/* Corner Zoom Controls */}
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-zinc-950/90 border border-zinc-800/90 rounded-xl p-1.5 shadow-2xl backdrop-blur-md text-zinc-300"
-            >
-              <button
-                onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.15).toFixed(2))))}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors cursor-pointer"
-                title="Zoom Out"
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <span className="text-[11px] font-mono px-1.5 text-zinc-400 min-w-[42px] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                onClick={() => setZoom((z) => Math.min(2.5, Number((z + 0.15).toFixed(2))))}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-white transition-colors cursor-pointer"
-                title="Zoom In"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
-              <button
-                onClick={() => setZoom(1.0)}
-                className="p-1.5 hover:bg-zinc-800 rounded-lg hover:text-emerald-400 transition-colors cursor-pointer"
-                title="Reset Zoom (100%)"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            </div>
+
           </div>
         </>
       )}

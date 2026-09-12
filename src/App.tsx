@@ -105,7 +105,6 @@ const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ defau
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
 const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
-const NativeTextEditor = lazy(() => import('./components/NativeTextEditor'));
 const CodeToPdf = lazy(() => import('./components/CodeToPdf').then((m) => ({ default: m.CodeToPdf })));
 const HtmlToPdf = lazy(() => import('./components/HtmlToPdf').then((m) => ({ default: m.HtmlToPdf })));
 
@@ -168,7 +167,6 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
   { name: 'Edit PDF', path: '/edit-pdf', category: 'organize', icon: FileEdit },
-  { name: 'Add text & shapes', path: '/add-text-to-pdf', category: 'organize', icon: FileEdit },
   { name: 'Code to PDF', path: '/code-to-pdf', category: 'convert', icon: Code2 },
   { name: 'HTML / Receipt to PDF', path: '/html-to-pdf', category: 'convert', icon: Receipt },
 ];
@@ -472,8 +470,7 @@ export default function App() {
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
-              <Route path="/edit-pdf" element={<NativeTextEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
-              <Route path="/add-text-to-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/edit-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
               <Route path="/html-to-pdf" element={<HtmlToPdf />} />

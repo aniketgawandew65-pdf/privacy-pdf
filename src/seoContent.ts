@@ -88,6 +88,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/edit-pdf': {
+    title: 'How to edit a PDF with text, whiteout areas and shapes',
+    intro: 'Make visual changes to a PDF directly in your browser. Add text, cover existing content and place or resize visual elements without sending the document to a processing server.',
+    steps: [
+      'Choose the PDF you want to edit.',
+      'Add a text box or whiteout area.',
+      'Drag the item to the correct position on the PDF.',
+      'Resize it using the corner handles.',
+      'Adjust text style, size and colour when needed.',
+      'Move between pages and repeat your edits.',
+      'Save and download the edited PDF.'
+    ],
+    example: 'To correct a visible value in a PDF, place a whiteout area over the old value and add a new text box in the same position. The rest of the original page remains unchanged.',
+    questions: [
+      ['Does this replace the original PDF text?', 'This editor makes visual PDF changes using text and overlay elements. It does not attempt to rebuild the original document layout like a Word processor.'],
+      ['Does my PDF upload to a processing server?', 'Core editing runs locally in your browser, so the PDF does not need to be uploaded for processing.'],
+      ['Can I edit scanned PDFs?', 'Yes. Because the editor uses visual text and overlay elements, it can also be used on scanned PDF pages.'],
+      ['Can I edit more than one page?', 'Yes. Use the page controls to move between pages and place edits on the pages you need.']
+    ],
+    related: [
+      ['/annotate-pdf','Draw and annotate a PDF'],
+      ['/sign-pdf','Add a signature'],
+      ['/watermark-pdf','Add a watermark'],
+      ['/redact-pdf','Permanently redact content']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',

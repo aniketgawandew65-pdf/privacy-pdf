@@ -229,3 +229,25 @@ a {text-decoration:none}
   .directory-card span {display:block;font-size:11px;color:#29292f;line-height:1.5}
   .directory-card {min-height:105px}
 }
+
+
+/* ==========================================================
+   EDIT PDF — MOBILE INPUT / KEYBOARD STABILITY
+   ========================================================== */
+
+@media (max-width: 767px) {
+  html.visual-editor-open input:not([type="range"]):not([type="color"]),
+  html.visual-editor-open textarea,
+  html.visual-editor-open select {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+
+  html.visual-editor-open {
+    scroll-behavior: auto !important;
+  }
+
+  html.visual-editor-open body {
+    overflow-anchor: none;
+  }
+}
