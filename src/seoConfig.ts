@@ -63,6 +63,21 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Scan Documents to PDF',
     subheading: 'Turn camera scans and photos into an ordered PDF directly on your device.',
   },
+  '/image-converter': {
+    path: '/image-converter',
+    title: 'Image Converter — JPG, PNG, WebP & HEIC to PDF or Images | 1into1',
+    description: 'Convert JPG, PNG, WebP, HEIC and HEIF images to PDF, JPG, PNG or WebP directly in your browser with private local processing.',
+    heading: 'Image Converter',
+    subheading: 'Convert images to PDF, JPG, PNG or WebP without uploading your files.',
+  },
+  '/pdf-to-image': {
+    path: '/pdf-to-image',
+    title: 'PDF to Image Converter — JPG, PNG & WebP | 1into1',
+    description: 'Convert PDF pages to JPG, PNG or WebP images directly in your browser and download individual pages or a ZIP archive.',
+    heading: 'PDF to Image Converter',
+    subheading: 'Turn every PDF page into JPG, PNG or WebP images privately on your device.',
+  },
+
   '/image-to-pdf': {
     path: '/image-to-pdf',
     title: 'Convert Images to PDF — JPG, PNG to PDF Locally',

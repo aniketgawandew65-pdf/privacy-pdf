@@ -358,36 +358,78 @@ export async function rotatePDF(
   return await doc.save({ useObjectStreams: false });
 }
 
-export async function pdfToImages(file: File): Promise<string[]> {
+export type PdfImageFormat = 'jpg' | 'png' | 'webp';
+
+export async function pdfToImages(
+  file: File,
+  format: PdfImageFormat = 'jpg',
+  quality: number = 0.9
+): Promise<string[]> {
   const fileBytes = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
+
+  const loadingTask = pdfjsLib.getDocument({
+    isEvalSupported: false,
+    data: new Uint8Array(fileBytes).slice(),
+  });
+
   const pdfDoc = await loadingTask.promise;
   const imageUrls: string[] = [];
 
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+  const mimeType =
+    format === 'png'
+      ? 'image/png'
+      : format === 'webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+
+  for (
+    let pageNum = 1;
+    pageNum <= pdfDoc.numPages;
+    pageNum++
+  ) {
     const page = await pdfDoc.getPage(pageNum);
     const viewport = page.getViewport({ scale: 2.0 });
 
     const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    const ctx = canvas.getContext('2d', {
+      alpha: false,
+    });
 
     if (!ctx) continue;
 
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     await (
       page.render({
-        canvasContext: ctx as any, viewport,
+        canvasContext: ctx as any,
+        viewport,
       } as any) as any
     ).promise;
 
-    imageUrls.push(canvas.toDataURL('image/jpeg', 0.9));
+    imageUrls.push(
+      canvas.toDataURL(
+        mimeType,
+        format === 'png' ? undefined : quality
+      )
+    );
+
+    ctx.clearRect(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
     canvas.width = 0;
     canvas.height = 0;
+
+    try {
+      page.cleanup();
+    } catch {}
   }
 
   return imageUrls;

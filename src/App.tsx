@@ -89,7 +89,6 @@ const ImageToPdf = lazy(() => import('./components/ImageToPdf'));
 const TextToPdf = lazy(() => import('./components/TextToPdf').then((m) => ({ default: m.TextToPdf })));
 const PdfToImages = lazy(() => import('./components/PdfToImages').then((m) => ({ default: m.PdfToImages })));
 const CompressImage = lazy(() => import('./components/CompressImage').then((m) => ({ default: m.CompressImage })));
-const HeicToJpg = lazy(() => import('./components/HeicToJpg').then((m) => ({ default: m.HeicToJpg })));
 const ExtractImages = lazy(() => import('./components/ExtractImages').then((m) => ({ default: m.ExtractImages })));
 const PdfToText = lazy(() => import('./components/PdfToText').then((m) => ({ default: m.PdfToText })));
 const OcrPdf = lazy(() => import('./components/OcrPdf').then((m) => ({ default: m.OcrPdf })));
@@ -156,9 +155,8 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'B&W / Grayscale', path: '/grayscale-pdf', category: 'convert', icon: Printer },
   { name: 'Annotate PDF', path: '/annotate-pdf', category: 'organize', icon: FileEdit },
   { name: 'Scan to PDF', path: '/scan-to-pdf', category: 'convert', icon: Camera },
-  { name: 'Image to PDF', path: '/image-to-pdf', category: 'convert', icon: ImageIcon },
-  { name: 'PDF to JPG', path: '/pdf-to-jpg', category: 'convert', icon: FileImage },
-  { name: 'HEIC to JPG', path: '/heic-to-jpg', category: 'convert', icon: Camera },
+  { name: 'Image Converter', path: '/image-converter', category: 'convert', icon: ImageIcon },
+  { name: 'PDF to Image', path: '/pdf-to-image', category: 'convert', icon: FileImage },
   { name: 'Compress Image', path: '/compress-image', category: 'convert', icon: ImageIcon },
   { name: 'PDF to Text', path: '/pdf-to-text', category: 'convert', icon: AlignLeft },
   { name: 'Edit Metadata', path: '/edit-metadata', category: 'convert', icon: Tag },
@@ -365,7 +363,7 @@ export default function App() {
   const isBlog = Boolean(blogMeta(location.pathname));
   const isInfo = ['/privacy', '/terms'].includes(location.pathname) || isBlog;
   const closeDirectory = () => { setDirectoryOpen(false); setSearch(''); };
-  const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/merge-pdf','/split-pdf','/sign-pdf','/image-to-pdf'].includes(tool.path));
+  const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/merge-pdf','/split-pdf','/sign-pdf','/image-converter'].includes(tool.path));
 
 
   return (
@@ -449,9 +447,12 @@ export default function App() {
               <Route path="/fill-pdf" element={<FillFormPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/annotate-pdf" element={<AnnotatePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/scan-to-pdf" element={<ScanToPdf />} />
+              <Route path="/image-converter" element={<ImageToPdf />} />
               <Route path="/image-to-pdf" element={<ImageToPdf />} />
+              <Route path="/heic-to-jpg" element={<ImageToPdf />} />
+
+              <Route path="/pdf-to-image" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-jpg" element={<PdfToImages file={activeFile} onFileChange={handleSingleFileChange} />} />
-              <Route path="/heic-to-jpg" element={<HeicToJpg />} />
               <Route path="/compress-image" element={<CompressImage />} />
               <Route path="/extract-images" element={<ExtractImages file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-text" element={<PdfToText file={activeFile} onFileChange={handleSingleFileChange} />} />
