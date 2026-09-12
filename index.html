@@ -1,13 +1,34 @@
 <!doctype html>
 <html lang="en">
   <head>
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-VEHQVX9YCY"></script>
+  <!-- Google Analytics: queued immediately, script loaded after critical rendering -->
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     gtag('js', new Date());
     gtag('config', 'G-VEHQVX9YCY');
+
+    (function () {
+      var loaded = false;
+
+      function loadGoogleAnalytics() {
+        if (loaded) return;
+        loaded = true;
+
+        var script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://www.googletagmanager.com/gtag/js?id=G-VEHQVX9YCY';
+        document.head.appendChild(script);
+      }
+
+      window.addEventListener('load', function () {
+        if ('requestIdleCallback' in window) {
+          requestIdleCallback(loadGoogleAnalytics, { timeout: 3000 });
+        } else {
+          setTimeout(loadGoogleAnalytics, 2000);
+        }
+      }, { once: true });
+    })();
   </script>
 
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
