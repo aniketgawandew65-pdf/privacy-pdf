@@ -48,7 +48,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is this a certificate-based digital signature?', 'No. This tool places a visual signature on a PDF. It does not issue a signing certificate or provide identity verification.'],
       ['Can I draw with my finger?', 'Yes, the drawing interface supports touch. Review the downloaded PDF because the final placement matters more than how large it looked on your phone screen.'],
       ['Will the recipient accept it?', 'Check the recipient’s instructions. Some workflows require a specific signing service or certificate rather than a drawn signature.']
-    ], related: [['/fill-pdf','Fill supported PDF form fields'], ['/edit-pdf','Add text to a PDF'], ['/protect-pdf','Password-protect a copy']]
+    ], related: [['/fill-pdf','Fill supported PDF form fields'], ['/add-text-to-pdf','Add text to a PDF'], ['/protect-pdf','Password-protect a copy']]
   },
   '/heic-to-jpg': {
     title: 'Convert an iPhone HEIC photo to JPG',
@@ -81,7 +81,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['What tools are available?', 'The editor supports text, freehand pen drawing, highlighting, rectangles, circles and arrows.']
     ],
     related: [
-      ['/edit-pdf','Add or replace visible text'],
+      ['/add-text-to-pdf','Add text and shapes'],
       ['/sign-pdf','Add a drawn signature'],
       ['/watermark-pdf','Add a watermark'],
       ['/scan-to-pdf','Turn photos into a PDF']

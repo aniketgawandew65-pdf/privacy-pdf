@@ -105,6 +105,7 @@ const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ defau
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
 const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
+const NativeTextEditor = lazy(() => import('./components/NativeTextEditor'));
 const CodeToPdf = lazy(() => import('./components/CodeToPdf').then((m) => ({ default: m.CodeToPdf })));
 const HtmlToPdf = lazy(() => import('./components/HtmlToPdf').then((m) => ({ default: m.HtmlToPdf })));
 
@@ -167,6 +168,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
   { name: 'Edit PDF', path: '/edit-pdf', category: 'organize', icon: FileEdit },
+  { name: 'Add text & shapes', path: '/add-text-to-pdf', category: 'organize', icon: FileEdit },
   { name: 'Code to PDF', path: '/code-to-pdf', category: 'convert', icon: Code2 },
   { name: 'HTML / Receipt to PDF', path: '/html-to-pdf', category: 'convert', icon: Receipt },
 ];
@@ -282,7 +284,7 @@ export default function App() {
       canonicalLink.rel = 'canonical';
       document.head.appendChild(canonicalLink);
     }
-    const cleanPath = location.pathname === '/' ? '' : location.pathname === '/visual-editor' ? '/edit-pdf' : location.pathname;
+    const cleanPath = location.pathname === '/' ? '' : location.pathname === '/visual-editor' ? '/add-text-to-pdf' : location.pathname;
     const pageUrl = `https://www.1into1.com${cleanPath}`;
     canonicalLink.href = pageUrl;
     for (const [selector, value] of [
@@ -470,7 +472,8 @@ export default function App() {
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
-              <Route path="/edit-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/edit-pdf" element={<NativeTextEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/add-text-to-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/code-to-pdf" element={<CodeToPdf />} />
               <Route path="/html-to-pdf" element={<HtmlToPdf />} />
@@ -489,7 +492,7 @@ export default function App() {
 
       <footer className="site-footer">
         <div className="footer-top"><NavLink to="/" className="footer-brand">1into1 PDF</NavLink><NavLink to="/blog">PDF guides</NavLink></div>
-        <details className="footer-directory"><summary>Explore all 42 tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
+        <details className="footer-directory"><summary>Explore all {TOOLS_LIST.length} tools<ChevronDown size={15} /></summary><nav aria-label="Complete PDF tool directory">{TOOLS_LIST.map(tool => <NavLink key={tool.path} to={tool.path}>{tool.name}</NavLink>)}</nav></details>
         <div className="footer-bottom"><span>© {new Date().getFullYear()} 1into1</span><div><NavLink to="/privacy">Privacy</NavLink><NavLink to="/terms">Terms</NavLink><button onClick={() => setIsAuditDrawerOpen(true)}>Network activity</button><button onClick={() => setIsProModalOpen(true)}>Pricing</button></div></div>
       
         {isDevMode && (

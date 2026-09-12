@@ -17,7 +17,7 @@ const app = await readFile(new URL('../src/App.tsx',import.meta.url),'utf8');
 const paths = [...app.matchAll(/<Route path="([^"]+)"/g)].map(m=>m[1]).filter(p=>!p.includes('*')&&!p.includes(':'));
 const articlePaths = ARTICLES.map(a=>'/blog/'+a.slug);
 const allPaths = [...new Set([...paths,...articlePaths])];
-const aliases = {'/visual-editor':'/edit-pdf'};
+const aliases = {'/visual-editor':'/add-text-to-pdf'};
 const nav = Object.entries(TOOLS_METADATA).filter(([p])=>allPaths.includes(p)&&!aliases[p]&&!['/','/privacy','/terms'].includes(p)).map(([p,m])=>`<a href="${p}">${e(m.heading)}</a>`).join('');
 function headFor(meta,path) {
   const url=origin+(aliases[path]|| (path==='/'?'':path));

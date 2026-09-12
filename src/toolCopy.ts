@@ -36,7 +36,8 @@ export const TOOL_COPY: Record<string, string> = {
   '/pdf-to-csv': 'Extract text-based tables to CSV with adjustable row and column detection.',
   '/pdf-to-markdown': 'Turn PDF text into Markdown for notes, documentation and AI workflows.',
   '/csv-to-pdf': 'Turn rows of CSV data into a paginated PDF table.',
-  '/edit-pdf': 'Place text, images and shapes on your PDF with a live page preview.',
+  '/edit-pdf': 'Edit supported existing text with its original font. Local processing, with a before-and-after preview.',
+  '/add-text-to-pdf': 'Place new text, images and shapes on your PDF with a live page preview.',
   '/code-to-pdf': 'Share code as a paginated PDF with readable syntax highlighting.',
   '/html-to-pdf': 'Turn HTML into A4, Letter or a continuous receipt-sized PDF.',
 };
