@@ -91,6 +91,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasDrawnSignature, setHasDrawnSignature] = useState(false);
+  const [signatureThickness, setSignatureThickness] = useState<number>(3);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
   // Zoom and viewport scaling
@@ -319,7 +320,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     isPadDrawing.current = true;
     const pt = getPadCoordinates(e);
 
-    ctx.lineWidth = 3.0;
+    ctx.lineWidth = signatureThickness;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
@@ -706,6 +707,35 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
                 </button>
               )}
             </div>
+
+            {/* Signature Thickness */}
+            <div className="flex items-center gap-3 px-1">
+              <span className="text-[11px] text-zinc-500 shrink-0">
+                Thin
+              </span>
+
+              <input
+                type="range"
+                min="1"
+                max="12"
+                step="0.5"
+                value={signatureThickness}
+                onChange={(e) =>
+                  setSignatureThickness(Number(e.target.value))
+                }
+                className="flex-1 accent-emerald-500 cursor-pointer"
+                aria-label="Signature thickness"
+              />
+
+              <span className="text-[11px] text-zinc-500 shrink-0">
+                Thick
+              </span>
+
+              <span className="text-[11px] font-mono text-emerald-400 min-w-[38px] text-right">
+                {signatureThickness}px
+              </span>
+            </div>
+
             <div className="bg-white rounded-xl overflow-hidden border border-zinc-700 flex justify-center shadow-inner">
               <canvas
                 ref={drawCanvasRef}

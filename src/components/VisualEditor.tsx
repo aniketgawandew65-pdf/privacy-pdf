@@ -519,6 +519,8 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 <a
                   href={downloadUrl}
                   download={`edited_${file.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-lg shadow-emerald-500/20"
                 >
                   <Download className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -852,7 +854,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                         ? Math.max(
                             6,
                             Math.min(
-                              item.height * 700 * 0.7,
+                              item.height * pageDisplayHeight * 0.7,
                               (item.width * 500) / Math.max(1, (item.text || 'Text').length * 0.58)
                             )
                           )

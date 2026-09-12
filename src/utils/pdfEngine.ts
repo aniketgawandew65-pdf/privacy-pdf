@@ -5080,6 +5080,29 @@ export async function applyVisualOverlays(
     return doc.embedFont(StandardFonts.Helvetica);
   };
 
+  // Match VisualEditor's on-screen text sizing exactly.
+  // Editor uses a fixed 500px-wide base coordinate system.
+  const getVisualFontPx = (
+    item: VisualOverlayItem,
+    previewHeight: number
+  ): number => {
+    if (item.fitMode === 'autofit') {
+      return Math.max(
+        6,
+        Math.min(
+          item.height * previewHeight * 0.7,
+          (item.width * 500) /
+            Math.max(
+              1,
+              (item.text || 'Text').length * 0.58
+            )
+        )
+      );
+    }
+
+    return (item.fontSize || 12) * 0.9;
+  };
+
   // =========================================================================
   // PATH A: Native Vector Path (For Standard Unencrypted PDFs)
   // =========================================================================
@@ -5114,17 +5137,55 @@ export async function applyVisualOverlays(
             b = parseInt(item.color.slice(5, 7), 16) / 255;
           }
           const textColor = rgb(r, g, b);
-          const fSize = Math.max(1, item.fontSize || 12);
-          const textY = boxY + (boxH - fSize * 0.85) / 2;
+          // VisualEditor is 500px wide. Convert its exact visual
+          // font size into this PDF page's point coordinate system.
+          const previewBaseWidth = 500;
+          const previewBaseHeight =
+            (pH / pW) * previewBaseWidth;
 
-          page.drawText(safeText, { x: boxX + 2, y: textY, size: fSize, font, color: textColor });
-          const textW = font.widthOfTextAtSize(safeText, fSize);
+          const previewFontPx =
+            getVisualFontPx(
+              item,
+              previewBaseHeight
+            );
+
+          const pdfPerPreviewPx =
+            pW / previewBaseWidth;
+
+          const fSize = Math.max(
+            1,
+            previewFontPx * pdfPerPreviewPx
+          );
+
+          // Visual preview has 2px horizontal text padding.
+          const textPaddingX =
+            2 * pdfPerPreviewPx;
+
+          // Match CSS flex vertical centering much more closely.
+          const textY =
+            boxY +
+            boxH / 2 -
+            fSize * 0.28;
+
+          page.drawText(safeText, {
+            x: boxX + textPaddingX,
+            y: textY,
+            size: fSize,
+            font,
+            color: textColor,
+          });
+
+          const textW =
+            font.widthOfTextAtSize(
+              safeText,
+              fSize
+            );
 
           // Underline
           if (item.isUnderline) {
             page.drawLine({
-              start: { x: boxX + 2, y: textY - 1.5 },
-              end: { x: boxX + 2 + textW, y: textY - 1.5 },
+              start: { x: boxX + textPaddingX, y: textY - 1.5 },
+              end: { x: boxX + textPaddingX + textW, y: textY - 1.5 },
               thickness: Math.max(0.8, fSize * 0.07),
               color: textColor,
             });
@@ -5133,8 +5194,8 @@ export async function applyVisualOverlays(
           // Strikethrough (cross between text)
           if (item.isStrikethrough) {
             page.drawLine({
-              start: { x: boxX + 2, y: textY + fSize * 0.32 },
-              end: { x: boxX + 2 + textW, y: textY + fSize * 0.32 },
+              start: { x: boxX + textPaddingX, y: textY + fSize * 0.32 },
+              end: { x: boxX + textPaddingX + textW, y: textY + fSize * 0.32 },
               thickness: Math.max(0.8, fSize * 0.07),
               color: textColor,
             });
@@ -5185,34 +5246,101 @@ export async function applyVisualOverlays(
       }
 
       if (item.type === 'text' && item.text?.trim()) {
-        const fSize = (item.fontSize || 12) * 2.0; // scale with 2.0 viewport
-        const fontName = item.fontFamily === 'times' ? 'Times New Roman' : item.fontFamily === 'courier' ? 'Courier New' : 'Arial';
-        const weight = item.isBold ? 'bold ' : '';
-        const style = item.isItalic ? 'italic ' : '';
+        const previewBaseWidth = 500;
 
-        ctx.font = `${style}${weight}${fSize}px ${fontName}`;
-        ctx.fillStyle = item.color || '#000000';
+        // viewport uses scale 2.0, so divide by 2 to recover
+        // the original PDF page dimensions.
+        const originalPageWidth =
+          viewport.width / 2.0;
+
+        const originalPageHeight =
+          viewport.height / 2.0;
+
+        const previewBaseHeight =
+          (originalPageHeight /
+            originalPageWidth) *
+          previewBaseWidth;
+
+        const previewFontPx =
+          getVisualFontPx(
+            item,
+            previewBaseHeight
+          );
+
+        const pdfFontSize =
+          previewFontPx *
+          (originalPageWidth /
+            previewBaseWidth);
+
+        // Canvas itself is rendered at 2x.
+        const fSize =
+          pdfFontSize * 2.0;
+
+        const canvasPaddingX =
+          2 *
+          (canvas.width /
+            previewBaseWidth);
+
+        const fontName =
+          item.fontFamily === 'times'
+            ? 'Times New Roman'
+            : item.fontFamily === 'courier'
+              ? 'Courier New'
+              : 'Arial';
+
+        const weight =
+          item.isBold ? 'bold ' : '';
+
+        const style =
+          item.isItalic ? 'italic ' : '';
+
+        ctx.font =
+          `${style}${weight}${fSize}px "${fontName}"`;
+
+        ctx.fillStyle =
+          item.color || '#000000';
+
         ctx.textBaseline = 'middle';
-        const textY = y + h / 2;
-        ctx.fillText(item.text, x + 4, textY);
 
-        const textMetrics = ctx.measureText(item.text);
+        const textY =
+          y + h / 2;
+
+        ctx.fillText(
+          item.text,
+          x + canvasPaddingX,
+          textY
+        );
+
+        const textMetrics =
+          ctx.measureText(item.text);
         ctx.strokeStyle = item.color || '#000000';
         ctx.lineWidth = Math.max(1.5, fSize * 0.07);
 
         // Underline
         if (item.isUnderline) {
           ctx.beginPath();
-          ctx.moveTo(x + 4, textY + fSize * 0.45);
-          ctx.lineTo(x + 4 + textMetrics.width, textY + fSize * 0.45);
+          ctx.moveTo(
+            x + canvasPaddingX,
+            textY + fSize * 0.45
+          );
+          ctx.lineTo(
+            x + canvasPaddingX + textMetrics.width,
+            textY + fSize * 0.45
+          );
           ctx.stroke();
         }
 
         // Strikethrough
         if (item.isStrikethrough) {
           ctx.beginPath();
-          ctx.moveTo(x + 4, textY);
-          ctx.lineTo(x + 4 + textMetrics.width, textY);
+          ctx.moveTo(
+            x + canvasPaddingX,
+            textY
+          );
+          ctx.lineTo(
+            x + canvasPaddingX + textMetrics.width,
+            textY
+          );
           ctx.stroke();
         }
       }
