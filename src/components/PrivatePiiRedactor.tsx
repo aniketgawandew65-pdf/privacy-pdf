@@ -2573,59 +2573,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           </div>
         )}
 
-        {manualReviewFindings.length > 0 && (
-          <div className="mt-3 rounded-xl border-2 border-amber-400 bg-amber-50 p-4">
-            <strong className="block text-sm text-amber-950">
-              {manualReviewFindings.length} item
-              {manualReviewFindings.length === 1 ? "" : "s"} need your review
-            </strong>
-
-            <p className="mt-1 text-xs leading-5 text-amber-900">
-              We automatically tried a stronger redaction once.
-              These are the areas the final safety check could
-              still read:
-            </p>
-
-            <div className="mt-3 space-y-2">
-              {manualReviewFindings.map((finding) => (
-                <div
-                  key={`review-${finding.id}`}
-                  className="flex items-center gap-3 rounded-lg border border-amber-300 bg-white px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <strong className="block text-xs text-zinc-950">
-                      {finding.category}
-                    </strong>
-
-                    <code className="block mt-0.5 text-xs text-zinc-700 truncate">
-                      {finding.maskedValue}
-                    </code>
-                  </div>
-
-                  {finding.page && (
-                    <span className="shrink-0 text-xs font-semibold text-zinc-700">
-                      Page {finding.page}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                continueToManualRedaction(
-                  manualReviewFindings
-                )
-              }
-              className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2"
-            >
-              Review these {manualReviewFindings.length} item
-              {manualReviewFindings.length === 1 ? "" : "s"} manually
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
       </div>
 
       {file && !isScanning && (
@@ -2832,6 +2779,60 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                       {status}
                     </span>
                   </div>
+                </div>
+              )}
+
+              {manualReviewFindings.length > 0 && (
+                <div className="mt-3 rounded-xl border-2 border-amber-400 bg-amber-50 p-4">
+                  <strong className="block text-sm text-amber-950">
+                    {manualReviewFindings.length} item
+                    {manualReviewFindings.length === 1 ? "" : "s"} need your review
+                  </strong>
+
+                  <p className="mt-1 text-xs leading-5 text-amber-900">
+                    We automatically tried a stronger redaction once.
+                    These are the areas the final safety check could
+                    still read:
+                  </p>
+
+                  <div className="mt-3 space-y-2">
+                    {manualReviewFindings.map((finding) => (
+                      <div
+                        key={`review-${finding.id}`}
+                        className="flex items-center gap-3 rounded-lg border border-amber-300 bg-white px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <strong className="block text-xs text-zinc-950">
+                            {finding.category}
+                          </strong>
+
+                          <code className="block mt-0.5 text-xs text-zinc-700 truncate">
+                            {finding.maskedValue}
+                          </code>
+                        </div>
+
+                        {finding.page && (
+                          <span className="shrink-0 text-xs font-semibold text-zinc-700">
+                            Page {finding.page}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      continueToManualRedaction(
+                        manualReviewFindings
+                      )
+                    }
+                    className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2"
+                  >
+                    Review these {manualReviewFindings.length} item
+                    {manualReviewFindings.length === 1 ? "" : "s"} manually
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 

@@ -110,128 +110,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const viewportContainerRef = useRef<HTMLDivElement>(null);
   const pdfDocRef = useRef<any>(null);
 
-  /*
-   * Stores a review item while we switch/render its page.
-   * Once that page finishes rendering, the preview scrolls
-   * directly to the flagged area.
-   */
-  const pendingReviewTargetRef =
-    useRef<ManualReviewItem | null>(null);
-
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   const currentRects = pageRedactions[currentPage] || [];
-
-  const scrollReviewTargetIntoView = useCallback(
-    (item: ManualReviewItem) => {
-      const container =
-        viewportContainerRef.current;
-
-      const overlay =
-        overlayRef.current;
-
-      if (!container || !overlay) return;
-
-      const containerRect =
-        container.getBoundingClientRect();
-
-      const overlayRect =
-        overlay.getBoundingClientRect();
-
-      const targetCenterX =
-        overlayRect.left +
-        (item.target.x +
-          item.target.width / 2) *
-          overlayRect.width;
-
-      const targetCenterY =
-        overlayRect.top +
-        (item.target.y +
-          item.target.height / 2) *
-          overlayRect.height;
-
-      const visibleCenterX =
-        containerRect.left +
-        container.clientWidth / 2;
-
-      const visibleCenterY =
-        containerRect.top +
-        container.clientHeight / 2;
-
-      container.scrollTo({
-        left:
-          container.scrollLeft +
-          (targetCenterX - visibleCenterX),
-        top:
-          container.scrollTop +
-          (targetCenterY - visibleCenterY),
-        behavior: "smooth",
-      });
-    },
-    []
-  );
-
-  const handleJumpToReviewItem = (
-    item: ManualReviewItem
-  ) => {
-    pendingReviewTargetRef.current = item;
-
-    /*
-     * Highlight the blackout rectangle closest to
-     * the flagged target.
-     */
-    const rects =
-      pageRedactions[item.page] || [];
-
-    if (rects.length > 0) {
-      const targetX =
-        item.target.x +
-        item.target.width / 2;
-
-      const targetY =
-        item.target.y +
-        item.target.height / 2;
-
-      let bestIndex = 0;
-      let bestDistance =
-        Number.POSITIVE_INFINITY;
-
-      rects.forEach((rect, index) => {
-        const rectX =
-          rect.x + rect.width / 2;
-
-        const rectY =
-          rect.y + rect.height / 2;
-
-        const distance =
-          Math.pow(rectX - targetX, 2) +
-          Math.pow(rectY - targetY, 2);
-
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          bestIndex = index;
-        }
-      });
-
-      setSelectedIndex(bestIndex);
-    } else {
-      setSelectedIndex(null);
-    }
-
-    if (currentPage === item.page) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          scrollReviewTargetIntoView(item);
-          pendingReviewTargetRef.current =
-            null;
-        });
-      });
-
-      return;
-    }
-
-    setCurrentPage(item.page);
-  };
 
   const handleCheckManualReview = async () => {
     if (!file) return;
@@ -467,31 +348,8 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       console.error('Page render error:', err);
     } finally {
       setIsLoadingPage(false);
-
-      const pendingTarget =
-        pendingReviewTargetRef.current;
-
-      if (
-        pendingTarget &&
-        pendingTarget.page === currentPage
-      ) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            scrollReviewTargetIntoView(
-              pendingTarget
-            );
-
-            pendingReviewTargetRef.current =
-              null;
-          });
-        });
-      }
     }
-  }, [
-    currentPage,
-    zoomLevel,
-    scrollReviewTargetIntoView,
-  ]);
+  }, [currentPage, zoomLevel]);
 
   useEffect(() => {
     if (totalPages > 0) {
@@ -1164,18 +1022,15 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                     </strong>
 
                     <p className="mt-1 text-xs leading-5 text-amber-900">
-                      Review the flagged areas below. Tap an item to jump to its page.
+                      These sensitive items are still readable after verification.
+                      Review the listed pages and adjust or add blackout boxes as needed.
                     </p>
 
                     <div className="mt-3 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
                       {manualReviewItems.map((item) => (
-                        <button
+                        <div
                           key={item.id}
-                          type="button"
-                          onClick={() =>
-                            handleJumpToReviewItem(item)
-                          }
-                          className="w-full min-h-0 rounded-lg border border-amber-300 bg-white px-3 py-3 text-left flex items-center gap-3 hover:bg-amber-50 transition"
+                          className="w-full rounded-lg border border-amber-300 bg-white px-3 py-3 text-left flex items-center gap-3"
                         >
                           <div className="min-w-0 flex-1">
                             <strong className="block text-xs text-zinc-950">
@@ -1190,7 +1045,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                           <span className="shrink-0 text-xs font-semibold text-zinc-700">
                             Page {item.page}
                           </span>
-                        </button>
+                        </div>
                       ))}
                     </div>
 
