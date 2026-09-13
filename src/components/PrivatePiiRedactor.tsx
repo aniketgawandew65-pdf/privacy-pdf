@@ -2321,23 +2321,22 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       // ======================================================
 
       if (!verification.passed) {
-        const failedValueSet =
+        const failedIdSet =
           new Set(
-            verification.leakedValues
-              .map((value) =>
-                normalizeForSafetyCheck(
-                  value
-                )
+            verification.leakedTargets
+              .map((target) =>
+                target.id
               )
-              .filter(Boolean)
+              .filter(
+                (id): id is string =>
+                  typeof id === "string"
+              )
           );
 
         const reviewItems =
           selected.filter((finding) =>
-            failedValueSet.has(
-              normalizeForSafetyCheck(
-                finding.value
-              )
+            failedIdSet.has(
+              finding.id
             )
           );
 

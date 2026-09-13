@@ -163,23 +163,30 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         await verifyFinishedPdf(
           bytes,
           verificationTargets.map((item) => ({
+            id: item.id,
             value: item.value,
+            page: item.page,
           })),
           (message) =>
             setManualCheckStatus(message)
         );
 
       if (
-        verification.leakedValues.length > 0
+        verification.leakedTargets.length > 0
       ) {
-        const leakedValues =
+        const leakedIds =
           new Set(
-            verification.leakedValues
+            verification.leakedTargets
+              .map((target) => target.id)
+              .filter(
+                (id): id is string =>
+                  typeof id === "string"
+              )
           );
 
         const unresolved =
           verificationTargets.filter((item) =>
-            leakedValues.has(item.value)
+            leakedIds.has(item.id)
           );
 
         setManualReviewItems(unresolved);
@@ -618,7 +625,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         await verifyFinishedPdf(
           bytes,
           verificationTargets.map((item) => ({
+            id: item.id,
             value: item.value,
+            page: item.page,
           })),
           (message) =>
             setManualCheckStatus(message)
@@ -648,15 +657,20 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
        * visible checklist, but still allow the user's
        * explicit Download anyway workflow.
        */
-      if (verification.leakedValues.length > 0) {
-        const leakedValues =
+      if (verification.leakedTargets.length > 0) {
+        const leakedIds =
           new Set(
-            verification.leakedValues
+            verification.leakedTargets
+              .map((target) => target.id)
+              .filter(
+                (id): id is string =>
+                  typeof id === "string"
+              )
           );
 
         const unresolved =
           verificationTargets.filter((item) =>
-            leakedValues.has(item.value)
+            leakedIds.has(item.id)
           );
 
         setManualReviewItems(unresolved);
