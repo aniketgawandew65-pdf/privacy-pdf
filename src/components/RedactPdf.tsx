@@ -18,11 +18,21 @@ import {
 import { pdfjsLib } from '../utils/pdfjs';
 import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { verifyFinishedPdf } from '../utils/pdfSafetyVerifier';
 
 interface RedactPdfProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
 }
+
+type ManualReviewItem = {
+  id: string;
+  category: string;
+  value: string;
+  maskedValue: string;
+  page: number;
+  target: RedactionRect;
+};
 
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -41,6 +51,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const routeState = location.state as
     | {
         initialRedactions?: Record<number, RedactionRect[]>;
+        manualReviewItems?: ManualReviewItem[];
         fromAutoRedactor?: boolean;
       }
     | null;
@@ -51,10 +62,33 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       ? routeState.initialRedactions
       : null;
 
+  const incomingManualReviewItems =
+    routeState?.fromAutoRedactor &&
+    Array.isArray(routeState.manualReviewItems)
+      ? routeState.manualReviewItems
+      : [];
+
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1); 
   const [redactMode, setRedactMode] = useState<"draw" | "pan">("draw");
   const [pageRedactions, setPageRedactions] = useState<Record<number, RedactionRect[]>>({});
+  const [manualReviewItems, setManualReviewItems] =
+    useState<ManualReviewItem[]>(incomingManualReviewItems);
+  const [manualCheckStatus, setManualCheckStatus] =
+    useState<string | null>(null);
+  const [isCheckingReview, setIsCheckingReview] =
+    useState(false);
+
+  /*
+   * Immutable original targets from Auto Redactor.
+   * These remain available even after resolved items disappear
+   * from the visible checklist.
+   */
+  const manualVerificationTargetsRef =
+    useRef<ManualReviewItem[]>([
+      ...incomingManualReviewItems,
+    ]);
+
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
 
@@ -80,12 +114,152 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
   const currentRects = pageRedactions[currentPage] || [];
 
+  const handleCheckManualReview = async () => {
+    if (!file) return;
+
+    const verificationTargets =
+      manualVerificationTargetsRef.current;
+
+    if (verificationTargets.length === 0) {
+      setManualCheckStatus(
+        "No flagged verification targets are available."
+      );
+      return;
+    }
+
+    const payload: PageRedaction[] =
+      Object.entries(pageRedactions).map(
+        ([pNum, rects]) => ({
+          pageIndex: parseInt(pNum, 10) - 1,
+          rects,
+        })
+      );
+
+    if (payload.length === 0) {
+      setManualCheckStatus(
+        "Draw at least one blackout rectangle before checking."
+      );
+      return;
+    }
+
+    setIsCheckingReview(true);
+    setManualCheckStatus(
+      "Preparing the current redacted PDF for safety verification…"
+    );
+
+    try {
+      /*
+       * Generate the ACTUAL current manual-redaction result
+       * in memory. Nothing is downloaded here.
+       */
+      const bytes =
+        await redactPDF(file, payload);
+
+      /*
+       * Run the SAME OCR/selectable-text safety verifier
+       * used by Private PII & Secrets Auto-Redactor.
+       */
+      const verification =
+        await verifyFinishedPdf(
+          bytes,
+          verificationTargets.map((item) => ({
+            value: item.value,
+          })),
+          (message) =>
+            setManualCheckStatus(message)
+        );
+
+      if (
+        verification.leakedValues.length > 0
+      ) {
+        const leakedValues =
+          new Set(
+            verification.leakedValues
+          );
+
+        const unresolved =
+          verificationTargets.filter((item) =>
+            leakedValues.has(item.value)
+          );
+
+        setManualReviewItems(unresolved);
+
+        setManualCheckStatus(
+          `${unresolved.length} item${
+            unresolved.length === 1 ? "" : "s"
+          } still readable in the finished PDF. Review ${
+            unresolved.length === 1
+              ? "it"
+              : "them"
+          } and check again.`
+        );
+
+        return;
+      }
+
+      if (
+        verification.selectableTextFound
+      ) {
+        setManualCheckStatus(
+          "The finished PDF still contains selectable text. Safety verification could not pass."
+        );
+
+        return;
+      }
+
+      if (verification.passed) {
+        setManualReviewItems([]);
+
+        setManualCheckStatus(
+          "Safety verification passed. No flagged values remain readable ✓"
+        );
+      }
+    } catch (err: any) {
+      console.error(
+        "Manual safety verification error:",
+        err
+      );
+
+      setManualCheckStatus(
+        err?.message ||
+          "Unable to complete the safety verification."
+      );
+    } finally {
+      setIsCheckingReview(false);
+    }
+  };
+
+
+  const handleManualDownloadClick = (
+    event: React.MouseEvent<HTMLAnchorElement>
+  ) => {
+    if (manualReviewItems.length === 0) {
+      return;
+    }
+
+    const count = manualReviewItems.length;
+
+    const confirmed = window.confirm(
+      `${count} item${
+        count === 1 ? "" : "s"
+      } still need manual review. Download this redacted PDF anyway?`
+    );
+
+    if (!confirmed) {
+      event.preventDefault();
+    }
+  };
+
   // Reset state when file changes
   useEffect(() => {
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
       setPageRedactions({});
+      setManualReviewItems([]);
+      setManualCheckStatus(null);
+      setIsCheckingReview(false);
+      manualVerificationTargetsRef.current = [];
       setSelectedIndex(null);
       setZoomLevel(1.0);
       revokeDownloadUrl();
@@ -388,13 +562,18 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const handleApplyRedactions = async () => {
     if (!file) return;
 
-    const payload: PageRedaction[] = Object.entries(pageRedactions).map(([pNum, rects]) => ({
-      pageIndex: parseInt(pNum, 10) - 1,
-      rects,
-    }));
+    const payload: PageRedaction[] =
+      Object.entries(pageRedactions).map(
+        ([pNum, rects]) => ({
+          pageIndex: parseInt(pNum, 10) - 1,
+          rects,
+        })
+      );
 
     if (payload.length === 0) {
-      setErrorMessage('Please draw at least one blackout rectangle to redact.');
+      setErrorMessage(
+        "Please draw at least one blackout rectangle to redact."
+      );
       return;
     }
 
@@ -403,12 +582,129 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     revokeDownloadUrl();
 
     try {
-      const bytes = await redactPDF(file, payload);
-      const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
+      /*
+       * Create the actual permanent redacted PDF once.
+       * These same bytes are verified and then used
+       * for the final download.
+       */
+      const bytes =
+        await redactPDF(file, payload);
+
+      const verificationTargets =
+        manualVerificationTargetsRef.current;
+
+      /*
+       * Files opened directly in Manual Redaction do
+       * not have Auto-Redactor verification targets.
+       * Preserve the existing standalone workflow.
+       */
+      if (verificationTargets.length === 0) {
+        const blob = new Blob(
+          [bytes as unknown as BlobPart],
+          {
+            type: "application/pdf",
+          }
+        );
+
+        createUrl(blob);
+        return;
+      }
+
+      setManualCheckStatus(
+        "Running final safety verification on the finished PDF…"
+      );
+
+      const verification =
+        await verifyFinishedPdf(
+          bytes,
+          verificationTargets.map((item) => ({
+            value: item.value,
+          })),
+          (message) =>
+            setManualCheckStatus(message)
+        );
+
+      /*
+       * A flattened manual-redaction result should not
+       * contain selectable text. Treat this as a hard
+       * safety failure rather than offering a misleading
+       * download.
+       */
+      if (verification.selectableTextFound) {
+        setErrorMessage(
+          "Final safety verification found selectable text in the finished PDF. Download was blocked because the permanent redaction could not be confirmed."
+        );
+
+        setManualCheckStatus(
+          "Final safety verification could not confirm a secure flattened PDF."
+        );
+
+        return;
+      }
+
+      /*
+       * Some original flagged values are still visibly
+       * readable. Restore those exact items to the
+       * visible checklist, but still allow the user's
+       * explicit Download anyway workflow.
+       */
+      if (verification.leakedValues.length > 0) {
+        const leakedValues =
+          new Set(
+            verification.leakedValues
+          );
+
+        const unresolved =
+          verificationTargets.filter((item) =>
+            leakedValues.has(item.value)
+          );
+
+        setManualReviewItems(unresolved);
+
+        setManualCheckStatus(
+          `${unresolved.length} item${
+            unresolved.length === 1 ? "" : "s"
+          } still readable after final verification.`
+        );
+
+        const blob = new Blob(
+          [bytes as unknown as BlobPart],
+          {
+            type: "application/pdf",
+          }
+        );
+
+        createUrl(blob);
+        return;
+      }
+
+      /*
+       * Full final verification passed.
+       */
+      setManualReviewItems([]);
+
+      setManualCheckStatus(
+        "Final safety verification passed ✓"
+      );
+
+      const blob = new Blob(
+        [bytes as unknown as BlobPart],
+        {
+          type: "application/pdf",
+        }
+      );
+
       createUrl(blob);
     } catch (err: any) {
-      console.error('Redaction error:', err);
-      setErrorMessage(err.message || 'Failed to redact PDF.');
+      console.error(
+        "Redaction error:",
+        err
+      );
+
+      setErrorMessage(
+        err?.message ||
+          "Failed to redact PDF."
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -716,35 +1012,121 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           )}
 
           {!downloadUrl ? (
-            <button
-              onClick={handleApplyRedactions}
-              disabled={isProcessing || totalRedactionsCount === 0}
-              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Permanently Redacting Document...</span>
-                </>
-              ) : (
-                <>
-                  <ShieldAlert className="w-4 h-4 stroke-[2.5]" />
-                  <span>Burn Blackouts &amp; Download PDF</span>
-                </>
-              )}
-            </button>
+            <>
+              {routeState?.fromAutoRedactor &&
+                manualReviewItems.length > 0 && (
+                  <div className="mb-4 rounded-xl border-2 border-amber-400 bg-amber-50 p-4">
+                    <strong className="block text-sm text-amber-950">
+                      {manualReviewItems.length} item
+                      {manualReviewItems.length === 1 ? "" : "s"} still need review
+                    </strong>
+
+                    <p className="mt-1 text-xs leading-5 text-amber-900">
+                      Review the flagged areas below. Tap an item to jump to its page.
+                    </p>
+
+                    <div className="mt-3 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
+                      {manualReviewItems.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setCurrentPage(item.page)}
+                          className="w-full min-h-0 rounded-lg border border-amber-300 bg-white px-3 py-3 text-left flex items-center gap-3 hover:bg-amber-50 transition"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <strong className="block text-xs text-zinc-950">
+                              {item.category}
+                            </strong>
+
+                            <code className="block mt-1 text-xs text-zinc-700 truncate">
+                              {item.maskedValue}
+                            </code>
+                          </div>
+
+                          <span className="shrink-0 text-xs font-semibold text-zinc-700">
+                            Page {item.page}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCheckManualReview}
+                      disabled={isProcessing || isCheckingReview}
+                      className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-white px-4 text-sm font-semibold text-zinc-950 inline-flex items-center justify-center gap-2 hover:bg-zinc-100 transition disabled:opacity-50"
+                    >
+                      {isCheckingReview ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Checking finished PDF…
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          Check reviewed areas
+                        </>
+                      )}
+                    </button>
+
+                    {manualCheckStatus && (
+                      <div className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs leading-5 text-zinc-800">
+                        {manualCheckStatus}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              <button
+                onClick={handleApplyRedactions}
+                disabled={
+                  isProcessing ||
+                  isCheckingReview ||
+                  totalRedactionsCount === 0
+                }
+                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Permanently Redacting Document...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-4 h-4 stroke-[2.5]" />
+                    <span>Burn Blackouts &amp; Download PDF</span>
+                  </>
+                )}
+              </button>
+            </>
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
-                <CheckCircle2 className="w-4 h-4" /> PDF Redacted Permanently
-              </div>
+              {manualReviewItems.length > 0 ? (
+                <div className="flex items-center justify-center gap-2 text-xs text-amber-300 bg-amber-950/30 p-3 rounded-lg border border-amber-800/40 font-medium">
+                  <AlertCircle className="w-4 h-4" />
+                  {manualReviewItems.length} item
+                  {manualReviewItems.length === 1 ? "" : "s"} still need review
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
+                  <CheckCircle2 className="w-4 h-4" />
+                  All flagged areas covered
+                </div>
+              )}
               <a
                 href={downloadUrl}
+                onClick={handleManualDownloadClick}
                 download={`redacted_${file.name}`}
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
-                <span>Download Redacted PDF</span>
+                <span>
+                  {manualReviewItems.length > 0
+                    ? `${manualReviewItems.length} item${
+                        manualReviewItems.length === 1 ? "" : "s"
+                      } still need review — Download anyway`
+                    : "Download Redacted PDF"}
+                </span>
               </a>
             </div>
           )}

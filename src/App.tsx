@@ -514,13 +514,27 @@ export default function App() {
         width: number;
         height: number;
       }>
-    >
+    >,
+    manualReviewItems: Array<{
+      id: string;
+      category: string;
+      value: string;
+      maskedValue: string;
+      page: number;
+      target: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+    }> = []
   ) => {
     handleSingleFileChange(file);
 
     navigate('/redact-pdf', {
       state: {
         initialRedactions,
+        manualReviewItems,
         fromAutoRedactor: true,
       },
     });

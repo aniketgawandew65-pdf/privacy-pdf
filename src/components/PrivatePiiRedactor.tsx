@@ -1,3 +1,7 @@
+import {
+  normalizeForSafetyCheck,
+  verifyFinishedPdf,
+} from "../utils/pdfSafetyVerifier";
 import { createWorker } from 'tesseract.js';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -416,147 +420,6 @@ const detectText = (text: string) => {
 };
 
 
-const normalizeForSafetyCheck = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-
-type FinalVerificationResult = {
-  passed: boolean;
-  leakedValues: string[];
-  selectableTextFound: boolean;
-};
-
-const verifyFinishedPdf = async (
-  bytes: Uint8Array,
-  selectedFindings: Finding[],
-  onProgress?: (message: string) => void
-): Promise<FinalVerificationResult> => {
-  const verificationPdf = await pdfjsLib.getDocument({
-    data: bytes.slice(),
-  }).promise;
-
-  let worker: any = null;
-
-  try {
-    const selectedValues = selectedFindings
-      .map((finding) => ({
-        original: finding.value,
-        normalized: normalizeForSafetyCheck(finding.value),
-      }))
-      .filter((item) => item.normalized.length >= 4);
-
-    let selectableTextFound = false;
-    let visibleText = "";
-
-    const { createWorker } = await import("tesseract.js");
-
-    worker = await createWorker(
-      "eng",
-      1,
-      {
-        workerPath: "/tessdata/worker.min.js",
-        corePath: "/tessdata/tesseract-core-simd-lstm.wasm.js",
-        langPath: "/tessdata",
-        gzip: true,
-      } as any
-    );
-
-    for (
-      let pageNumber = 1;
-      pageNumber <= verificationPdf.numPages;
-      pageNumber++
-    ) {
-      onProgress?.(
-        `Final safety verification ${pageNumber} of ${verificationPdf.numPages}…`
-      );
-
-      const page = await verificationPdf.getPage(pageNumber);
-
-      // Security check #1:
-      // the flattened secure output should not contain selectable text.
-      const textContent = await page.getTextContent();
-
-      const selectableText = textContent.items
-        .map((item: any) => item?.str || "")
-        .join(" ")
-        .trim();
-
-      if (selectableText.length > 0) {
-        selectableTextFound = true;
-      }
-
-      // Security check #2:
-      // OCR the ACTUAL finished page and make sure selected
-      // sensitive values are not still visibly readable.
-      const viewport = page.getViewport({ scale: 1.7 });
-
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-
-      const ctx = canvas.getContext("2d", {
-        alpha: false,
-      });
-
-      if (!ctx) {
-        throw new Error(
-          "Unable to create final safety verification renderer."
-        );
-      }
-
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      await page.render({
-        canvasContext: ctx,
-        viewport,
-        canvas,
-      } as any).promise;
-
-      const { data } = await worker.recognize(
-        canvas,
-        {},
-        {
-          text: true,
-        } as any
-      );
-
-      visibleText += ` ${data?.text || ""}`;
-
-      canvas.width = 1;
-      canvas.height = 1;
-    }
-
-    const normalizedVisibleText =
-      normalizeForSafetyCheck(visibleText);
-
-    const leakedValues = selectedValues
-      .filter((item) =>
-        normalizedVisibleText.includes(item.normalized)
-      )
-      .map((item) => item.original);
-
-    return {
-      passed:
-        !selectableTextFound &&
-        leakedValues.length === 0,
-      leakedValues,
-      selectableTextFound,
-    };
-  } finally {
-    if (worker) {
-      try {
-        await worker.terminate();
-      } catch (_) {}
-    }
-
-    try {
-      await verificationPdf.destroy();
-    } catch (_) {}
-  }
-};
-
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -580,10 +443,25 @@ type ManualRedactionMap = Record<
   }>
 >;
 
+type ManualReviewItem = {
+  id: string;
+  category: FindingCategory;
+  value: string;
+  maskedValue: string;
+  page: number;
+  target: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+};
+
 interface PrivatePiiRedactorProps {
   onContinueManual?: (
     file: File,
-    initialRedactions: ManualRedactionMap
+    initialRedactions: ManualRedactionMap,
+    manualReviewItems?: ManualReviewItem[]
   ) => void;
 }
 
@@ -672,19 +550,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     const initialRedactions: ManualRedactionMap = {};
 
-    const sourceFindings =
-      reviewOnly && reviewOnly.length > 0
-        ? reviewOnly
-        : findings.filter((finding) => finding.selected);
-
-    for (const finding of sourceFindings) {
+    const normalizeBox = (finding: Finding) => {
       if (
         !finding.page ||
         !finding.box ||
         !finding.pageWidth ||
         !finding.pageHeight
       ) {
-        continue;
+        return null;
       }
 
       const box = finding.box;
@@ -718,14 +591,66 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         1 - normalized.y
       );
 
+      return normalized;
+    };
+
+    /*
+     * Keep ALL selected automatic redaction boxes
+     * when moving into Manual Redaction.
+     */
+    const selectedFindings =
+      findings.filter((finding) => finding.selected);
+
+    for (const finding of selectedFindings) {
+      const normalized = normalizeBox(finding);
+
+      if (!normalized || !finding.page) {
+        continue;
+      }
+
       if (!initialRedactions[finding.page]) {
         initialRedactions[finding.page] = [];
       }
 
-      initialRedactions[finding.page].push(normalized);
+      initialRedactions[finding.page].push(
+        normalized
+      );
     }
 
-    onContinueManual(file, initialRedactions);
+    /*
+     * Separately carry only the items that failed
+     * final verification, without exposing raw PII.
+     */
+    const manualReviewItems: ManualReviewItem[] =
+      (reviewOnly || [])
+        .map((finding) => {
+          const target = normalizeBox(finding);
+
+          if (!target || !finding.page) {
+            return null;
+          }
+
+          return {
+            id: finding.id,
+            category: finding.category,
+            value: finding.value,
+            maskedValue: finding.maskedValue,
+            page: finding.page,
+            target,
+          };
+        })
+        .filter(
+          (
+            item
+          ): item is ManualReviewItem =>
+            item !== null
+        );
+
+    onContinueManual(
+      file,
+      initialRedactions,
+      manualReviewItems
+    );
   };
 
   const clearAll = () => {
