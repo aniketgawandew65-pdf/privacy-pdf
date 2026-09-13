@@ -859,7 +859,11 @@ export const TextToPdf: React.FC<any> = () => {
         {/* Vertical Stack of Real A4 Sheets */}
         <div
           ref={previewOuterRef}
-          className="relative w-full min-h-[500px] max-h-[700px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex flex-col items-center gap-8 p-6 overflow-y-auto overflow-x-hidden"
+          className="relative w-full min-h-[500px] max-h-[700px] bg-zinc-950 border border-zinc-800/80 rounded-xl flex flex-col items-start gap-8 p-6 overflow-auto overscroll-contain"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            touchAction: "pan-x pan-y",
+          }}
         >
           {pagesHtml.map((pageHtml, index) => (
             <div
@@ -869,6 +873,7 @@ export const TextToPdf: React.FC<any> = () => {
                 height: `${A4_PAGE_HEIGHT_PX * effectiveScale}px`,
                 position: "relative",
                 flexShrink: 0,
+                marginInline: "auto",
               }}
             >
               {/* Discrete A4 Sheet matching PDF layout 1:1 */}
