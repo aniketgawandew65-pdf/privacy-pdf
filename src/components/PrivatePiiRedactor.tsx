@@ -2559,13 +2559,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           }
         />
 
-        {status && (
+        {status && isScanning && (
           <div className="mt-4 flex items-center gap-2 text-xs text-zinc-950">
-            {isScanning || isRedacting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <ScanSearch className="w-4 h-4" />
-            )}
+            <Loader2 className="w-4 h-4 animate-spin" />
             {status}
           </div>
         )}
@@ -2807,6 +2803,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                   </>
                 )}
               </button>
+
+              {status && isRedacting && (
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <div className="flex items-center justify-center gap-2 text-xs font-medium text-emerald-900">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{status}</span>
+                  </div>
+                </div>
+              )}
 
               <p className="mt-3 text-center text-[11px] leading-5 text-zinc-950">
                 PDF exports are flattened into a new document so
