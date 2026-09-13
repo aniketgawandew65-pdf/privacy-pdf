@@ -46,7 +46,10 @@ export default defineConfig({
         navigateFallback: null,
         // Exclude HTML from precache so browsers ALWAYS fetch the latest index.html
         globPatterns: ['**/*.{js,css,ico,png,svg,wasm,mjs}'],
-        globIgnores: ['tessdata/**'],
+        globIgnores: [
+          'tessdata/**',
+          '**/exceljs*.js',
+        ],
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,

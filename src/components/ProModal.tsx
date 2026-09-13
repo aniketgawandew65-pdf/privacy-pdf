@@ -43,15 +43,28 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
       <div className="eyebrow">A LITTLE MORE ROOM</div>
       <h2 id="pro-heading">Meet 1into1 Pro.</h2>
       <p className="pro-description">For the PDFs that need more. Keep your document processing on your own device.</p>
-      <div className="pro-price"><strong>$49</strong><span>/ year</span></div>
+      <div className="pro-plan-grid">
+        <div className="pro-plan-option">
+          <span className="pro-plan-label">Monthly</span>
+          <div className="pro-plan-price"><strong>$6.99</strong><span>/ month</span></div>
+          <small>Cancel anytime</small>
+        </div>
+
+        <div className="pro-plan-option pro-plan-best">
+          <span className="pro-plan-badge">BEST VALUE · SAVE 42%</span>
+          <span className="pro-plan-label">Yearly</span>
+          <div className="pro-plan-price"><strong>$49</strong><span>/ year</span></div>
+          <small>$4.08/month billed annually</small>
+        </div>
+      </div>
       <ul className="pro-features">
         <li><Check size={17} />Unlimited tasks</li>
         <li><Check size={17} />Lightening fast results</li>
         <li><Check size={17} />All tools included</li>
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
-        <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Continue to checkout</span><ArrowRight size={16} /></a>
-        <p className="pro-fineprint">Billed annually through Lemon Squeezy. Taxes, renewal and refund terms are shown at checkout. Cloud AI provider charges are separate.</p>
+        <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose a plan</span><ArrowRight size={16} /></a>
+        <p className="pro-fineprint">Choose Monthly or Yearly securely at Lemon Squeezy checkout. Taxes, renewal and refund terms are shown at checkout. Cloud AI provider charges are separate.</p>
         <form className="license-form" onSubmit={handleActivate}>
           <label htmlFor="pro-license">Already purchased? Activate your license.</label>
           <div className="license-row"><input id="pro-license" value={licenseInput} onChange={e => setLicenseInput(e.target.value)} placeholder="Paste your license key" autoComplete="off" autoCapitalize="none" spellCheck={false} required /><button className="quiet-button" disabled={busy} type="submit">{busy ? 'Checking…' : 'Activate'}</button></div>

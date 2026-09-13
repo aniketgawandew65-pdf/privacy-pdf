@@ -1,0 +1,2025 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import * as pdfjs from 'pdfjs-dist';
+
+import html2canvas from 'html2canvas';
+
+import {
+  CheckCircle2,
+  Download,
+  Loader2,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+
+import {
+  exportFlattenedPreviewPage,
+  makeTextlessPreview,
+} from '../utils/nativeTextEditor';
+
+import {
+  useObjectUrl,
+} from '../utils/useObjectUrl';
+
+
+type Props = {
+  file: File | null;
+
+  onFileChange:
+    (
+      file: File | null
+    ) => void;
+};
+
+
+export default function ReconstructedEditLab({
+  file,
+  onFileChange,
+}: Props) {
+
+  const inputRef =
+    useRef<HTMLInputElement>(
+      null
+    );
+
+  const canvasRef =
+    useRef<HTMLCanvasElement>(
+      null
+    );
+
+  const textLayerRef =
+    useRef<HTMLDivElement>(
+      null
+    );
+
+
+  /*
+   * The complete visible PDF page:
+   *
+   * background canvas
+   * +
+   * editable text layer
+   *
+   * This is what gets captured for download.
+   */
+  const pageCaptureRef =
+    useRef<HTMLDivElement>(
+      null
+    );
+
+
+  const [busy, setBusy] =
+    useState(false);
+
+  const [exporting, setExporting] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const [zoom, setZoom] =
+    useState(1);
+
+  const [pageSize, setPageSize] =
+    useState({
+      width: 0,
+      height: 0,
+    });
+
+
+  const generation =
+    useRef(0);
+
+
+  const {
+    url: downloadUrl,
+    createUrl,
+    revoke: revokeDownloadUrl,
+  } = useObjectUrl();
+
+
+  // ==========================================================
+  // LOAD PAGE 1
+  // ==========================================================
+
+  useEffect(() => {
+
+    const id =
+      ++generation.current;
+
+    setError('');
+    setZoom(1);
+
+    revokeDownloadUrl();
+
+
+    if (!file) {
+      return;
+    }
+
+
+    setBusy(true);
+
+
+    let originalTask:
+      pdfjs.PDFDocumentLoadingTask |
+      null = null;
+
+    let backgroundTask:
+      pdfjs.PDFDocumentLoadingTask |
+      null = null;
+
+    let renderTask:
+      pdfjs.RenderTask |
+      null = null;
+
+
+    void (async () => {
+
+      try {
+
+        if (
+          file.size >
+          25 *
+            1024 *
+            1024
+        ) {
+
+          throw new Error(
+            'Use a PDF under 25 MB for this lab test.'
+          );
+        }
+
+
+        const bytes =
+          new Uint8Array(
+            await file.arrayBuffer()
+          );
+
+
+        // ====================================================
+        // GRAPHICS-ONLY PDF PAGE
+        // ====================================================
+
+        const textless =
+          await makeTextlessPreview(
+            bytes,
+            0
+          );
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        originalTask =
+          pdfjs.getDocument({
+            data:
+              bytes.slice(),
+
+            isEvalSupported:
+              false,
+          });
+
+
+        backgroundTask =
+          pdfjs.getDocument({
+            data:
+              textless.slice(),
+
+            isEvalSupported:
+              false,
+          });
+
+
+        const [
+          originalPdf,
+          backgroundPdf,
+        ] =
+          await Promise.all([
+            originalTask.promise,
+            backgroundTask.promise,
+          ]);
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        const [
+          originalPage,
+          backgroundPage,
+        ] =
+          await Promise.all([
+            originalPdf.getPage(
+              1
+            ),
+
+            backgroundPdf.getPage(
+              1
+            ),
+          ]);
+
+
+        const base =
+          originalPage.getViewport({
+            scale: 1,
+          });
+
+
+        const scale =
+          Math.min(
+            1.35,
+            760 /
+              base.width
+          );
+
+
+        const viewport =
+          originalPage.getViewport({
+            scale,
+          });
+
+
+        /*
+         * CSS viewport used by the editable text layer.
+         */
+        const backgroundViewport =
+          backgroundPage.getViewport({
+            scale,
+          });
+
+
+        /*
+         * HiDPI rendering viewport.
+         *
+         * PDF graphics remain the exact same CSS size,
+         * but are painted with 2x/3x more pixels so curves,
+         * rounded boxes, table borders and thin lines match
+         * a native PDF viewer much more closely.
+         */
+        const outputScale =
+          Math.min(
+            3,
+            Math.max(
+              2,
+              window.devicePixelRatio ||
+              1
+            )
+          );
+
+
+        const hiDpiViewport =
+          backgroundPage.getViewport({
+            scale:
+              scale *
+              outputScale,
+          });
+
+
+        setPageSize({
+          width:
+            viewport.width,
+
+          height:
+            viewport.height,
+        });
+
+
+        const canvas =
+          canvasRef.current;
+
+        const layer =
+          textLayerRef.current;
+
+
+        if (
+          !canvas ||
+          !layer
+        ) {
+          return;
+        }
+
+
+        // ====================================================
+        // RENDER BACKGROUND
+        // ====================================================
+
+        /*
+         * Internal canvas = high resolution.
+         * Visible canvas = original PDF CSS dimensions.
+         */
+        canvas.width =
+          Math.ceil(
+            hiDpiViewport.width
+          );
+
+        canvas.height =
+          Math.ceil(
+            hiDpiViewport.height
+          );
+
+        canvas.style.width =
+          `${backgroundViewport.width}px`;
+
+        canvas.style.height =
+          `${backgroundViewport.height}px`;
+
+
+        const context =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+
+        if (!context) {
+
+          throw new Error(
+            'Canvas is unavailable in this browser.'
+          );
+        }
+
+
+        context.fillStyle =
+          '#ffffff';
+
+        context.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+
+        renderTask =
+          backgroundPage.render({
+            canvasContext:
+              context,
+
+            viewport:
+              hiDpiViewport,
+          });
+
+
+        await renderTask.promise;
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        // ====================================================
+        // EXTRACT ORIGINAL TEXT
+        // ====================================================
+
+        layer.replaceChildren();
+
+
+        layer.style.setProperty(
+          '--scale-factor',
+          String(
+            viewport.scale
+          )
+        );
+
+
+        const textContent =
+          await originalPage
+            .getTextContent();
+
+
+        // ====================================================
+        // LOAD THE PDF'S REAL EMBEDDED FONTS
+        // ====================================================
+        //
+        // PDF.js internally resolves font objects while building
+        // the operator list. Once resolved, many computer-made
+        // PDFs expose the actual embedded font program through
+        // page.commonObjs.
+        //
+        // This is generic:
+        // Tahoma / Calibri / Helvetica / Arial / Roboto /
+        // corporate fonts / subset fonts etc. are all handled
+        // the same way when their bytes are available.
+
+        try {
+          await originalPage
+            .getOperatorList();
+        } catch {
+          // Text layer can still work with fallback fonts.
+        }
+
+
+        type ExactFontInfo = {
+          family: string;
+          weight: string;
+          style: string;
+        };
+
+
+        const exactFontMap =
+          new Map<
+            string,
+            ExactFontInfo
+          >();
+
+
+        const uniqueFontNames =
+          Array.from(
+            new Set(
+              (
+                textContent.items as
+                  any[]
+              )
+                .map(
+                  item =>
+                    item?.fontName
+                )
+                .filter(
+                  Boolean
+                )
+            )
+          ) as string[];
+
+
+        for (
+          const fontName of
+            uniqueFontNames
+        ) {
+
+          const pdfStyle =
+            (
+              textContent as any
+            ).styles?.[
+              fontName
+            ];
+
+
+          let fontObject:
+            any = null;
+
+
+          try {
+
+            fontObject =
+              (
+                originalPage as any
+              ).commonObjs?.get(
+                fontName
+              );
+
+          } catch {
+            // Some PDF.js font objects may not expose bytes.
+          }
+
+
+          const sourceName =
+            String(
+              fontObject?.name ||
+              fontObject?.loadedName ||
+              pdfStyle?.fontFamily ||
+              fontName
+            );
+
+
+          const lowerName =
+            sourceName
+              .toLowerCase();
+
+
+          const isBold =
+            Boolean(
+              fontObject?.bold
+            ) ||
+            Boolean(
+              fontObject?.black
+            ) ||
+            /bold|black|semibold|semi-bold|demi|heavy/.test(
+              lowerName
+            );
+
+
+          const isItalic =
+            Boolean(
+              fontObject?.italic
+            ) ||
+            /italic|oblique/.test(
+              lowerName
+            );
+
+
+          const weight =
+            isBold
+              ? '700'
+              : '400';
+
+
+          const fontStyle =
+            isItalic
+              ? 'italic'
+              : 'normal';
+
+
+          /*
+           * Start with the PDF.js CSS family as fallback.
+           */
+          let family =
+            String(
+              fontObject?.loadedName ||
+              pdfStyle?.fontFamily ||
+              'sans-serif'
+            );
+
+
+          const rawData =
+            fontObject?.data;
+
+
+          /*
+           * If PDF.js exposes the embedded font bytes,
+           * register them directly with the browser.
+           *
+           * No network request.
+           * No server.
+           * No hard-coded font name.
+           */
+          if (
+            rawData &&
+            (
+              rawData.byteLength ||
+              rawData.length
+            )
+          ) {
+
+            try {
+
+              const bytes =
+                rawData instanceof
+                  Uint8Array
+                  ? rawData.slice()
+                  : new Uint8Array(
+                      rawData
+                    );
+
+
+              const safeName =
+                fontName.replace(
+                  /[^a-zA-Z0-9_-]/g,
+                  '_'
+                );
+
+
+              const exactFamily =
+                `OneIntoOnePDF_${id}_${safeName}`;
+
+
+              const fontBuffer =
+                bytes.buffer as
+                  ArrayBuffer;
+
+
+              const fontFace =
+                new FontFace(
+                  exactFamily,
+                  fontBuffer,
+                  {
+                    weight,
+                    style:
+                      fontStyle,
+                  }
+                );
+
+
+              await fontFace
+                .load();
+
+
+              document.fonts.add(
+                fontFace
+              );
+
+
+              family =
+                exactFamily;
+
+
+              console.log(
+                '[Edit PDF Lab] Loaded embedded PDF font:',
+                fontName,
+                sourceName
+              );
+
+
+            } catch (
+              fontError
+            ) {
+
+              console.warn(
+                '[Edit PDF Lab] Embedded font could not be registered:',
+                fontName,
+                fontError
+              );
+            }
+          }
+
+
+          exactFontMap.set(
+            fontName,
+            {
+              family,
+              weight,
+              style:
+                fontStyle,
+            }
+          );
+        }
+
+
+        /*
+         * Critical for export:
+         * don't render/capture until all registered fonts
+         * have actually finished loading.
+         */
+        try {
+          await document.fonts
+            .ready;
+        } catch {}
+
+
+
+        const textDivs:
+          HTMLElement[] = [];
+
+
+        await pdfjs.renderTextLayer({
+          textContentSource:
+            textContent,
+
+          container:
+            layer,
+
+          viewport,
+
+          textDivs,
+        }).promise;
+
+
+        /*
+         * renderTextLayer textDivs correspond to PDF.js
+         * TextItems in their extracted order.
+         */
+        const pdfTextItems =
+          textContent.items.filter(
+            (item: any) =>
+              typeof item?.str ===
+              'string'
+          ) as any[];
+
+
+        // ====================================================
+        // TEXT GEOMETRY CORRECTION
+        // ====================================================
+        //
+        // PDF text is not laid out like HTML text.
+        //
+        // Example:
+        //
+        //   Summary
+        //   move 3.2pt
+        //   of
+        //   move 3.5pt
+        //   Account
+        //
+        // PDF.js knows the final intended width.
+        //
+        // When we swap in the PDF's real embedded font,
+        // browser font metrics can differ from the metrics
+        // PDF.js originally used to calculate its scaleX.
+        //
+        // This function reconciles the browser text with the
+        // PDF's original geometry.
+
+
+        const measurementCanvas =
+          document.createElement(
+            'canvas'
+          );
+
+
+        const measurementContext =
+          measurementCanvas.getContext(
+            '2d'
+          );
+
+
+        const stripScaleX =
+          (
+            transform:
+              string
+          ) =>
+            transform
+              .replace(
+                /scaleX\([^)]*\)/g,
+                ''
+              )
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim();
+
+
+        // ====================================================
+        // RESTORE PDF.JS' ORIGINAL TEXT APPEARANCE
+        // ====================================================
+
+        const restoreNativeTextStyle =
+          (
+            span:
+              HTMLSpanElement
+          ) => {
+
+            span.style.fontFamily =
+              span.dataset
+                .pdfNativeFontFamily ||
+              '';
+
+            span.style.fontWeight =
+              span.dataset
+                .pdfNativeFontWeight ||
+              '';
+
+            span.style.fontStyle =
+              span.dataset
+                .pdfNativeFontStyle ||
+              '';
+
+            span.style.transform =
+              span.dataset
+                .pdfNativeTransform ||
+              '';
+
+            span.style.letterSpacing =
+              span.dataset
+                .pdfNativeLetterSpacing ||
+              '';
+
+            span.style.wordSpacing =
+              span.dataset
+                .pdfNativeWordSpacing ||
+              '';
+
+            span.style.transformOrigin =
+              span.dataset
+                .pdfNativeTransformOrigin ||
+              '0% 0%';
+          };
+
+
+        // ====================================================
+        // EDITED TEXT ONLY
+        // ====================================================
+        //
+        // Untouched text remains exactly as PDF.js rendered it.
+        //
+        // Only text changed by the user gets:
+        // - the extracted embedded PDF font when available
+        // - natural browser spacing
+        // - width protection when replacement is too long
+
+        const reconcileSpanGeometry =
+          (
+            span:
+              HTMLSpanElement,
+
+            pdfItem:
+              any
+          ) => {
+
+            const value =
+              span.textContent ||
+              '';
+
+            const original =
+              span.dataset
+                .originalText ||
+              '';
+
+
+            const edited =
+              value !==
+              original;
+
+
+            // ------------------------------------------------
+            // UNTOUCHED TEXT
+            // ------------------------------------------------
+
+            if (!edited) {
+
+              restoreNativeTextStyle(
+                span
+              );
+
+              span.dataset.pdfEdited =
+                'false';
+
+              return;
+            }
+
+
+            span.dataset.pdfEdited =
+              'true';
+
+
+            // ------------------------------------------------
+            // APPLY REAL EMBEDDED FONT TO EDITED RUN
+            // ------------------------------------------------
+
+            const exactFamily =
+              span.dataset
+                .pdfExactFont;
+
+
+            if (exactFamily) {
+
+              span.style.fontFamily =
+                `"${exactFamily}"`;
+
+              span.style.fontWeight =
+                span.dataset
+                  .pdfFontWeight ||
+                '400';
+
+              span.style.fontStyle =
+                span.dataset
+                  .pdfFontStyle ||
+                'normal';
+
+            } else {
+
+              /*
+               * If exact font bytes were unavailable,
+               * keep PDF.js' own font selection.
+               */
+              span.style.fontFamily =
+                span.dataset
+                  .pdfNativeFontFamily ||
+                span.style
+                  .fontFamily;
+
+              span.style.fontWeight =
+                span.dataset
+                  .pdfNativeFontWeight ||
+                span.style
+                  .fontWeight;
+
+              span.style.fontStyle =
+                span.dataset
+                  .pdfNativeFontStyle ||
+                span.style
+                  .fontStyle;
+            }
+
+
+            /*
+             * Edited content should have normal typography.
+             *
+             * We don't recreate artificial PDF word spacing
+             * inside a replacement string.
+             */
+            span.style.wordSpacing =
+              '0px';
+
+            span.style.letterSpacing =
+              '0px';
+
+
+            const nativeTransform =
+              span.dataset
+                .pdfNativeTransform ||
+              '';
+
+
+            const baseTransform =
+              stripScaleX(
+                nativeTransform
+              );
+
+
+            if (
+              !measurementContext ||
+              !value
+            ) {
+
+              span.style.transform =
+                baseTransform;
+
+              return;
+            }
+
+
+            const computed =
+              window.getComputedStyle(
+                span
+              );
+
+
+            const fontSize =
+              Number.parseFloat(
+                computed.fontSize
+              ) || 10;
+
+
+            measurementContext.font =
+              `${computed.fontStyle || 'normal'} ${computed.fontWeight || '400'} ${fontSize}px ${computed.fontFamily || 'sans-serif'}`;
+
+
+            const naturalWidth =
+              measurementContext
+                .measureText(
+                  value
+                )
+                .width;
+
+
+            /*
+             * PDF.js exposes TextItem.width in PDF units.
+             * Convert to the CSS coordinate system of the
+             * visible editable layer.
+             */
+            const originalWidth =
+              Math.max(
+                1,
+                (
+                  Number(
+                    pdfItem.width
+                  ) || 1
+                ) *
+                viewport.scale
+              );
+
+
+            /*
+             * Give edited text a little breathing room.
+             *
+             * A replacement slightly wider than the old value
+             * should not immediately get compressed.
+             */
+            const availableWidth =
+              originalWidth *
+              1.08;
+
+
+            let scaleX =
+              1;
+
+
+            if (
+              Number.isFinite(
+                naturalWidth
+              ) &&
+              naturalWidth >
+                availableWidth
+            ) {
+
+              scaleX =
+                availableWidth /
+                naturalWidth;
+
+
+              /*
+               * Never crush text beyond 55%.
+               */
+              scaleX =
+                Math.max(
+                  0.55,
+                  Math.min(
+                    1,
+                    scaleX
+                  )
+                );
+            }
+
+
+            span.style.transform =
+              [
+                baseTransform,
+
+                scaleX < 0.999
+                  ? `scaleX(${scaleX})`
+                  : '',
+              ]
+                .filter(
+                  Boolean
+                )
+                .join(
+                  ' '
+                );
+
+
+            span.style.transformOrigin =
+              span.dataset
+                .pdfNativeTransformOrigin ||
+              '0% 0%';
+          };
+
+
+        for (
+          let index = 0;
+          index <
+          textDivs.length;
+          index++
+        ) {
+
+          const div =
+            textDivs[index];
+
+          const pdfItem =
+            pdfTextItems[index];
+
+
+          if (
+            !(
+              div instanceof
+              HTMLSpanElement
+            ) ||
+            !div.textContent
+              ?.trim() ||
+            !pdfItem
+          ) {
+            continue;
+          }
+
+
+          const transform =
+            Array.isArray(
+              pdfItem.transform
+            )
+              ? pdfItem.transform
+              : [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                ];
+
+
+          /*
+           * Save ORIGINAL PDF coordinates directly on each
+           * browser text span.
+           *
+           * We do not later guess coordinates from screen
+           * pixels.
+           */
+          const x =
+            Number(
+              transform[4]
+            ) || 0;
+
+          const y =
+            Number(
+              transform[5]
+            ) || 0;
+
+
+          const fontSize =
+            Math.max(
+              4,
+
+              Math.hypot(
+                Number(
+                  transform[2]
+                ) || 0,
+
+                Number(
+                  transform[3]
+                ) || 0
+              ) ||
+
+              Number(
+                pdfItem.height
+              ) ||
+
+              10
+            );
+
+
+          const rotation =
+            Math.atan2(
+              Number(
+                transform[1]
+              ) || 0,
+
+              Number(
+                transform[0]
+              ) || 1
+            ) *
+            (
+              180 /
+              Math.PI
+            );
+
+
+          div.dataset.pdfX =
+            String(x);
+
+          div.dataset.pdfY =
+            String(y);
+
+          div.dataset.pdfWidth =
+            String(
+              Math.max(
+                1,
+                Number(
+                  pdfItem.width
+                ) || 1
+              )
+            );
+
+          div.dataset.pdfFontSize =
+            String(
+              fontSize
+            );
+
+          div.dataset.pdfRotation =
+            String(
+              rotation
+            );
+
+
+          // ==================================================
+          // EXACT PDF FONT FOR THIS TEXT RUN
+          // ==================================================
+
+          // ==================================================
+          // SAVE PDF.JS' NATIVE LAYOUT FIRST
+          // ==================================================
+          //
+          // These values are the source of truth for every
+          // untouched text run.
+
+          div.dataset.pdfNativeTransform =
+            div.style.transform ||
+            '';
+
+          div.dataset.pdfNativeTransformOrigin =
+            div.style.transformOrigin ||
+            '0% 0%';
+
+          div.dataset.pdfNativeFontFamily =
+            div.style.fontFamily ||
+            '';
+
+          div.dataset.pdfNativeFontWeight =
+            div.style.fontWeight ||
+            '';
+
+          div.dataset.pdfNativeFontStyle =
+            div.style.fontStyle ||
+            '';
+
+          div.dataset.pdfNativeLetterSpacing =
+            div.style.letterSpacing ||
+            '';
+
+          div.dataset.pdfNativeWordSpacing =
+            div.style.wordSpacing ||
+            '';
+
+
+          // ==================================================
+          // STORE EXACT EMBEDDED FONT — DON'T APPLY IT YET
+          // ==================================================
+          //
+          // It is used only if the user edits this text run.
+
+          const fontInfo =
+            exactFontMap.get(
+              String(
+                pdfItem.fontName ||
+                ''
+              )
+            );
+
+
+          if (fontInfo) {
+
+            div.dataset.pdfExactFont =
+              fontInfo.family;
+
+            div.dataset.pdfFontWeight =
+              fontInfo.weight;
+
+            div.dataset.pdfFontStyle =
+              fontInfo.style;
+          }
+
+
+          div.contentEditable =
+            'true';
+
+          div.spellcheck =
+            false;
+
+          div.dataset.originalText =
+            div.textContent;
+
+          div.title =
+            'Click to edit';
+
+
+          /*
+           * Browser typography settings that are closest to
+           * PDF text shaping.
+           */
+          div.style.fontKerning =
+            'normal';
+
+          div.style.fontVariantLigatures =
+            'none';
+
+          (
+            div.style as any
+          ).textRendering =
+            'geometricPrecision';
+
+
+          /*
+           * Required visual positioning stays controlled by
+           * PDF.js. We only turn the spans into editable text.
+           */
+          div.style.position =
+            'absolute';
+
+          div.style.whiteSpace =
+            'pre';
+
+          div.style.transformOrigin =
+            '0% 0%';
+
+          div.style.color =
+            '#111827';
+
+          div.style.cursor =
+            'text';
+
+          div.style.caretColor =
+            '#059669';
+
+          div.style.outline =
+            'none';
+
+
+          /*
+           * Untouched text is deliberately restored to
+           * PDF.js' original geometry.
+           */
+          reconcileSpanGeometry(
+            div,
+            pdfItem
+          );
+
+
+          div.addEventListener(
+            'focus',
+            () => {
+
+              div.style.background =
+                'rgba(16,185,129,.12)';
+
+              div.style.boxShadow =
+                '0 0 0 1px rgba(16,185,129,.70)';
+            }
+          );
+
+
+          div.addEventListener(
+            'blur',
+            () => {
+
+              div.style.background =
+                'transparent';
+
+              div.style.boxShadow =
+                'none';
+
+
+              reconcileSpanGeometry(
+                div,
+                pdfItem
+              );
+            }
+          );
+
+
+          /*
+           * As soon as a value changes, any old generated
+           * download is no longer current.
+           */
+          div.addEventListener(
+            'input',
+            () => {
+
+              /*
+               * Changed values use natural typography.
+               * They are only compressed if they exceed the
+               * original PDF region.
+               */
+              reconcileSpanGeometry(
+                div,
+                pdfItem
+              );
+
+              revokeDownloadUrl();
+            }
+          );
+
+
+          /*
+           * Keep one extracted PDF run on one line.
+           */
+          div.addEventListener(
+            'keydown',
+            event => {
+
+              if (
+                event.key ===
+                'Enter'
+              ) {
+
+                event.preventDefault();
+
+                div.blur();
+              }
+            }
+          );
+        }
+
+
+      } catch (err) {
+
+        if (
+          id ===
+          generation.current
+        ) {
+
+          setError(
+            err instanceof
+              Error
+              ? err.message
+              : 'Could not reconstruct this PDF page.'
+          );
+        }
+
+      } finally {
+
+        if (
+          id ===
+          generation.current
+        ) {
+
+          setBusy(false);
+        }
+      }
+
+    })();
+
+
+    return () => {
+
+      generation.current =
+        id + 1;
+
+      try {
+        renderTask?.cancel();
+      } catch {}
+
+      void originalTask
+        ?.destroy();
+
+      void backgroundTask
+        ?.destroy();
+    };
+
+  }, [file]);
+
+
+  // ==========================================================
+  // EXPORT PAGE 1
+  // ==========================================================
+
+  const handleExport =
+    async () => {
+
+      if (!file) {
+        return;
+      }
+
+
+      const pageElement =
+        pageCaptureRef.current;
+
+
+      if (
+        !pageElement ||
+        !pageSize.width ||
+        !pageSize.height
+      ) {
+        return;
+      }
+
+
+      setExporting(true);
+
+      setError('');
+
+      revokeDownloadUrl();
+
+
+      try {
+
+        // ====================================================
+        // REMOVE EDITING UI BEFORE CAPTURE
+        // ====================================================
+
+        if (
+          document.activeElement instanceof
+          HTMLElement
+        ) {
+          document.activeElement.blur();
+        }
+
+
+        try {
+          window
+            .getSelection()
+            ?.removeAllRanges();
+        } catch {}
+
+
+        /*
+         * Wait until blur/focus styles are actually repainted.
+         */
+        await new Promise<void>(
+          resolve =>
+            requestAnimationFrame(
+              () =>
+                requestAnimationFrame(
+                  () =>
+                    resolve()
+                )
+            )
+        );
+
+
+        try {
+          await document.fonts.ready;
+        } catch {}
+
+
+        // ====================================================
+        // CAPTURE EXACT PREVIEW
+        // ====================================================
+        //
+        // The page shown on screen is zoomed using CSS.
+        //
+        // For export we temporarily remove ONLY that outer zoom.
+        // The actual internal PDF/text coordinates are untouched.
+
+        const previousTransform =
+          pageElement.style
+            .transform;
+
+        const previousTransformOrigin =
+          pageElement.style
+            .transformOrigin;
+
+
+        pageElement.style.transform =
+          'none';
+
+        pageElement.style.transformOrigin =
+          '0 0';
+
+
+        let capturedCanvas:
+          HTMLCanvasElement;
+
+
+        try {
+
+          capturedCanvas =
+            await html2canvas(
+              pageElement,
+              {
+                /*
+                 * Capture entire page exactly as visible.
+                 */
+                backgroundColor:
+                  '#ffffff',
+
+                /*
+                 * High-resolution document rendering.
+                 */
+                scale: 3,
+
+                logging: false,
+
+                useCORS: false,
+
+                allowTaint: false,
+
+                width:
+                  pageSize.width,
+
+                height:
+                  pageSize.height,
+
+                scrollX: 0,
+
+                scrollY: 0,
+
+                windowWidth:
+                  Math.ceil(
+                    pageSize.width
+                  ),
+
+                windowHeight:
+                  Math.ceil(
+                    pageSize.height
+                  ),
+              }
+            );
+
+
+        } finally {
+
+          /*
+           * Return the live editor to its previous zoom.
+           */
+          pageElement.style.transform =
+            previousTransform;
+
+          pageElement.style.transformOrigin =
+            previousTransformOrigin;
+        }
+
+
+        // ====================================================
+        // PNG
+        // ====================================================
+
+        const pngBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+
+              capturedCanvas.toBlob(
+                blob => {
+
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Could not capture the edited PDF page.'
+                      )
+                    );
+                  }
+                },
+
+                'image/png'
+              );
+            }
+          );
+
+
+        const pagePng =
+          new Uint8Array(
+            await pngBlob
+              .arrayBuffer()
+          );
+
+
+        // ====================================================
+        // REPLACE ONLY PAGE 1
+        // ====================================================
+
+        const originalBytes =
+          new Uint8Array(
+            await file
+              .arrayBuffer()
+          );
+
+
+        const outputBytes =
+          await exportFlattenedPreviewPage(
+            originalBytes,
+            0,
+            pagePng
+          );
+
+
+        const outputBlob =
+          new Blob(
+            [
+              outputBytes as unknown as
+                BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+
+        createUrl(
+          outputBlob
+        );
+
+
+      } catch (err) {
+
+        console.error(
+          'Exact preview PDF export failed:',
+          err
+        );
+
+
+        setError(
+          err instanceof
+            Error
+            ? err.message
+            : 'Could not create the edited PDF.'
+        );
+
+
+      } finally {
+
+        setExporting(
+          false
+        );
+      }
+    };
+
+
+  // ==========================================================
+  // UI
+  // ==========================================================
+
+  return (
+    <div className="max-w-6xl mx-auto px-3 sm:px-5 py-6">
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+
+        onChange={event => {
+
+          const next =
+            event.target
+              .files?.[0];
+
+          if (next) {
+            onFileChange(
+              next
+            );
+          }
+
+          event.currentTarget.value =
+            '';
+        }}
+      />
+
+
+      {!file ? (
+
+        <button
+          type="button"
+
+          onClick={() =>
+            inputRef.current
+              ?.click()
+          }
+
+          className="w-full min-h-64 rounded-3xl border border-dashed border-zinc-700 bg-zinc-950/50 flex flex-col items-center justify-center gap-3 text-zinc-300 hover:border-emerald-500/60"
+        >
+
+          <Upload className="w-7 h-7 text-emerald-400" />
+
+          <strong>
+            Choose a computer-generated PDF
+          </strong>
+
+          <span className="text-xs text-zinc-500">
+            Edit PDF reconstruction lab · Page 1 · Local browser processing
+          </span>
+
+        </button>
+
+      ) : (
+
+        <div className="space-y-4">
+
+
+          {/* HEADER */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
+
+            <div>
+
+              <strong className="text-white">
+                Edit PDF Reconstruction Lab
+              </strong>
+
+              <p className="text-xs text-zinc-500 mt-1">
+                Edit page 1 directly. Graphics, watermark, tables and background remain underneath.
+              </p>
+
+            </div>
+
+
+            <div className="flex items-center gap-2">
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  setZoom(
+                    value =>
+                      Math.max(
+                        0.6,
+                        Number(
+                          (
+                            value -
+                            0.15
+                          ).toFixed(
+                            2
+                          )
+                        )
+                      )
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+
+
+              <span className="text-xs font-mono min-w-12 text-center">
+                {Math.round(
+                  zoom * 100
+                )}%
+              </span>
+
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  setZoom(
+                    value =>
+                      Math.min(
+                        2,
+                        Number(
+                          (
+                            value +
+                            0.15
+                          ).toFixed(
+                            2
+                          )
+                        )
+                      )
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  onFileChange(
+                    null
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+            </div>
+
+          </div>
+
+
+          {error && (
+            <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+
+          {busy && (
+            <div className="flex items-center gap-2 rounded-xl border border-zinc-800 p-3 text-sm text-zinc-400">
+
+              <Loader2 className="w-4 h-4 animate-spin" />
+
+              Separating page graphics from editable text…
+
+            </div>
+          )}
+
+
+          {/* PAGE */}
+          <div className="overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-8 min-h-[600px]">
+
+            <div
+              style={{
+                width:
+                  pageSize.width *
+                  zoom,
+
+                height:
+                  pageSize.height *
+                  zoom,
+              }}
+
+              className="relative mx-auto"
+            >
+
+              <div
+                ref={pageCaptureRef}
+
+                style={{
+                  width:
+                    pageSize.width,
+
+                  height:
+                    pageSize.height,
+
+                  transform:
+                    `scale(${zoom})`,
+
+                  transformOrigin:
+                    'top left',
+                }}
+
+                className="absolute left-0 top-0 bg-white shadow-2xl"
+              >
+
+
+                <canvas
+                  ref={canvasRef}
+                  className="block"
+                />
+
+
+                <div
+                  ref={
+                    textLayerRef
+                  }
+
+                  className="absolute inset-0 overflow-hidden"
+
+                  style={{
+                    lineHeight: 1,
+
+                    WebkitTextSizeAdjust:
+                      'none',
+
+                    textSizeAdjust:
+                      'none',
+
+                    transformOrigin:
+                      '0 0',
+
+                    zIndex: 2,
+                  }}
+                />
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <p className="text-xs text-zinc-500 text-center">
+            Click directly on any text on page 1 and type your replacement.
+          </p>
+
+
+          {/* EXPORT */}
+          <button
+            type="button"
+
+            disabled={
+              busy ||
+              exporting
+            }
+
+            onClick={
+              handleExport
+            }
+
+            className="w-full min-h-12 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-semibold flex items-center justify-center gap-2"
+          >
+
+            {exporting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Creating edited PDF...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                Create Edited PDF
+              </>
+            )}
+
+          </button>
+
+
+          {downloadUrl && (
+            <div className="space-y-2">
+
+              <div className="flex items-center justify-center gap-2 rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-2.5 text-xs text-emerald-400">
+
+                <CheckCircle2 className="w-4 h-4" />
+
+                Edited PDF created. Page 1 was flattened exactly from the editor preview; the remaining pages were preserved.
+
+              </div>
+
+
+              <a
+                href={
+                  downloadUrl
+                }
+
+                download={
+                  `${
+                    file.name.replace(
+                      /\.pdf$/i,
+                      ''
+                    )
+                  }-edited.pdf`
+                }
+
+                target="_blank"
+                rel="noopener noreferrer"
+
+                className="w-full min-h-12 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 font-semibold flex items-center justify-center gap-2"
+              >
+
+                <Download className="w-4 h-4" />
+
+                Download Edited PDF
+
+              </a>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+    </div>
+  );
+}

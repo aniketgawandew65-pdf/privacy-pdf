@@ -12,6 +12,7 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "browser-image-compression": "^2.0.2",
+    "exceljs": "^4.4.0",
     "heic2any": "^0.0.4",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",

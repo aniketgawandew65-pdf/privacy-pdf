@@ -1,0 +1,779 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import * as pdfjs from 'pdfjs-dist';
+
+import {
+  Loader2,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+
+import {
+  makeTextlessPreview,
+} from '../utils/nativeTextEditor';
+
+
+type Props = {
+  file: File | null;
+
+  onFileChange:
+    (
+      file: File | null
+    ) => void;
+};
+
+
+export default function ReconstructedEditLab({
+  file,
+  onFileChange,
+}: Props) {
+
+  const inputRef =
+    useRef<HTMLInputElement>(
+      null
+    );
+
+  const canvasRef =
+    useRef<HTMLCanvasElement>(
+      null
+    );
+
+  const textLayerRef =
+    useRef<HTMLDivElement>(
+      null
+    );
+
+
+  const [busy, setBusy] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const [zoom, setZoom] =
+    useState(1);
+
+  const [pageSize, setPageSize] =
+    useState({
+      width: 0,
+      height: 0,
+    });
+
+  const generation =
+    useRef(0);
+
+
+  useEffect(() => {
+
+    const id =
+      ++generation.current;
+
+    setError('');
+    setZoom(1);
+
+    if (!file) {
+      return;
+    }
+
+    setBusy(true);
+
+
+    let originalTask:
+      pdfjs.PDFDocumentLoadingTask |
+      null = null;
+
+    let backgroundTask:
+      pdfjs.PDFDocumentLoadingTask |
+      null = null;
+
+    let renderTask:
+      pdfjs.RenderTask |
+      null = null;
+
+
+    void (async () => {
+
+      try {
+
+        if (
+          file.size >
+          25 *
+            1024 *
+            1024
+        ) {
+
+          throw new Error(
+            'Use a PDF under 25 MB for this lab test.'
+          );
+        }
+
+
+        const bytes =
+          new Uint8Array(
+            await file.arrayBuffer()
+          );
+
+
+        /*
+         * First create our graphics-only page.
+         *
+         * The watermark, logo, tables, borders and other
+         * graphics remain in the PDF.
+         */
+        const textless =
+          await makeTextlessPreview(
+            bytes,
+            0
+          );
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        /*
+         * ORIGINAL:
+         * used only to extract text + exact positions.
+         *
+         * BACKGROUND:
+         * used to render graphics without the main text.
+         */
+        originalTask =
+          pdfjs.getDocument({
+            data:
+              bytes.slice(),
+
+            isEvalSupported:
+              false,
+          });
+
+
+        backgroundTask =
+          pdfjs.getDocument({
+            data:
+              textless.slice(),
+
+            isEvalSupported:
+              false,
+          });
+
+
+        const [
+          originalPdf,
+          backgroundPdf,
+        ] =
+          await Promise.all([
+            originalTask.promise,
+            backgroundTask.promise,
+          ]);
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        const [
+          originalPage,
+          backgroundPage,
+        ] =
+          await Promise.all([
+            originalPdf.getPage(
+              1
+            ),
+
+            backgroundPdf.getPage(
+              1
+            ),
+          ]);
+
+
+        const base =
+          originalPage.getViewport({
+            scale: 1,
+          });
+
+
+        /*
+         * Desktop-friendly test size.
+         * Zoom remains separate.
+         */
+        const scale =
+          Math.min(
+            1.35,
+            760 /
+              base.width
+          );
+
+
+        const viewport =
+          originalPage.getViewport({
+            scale,
+          });
+
+
+        const backgroundViewport =
+          backgroundPage.getViewport({
+            scale,
+          });
+
+
+        setPageSize({
+          width:
+            viewport.width,
+
+          height:
+            viewport.height,
+        });
+
+
+        const canvas =
+          canvasRef.current;
+
+        const layer =
+          textLayerRef.current;
+
+
+        if (
+          !canvas ||
+          !layer
+        ) {
+          return;
+        }
+
+
+        // =====================================================
+        // DRAW GRAPHICS-ONLY BACKGROUND
+        // =====================================================
+
+        canvas.width =
+          Math.ceil(
+            backgroundViewport.width
+          );
+
+        canvas.height =
+          Math.ceil(
+            backgroundViewport.height
+          );
+
+        canvas.style.width =
+          `${backgroundViewport.width}px`;
+
+        canvas.style.height =
+          `${backgroundViewport.height}px`;
+
+
+        const context =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+
+        if (!context) {
+
+          throw new Error(
+            'Canvas is unavailable in this browser.'
+          );
+        }
+
+
+        context.fillStyle =
+          '#ffffff';
+
+        context.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+
+        renderTask =
+          backgroundPage.render({
+            canvasContext:
+              context,
+
+            viewport:
+              backgroundViewport,
+          });
+
+
+        await renderTask.promise;
+
+
+        if (
+          id !==
+          generation.current
+        ) {
+          return;
+        }
+
+
+        // =====================================================
+        // CREATE EDITABLE TEXT LAYER
+        // =====================================================
+
+        layer.replaceChildren();
+
+        layer.style.setProperty(
+          '--scale-factor',
+          String(
+            viewport.scale
+          )
+        );
+
+
+        const textContent =
+          await originalPage
+            .getTextContent();
+
+
+        const textDivs:
+          HTMLElement[] = [];
+
+
+        await pdfjs.renderTextLayer({
+          textContentSource:
+            textContent,
+
+          container:
+            layer,
+
+          viewport,
+
+          textDivs,
+        }).promise;
+
+
+        /*
+         * PDF.js normally makes its text layer invisible,
+         * because it exists only for text selection.
+         *
+         * We intentionally make every extracted text span
+         * visible and editable.
+         */
+        for (
+          const div of textDivs
+        ) {
+
+          if (
+            !(
+              div instanceof
+              HTMLSpanElement
+            ) ||
+            !div.textContent
+              ?.trim()
+          ) {
+            continue;
+          }
+
+
+          div.contentEditable =
+            'true';
+
+          div.spellcheck =
+            false;
+
+          div.dataset.originalText =
+            div.textContent;
+
+          div.title =
+            'Click to edit';
+
+
+          /*
+           * Required PDF.js text-layer layout styles.
+           */
+          div.style.position =
+            'absolute';
+
+          div.style.whiteSpace =
+            'pre';
+
+          div.style.transformOrigin =
+            '0% 0%';
+
+          div.style.color =
+            '#111827';
+
+          div.style.cursor =
+            'text';
+
+          div.style.caretColor =
+            '#059669';
+
+          div.style.outline =
+            'none';
+
+
+          div.addEventListener(
+            'focus',
+            () => {
+
+              div.style.background =
+                'rgba(16,185,129,.12)';
+
+              div.style.boxShadow =
+                '0 0 0 1px rgba(16,185,129,.70)';
+            }
+          );
+
+
+          div.addEventListener(
+            'blur',
+            () => {
+
+              div.style.background =
+                'transparent';
+
+              div.style.boxShadow =
+                'none';
+            }
+          );
+
+
+          /*
+           * Page-one lab:
+           * keep each extracted PDF text run single-line.
+           */
+          div.addEventListener(
+            'keydown',
+            event => {
+
+              if (
+                event.key ===
+                'Enter'
+              ) {
+
+                event.preventDefault();
+
+                div.blur();
+              }
+            }
+          );
+        }
+
+
+      } catch (err) {
+
+        if (
+          id ===
+          generation.current
+        ) {
+
+          setError(
+            err instanceof
+              Error
+              ? err.message
+              : 'Could not reconstruct this PDF page.'
+          );
+        }
+
+      } finally {
+
+        if (
+          id ===
+          generation.current
+        ) {
+
+          setBusy(false);
+        }
+      }
+
+    })();
+
+
+    return () => {
+
+      generation.current =
+        id + 1;
+
+      try {
+        renderTask?.cancel();
+      } catch {}
+
+      void originalTask
+        ?.destroy();
+
+      void backgroundTask
+        ?.destroy();
+    };
+
+  }, [file]);
+
+
+  // ==========================================================
+  // UI
+  // ==========================================================
+
+  return (
+    <div className="max-w-6xl mx-auto px-3 sm:px-5 py-6">
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+
+        onChange={event => {
+
+          const next =
+            event.target
+              .files?.[0];
+
+          if (next) {
+            onFileChange(
+              next
+            );
+          }
+
+          event.currentTarget.value =
+            '';
+        }}
+      />
+
+
+      {!file ? (
+
+        <button
+          type="button"
+
+          onClick={() =>
+            inputRef.current
+              ?.click()
+          }
+
+          className="w-full min-h-64 rounded-3xl border border-dashed border-zinc-700 bg-zinc-950/50 flex flex-col items-center justify-center gap-3 text-zinc-300 hover:border-emerald-500/60"
+        >
+
+          <Upload className="w-7 h-7 text-emerald-400" />
+
+          <strong>
+            Choose a computer-generated PDF
+          </strong>
+
+          <span className="text-xs text-zinc-500">
+            Edit PDF reconstruction lab · Page 1 only · Local browser processing
+          </span>
+
+        </button>
+
+      ) : (
+
+        <div className="space-y-4">
+
+
+          {/* HEADER */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
+
+            <div>
+
+              <strong className="text-white">
+                Edit PDF Reconstruction Lab
+              </strong>
+
+              <p className="text-xs text-zinc-500 mt-1">
+                Page 1 only. Graphics stay underneath while extracted PDF text becomes editable.
+              </p>
+
+            </div>
+
+
+            <div className="flex items-center gap-2">
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  setZoom(
+                    value =>
+                      Math.max(
+                        0.6,
+                        Number(
+                          (
+                            value -
+                            0.15
+                          ).toFixed(
+                            2
+                          )
+                        )
+                      )
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+
+
+              <span className="text-xs font-mono min-w-12 text-center">
+                {Math.round(
+                  zoom * 100
+                )}%
+              </span>
+
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  setZoom(
+                    value =>
+                      Math.min(
+                        2,
+                        Number(
+                          (
+                            value +
+                            0.15
+                          ).toFixed(
+                            2
+                          )
+                        )
+                      )
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  onFileChange(
+                    null
+                  )
+                }
+
+                className="p-2 rounded-lg border border-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+            </div>
+
+          </div>
+
+
+          {error && (
+            <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+
+          {busy && (
+            <div className="flex items-center gap-2 rounded-xl border border-zinc-800 p-3 text-sm text-zinc-400">
+
+              <Loader2 className="w-4 h-4 animate-spin" />
+
+              Separating page graphics from editable text…
+
+            </div>
+          )}
+
+
+          {/* PAGE */}
+          <div className="overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4 sm:p-8 min-h-[600px]">
+
+            <div
+              style={{
+                width:
+                  pageSize.width *
+                  zoom,
+
+                height:
+                  pageSize.height *
+                  zoom,
+              }}
+
+              className="relative mx-auto"
+            >
+
+              <div
+                style={{
+                  width:
+                    pageSize.width,
+
+                  height:
+                    pageSize.height,
+
+                  transform:
+                    `scale(${zoom})`,
+
+                  transformOrigin:
+                    'top left',
+                }}
+
+                className="absolute left-0 top-0 bg-white shadow-2xl"
+              >
+
+
+                {/* GRAPHICS / WATERMARK BACKGROUND */}
+                <canvas
+                  ref={canvasRef}
+                  className="block"
+                />
+
+
+                {/* EDITABLE TEXT */}
+                <div
+                  ref={
+                    textLayerRef
+                  }
+
+                  className="absolute inset-0 overflow-hidden"
+
+                  style={{
+                    lineHeight: 1,
+
+                    WebkitTextSizeAdjust:
+                      'none',
+
+                    textSizeAdjust:
+                      'none',
+
+                    transformOrigin:
+                      '0 0',
+
+                    zIndex: 2,
+                  }}
+                />
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <p className="text-xs text-zinc-500 text-center">
+            Click directly on the name, account number, date, amount or other text and type. This first lab intentionally has no download button yet.
+          </p>
+
+        </div>
+      )}
+
+    </div>
+  );
+}

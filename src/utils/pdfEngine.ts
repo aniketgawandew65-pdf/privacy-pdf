@@ -4493,6 +4493,2226 @@ export async function extractTableFromPDF(
   };
 }
 
+
+export type UniversalDocumentKind =
+  | 'bank-statement'
+  | 'key-value'
+  | 'table'
+  | 'general'
+  | 'mixed';
+
+export interface UniversalDocumentSection {
+  pageNumber: number;
+  kind: 'key-value' | 'table' | 'general';
+  label: string;
+  confidence: number;
+  rows: string[][];
+}
+
+export interface UniversalDocumentExtractResult {
+  kind: UniversalDocumentKind;
+  rows: string[][];
+  totalRows: number;
+  confidence: number;
+  label: string;
+  sections?: UniversalDocumentSection[];
+}
+
+const UNIVERSAL_DATE_RE =
+  /\b\d{1,2}[-\/](?:[A-Za-z]{3}|\d{1,2})[-\/]\d{2,4}\b/gi;
+
+const universalCleanCell = (value: string) =>
+  String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const universalMoneyValue = (
+  value: string
+): number | null => {
+  const cleaned = universalCleanCell(value)
+    .replace(/[₹$£€]/g, '')
+    .replace(/,/g, '')
+    .trim();
+
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(cleaned)) {
+    return null;
+  }
+
+  const number = Number(cleaned);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+};
+
+const universalFormatMoney = (value: number) =>
+  value.toFixed(2);
+
+const universalNormalizeBankRows = (
+  sourceRows: string[][]
+): string[][] => {
+  const output: string[][] = [
+    [
+      'Transaction Date',
+      'Value Date',
+      'Details',
+      'Debit',
+      'Credit',
+      'Balance',
+    ],
+  ];
+
+  let previousBalance: number | null = null;
+
+  for (const sourceRow of sourceRows) {
+    const cells = sourceRow
+      .map(universalCleanCell)
+      .filter(Boolean);
+
+    if (cells.length === 0) continue;
+
+    const fullText = cells.join(' ');
+
+    if (
+      /transaction date/i.test(fullText) &&
+      /balance/i.test(fullText)
+    ) {
+      continue;
+    }
+
+    if (/opening balance/i.test(fullText)) {
+      const numeric = cells
+        .map(universalMoneyValue)
+        .filter(
+          (value): value is number =>
+            value !== null
+        );
+
+      if (numeric.length > 0) {
+        previousBalance =
+          numeric[numeric.length - 1];
+      }
+
+      continue;
+    }
+
+    const dates =
+      fullText.match(UNIVERSAL_DATE_RE) || [];
+
+    if (dates.length < 2) {
+      continue;
+    }
+
+    const numericCells = cells
+      .map((cell, index) => ({
+        cell,
+        index,
+        value: universalMoneyValue(cell),
+      }))
+      .filter(
+        (
+          item
+        ): item is {
+          cell: string;
+          index: number;
+          value: number;
+        } => item.value !== null
+      );
+
+    if (numericCells.length < 2) {
+      continue;
+    }
+
+    const balanceEntry =
+      numericCells[numericCells.length - 1];
+
+    const amountEntry =
+      numericCells[numericCells.length - 2];
+
+    const balance = balanceEntry.value;
+    const amount = Math.abs(amountEntry.value);
+
+    const detailCells = cells.filter(
+      (cell, index) => {
+        if (
+          index === balanceEntry.index ||
+          index === amountEntry.index
+        ) {
+          return false;
+        }
+
+        if (
+          cell.match(UNIVERSAL_DATE_RE)
+        ) {
+          return false;
+        }
+
+        return true;
+      }
+    );
+
+    let debit = '';
+    let credit = '';
+
+    if (previousBalance !== null) {
+      const delta =
+        Math.round(
+          (balance - previousBalance) * 100
+        ) / 100;
+
+      if (delta < -0.001) {
+        debit = universalFormatMoney(
+          Math.abs(delta)
+        );
+      } else if (delta > 0.001) {
+        credit = universalFormatMoney(
+          Math.abs(delta)
+        );
+      } else {
+        debit =
+          universalFormatMoney(amount);
+      }
+    } else {
+      /*
+       * First transaction fallback.
+       * Most statements place the amount before
+       * the balance. Keep it as debit until the
+       * running balance establishes direction.
+       */
+      debit =
+        universalFormatMoney(amount);
+    }
+
+    output.push([
+      dates[0] ?? '',
+      dates[1] ?? '',
+      detailCells.join(' '),
+      debit,
+      credit,
+      universalFormatMoney(balance),
+    ]);
+
+    previousBalance = balance;
+  }
+
+  return output;
+};
+
+const universalBuildKeyValueRows = (
+  sourceRows: string[][]
+): string[][] => {
+  const result: string[][] = [
+    ['Field', 'Value'],
+  ];
+
+  const seen = new Set<string>();
+
+  const addPair = (
+    rawField: string,
+    rawValue: string
+  ) => {
+    const field = universalCleanCell(rawField)
+      .replace(
+        /^\(?\d+\)?[\.\)]?\s*/,
+        ''
+      )
+      .replace(/[:\-–—]+$/, '')
+      .trim();
+
+    const value =
+      universalCleanCell(rawValue);
+
+    if (
+      !field ||
+      !value ||
+      field.length > 90
+    ) {
+      return;
+    }
+
+    const key =
+      `${field.toLowerCase()}|${value.toLowerCase()}`;
+
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    result.push([field, value]);
+  };
+
+  const commonLabelPattern =
+    /^(?:\(?\d+\)?[\.\)]?\s*)?(name|address|owner name|owner address|tenant name|tenant address|date|date of execution|date of registration|registration number(?:\/year)?|registration fee|stamp duty|license fee|deposit|period|area|property description|document no\.?|document type|presentor name|account no\.?|account number|account type|currency|branch address|ifsc code|micr code|phone|mobile|email|pan|aadhaar|passport(?: no\.?)?|receipt no\.?|village name)\s*[:\-–—]?\s+(.+)$/i;
+
+  for (const sourceRow of sourceRows) {
+    const cells = sourceRow
+      .map(universalCleanCell)
+      .filter(Boolean);
+
+    if (cells.length === 0) continue;
+
+    if (
+      cells.length >= 2 &&
+      cells[0].length <= 90
+    ) {
+      const firstIsLabel =
+        !universalMoneyValue(cells[0]) &&
+        !UNIVERSAL_DATE_RE.test(cells[0]);
+
+      UNIVERSAL_DATE_RE.lastIndex = 0;
+
+      if (firstIsLabel) {
+        addPair(
+          cells[0],
+          cells.slice(1).join(' ')
+        );
+      }
+    }
+
+    const text = cells.join(' ');
+
+    const colonMatch =
+      text.match(
+        /^\s*(?:\(?\d+\)?[\.\)]?\s*)?([^:]{2,80})\s*:\s*(.+)$/
+      );
+
+    if (colonMatch) {
+      addPair(
+        colonMatch[1],
+        colonMatch[2]
+      );
+      continue;
+    }
+
+    const commonMatch =
+      text.match(commonLabelPattern);
+
+    if (commonMatch) {
+      addPair(
+        commonMatch[1],
+        commonMatch[2]
+      );
+    }
+  }
+
+  return result;
+};
+
+
+async function universalIsMostlyScannedPdf(
+  file: File
+): Promise<boolean> {
+  const bytes = await file.arrayBuffer();
+
+  const pdf = await pdfjsLib.getDocument({
+    isEvalSupported: false,
+    data: new Uint8Array(bytes.slice(0)),
+  }).promise;
+
+  let textItems = 0;
+
+  try {
+    for (
+      let pageNumber = 1;
+      pageNumber <= pdf.numPages;
+      pageNumber++
+    ) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+
+      textItems += (content.items as any[]).filter(
+        (item) =>
+          item?.str &&
+          String(item.str).trim()
+      ).length;
+
+      try {
+        page.cleanup();
+      } catch {}
+    }
+  } finally {
+    try {
+      await pdf.destroy();
+    } catch {}
+  }
+
+  return textItems <
+    Math.max(10, pdf.numPages * 3);
+}
+
+type UniversalOcrWord = {
+  text: string;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  confidence: number;
+};
+
+const universalRowsFromWords = (
+  words: UniversalOcrWord[],
+  pageWidth: number
+): string[][] => {
+  if (!words.length) return [];
+
+  const sorted = [...words].sort((a, b) => {
+    const ay = (a.y0 + a.y1) / 2;
+    const by = (b.y0 + b.y1) / 2;
+
+    if (Math.abs(ay - by) > 8) {
+      return ay - by;
+    }
+
+    return a.x0 - b.x0;
+  });
+
+  const lines: UniversalOcrWord[][] = [];
+
+  for (const word of sorted) {
+    const centerY =
+      (word.y0 + word.y1) / 2;
+
+    let bestLine:
+      | UniversalOcrWord[]
+      | null = null;
+
+    let bestDistance = Infinity;
+
+    for (const line of lines) {
+      const lineCenter =
+        line.reduce(
+          (sum, item) =>
+            sum +
+            (item.y0 + item.y1) / 2,
+          0
+        ) / line.length;
+
+      const distance =
+        Math.abs(
+          centerY - lineCenter
+        );
+
+      const averageHeight =
+        line.reduce(
+          (sum, item) =>
+            sum +
+            (item.y1 - item.y0),
+          0
+        ) / line.length;
+
+      const tolerance =
+        Math.max(
+          8,
+          averageHeight * 0.55
+        );
+
+      if (
+        distance <= tolerance &&
+        distance < bestDistance
+      ) {
+        bestLine = line;
+        bestDistance = distance;
+      }
+    }
+
+    if (bestLine) {
+      bestLine.push(word);
+    } else {
+      lines.push([word]);
+    }
+  }
+
+  lines.sort((a, b) => {
+    const ay =
+      a.reduce(
+        (sum, item) =>
+          sum +
+          (item.y0 + item.y1) / 2,
+        0
+      ) / a.length;
+
+    const by =
+      b.reduce(
+        (sum, item) =>
+          sum +
+          (item.y0 + item.y1) / 2,
+        0
+      ) / b.length;
+
+    return ay - by;
+  });
+
+  const rows: string[][] = [];
+
+  for (const line of lines) {
+    line.sort(
+      (a, b) => a.x0 - b.x0
+    );
+
+    const heights = line
+      .map(
+        (word) =>
+          word.y1 - word.y0
+      )
+      .sort((a, b) => a - b);
+
+    const medianHeight =
+      heights[
+        Math.floor(
+          heights.length / 2
+        )
+      ] || 12;
+
+    /*
+     * Normal spaces between words stay inside one cell.
+     * Larger visual gaps become separate spreadsheet columns.
+     */
+    const gapThreshold =
+      Math.max(
+        22,
+        medianHeight * 1.65,
+        pageWidth * 0.014
+      );
+
+    const chunks: string[] = [];
+
+    let currentText = '';
+    let previousRight:
+      | number
+      | null = null;
+
+    for (const word of line) {
+      if (
+        previousRight !== null
+      ) {
+        const gap =
+          word.x0 -
+          previousRight;
+
+        if (
+          gap > gapThreshold &&
+          currentText.trim()
+        ) {
+          chunks.push(
+            currentText.trim()
+          );
+
+          currentText = '';
+        }
+      }
+
+      currentText +=
+        (currentText ? ' ' : '') +
+        word.text;
+
+      previousRight = word.x1;
+    }
+
+    if (currentText.trim()) {
+      chunks.push(
+        currentText.trim()
+      );
+    }
+
+    const cleanChunks =
+      chunks
+        .map((value) =>
+          universalCleanCell(value)
+        )
+        .filter(Boolean);
+
+    if (cleanChunks.length) {
+      rows.push(cleanChunks);
+    }
+  }
+
+  return rows;
+};
+
+type UniversalScannedPageData = {
+  pageNumber: number;
+  rows: string[][];
+};
+
+const universalStrictKeyValueRows = (
+  rows: string[][]
+): string[][] => {
+  const output: string[][] = [
+    ['Field', 'Value'],
+  ];
+
+  const seen = new Set<string>();
+
+  const fieldPattern =
+    /(?:article|deposit|license fee|license fee\s*&\s*deposit|property description|area|assessment|licensor|licensee|date of execution|date of registration|registration number|stamp duty|registration fee|remark|village name|receipt|document no|document type|presentor|presenter|owner|tenant|rented property|identity proof|occupation|mobile|email|phone|address|name|pan|aadhaar|passport|person 1|person 2|agent|period|pin code)/i;
+
+  const valuePattern =
+    /(?:₹|rs\.?|inr|\b\d{1,3}(?:,\d{2,3})+(?:\.\d+)?\b|\b\d{4,}\b|\b\d{1,2}[-\/](?:[a-z]{3}|\d{1,2})[-\/]\d{2,4}\b|\b[A-Z]{5}\d{4}[A-Z]\b|\b\d{10,12}\b|\bone lakh\b|\bthousand\b|\bhundred\b)/i;
+
+  const add = (
+    rawField: string,
+    rawValue: string
+  ) => {
+    const field =
+      universalCleanCell(rawField)
+        .replace(
+          /^\(?\d+\)?[\.\)]?\s*/,
+          ''
+        )
+        .replace(/[:\-–—]+$/, '')
+        .trim();
+
+    const value =
+      universalCleanCell(rawValue);
+
+    if (
+      !field ||
+      !value ||
+      field.length > 100
+    ) {
+      return;
+    }
+
+    const key =
+      `${field.toLowerCase()}|${value.toLowerCase()}`;
+
+    if (seen.has(key)) return;
+
+    seen.add(key);
+
+    output.push([
+      field,
+      value,
+    ]);
+  };
+
+  for (
+    let rowIndex = 0;
+    rowIndex < rows.length;
+    rowIndex++
+  ) {
+    const cells =
+      rows[rowIndex]
+        .map(universalCleanCell)
+        .filter(Boolean);
+
+    if (!cells.length) continue;
+
+    const text =
+      cells.join(' ');
+
+    /*
+     * Normal visual Field | Value row.
+     */
+    if (
+      cells.length >= 2 &&
+      fieldPattern.test(cells[0])
+    ) {
+      const value =
+        cells
+          .slice(1)
+          .join(' ');
+
+      if (value) {
+        add(
+          cells[0],
+          value
+        );
+
+        continue;
+      }
+    }
+
+    /*
+     * "Field: Value" on one OCR line.
+     */
+    const colon =
+      text.match(
+        /^\s*(.{2,100}?)\s*[:：]\s*(.+)$/
+      );
+
+    if (
+      colon &&
+      fieldPattern.test(
+        colon[1]
+      )
+    ) {
+      add(
+        colon[1],
+        colon[2]
+      );
+
+      continue;
+    }
+
+    /*
+     * OCR often puts the label on one row and
+     * the actual amount/value on the next row.
+     */
+    if (
+      fieldPattern.test(text) &&
+      text.length <= 110
+    ) {
+      const nearbyValues: string[] = [];
+
+      for (
+        let offset = 1;
+        offset <= 3;
+        offset++
+      ) {
+        const next =
+          rows[
+            rowIndex + offset
+          ];
+
+        if (!next) break;
+
+        const nextText =
+          next
+            .map(
+              universalCleanCell
+            )
+            .filter(Boolean)
+            .join(' ');
+
+        if (!nextText) continue;
+
+        /*
+         * Stop once another obvious field begins.
+         */
+        if (
+          fieldPattern.test(
+            nextText
+          ) &&
+          !valuePattern.test(
+            nextText
+          )
+        ) {
+          break;
+        }
+
+        if (
+          valuePattern.test(
+            nextText
+          ) &&
+          nextText.length <= 180
+        ) {
+          nearbyValues.push(
+            nextText
+          );
+        }
+
+        if (
+          nearbyValues.length >= 2
+        ) {
+          break;
+        }
+      }
+
+      if (
+        nearbyValues.length
+      ) {
+        add(
+          text,
+          nearbyValues.join(
+            ' · '
+          )
+        );
+      }
+    }
+
+    /*
+     * Special high-value agreement field.
+     * Preserve both fee and deposit when OCR
+     * has separated them across nearby lines.
+     */
+    if (
+      /license fee/i.test(
+        text
+      ) &&
+      /deposit/i.test(
+        text
+      )
+    ) {
+      const values: string[] = [];
+
+      for (
+        let offset = 0;
+        offset <= 4;
+        offset++
+      ) {
+        const candidate =
+          rows[
+            rowIndex + offset
+          ];
+
+        if (!candidate)
+          continue;
+
+        const candidateText =
+          candidate
+            .map(
+              universalCleanCell
+            )
+            .filter(Boolean)
+            .join(' ');
+
+        if (
+          valuePattern.test(
+            candidateText
+          )
+        ) {
+          values.push(
+            candidateText
+          );
+        }
+      }
+
+      if (values.length) {
+        add(
+          'License Fee & Deposit',
+          values.join(' · ')
+        );
+      }
+    }
+  }
+
+  return output;
+};
+
+const universalBuildPageSections = (
+  pageNumber: number,
+  rawRows: string[][]
+): UniversalDocumentSection[] => {
+  const rows =
+    rawRows
+      .map((row) =>
+        row
+          .map(universalCleanCell)
+          .filter(Boolean)
+      )
+      .filter((row) =>
+        row.length > 0
+      );
+
+  if (!rows.length) {
+    return [];
+  }
+
+  const text =
+    rows
+      .flat()
+      .join(' ')
+      .toLowerCase();
+
+  const multiColumnRows =
+    rows.filter(
+      (row) =>
+        row.length >= 2
+    );
+
+  const maxColumns =
+    Math.max(
+      1,
+      ...rows.map(
+        (row) => row.length
+      )
+    );
+
+  const multiColumnRatio =
+    multiColumnRows.length /
+    Math.max(
+      1,
+      rows.length
+    );
+
+  /*
+   * A real table usually has several repeatable,
+   * reasonably short cells.
+   */
+  const structuredRows =
+    rows.filter(
+      (row) =>
+        row.length >= 2 &&
+        row.length <= 7 &&
+        row.every(
+          (cell) =>
+            cell.length <= 120
+        )
+    );
+
+  const structuredRatio =
+    structuredRows.length /
+    Math.max(
+      1,
+      rows.length
+    );
+
+  /*
+   * Long rows are a strong sign that this is
+   * prose that OCR accidentally split into columns.
+   */
+  const longProseRows =
+    rows.filter(
+      (row) => {
+        const joined =
+          row.join(' ');
+
+        return (
+          joined.length >= 135 &&
+          row.length <= 3
+        );
+      }
+    );
+
+  const proseRatio =
+    longProseRows.length /
+    Math.max(
+      1,
+      rows.length
+    );
+
+  const tableSignals = [
+    'particulars',
+    'amount paid',
+    'transaction id',
+    'grn',
+    'name & address',
+    'thumb image',
+    'digitally signed',
+    'type of party',
+    'date & time',
+    'date, time',
+    'information received',
+    'admission',
+    'verification with uidai',
+    'receipt no',
+    'receipt',
+    'document no',
+    'registration fee',
+    'amount paid',
+    'total',
+  ].filter((signal) =>
+    text.includes(signal)
+  ).length;
+
+  const formSignals = [
+    'village name',
+    'deposit',
+    'license fee',
+    'property description',
+    'date of execution',
+    'date of registration',
+    'registration number',
+    'registration fee',
+    'stamp duty',
+    'document no',
+    'document type',
+    'presentor name',
+    'owner name',
+    'owner details',
+    'tenant name',
+    'tenant details',
+    'rented property',
+    'identity proof',
+    'occupation',
+    'mobile number',
+    'email id',
+    'agent details',
+  ].filter((signal) =>
+    text.includes(signal)
+  ).length;
+
+  const proseSignals = [
+    'whereas',
+    'hereinafter',
+    'terms and conditions',
+    'the licensor',
+    'the licensee',
+    'shall be',
+    'provided that',
+    'agreement',
+    'witnesseth',
+  ].filter((signal) =>
+    text.includes(signal)
+  ).length;
+
+  const kvRows =
+    universalStrictKeyValueRows(
+      rows
+    );
+
+  const looksLikeProse =
+    proseSignals >= 2 ||
+    proseRatio >= 0.3 ||
+    (
+      rows.length >= 5 &&
+      structuredRatio < 0.28
+    );
+
+  /*
+   * Strong forms are handled BEFORE weak visual
+   * table guesses. This fixes pages such as tenant
+   * information / registration forms.
+   */
+  if (
+    kvRows.length >= 4 &&
+    formSignals >= 2 &&
+    !looksLikeProse &&
+    tableSignals < 2
+  ) {
+    const sections:
+      UniversalDocumentSection[] = [
+        {
+          pageNumber,
+          kind: 'key-value',
+          label:
+            `Page ${pageNumber} · Form / Key-Value`,
+          confidence:
+            formSignals >= 4
+              ? 0.92
+              : 0.84,
+          rows: kvRows,
+        },
+      ];
+
+    const notes =
+      rows
+        .filter(
+          (row) =>
+            row.join(' ')
+              .length >= 70
+        )
+        .map((row) => [
+          row.join(' '),
+        ]);
+
+    if (
+      notes.length >= 2
+    ) {
+      sections.push({
+        pageNumber,
+        kind: 'general',
+        label:
+          `Page ${pageNumber} · Notes`,
+        confidence: 0.7,
+        rows: notes,
+      });
+    }
+
+    return sections;
+  }
+
+  /*
+   * Strong real tables.
+   * Explicit table headers can override prose,
+   * but weak visual spacing cannot.
+   */
+  /*
+   * Some pages contain a real table at the top
+   * followed by long legal prose. Judge the top
+   * section separately so the prose cannot hide it.
+   */
+  const topRows =
+    rows.slice(
+      0,
+      Math.min(
+        14,
+        rows.length
+      )
+    );
+
+  const topStructuredRows =
+    topRows.filter(
+      (row) =>
+        row.length >= 2 &&
+        row.length <= 8 &&
+        row.every(
+          (cell) =>
+            cell.length <= 130
+        )
+    );
+
+  const topText =
+    topRows
+      .flat()
+      .join(' ')
+      .toLowerCase();
+
+  const topTableSignals = [
+    'particular',
+    'amount paid',
+    'transaction',
+    'grn',
+    'receipt',
+    'document no',
+    'document type',
+    'registration fee',
+    'stamp duty',
+    'total',
+    'date',
+  ].filter(
+    (signal) =>
+      topText.includes(
+        signal
+      )
+  ).length;
+
+  const topLooksLikeTable =
+    topStructuredRows.length >=
+      3 &&
+    (
+      topTableSignals >= 1 ||
+      (
+        topRows.length > 0 &&
+        topStructuredRows.length /
+          topRows.length >=
+          0.45
+      )
+    );
+
+  const strongTable =
+    tableSignals >= 2 ||
+    topLooksLikeTable ||
+    (
+      !looksLikeProse &&
+      maxColumns >= 3 &&
+      structuredRows.length >= 4 &&
+      multiColumnRatio >= 0.3 &&
+      structuredRatio >= 0.4
+    );
+
+  if (strongTable) {
+    const sections:
+      UniversalDocumentSection[] = [];
+
+    const tableRows =
+      rows.filter(
+        (row) =>
+          row.length >= 2 &&
+          row.length <= 8
+      );
+
+    if (
+      tableRows.length >= 2
+    ) {
+      sections.push({
+        pageNumber,
+        kind: 'table',
+        label:
+          `Page ${pageNumber} · Table`,
+        confidence:
+          tableSignals >= 2
+            ? 0.92
+            : 0.82,
+        rows: tableRows,
+      });
+    }
+
+    const proseRows =
+      rows
+        .filter(
+          (row) =>
+            row.length === 1 &&
+            row[0].length >= 35
+        )
+        .map((row) => [
+          row.join(' '),
+        ]);
+
+    if (
+      proseRows.length >= 2
+    ) {
+      sections.push({
+        pageNumber,
+        kind: 'general',
+        label:
+          `Page ${pageNumber} · Text / Notes`,
+        confidence: 0.72,
+        rows: proseRows,
+      });
+    }
+
+    return sections;
+  }
+
+  /*
+   * Legal clauses and ordinary prose stay as text
+   * instead of becoming fake spreadsheet tables.
+   */
+  return [
+    {
+      pageNumber,
+      kind: 'general',
+      label:
+        `Page ${pageNumber} · Text`,
+      confidence:
+        looksLikeProse
+          ? 0.86
+          : 0.72,
+      rows: rows.map(
+        (row) => [
+          row.join(' '),
+        ]
+      ),
+    },
+  ];
+};
+
+
+
+const universalMoneyWordsToNumber = (
+  raw: string
+): number | null => {
+  const units: Record<
+    string,
+    number
+  > = {
+    zero: 0,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+  };
+
+  const tens: Record<
+    string,
+    number
+  > = {
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+  };
+
+  const scales: Record<
+    string,
+    number
+  > = {
+    thousand: 1000,
+    lakh: 100000,
+    lac: 100000,
+    million: 1000000,
+    crore: 10000000,
+  };
+
+  const tokens =
+    raw
+      .toLowerCase()
+      .replace(/-/g, ' ')
+      .replace(
+        /[^a-z\s]/g,
+        ' '
+      )
+      .split(/\s+/)
+      .filter(Boolean);
+
+  let current = 0;
+  let total = 0;
+  let found = false;
+
+  for (
+    const token of tokens
+  ) {
+    if (
+      Object.prototype.hasOwnProperty.call(
+        units,
+        token
+      )
+    ) {
+      current +=
+        units[token];
+
+      found = true;
+      continue;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        tens,
+        token
+      )
+    ) {
+      current +=
+        tens[token];
+
+      found = true;
+      continue;
+    }
+
+    if (
+      token ===
+      'hundred'
+    ) {
+      current =
+        Math.max(
+          1,
+          current
+        ) * 100;
+
+      found = true;
+      continue;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        scales,
+        token
+      )
+    ) {
+      total +=
+        Math.max(
+          1,
+          current
+        ) *
+        scales[token];
+
+      current = 0;
+      found = true;
+    }
+  }
+
+  const value =
+    total + current;
+
+  if (
+    !found ||
+    value < 100
+  ) {
+    return null;
+  }
+
+  return value;
+};
+
+const universalExtractFinancialHints = (
+  rawText: string
+): string[][] => {
+  const text =
+    String(
+      rawText ?? ''
+    )
+      .replace(
+        /\s+/g,
+        ' '
+      )
+      .trim();
+
+  if (!text) {
+    return [];
+  }
+
+  const output:
+    string[][] = [];
+
+  const seen =
+    new Set<string>();
+
+  const normalizeAmount = (
+    raw: string
+  ): number | null => {
+    const digits =
+      raw.replace(
+        /[^\d]/g,
+        ''
+      );
+
+    if (
+      digits.length < 3 ||
+      digits.length > 8
+    ) {
+      return null;
+    }
+
+    const value =
+      Number(
+        digits
+      );
+
+    if (
+      !Number.isFinite(
+        value
+      ) ||
+      value < 100 ||
+      value > 99999999
+    ) {
+      return null;
+    }
+
+    return value;
+  };
+
+  const add = (
+    label: string,
+    amount: number
+  ) => {
+    if (
+      !Number.isFinite(
+        amount
+      ) ||
+      amount < 100
+    ) {
+      return;
+    }
+
+    const key =
+      label.toLowerCase();
+
+    if (
+      seen.has(key)
+    ) {
+      return;
+    }
+
+    seen.add(key);
+
+    output.push([
+      label,
+      `Rs. ${Math.round(
+        amount
+      )}`,
+    ]);
+  };
+
+  const collectWordAmounts = (
+    source: string
+  ): number[] => {
+    const amounts:
+      number[] = [];
+
+    /*
+     * Normalize common OCR mistakes:
+     * Only -> Oniy / Onl
+     */
+    const normalized =
+      String(source ?? '')
+        .toLowerCase()
+        .replace(/[–—]/g, '-')
+        .replace(
+          /\boniy\b|\bonl\b|\boniy\b/g,
+          'only'
+        );
+
+    /*
+     * Capture phrases such as:
+     *
+     * Twenty-Seven Thousand Only
+     * One Lakh Only
+     * Ninety Five Thousand
+     */
+    const phrasePattern =
+      /\b((?:(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|and)[\s-]+){0,8}(?:thousand|lakh|lac|million|crore)(?:\s+only)?)\b/gi;
+
+    let match:
+      RegExpExecArray | null;
+
+    while (
+      (
+        match =
+          phrasePattern.exec(
+            normalized
+          )
+      ) !== null
+    ) {
+      const value =
+        universalMoneyWordsToNumber(
+          match[1] ?? ''
+        );
+
+      if (
+        value !== null &&
+        value >= 1000 &&
+        !amounts.includes(
+          value
+        )
+      ) {
+        amounts.push(
+          value
+        );
+      }
+    }
+
+    return amounts;
+  };
+
+  /*
+   * Special case:
+   * License Fee & Deposit often contains
+   * both amounts in one paragraph.
+   */
+  const combined =
+    text.match(
+      /(?:license\s*)?fee\s*(?:&|and)?\s*deposit/i
+    );
+
+  if (
+    combined &&
+    typeof combined.index ===
+      'number'
+  ) {
+    const window =
+      text.slice(
+        combined.index,
+        combined.index +
+          900
+      );
+
+    const amounts:
+      number[] = [];
+
+    const digitRegex =
+      /(?:rs\.?|inr|₹)\s*([0-9][0-9,\s]{2,14})/gi;
+
+    let digitMatch:
+      RegExpExecArray | null;
+
+    while (
+      (
+        digitMatch =
+          digitRegex.exec(
+            window
+          )
+      ) !== null
+    ) {
+      const value =
+        normalizeAmount(
+          digitMatch[1] ??
+            ''
+        );
+
+      if (
+        value !== null &&
+        !amounts.includes(
+          value
+        )
+      ) {
+        amounts.push(
+          value
+        );
+      }
+    }
+
+    /*
+     * If OCR missed digits, recover amounts from:
+     * "Twenty-Seven Thousand Only"
+     * "One Lakh Only"
+     */
+    const wordAmounts =
+      collectWordAmounts(
+        window
+      );
+
+    /*
+     * Written amounts are safer when scan OCR drops
+     * leading digits.
+     *
+     * Example:
+     * "Rs. 7000 (Twenty-Seven Thousand Only)"
+     * becomes 27000 rather than 7000.
+     */
+    let resolvedAmounts:
+      number[] = [];
+
+    if (
+      wordAmounts.length >= 2
+    ) {
+      resolvedAmounts =
+        [...wordAmounts]
+          .sort(
+            (a, b) =>
+              a - b
+          );
+    } else if (
+      amounts.length === 2
+    ) {
+      /*
+       * Trust printed digits only when exactly
+       * two plausible amounts were found.
+       */
+      resolvedAmounts =
+        [...amounts]
+          .sort(
+            (a, b) =>
+              a - b
+          );
+    }
+
+    if (
+      resolvedAmounts.length >= 2
+    ) {
+      add(
+        'License Fee',
+        resolvedAmounts[0]
+      );
+
+      add(
+        'Deposit',
+        resolvedAmounts[
+          resolvedAmounts.length -
+            1
+        ]
+      );
+    }
+  }
+
+  const patterns: Array<
+    [
+      string,
+      RegExp
+    ]
+  > = [
+    [
+      'Stamp Duty',
+      /stamp\s*duty[\s\S]{0,160}?(?:rs\.?|inr|₹)\s*([0-9][0-9,\s]{2,14})/i,
+    ],
+    [
+      'Registration Fee',
+      /registration\s*fee[\s\S]{0,160}?(?:rs\.?|inr|₹)\s*([0-9][0-9,\s]{2,14})/i,
+    ],
+  ];
+
+  for (
+    const [
+      label,
+      pattern,
+    ] of patterns
+  ) {
+    const match =
+      text.match(
+        pattern
+      );
+
+    if (
+      match?.[1]
+    ) {
+      const value =
+        normalizeAmount(
+          match[1]
+        );
+
+      if (
+        value !== null
+      ) {
+        add(
+          label,
+          value
+        );
+      }
+    }
+  }
+
+  return output;
+};
+
+
+
+async function universalExtractScannedPages(
+  file: File,
+  options: TableExtractOptions
+): Promise<UniversalScannedPageData[]> {
+  const bytes =
+    await file.arrayBuffer();
+
+  const pdf =
+    await pdfjsLib.getDocument({
+      isEvalSupported: false,
+      data: new Uint8Array(
+        bytes.slice(0)
+      ),
+    }).promise;
+
+  const worker =
+    await createWorker(
+      'eng',
+      1,
+      {
+        workerPath:
+          '/tessdata/worker.min.js',
+        corePath:
+          '/tessdata/tesseract-core-simd-lstm.wasm.js',
+        langPath:
+          '/tessdata',
+        gzip: true,
+      }
+    );
+
+  const pages:
+    UniversalScannedPageData[] = [];
+
+  try {
+    for (
+      let pageNumber = 1;
+      pageNumber <= pdf.numPages;
+      pageNumber++
+    ) {
+      options.onProgress?.(
+        pageNumber,
+        pdf.numPages
+      );
+
+      const page =
+        await pdf.getPage(
+          pageNumber
+        );
+
+      const baseViewport =
+        page.getViewport({
+          scale: 1,
+        });
+
+      const maxDimension =
+        Math.max(
+          baseViewport.width,
+          baseViewport.height
+        );
+
+      const scale =
+        Math.min(
+          2.25,
+          Math.max(
+            1.75,
+            2400 /
+              Math.max(
+                1,
+                maxDimension
+              )
+          )
+        );
+
+      const viewport =
+        page.getViewport({
+          scale,
+        });
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      canvas.width =
+        Math.max(
+          1,
+          Math.ceil(
+            viewport.width
+          )
+        );
+
+      canvas.height =
+        Math.max(
+          1,
+          Math.ceil(
+            viewport.height
+          )
+        );
+
+      const ctx =
+        canvas.getContext(
+          '2d',
+          {
+            alpha: false,
+          }
+        );
+
+      if (!ctx) {
+        continue;
+      }
+
+      ctx.fillStyle =
+        '#ffffff';
+
+      ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      await (
+        page.render({
+          canvasContext:
+            ctx as any,
+          viewport,
+        } as any) as any
+      ).promise;
+
+      const result =
+        await worker.recognize(
+          canvas,
+          {},
+          {
+            text: true,
+            blocks: true,
+          } as any
+        );
+
+      const data: any =
+        result.data;
+
+      let financialHints =
+        universalExtractFinancialHints(
+          String(
+            data?.text ?? ''
+          )
+        );
+
+      let rawWords: any[] =
+        [];
+
+      if (
+        Array.isArray(
+          data?.words
+        ) &&
+        data.words.length
+      ) {
+        rawWords =
+          data.words;
+      } else if (
+        Array.isArray(
+          data?.blocks
+        )
+      ) {
+        rawWords =
+          data.blocks
+            .flatMap(
+              (block: any) =>
+                block.paragraphs ??
+                []
+            )
+            .flatMap(
+              (paragraph: any) =>
+                paragraph.lines ??
+                []
+            )
+            .flatMap(
+              (line: any) =>
+                line.words ??
+                []
+            );
+      }
+
+      const words:
+        UniversalOcrWord[] =
+        rawWords
+          .map((word: any) => {
+            const box =
+              word?.bbox;
+
+            return {
+              text:
+                universalCleanCell(
+                  word?.text ?? ''
+                ),
+              x0:
+                Number(
+                  box?.x0 ?? 0
+                ),
+              x1:
+                Number(
+                  box?.x1 ?? 0
+                ),
+              y0:
+                Number(
+                  box?.y0 ?? 0
+                ),
+              y1:
+                Number(
+                  box?.y1 ?? 0
+                ),
+              confidence:
+                Number(
+                  word?.confidence ??
+                    word?.conf ??
+                    0
+                ),
+            };
+          })
+          .filter(
+            (
+              word:
+                UniversalOcrWord
+            ) =>
+              word.text &&
+              word.x1 >
+                word.x0 &&
+              word.y1 >
+                word.y0 &&
+              word.confidence >= 20
+          );
+
+      let pageRows =
+        universalRowsFromWords(
+          words,
+          canvas.width
+        );
+
+      if (
+        pageRows.length === 0 &&
+        data?.text
+      ) {
+        pageRows =
+          String(data.text)
+            .split('\n')
+            .map((line) =>
+              universalCleanCell(
+                line
+              )
+            )
+            .filter(Boolean)
+            .map((line) => [
+              line,
+            ]);
+      }
+
+      for (
+        const hint of
+        financialHints
+      ) {
+        const duplicate =
+          pageRows.some(
+            (row) =>
+              row
+                .join(' ')
+                .toLowerCase()
+                .includes(
+                  hint[0]
+                    .toLowerCase()
+                ) &&
+              row
+                .join(' ')
+                .includes(
+                  hint[1]
+                )
+          );
+
+        if (!duplicate) {
+          pageRows.push(
+            hint
+          );
+        }
+      }
+
+      pages.push({
+        pageNumber,
+        rows: pageRows,
+      });
+
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      canvas.width = 1;
+      canvas.height = 1;
+
+      try {
+        page.cleanup();
+      } catch {}
+    }
+  } finally {
+    try {
+      await worker.terminate();
+    } catch {}
+
+    try {
+      await pdf.destroy();
+    } catch {}
+  }
+
+  return pages;
+}
+
+export async function extractUniversalDocumentData(
+  file: File,
+  options: TableExtractOptions = {}
+): Promise<UniversalDocumentExtractResult> {
+  const isScanned =
+    await universalIsMostlyScannedPdf(
+      file
+    );
+
+  let rawRows: string[][];
+  let scannedPages:
+    UniversalScannedPageData[] | null =
+    null;
+
+  if (isScanned) {
+    scannedPages =
+      await universalExtractScannedPages(
+        file,
+        options
+      );
+
+    rawRows =
+      scannedPages.flatMap(
+        (page) =>
+          page.rows
+      );
+  } else {
+    const base =
+      await extractTableFromPDF(
+        file,
+        options
+      );
+
+    rawRows =
+      base.rows;
+  }
+
+  const sourceRows =
+    rawRows
+      .map((row) =>
+        row.map(
+          universalCleanCell
+        )
+      )
+      .filter((row) =>
+        row.some(Boolean)
+      );
+
+  const combinedText =
+    sourceRows
+      .flat()
+      .join(' ')
+      .toLowerCase();
+
+  /*
+   * KEEP BANK STATEMENT PATH FIRST.
+   * This preserves the existing successful
+   * six-column bank normalizer.
+   */
+  const bankSignals = [
+    'transaction date',
+    'value date',
+    'debit',
+    'credit',
+    'balance',
+    'opening balance',
+    'closing balance',
+    'account no',
+    'statement period',
+  ].filter((signal) =>
+    combinedText.includes(
+      signal
+    )
+  ).length;
+
+  const dateHeavyRows =
+    sourceRows.filter(
+      (row) => {
+        const text =
+          row.join(' ');
+
+        const matches =
+          text.match(
+            UNIVERSAL_DATE_RE
+          );
+
+        UNIVERSAL_DATE_RE.lastIndex =
+          0;
+
+        return Boolean(
+          matches &&
+            matches.length >= 2
+        );
+      }
+    ).length;
+
+  if (
+    bankSignals >= 4 ||
+    dateHeavyRows >= 5
+  ) {
+    const rows =
+      universalNormalizeBankRows(
+        sourceRows
+      );
+
+    if (rows.length >= 4) {
+      return {
+        kind:
+          'bank-statement',
+        rows,
+        totalRows:
+          rows.length - 1,
+        confidence:
+          bankSignals >= 6
+            ? 0.98
+            : 0.9,
+        label:
+          'Bank statement',
+      };
+    }
+  }
+
+  /*
+   * PAGE-AWARE SCANNED DOCUMENT PATH
+   */
+  if (
+    isScanned &&
+    scannedPages
+  ) {
+    const sections =
+      scannedPages.flatMap(
+        (page) =>
+          universalBuildPageSections(
+            page.pageNumber,
+            page.rows
+          )
+      );
+
+    if (sections.length) {
+      const kinds =
+        new Set(
+          sections.map(
+            (section) =>
+              section.kind
+          )
+        );
+
+      const totalRows =
+        sections.reduce(
+          (sum, section) =>
+            sum +
+            section.rows.length,
+          0
+        );
+
+      return {
+        kind:
+          kinds.size > 1
+            ? 'mixed'
+            : sections[0]
+                ?.kind ??
+              'general',
+        rows:
+          sections.flatMap(
+            (section) =>
+              section.rows
+          ),
+        totalRows,
+        confidence:
+          sections.reduce(
+            (sum, section) =>
+              sum +
+              section.confidence,
+            0
+          ) /
+          Math.max(
+            1,
+            sections.length
+          ),
+        label:
+          kinds.size > 1
+            ? 'Mixed scanned document'
+            : sections[0]
+                ?.label ??
+              'Scanned document',
+        sections,
+      };
+    }
+  }
+
+  /*
+   * DIGITAL / SIMPLE DOCUMENT FALLBACK
+   */
+  const keyValueRows =
+    universalBuildKeyValueRows(
+      sourceRows
+    );
+
+  const maxColumns =
+    Math.max(
+      0,
+      ...sourceRows.map(
+        (row) =>
+          row.filter(Boolean)
+            .length
+      )
+    );
+
+  const multiColumnRows =
+    sourceRows.filter(
+      (row) =>
+        row.filter(Boolean)
+          .length >= 2
+    ).length;
+
+  const multiColumnRatio =
+    sourceRows.length > 0
+      ? multiColumnRows /
+        sourceRows.length
+      : 0;
+
+  if (
+    keyValueRows.length >= 5 &&
+    (
+      maxColumns <= 3 ||
+      multiColumnRatio <
+        0.45
+    )
+  ) {
+    return {
+      kind: 'key-value',
+      rows: keyValueRows,
+      totalRows:
+        keyValueRows.length -
+        1,
+      confidence: 0.82,
+      label:
+        'Form / key-value document',
+    };
+  }
+
+  if (
+    maxColumns >= 2 &&
+    multiColumnRatio >=
+      0.25
+  ) {
+    return {
+      kind: 'table',
+      rows: sourceRows,
+      totalRows:
+        sourceRows.length,
+      confidence: 0.8,
+      label:
+        'Structured table',
+    };
+  }
+
+  return {
+    kind: 'general',
+    rows:
+      sourceRows.map(
+        (row) => [
+          row.join(' '),
+        ]
+      ),
+    totalRows:
+      sourceRows.length,
+    confidence: 0.6,
+    label:
+      'General document',
+  };
+}
+
 export interface MarkdownExtractOptions {
   detectHeadings?: boolean;
   detectLists?: boolean;

@@ -281,6 +281,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'PDF to CSV Table Extractor',
     subheading: 'Extract tabular statements and invoices directly into CSV format without financial data leaving your computer.',
   },
+  '/document-data-extractor': {
+    path: '/document-data-extractor',
+    title: 'Universal Document Data Extractor — PDF to Excel & CSV | 1into1',
+    description: 'Extract structured rows and tables from digital and scanned PDF documents, review the data, edit cells, and export to CSV or Excel locally in your browser.',
+    heading: 'Universal Document Data Extractor',
+    subheading: 'Turn digital and scanned PDFs into editable spreadsheet data with automatic OCR fallback and local processing.',
+  },
   '/pdf-to-markdown': {
     path: '/pdf-to-markdown',
     title: 'PDF to Markdown Converter — Private & AI-Ready | 1into1',

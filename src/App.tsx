@@ -102,6 +102,7 @@ const AiSummaryPdf = lazy(() => import('./components/AiSummaryPdf').then((m) => 
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) => ({ default: m.PrivacyPolicy })));
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
 const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
+const DocumentDataExtractor = lazy(() => import('./components/DocumentDataExtractor').then((m) => ({ default: m.DocumentDataExtractor })));
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
 const VisualEditor = lazy(() => import('./components/VisualEditor').then((m) => ({ default: m.VisualEditor })));
@@ -164,6 +165,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Edit Metadata', path: '/edit-metadata', category: 'convert', icon: Tag },
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
   { name: 'PDF to CSV / Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
+  { name: 'Universal Data Extractor', path: '/document-data-extractor', category: 'convert', icon: Table },
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
   { name: 'Edit PDF', path: '/edit-pdf', category: 'organize', icon: FileEdit },
@@ -568,6 +570,7 @@ export default function App() {
               <Route path="/edit-metadata" element={<EditMetadata file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/page-numbers" element={<PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-csv" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/document-data-extractor" element={<DocumentDataExtractor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-markdown" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
 
               <Route path="/bank-statement-to-excel" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
