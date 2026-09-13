@@ -615,6 +615,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     () => redactorSessionCache.status
   );
 
+  const [manualReviewFindings, setManualReviewFindings] =
+    useState<Finding[]>([]);
+
   useEffect(() => {
     redactorSessionCache = {
       file,
@@ -662,14 +665,20 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       )
   );
 
-  const continueToManualRedaction = () => {
+  const continueToManualRedaction = (
+    reviewOnly?: Finding[]
+  ) => {
     if (!file || !onContinueManual || !isPdfFile) return;
 
     const initialRedactions: ManualRedactionMap = {};
 
-    for (const finding of findings) {
+    const sourceFindings =
+      reviewOnly && reviewOnly.length > 0
+        ? reviewOnly
+        : findings.filter((finding) => finding.selected);
+
+    for (const finding of sourceFindings) {
       if (
-        !finding.selected ||
         !finding.page ||
         !finding.box ||
         !finding.pageWidth ||
@@ -699,7 +708,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         ),
       };
 
-      // Ensure the rectangle remains inside the page.
       normalized.width = Math.min(
         normalized.width,
         1 - normalized.x
@@ -730,6 +738,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     setSourceText("");
     setError(null);
     setStatus(null);
+    setManualReviewFindings([]);
 
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -2098,189 +2107,398 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const redactPdf = async (): Promise<boolean> => {
     if (!file) return false;
 
-    const originalBytes = new Uint8Array(await file.arrayBuffer());
+    const originalBytes = new Uint8Array(
+      await file.arrayBuffer()
+    );
 
     const pdf = await pdfjsLib.getDocument({
       data: originalBytes.slice(),
     }).promise;
 
-    const outputPdf = await PDFDocument.create();
-
     const selected = findings.filter(
       (finding) =>
-        finding.selected && finding.page && finding.box
+        finding.selected &&
+        finding.page &&
+        finding.box
     );
 
     const renderScale = 1.7;
 
-    for (
-      let pageNumber = 1;
-      pageNumber <= pdf.numPages;
-      pageNumber++
-    ) {
-      setStatus(
-        `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
-      );
+    const buildSecurePdf = async (
+      strengthenValues = new Set<string>()
+    ): Promise<Uint8Array> => {
+      const outputPdf = await PDFDocument.create();
 
-      const page = await pdf.getPage(pageNumber);
+      for (
+        let pageNumber = 1;
+        pageNumber <= pdf.numPages;
+        pageNumber++
+      ) {
+        setStatus(
+          `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
+        );
 
-      const baseViewport = page.getViewport({ scale: 1 });
-      const renderViewport = page.getViewport({
-        scale: renderScale,
-      });
+        const page = await pdf.getPage(pageNumber);
 
-      const canvas = document.createElement("canvas");
+        const baseViewport = page.getViewport({
+          scale: 1,
+        });
 
-      canvas.width = Math.ceil(renderViewport.width);
-      canvas.height = Math.ceil(renderViewport.height);
+        const renderViewport = page.getViewport({
+          scale: renderScale,
+        });
 
-      const ctx = canvas.getContext("2d", {
-        alpha: false,
-      });
+        const canvas =
+          document.createElement("canvas");
 
-      if (!ctx) {
-        throw new Error("Unable to create secure PDF renderer.");
-      }
+        canvas.width = Math.ceil(
+          renderViewport.width
+        );
 
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+        canvas.height = Math.ceil(
+          renderViewport.height
+        );
 
-      await page.render({
-        canvasContext: ctx,
-        viewport: renderViewport,
-        canvas,
-      } as any).promise;
+        const ctx = canvas.getContext(
+          "2d",
+          { alpha: false }
+        );
 
-      const pageFindings = selected.filter(
-        (finding) => finding.page === pageNumber
-      );
+        if (!ctx) {
+          throw new Error(
+            "Unable to create secure PDF renderer."
+          );
+        }
 
-      ctx.fillStyle = "#000000";
-
-      for (const finding of pageFindings) {
-        const box = finding.box!;
-
-        const x = box.x * renderScale;
-        const y = box.y * renderScale;
-        const width = box.width * renderScale;
-        const height = box.height * renderScale;
+        ctx.fillStyle = "#ffffff";
 
         ctx.fillRect(
-          Math.max(0, x),
-          Math.max(0, y),
-          Math.max(2, width),
-          Math.max(2, height)
+          0,
+          0,
+          canvas.width,
+          canvas.height
         );
+
+        await page.render({
+          canvasContext: ctx,
+          viewport: renderViewport,
+          canvas,
+        } as any).promise;
+
+        const pageFindings = selected.filter(
+          (finding) =>
+            finding.page === pageNumber
+        );
+
+        ctx.fillStyle = "#000000";
+
+        for (const finding of pageFindings) {
+          const box = finding.box!;
+
+          const normalizedValue =
+            normalizeForSafetyCheck(
+              finding.value
+            );
+
+          const strengthen =
+            strengthenValues.has(
+              normalizedValue
+            );
+
+          /*
+           * First pass uses the exact detected box.
+           *
+           * If verification says this specific value
+           * remains readable, the second pass adds
+           * generous privacy padding around ONLY that
+           * failed box.
+           */
+          const padX = strengthen
+            ? Math.max(
+                6,
+                box.height * 0.45
+              )
+            : 0;
+
+          const padY = strengthen
+            ? Math.max(
+                4,
+                box.height * 0.30
+              )
+            : 0;
+
+          const left = Math.max(
+            0,
+            (box.x - padX) * renderScale
+          );
+
+          const top = Math.max(
+            0,
+            (box.y - padY) * renderScale
+          );
+
+          const right = Math.min(
+            canvas.width,
+            (
+              box.x +
+              box.width +
+              padX
+            ) * renderScale
+          );
+
+          const bottom = Math.min(
+            canvas.height,
+            (
+              box.y +
+              box.height +
+              padY
+            ) * renderScale
+          );
+
+          ctx.fillRect(
+            left,
+            top,
+            Math.max(2, right - left),
+            Math.max(2, bottom - top)
+          );
+        }
+
+        const imageBlob =
+          await new Promise<Blob>(
+            (resolve, reject) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) resolve(blob);
+                  else {
+                    reject(
+                      new Error(
+                        "Unable to render PDF page."
+                      )
+                    );
+                  }
+                },
+                "image/jpeg",
+                0.94
+              );
+            }
+          );
+
+        const imageBytes =
+          new Uint8Array(
+            await imageBlob.arrayBuffer()
+          );
+
+        const image =
+          await outputPdf.embedJpg(
+            imageBytes
+          );
+
+        const outputPage =
+          outputPdf.addPage([
+            baseViewport.width,
+            baseViewport.height,
+          ]);
+
+        outputPage.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: baseViewport.width,
+          height: baseViewport.height,
+        });
+
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
 
-      const imageBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (blob) => {
-            if (blob) resolve(blob);
-            else reject(new Error("Unable to render PDF page."));
-          },
-          "image/jpeg",
-          0.94
-        );
-      });
+      outputPdf.setTitle("");
+      outputPdf.setAuthor("");
+      outputPdf.setSubject("");
+      outputPdf.setKeywords([]);
+      outputPdf.setCreator("1into1");
+      outputPdf.setProducer("1into1");
 
-      const imageBytes = new Uint8Array(
-        await imageBlob.arrayBuffer()
-      );
+      return await outputPdf.save();
+    };
 
-      const image = await outputPdf.embedJpg(imageBytes);
+    try {
+      // ======================================================
+      // PASS 1 — normal automatic redaction
+      // ======================================================
 
-      const outputPage = outputPdf.addPage([
-        baseViewport.width,
-        baseViewport.height,
-      ]);
-
-      outputPage.drawImage(image, {
-        x: 0,
-        y: 0,
-        width: baseViewport.width,
-        height: baseViewport.height,
-      });
-
-      canvas.width = 1;
-      canvas.height = 1;
-    }
-
-    outputPdf.setTitle("");
-    outputPdf.setAuthor("");
-    outputPdf.setSubject("");
-    outputPdf.setKeywords([]);
-    outputPdf.setCreator("1into1");
-    outputPdf.setProducer("1into1");
-
-    const bytes = await outputPdf.save();
-
-    setStatus(
-      "Running final safety verification on the finished PDF…"
-    );
-
-    const verification = await verifyFinishedPdf(
-      bytes,
-      selected,
-      (message) => setStatus(message)
-    );
-
-    if (!verification.passed) {
-      const reasons: string[] = [];
-
-      if (verification.selectableTextFound) {
-        reasons.push(
-          "the secure output unexpectedly contains selectable text"
-        );
-      }
-
-      if (verification.leakedValues.length > 0) {
-        reasons.push(
-          `${verification.leakedValues.length} selected sensitive item${verification.leakedValues.length === 1 ? "" : "s"} may still be visually readable`
-        );
-      }
-
-      setError(
-        `Final safety verification stopped the download because ${reasons.join(
-          " and "
-        )}. Continue in Manual Redaction and review the affected areas.`
-      );
+      let bytes = await buildSecurePdf();
 
       setStatus(
-        "Final safety verification needs manual review."
+        "Checking the finished PDF for anything still readable…"
       );
 
+      let verification =
+        await verifyFinishedPdf(
+          bytes,
+          selected,
+          (message) =>
+            setStatus(message)
+        );
+
+      // ======================================================
+      // PASS 2 — AUTOMATIC REPAIR
+      //
+      // If individual sensitive values remain readable,
+      // automatically enlarge ONLY those redactions and
+      // regenerate the PDF once.
+      // ======================================================
+
+      if (
+        !verification.passed &&
+        verification.leakedValues.length > 0
+      ) {
+        const failedValues =
+          new Set(
+            verification.leakedValues
+              .map((value) =>
+                normalizeForSafetyCheck(
+                  value
+                )
+              )
+              .filter(Boolean)
+          );
+
+        setStatus(
+          `Strengthening ${verification.leakedValues.length} redaction${
+            verification.leakedValues.length === 1
+              ? ""
+              : "s"
+          } automatically…`
+        );
+
+        bytes = await buildSecurePdf(
+          failedValues
+        );
+
+        setStatus(
+          "Re-checking the strengthened redactions…"
+        );
+
+        verification =
+          await verifyFinishedPdf(
+            bytes,
+            selected,
+            (message) =>
+              setStatus(message)
+          );
+      }
+
+      // ======================================================
+      // STILL UNSAFE AFTER AUTOMATIC SECOND PASS
+      // ======================================================
+
+      if (!verification.passed) {
+        const failedValueSet =
+          new Set(
+            verification.leakedValues
+              .map((value) =>
+                normalizeForSafetyCheck(
+                  value
+                )
+              )
+              .filter(Boolean)
+          );
+
+        const reviewItems =
+          selected.filter((finding) =>
+            failedValueSet.has(
+              normalizeForSafetyCheck(
+                finding.value
+              )
+            )
+          );
+
+        setManualReviewFindings(
+          reviewItems
+        );
+
+        if (reviewItems.length > 0) {
+          setError(
+            `${reviewItems.length} sensitive item${
+              reviewItems.length === 1
+                ? ""
+                : "s"
+            } still need your review. We automatically tried a stronger redaction, but the safety check could still read ${
+              reviewItems.length === 1
+                ? "this area"
+                : "these areas"
+            }.`
+          );
+
+          setStatus(
+            `${reviewItems.length} item${
+              reviewItems.length === 1
+                ? ""
+                : "s"
+            } need your review before download.`
+          );
+        } else if (
+          verification.selectableTextFound
+        ) {
+          setError(
+            "The finished PDF still contains selectable text where a secure flattened copy was expected. Download was blocked for your protection."
+          );
+
+          setStatus(
+            "The PDF needs manual review before download."
+          );
+        } else {
+          setError(
+            "The safety check could not confirm that every selected item is fully hidden. Download was blocked for your protection."
+          );
+
+          setStatus(
+            "The PDF needs manual review before download."
+          );
+        }
+
+        return false;
+      }
+
+      // ======================================================
+      // PASSED
+      // ======================================================
+
+      setManualReviewFindings([]);
+
+      setStatus(
+        "Safety check passed. Preparing download…"
+      );
+
+      const base =
+        file.name.replace(
+          /\.pdf$/i,
+          ""
+        );
+
+      downloadBlob(
+        new Blob([bytes as any], {
+          type: "application/pdf",
+        }),
+        `${base}-redacted.pdf`
+      );
+
+      return true;
+    } finally {
       try {
         await pdf.destroy();
       } catch (_) {}
-
-      return false;
     }
-
-    setStatus(
-      "Final safety verification passed. Preparing download…"
-    );
-
-    const base = file.name.replace(/\.pdf$/i, "");
-
-    downloadBlob(
-      new Blob([bytes as any], {
-        type: "application/pdf",
-      }),
-      `${base}-redacted.pdf`
-    );
-
-    try {
-      await pdf.destroy();
-    } catch (_) {}
-
-    return true;
   };
 
   const createRedactedCopy = async () => {
     if (!file || selectedCount === 0) return;
 
     setError(null);
+    setManualReviewFindings([]);
     setIsRedacting(true);
 
     try {
@@ -2433,6 +2651,60 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             {error}
           </div>
         )}
+
+        {manualReviewFindings.length > 0 && (
+          <div className="mt-3 rounded-xl border-2 border-amber-400 bg-amber-50 p-4">
+            <strong className="block text-sm text-amber-950">
+              {manualReviewFindings.length} item
+              {manualReviewFindings.length === 1 ? "" : "s"} need your review
+            </strong>
+
+            <p className="mt-1 text-xs leading-5 text-amber-900">
+              We automatically tried a stronger redaction once.
+              These are the areas the final safety check could
+              still read:
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {manualReviewFindings.map((finding) => (
+                <div
+                  key={`review-${finding.id}`}
+                  className="flex items-center gap-3 rounded-lg border border-amber-300 bg-white px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <strong className="block text-xs text-zinc-950">
+                      {finding.category}
+                    </strong>
+
+                    <code className="block mt-0.5 text-xs text-zinc-700 truncate">
+                      {finding.maskedValue}
+                    </code>
+                  </div>
+
+                  {finding.page && (
+                    <span className="shrink-0 text-xs font-semibold text-zinc-700">
+                      Page {finding.page}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                continueToManualRedaction(
+                  manualReviewFindings
+                )
+              }
+              className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2"
+            >
+              Review these {manualReviewFindings.length} item
+              {manualReviewFindings.length === 1 ? "" : "s"} manually
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {file && !isScanning && (
@@ -2578,8 +2850,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
               <button
                 type="button"
-                onClick={continueToManualRedaction}
-                className="pii-manual-handoff mt-3 sm:mt-0 shrink-0 min-h-10 px-4 rounded-lg inline-flex items-center justify-center gap-2 text-xs font-semibold transition"
+                onClick={() => continueToManualRedaction()}
+                className="pii-manual-handoff mt-4 sm:mt-0 w-full sm:w-auto shrink-0 min-h-12 px-5 rounded-xl border-2 inline-flex items-center justify-center gap-2 text-xs font-semibold transition"
               >
                 Auto-Redact & Continue Manually
                 <ArrowRight className="w-4 h-4" />
