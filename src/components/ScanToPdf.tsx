@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { imagesToPDF } from '../utils/pdfEngine';
 import heic2any from 'heic2any';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 type ScanMode = 'original' | 'grayscale' | 'bw';
 
@@ -301,6 +302,19 @@ export const ScanToPdf = () => {
       return;
     }
 
+    const incomingSizeCheck = validateTaskFiles(
+      [
+        ...pages.map((page) => page.file),
+        ...valid,
+      ],
+      'Scan images'
+    );
+
+    if (!incomingSizeCheck.allowed) {
+      setError(incomingSizeCheck.errorMessage);
+      return;
+    }
+
     setError(null);
 
     try {
@@ -319,6 +333,22 @@ export const ScanToPdf = () => {
           flipped: false,
           mode: 'original',
         });
+      }
+
+      const normalizedSizeCheck = validateTaskFiles(
+        [
+          ...pages.map((page) => page.file),
+          ...added.map((page) => page.file),
+        ],
+        'Scan images'
+      );
+
+      if (!normalizedSizeCheck.allowed) {
+        added.forEach((page) =>
+          URL.revokeObjectURL(page.preview)
+        );
+        setError(normalizedSizeCheck.errorMessage);
+        return;
       }
 
       setPages((current) => [
@@ -419,6 +449,16 @@ export const ScanToPdf = () => {
 
   const createPdf = async () => {
     if (!pages.length || isProcessing) {
+      return;
+    }
+
+    const sizeCheck = validateTaskFiles(
+      pages.map((page) => page.file),
+      'Scan images'
+    );
+
+    if (!sizeCheck.allowed) {
+      setError(sizeCheck.errorMessage);
       return;
     }
 

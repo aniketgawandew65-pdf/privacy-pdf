@@ -1,3 +1,4 @@
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 import React, { useState, useRef } from 'react';
 import {
   Download,
@@ -44,6 +45,17 @@ export const CodeToPdf: React.FC = () => {
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
 
   const handleFileDrop = async (selectedFile: File) => {
+    // Source file size limit
+    const sizeCheck = validateTaskFiles(
+      [selectedFile],
+      'Selected file'
+    );
+
+    if (!sizeCheck.allowed) {
+      setErrorMessage(sizeCheck.errorMessage);
+      return;
+    }
+
     setFile(selectedFile);
     setTitle(selectedFile.name);
     revokeUrl();
@@ -59,6 +71,18 @@ export const CodeToPdf: React.FC = () => {
 
   const handleConvert = async () => {
     if (!codeContent.trim()) return;
+    if (file) {
+      const currentSizeCheck = validateTaskFiles(
+        [file],
+        'Selected file'
+      );
+
+      if (!currentSizeCheck.allowed) {
+        setErrorMessage(currentSizeCheck.errorMessage);
+        return;
+      }
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeUrl();

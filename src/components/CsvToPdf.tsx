@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { generateCsvPDF, type CsvToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 export const CsvToPdf: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
@@ -55,6 +56,17 @@ export const CsvToPdf: React.FC = () => {
   };
 
   const handleFileDrop = (selectedFile: File) => {
+    // Source file size limit
+    const sizeCheck = validateTaskFiles(
+      [selectedFile],
+      'Selected file'
+    );
+
+    if (!sizeCheck.allowed) {
+      setErrorMessage(sizeCheck.errorMessage);
+      return;
+    }
+
     setFile(selectedFile);
     setDocumentTitle(selectedFile.name.replace(/\.[^/.]+$/, ''));
     revokeUrl();
@@ -72,6 +84,18 @@ export const CsvToPdf: React.FC = () => {
   };
 
   const handleConvert = async () => {
+    if (file) {
+      const currentSizeCheck = validateTaskFiles(
+        [file],
+        'Selected file'
+      );
+
+      if (!currentSizeCheck.allowed) {
+        setErrorMessage(currentSizeCheck.errorMessage);
+        return;
+      }
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeUrl();

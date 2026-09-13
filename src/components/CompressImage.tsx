@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 interface CompressedResult {
   name: string;
@@ -132,6 +133,16 @@ export function CompressImage() {
 
   const compressImages = async () => {
     if (!files.length || isProcessing) return;
+
+    const sizeCheck = validateTaskFiles(
+      files,
+      'Image compression files'
+    );
+
+    if (!sizeCheck.allowed) {
+      setError(sizeCheck.errorMessage);
+      return;
+    }
 
     setIsProcessing(true);
     setError(null);

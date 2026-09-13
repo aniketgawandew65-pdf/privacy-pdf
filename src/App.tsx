@@ -57,6 +57,7 @@ import {
   Code2,
   Receipt,
 } from 'lucide-react';
+import { validateTaskFiles } from './utils/fileSizeGuard';
 
 declare const __BUILD_TIME__: string;
 
@@ -190,6 +191,11 @@ export default function App() {
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
+  const [globalFileError, setGlobalFileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setGlobalFileError(null);
+  }, [location.pathname]);
   const proRequested =
     new URLSearchParams(location.search).get('pro') === 'true';
 
@@ -429,8 +435,72 @@ export default function App() {
   const handleSingleFileChange = (file: File | null) => {
     if (!file) {
       setSharedFiles([]);
-    } else {
-      setSharedFiles([file]);
+      setGlobalFileError(null);
+      return;
+    }
+
+    const sizeCheck = validateTaskFiles(
+      [file],
+      'Selected file'
+    );
+
+    if (!sizeCheck.allowed) {
+      setSharedFiles([]);
+      setGlobalFileError(sizeCheck.errorMessage);
+      return;
+    }
+
+    setGlobalFileError(null);
+    setSharedFiles([file]);
+  };
+
+  const validateIncomingFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return true;
+
+    const sizeCheck = validateTaskFiles(
+      Array.from(files),
+      'Selected files'
+    );
+
+    if (!sizeCheck.allowed) {
+      setGlobalFileError(sizeCheck.errorMessage);
+      return false;
+    }
+
+    setGlobalFileError(null);
+    return true;
+  };
+
+  const handleWorkspaceFileChangeCapture = (
+    event: React.FormEvent<HTMLElement>
+  ) => {
+    const input = event.target as HTMLInputElement;
+
+    if (
+      input?.type !== 'file' ||
+      !input.files ||
+      input.files.length === 0
+    ) {
+      return;
+    }
+
+    if (!validateIncomingFiles(input.files)) {
+      event.preventDefault();
+      event.stopPropagation();
+      input.value = '';
+    }
+  };
+
+  const handleWorkspaceDropCapture = (
+    event: React.DragEvent<HTMLElement>
+  ) => {
+    const files = event.dataTransfer?.files;
+
+    if (!files || files.length === 0) return;
+
+    if (!validateIncomingFiles(files)) {
+      event.preventDefault();
+      event.stopPropagation();
     }
   };
 
@@ -514,7 +584,27 @@ export default function App() {
           {visibleTools.length === 0 && <p className="empty-search">No matching tools. Try “merge”, “image” or “text”.</p>}
         </section>}
 
-        <section id="workspace" className="tool-workspace" aria-label="Document workspace" tabIndex={-1}>
+        <section
+          id="workspace"
+          className="tool-workspace"
+          aria-label="Document workspace"
+          tabIndex={-1}
+          onChangeCapture={handleWorkspaceFileChangeCapture}
+          onDropCapture={handleWorkspaceDropCapture}
+        >
+          {globalFileError && (
+            <div
+              role="alert"
+              className="mb-4 w-full max-w-3xl mx-auto rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-left"
+            >
+              <p className="text-sm font-semibold text-red-300">
+                File size limit exceeded
+              </p>
+              <p className="text-xs text-red-200/90 mt-1">
+                {globalFileError}
+              </p>
+            </div>
+          )}
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<ToolFallback />}>
             <Routes>

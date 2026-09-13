@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { imagesToPDF } from '../utils/pdfEngine';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 type OutputFormat = 'pdf' | 'jpg' | 'png' | 'webp';
 
@@ -175,6 +176,16 @@ export const ImageToPdf: React.FC = () => {
 
   const handleFilesSelect = (filesList: FileList | null) => {
     if (!filesList) return;
+    const sizeCheck = validateTaskFiles(
+      [...images, ...Array.from(filesList)],
+      'Image conversion files'
+    );
+
+    if (!sizeCheck.allowed) {
+      setErrorMessage(sizeCheck.errorMessage);
+      return;
+    }
+
 
     const validImages =
       Array.from(filesList).filter(isSupportedImage);
@@ -206,6 +217,16 @@ export const ImageToPdf: React.FC = () => {
     if (!images.length) return;
 
     clearGenerated();
+    const sizeCheck = validateTaskFiles(
+      images,
+      'Image conversion files'
+    );
+
+    if (!sizeCheck.allowed) {
+      setErrorMessage(sizeCheck.errorMessage);
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
 

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 const SAMPLE_RECEIPT = `<div style="text-align: center; margin-bottom: 12px;">
   <h2 style="margin: 0; font-size: 16px;">COFFEE &amp; BAKERY</h2>
@@ -111,6 +112,17 @@ export const HtmlToPdf: React.FC = () => {
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
 
   const handleFileDrop = async (selectedFile: File) => {
+    // Source file size limit
+    const sizeCheck = validateTaskFiles(
+      [selectedFile],
+      'Selected file'
+    );
+
+    if (!sizeCheck.allowed) {
+      setErrorMessage(sizeCheck.errorMessage);
+      return;
+    }
+
     setFile(selectedFile);
     setFileName(selectedFile.name.replace(/\.[^/.]+$/, ''));
     revokeUrl();
@@ -127,6 +139,18 @@ export const HtmlToPdf: React.FC = () => {
 
   const handleConvert = async () => {
     if (!htmlContent.trim()) return;
+    if (file) {
+      const currentSizeCheck = validateTaskFiles(
+        [file],
+        'Selected file'
+      );
+
+      if (!currentSizeCheck.allowed) {
+        setErrorMessage(currentSizeCheck.errorMessage);
+        return;
+      }
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeUrl();

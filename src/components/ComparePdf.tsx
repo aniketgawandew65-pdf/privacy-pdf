@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { pdfjsLib } from '../utils/pdfjs';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
 
 
 if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -66,6 +67,18 @@ export const ComparePdf: React.FC = () => {
     (async () => {
       try {
         setErrorMessage(null);
+        const comparisonSizeCheck = validateTaskFiles(
+          [fileA, fileB].filter(
+            (candidate): candidate is File => Boolean(candidate)
+          ),
+          'Comparison files'
+        );
+
+        if (!comparisonSizeCheck.allowed) {
+          setErrorMessage(comparisonSizeCheck.errorMessage);
+          return;
+        }
+
         const buffer = await fileA.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;
@@ -94,6 +107,18 @@ export const ComparePdf: React.FC = () => {
     (async () => {
       try {
         setErrorMessage(null);
+        const comparisonSizeCheck = validateTaskFiles(
+          [fileA, fileB].filter(
+            (candidate): candidate is File => Boolean(candidate)
+          ),
+          'Comparison files'
+        );
+
+        if (!comparisonSizeCheck.allowed) {
+          setErrorMessage(comparisonSizeCheck.errorMessage);
+          return;
+        }
+
         const buffer = await fileB.arrayBuffer();
         const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
         if (!isMounted) return;

@@ -11,6 +11,14 @@ interface MergerProps {
 }
 
 const FREE_BATCH_LIMIT = 3;
+const PRO_TOTAL_SIZE_LIMIT_MB = 150;
+const PRO_TOTAL_SIZE_LIMIT_BYTES = PRO_TOTAL_SIZE_LIMIT_MB * 1024 * 1024;
+
+const getTotalSizeBytes = (files: File[]) =>
+  files.reduce((total, file) => total + file.size, 0);
+
+const formatSizeMB = (bytes: number) =>
+  (bytes / 1024 / 1024).toFixed(2);
 
 export function Merger({ files, onFilesChange }: MergerProps) {
   const [isMerging, setIsMerging] = useState(false);
@@ -30,16 +38,34 @@ export function Merger({ files, onFilesChange }: MergerProps) {
 
   const handleAddFiles = (newFiles: FileList | null) => {
     if (!newFiles) return;
-    const addedList = Array.from(newFiles).filter((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+
+    const addedList = Array.from(newFiles).filter(
+      (f) =>
+        f.type === 'application/pdf' ||
+        f.name.toLowerCase().endsWith('.pdf')
+    );
+
     const combined = [...files, ...addedList];
 
     if (!isPro && combined.length > FREE_BATCH_LIMIT) {
       setIsProModalOpen(true);
       onFilesChange(combined.slice(0, FREE_BATCH_LIMIT));
-    } else {
-      onFilesChange(combined);
+      revokeDownloadUrl();
+      return;
     }
+
+    onFilesChange(combined);
     revokeDownloadUrl();
+
+    const totalBytes = getTotalSizeBytes(combined);
+
+    if (totalBytes > PRO_TOTAL_SIZE_LIMIT_BYTES) {
+      setErrorMessage(
+        `Merge limit exceeded. Your files total ${formatSizeMB(totalBytes)} MB. This tool supports up to ${PRO_TOTAL_SIZE_LIMIT_MB} MB total per merge. Remove some files and try again.`
+      );
+      return;
+    }
+
     setErrorMessage(null);
   };
 
@@ -67,6 +93,15 @@ export function Merger({ files, onFilesChange }: MergerProps) {
 
     if (!isPro && files.length > FREE_BATCH_LIMIT) {
       setIsProModalOpen(true);
+      return;
+    }
+
+    const totalBytes = getTotalSizeBytes(files);
+
+    if (totalBytes > PRO_TOTAL_SIZE_LIMIT_BYTES) {
+      setErrorMessage(
+        `Merge limit exceeded. Your files total ${formatSizeMB(totalBytes)} MB. This tool supports up to ${PRO_TOTAL_SIZE_LIMIT_MB} MB total per merge. Remove some files and try again.`
+      );
       return;
     }
 
@@ -120,7 +155,9 @@ export function Merger({ files, onFilesChange }: MergerProps) {
           Click or drop PDF files here to merge
         </p>
         <p className="text-xs text-zinc-500 mt-1">
-          {isPro ? 'Pro Active: Unlimited files supported' : `Free Tier: Up to ${FREE_BATCH_LIMIT} files`}
+          {isPro
+            ? `Pro Active: Unlimited files • Max ${PRO_TOTAL_SIZE_LIMIT_MB} MB total`
+            : `Free Tier: Up to ${FREE_BATCH_LIMIT} files`}
         </p>
       </div>
 
@@ -212,7 +249,11 @@ export function Merger({ files, onFilesChange }: MergerProps) {
       <div className="flex flex-col gap-3">
         {!downloadUrl ? (
           <button
-            disabled={files.length < 2 || isMerging}
+            disabled={
+              files.length < 2 ||
+              isMerging ||
+              (getTotalSizeBytes(files) > PRO_TOTAL_SIZE_LIMIT_BYTES)
+            }
             onClick={handleMerge}
             className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black text-sm font-semibold transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
           >
