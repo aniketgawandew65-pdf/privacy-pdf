@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -9,6 +9,7 @@ import {
   ScanSearch,
   ShieldCheck,
   Trash2,
+  X,
   Upload,
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
@@ -54,6 +55,26 @@ type Finding = {
   box?: RedactionBox;
 
   selected: boolean;
+};
+
+type RedactorSessionCache = {
+  file: File | null;
+  findings: Finding[];
+  sourceText: string;
+  error: string | null;
+  status: string | null;
+};
+
+const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
+  file: null,
+  findings: [],
+  sourceText: "",
+  error: null,
+  status: null,
+};
+
+let redactorSessionCache: RedactorSessionCache = {
+  ...EMPTY_REDACTOR_SESSION,
 };
 
 type Detector = {
@@ -106,7 +127,7 @@ const DETECTORS: Detector[] = [
   {
     category: "Email",
     regex:
-      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+      /\b[A-Z0-9._%+-]+\s*@\s*[A-Z0-9-]+(?:\s*\.\s*[A-Z0-9-]+)*\s*\.\s*[A-Z]{2,}\b/gi,
   },
   {
     category: "US SSN",
@@ -236,7 +257,47 @@ const detectText = (text: string) => {
     }
   }
 
-  return matches.sort((a, b) => a.start - b.start);
+  const priority: Record<FindingCategory, number> = {
+    "Credit Card": 100,
+    "US SSN": 95,
+    "IBAN": 90,
+    "Bank Account": 88,
+    "Passport": 86,
+    "Date of Birth": 84,
+    "AWS Access Key": 100,
+    "OpenAI API Key": 100,
+    "GitHub Token": 100,
+    "JWT": 100,
+    "Password / Secret": 92,
+    "Email": 90,
+    "IP Address": 88,
+    "Phone": 50,
+    "Name": 70,
+    "Address": 70,
+  };
+
+  const accepted: typeof matches = [];
+
+  for (const candidate of [...matches].sort((a, b) => {
+    const priorityDiff =
+      priority[b.category] - priority[a.category];
+
+    if (priorityDiff !== 0) return priorityDiff;
+
+    return (b.end - b.start) - (a.end - a.start);
+  })) {
+    const overlapsHigherPriority = accepted.some(
+      (existing) =>
+        candidate.start < existing.end &&
+        candidate.end > existing.start
+    );
+
+    if (!overlapsHigherPriority) {
+      accepted.push(candidate);
+    }
+  }
+
+  return accepted.sort((a, b) => a.start - b.start);
 };
 
 const downloadBlob = (blob: Blob, filename: string) => {
@@ -255,15 +316,38 @@ const downloadBlob = (blob: Blob, filename: string) => {
 export const PrivatePiiRedactor: React.FC = () => {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [findings, setFindings] = useState<Finding[]>([]);
-  const [sourceText, setSourceText] = useState("");
+  const [file, setFile] = useState<File | null>(
+    () => redactorSessionCache.file
+  );
+
+  const [findings, setFindings] = useState<Finding[]>(
+    () => redactorSessionCache.findings
+  );
+
+  const [sourceText, setSourceText] = useState(
+    () => redactorSessionCache.sourceText
+  );
 
   const [isScanning, setIsScanning] = useState(false);
   const [isRedacting, setIsRedacting] = useState(false);
 
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    () => redactorSessionCache.error
+  );
+
+  const [status, setStatus] = useState<string | null>(
+    () => redactorSessionCache.status
+  );
+
+  useEffect(() => {
+    redactorSessionCache = {
+      file,
+      findings,
+      sourceText,
+      error,
+      status,
+    };
+  }, [file, findings, sourceText, error, status]);
 
   const grouped = useMemo(() => {
     const map = new Map<FindingCategory, Finding[]>();
@@ -280,6 +364,10 @@ export const PrivatePiiRedactor: React.FC = () => {
   const selectedCount = findings.filter((x) => x.selected).length;
 
   const clearAll = () => {
+    redactorSessionCache = {
+      ...EMPTY_REDACTOR_SESSION,
+    };
+
     setFile(null);
     setFindings([]);
     setSourceText("");
@@ -311,96 +399,506 @@ export const PrivatePiiRedactor: React.FC = () => {
   const scanPdf = async (nextFile: File) => {
     const bytes = new Uint8Array(await nextFile.arrayBuffer());
 
-    const loadingTask = pdfjsLib.getDocument({ data: bytes });
-    const pdf = await loadingTask.promise;
+    const loadingTask = pdfjsLib.getDocument({
+      data: bytes,
+      isEvalSupported: false,
+    });
 
+    const pdf = await loadingTask.promise;
     const nextFindings: Finding[] = [];
 
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-      setStatus(`Scanning page ${pageNumber} of ${pdf.numPages}…`);
+    let ocrWorker: any = null;
 
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1 });
-      const textContent = await page.getTextContent();
+    type PositionedSpan = {
+      text: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
 
-      textContent.items.forEach((rawItem: any, itemIndex: number) => {
-        if (!rawItem || typeof rawItem.str !== "string") return;
+    const groupIntoLines = (input: PositionedSpan[]) => {
+      const sorted = [...input].sort((a, b) => {
+        const ay = a.y + a.height / 2;
+        const by = b.y + b.height / 2;
 
-        const text = rawItem.str;
-        if (!text.trim()) return;
+        if (Math.abs(ay - by) > 4) return ay - by;
+        return a.x - b.x;
+      });
 
-        const matches = detectText(text);
-        if (!matches.length) return;
+      const lines: {
+        centerY: number;
+        avgHeight: number;
+        spans: PositionedSpan[];
+      }[] = [];
 
-        const transformed = pdfjsLib.Util.transform(
-          viewport.transform,
-          rawItem.transform
-        );
+      for (const span of sorted) {
+        if (!span.text.trim()) continue;
 
-        const fontHeight = Math.max(
-          7,
-          Math.hypot(transformed[2], transformed[3])
-        );
+        const centerY = span.y + span.height / 2;
 
-        const itemWidth = Math.max(
-          2,
-          Number(rawItem.width || text.length * fontHeight * 0.5) *
-            viewport.scale
-        );
+        let target = lines.find((line) => {
+          const tolerance = Math.max(
+            5,
+            Math.min(14, Math.max(line.avgHeight, span.height) * 0.7)
+          );
 
-        const baseX = transformed[4];
-        const baseY = transformed[5] - fontHeight;
+          return Math.abs(line.centerY - centerY) <= tolerance;
+        });
 
-        for (const match of matches) {
+        if (!target) {
+          target = {
+            centerY,
+            avgHeight: span.height,
+            spans: [],
+          };
+
+          lines.push(target);
+        }
+
+        target.spans.push(span);
+
+        const count = target.spans.length;
+
+        target.centerY =
+          ((target.centerY * (count - 1)) + centerY) / count;
+
+        target.avgHeight =
+          ((target.avgHeight * (count - 1)) + span.height) / count;
+      }
+
+      return lines
+        .sort((a, b) => a.centerY - b.centerY)
+        .map((line) => ({
+          ...line,
+          spans: line.spans.sort((a, b) => a.x - b.x),
+        }));
+    };
+
+    const detectPositionedLine = (
+      pageNumber: number,
+      spans: PositionedSpan[],
+      pageWidth: number,
+      pageHeight: number,
+      idPrefix: string
+    ) => {
+      if (!spans.length) return 0;
+
+      let lineText = "";
+
+      const mapped: Array<
+        PositionedSpan & {
+          start: number;
+          end: number;
+        }
+      > = [];
+
+      for (const original of spans) {
+        const text = original.text.trim();
+        if (!text) continue;
+
+        if (lineText.length > 0) {
+          lineText += " ";
+        }
+
+        const start = lineText.length;
+        lineText += text;
+        const end = lineText.length;
+
+        mapped.push({
+          ...original,
+          text,
+          start,
+          end,
+        });
+      }
+
+      if (!lineText.trim()) return 0;
+
+      const matches = detectText(lineText);
+      let added = 0;
+
+      for (const match of matches) {
+        const segments: Array<{
+          x0: number;
+          y0: number;
+          x1: number;
+          y1: number;
+          height: number;
+        }> = [];
+
+        for (const span of mapped) {
+          const overlapStart = Math.max(match.start, span.start);
+          const overlapEnd = Math.min(match.end, span.end);
+
+          if (overlapEnd <= overlapStart) continue;
+
+          const textLength = Math.max(1, span.end - span.start);
+
           const startRatio =
-            text.length > 0 ? match.start / text.length : 0;
+            (overlapStart - span.start) / textLength;
 
           const endRatio =
-            text.length > 0 ? match.end / text.length : 1;
+            (overlapEnd - span.start) / textLength;
 
-          const horizontalGuard = Math.max(5, fontHeight * 0.45);
+          segments.push({
+            x0: span.x + span.width * startRatio,
+            x1: span.x + span.width * endRatio,
+            y0: span.y,
+            y1: span.y + span.height,
+            height: span.height,
+          });
+        }
 
-          const rawX = baseX + itemWidth * startRatio;
-          const x = Math.max(0, rawX - horizontalGuard);
-          const y = Math.max(0, baseY - 3);
+        if (!segments.length) continue;
 
-          const width = Math.min(
-            viewport.width - x,
-            Math.max(
-              8,
-              itemWidth * (endRatio - startRatio) +
-                horizontalGuard * 2
+        const minX = Math.min(...segments.map((x) => x.x0));
+        const maxX = Math.max(...segments.map((x) => x.x1));
+        const minY = Math.min(...segments.map((x) => x.y0));
+        const maxY = Math.max(...segments.map((x) => x.y1));
+
+        const maxHeight = Math.max(
+          ...segments.map((x) => x.height)
+        );
+
+        const horizontalGuard = Math.max(
+          5,
+          maxHeight * 0.4
+        );
+
+        const x = Math.max(0, minX - horizontalGuard);
+        const y = Math.max(0, minY - 3);
+
+        const width = Math.min(
+          pageWidth - x,
+          Math.max(
+            8,
+            maxX - minX + horizontalGuard * 2
+          )
+        );
+
+        const height = Math.min(
+          pageHeight - y,
+          Math.max(
+            10,
+            maxY - minY + 6
+          )
+        );
+
+        nextFindings.push({
+          id: `${idPrefix}-${pageNumber}-${nextFindings.length}-${match.start}-${match.category}`,
+          category: match.category,
+          value: match.value,
+          maskedValue: maskValue(match.value),
+          page: pageNumber,
+          box: {
+            x,
+            y,
+            width,
+            height,
+          },
+          selected: true,
+        });
+
+        added++;
+      }
+
+      return added;
+    };
+
+    const getOcrWorker = async () => {
+      if (ocrWorker) return ocrWorker;
+
+      setStatus("Initializing private local OCR engine…");
+
+      const { createWorker } = await import("tesseract.js");
+
+      ocrWorker = await createWorker("eng", 1, {
+        workerPath: "/tessdata/worker.min.js",
+        corePath: "/tessdata/tesseract-core-simd-lstm.wasm.js",
+        langPath: "/tessdata",
+        gzip: true,
+      });
+
+      return ocrWorker;
+    };
+
+    try {
+      for (
+        let pageNumber = 1;
+        pageNumber <= pdf.numPages;
+        pageNumber++
+      ) {
+        setStatus(
+          `Scanning page ${pageNumber} of ${pdf.numPages}…`
+        );
+
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1 });
+
+        const textContent = await page.getTextContent();
+
+        const digitalSpans: PositionedSpan[] = [];
+
+        for (const rawItem of textContent.items as any[]) {
+          if (
+            !rawItem ||
+            typeof rawItem.str !== "string" ||
+            !rawItem.str.trim()
+          ) {
+            continue;
+          }
+
+          const transformed = pdfjsLib.Util.transform(
+            viewport.transform,
+            rawItem.transform
+          );
+
+          const fontHeight = Math.max(
+            7,
+            Math.hypot(
+              transformed[2],
+              transformed[3]
             )
           );
 
-          const height = Math.min(
-            viewport.height - y,
-            Math.max(10, fontHeight + 6)
+          const width = Math.max(
+            2,
+            Number(
+              rawItem.width ||
+                rawItem.str.length * fontHeight * 0.5
+            ) * viewport.scale
           );
 
-          nextFindings.push({
-            id: `pdf-${pageNumber}-${itemIndex}-${match.start}-${match.category}`,
-            category: match.category,
-            value: match.value,
-            maskedValue: maskValue(match.value),
-            page: pageNumber,
-            box: {
-              x,
-              y,
-              width,
-              height,
-            },
-            selected: true,
+          digitalSpans.push({
+            text: rawItem.str,
+            x: transformed[4],
+            y: transformed[5] - fontHeight,
+            width,
+            height: fontHeight,
           });
         }
-      });
+
+        const digitalCharacters = digitalSpans.reduce(
+          (sum, item) =>
+            sum + item.text.replace(/\s/g, "").length,
+          0
+        );
+
+        let digitalFindings = 0;
+
+        const digitalLines =
+          groupIntoLines(digitalSpans);
+
+        for (const line of digitalLines) {
+          digitalFindings += detectPositionedLine(
+            pageNumber,
+            line.spans,
+            viewport.width,
+            viewport.height,
+            "pdf"
+          );
+        }
+
+        const hasUsableDigitalText =
+          digitalCharacters >= 40 ||
+          digitalSpans.length >= 8 ||
+          digitalFindings > 0;
+
+        if (!hasUsableDigitalText) {
+          setStatus(
+            `Page ${pageNumber} appears scanned — running private OCR…`
+          );
+
+          const worker = await getOcrWorker();
+          const ocrScale = 2;
+
+          const ocrViewport = page.getViewport({
+            scale: ocrScale,
+          });
+
+          const canvas =
+            document.createElement("canvas");
+
+          canvas.width = Math.ceil(
+            ocrViewport.width
+          );
+
+          canvas.height = Math.ceil(
+            ocrViewport.height
+          );
+
+          const ctx = canvas.getContext("2d", {
+            alpha: false,
+          });
+
+          if (!ctx) {
+            throw new Error(
+              "Unable to initialize local OCR canvas."
+            );
+          }
+
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          await page.render({
+            canvasContext: ctx,
+            viewport: ocrViewport,
+            canvas,
+          } as any).promise;
+
+          const { data } =
+            await worker.recognize(
+              canvas,
+              {},
+              {
+                text: true,
+                blocks: true,
+              } as any
+            );
+
+          let ocrLines: any[][] = [];
+
+          if (
+            Array.isArray((data as any)?.blocks)
+          ) {
+            ocrLines = (data as any).blocks
+              .flatMap(
+                (block: any) =>
+                  block?.paragraphs || []
+              )
+              .flatMap(
+                (paragraph: any) =>
+                  paragraph?.lines || []
+              )
+              .map(
+                (line: any) =>
+                  line?.words || []
+              )
+              .filter(
+                (words: any[]) =>
+                  words.length > 0
+              );
+          }
+
+          if (
+            ocrLines.length === 0 &&
+            Array.isArray((data as any)?.words)
+          ) {
+            const positionedWords: PositionedSpan[] =
+              (data as any).words
+                .filter(
+                  (word: any) =>
+                    word?.text?.trim() &&
+                    word?.bbox
+                )
+                .map((word: any) => ({
+                  text: word.text,
+                  x:
+                    word.bbox.x0 /
+                    ocrScale,
+                  y:
+                    word.bbox.y0 /
+                    ocrScale,
+                  width:
+                    (word.bbox.x1 -
+                      word.bbox.x0) /
+                    ocrScale,
+                  height:
+                    (word.bbox.y1 -
+                      word.bbox.y0) /
+                    ocrScale,
+                }));
+
+            const fallbackLines =
+              groupIntoLines(positionedWords);
+
+            for (const line of fallbackLines) {
+              detectPositionedLine(
+                pageNumber,
+                line.spans,
+                viewport.width,
+                viewport.height,
+                "ocr"
+              );
+            }
+          } else {
+            for (
+              let lineIndex = 0;
+              lineIndex < ocrLines.length;
+              lineIndex++
+            ) {
+              const words =
+                ocrLines[lineIndex];
+
+              const positioned: PositionedSpan[] =
+                words
+                  .filter(
+                    (word: any) =>
+                      word?.text?.trim() &&
+                      word?.bbox
+                  )
+                  .map((word: any) => ({
+                    text: word.text,
+                    x:
+                      word.bbox.x0 /
+                      ocrScale,
+                    y:
+                      word.bbox.y0 /
+                      ocrScale,
+                    width:
+                      (word.bbox.x1 -
+                        word.bbox.x0) /
+                      ocrScale,
+                    height:
+                      (word.bbox.y1 -
+                        word.bbox.y0) /
+                      ocrScale,
+                  }));
+
+              detectPositionedLine(
+                pageNumber,
+                positioned,
+                viewport.width,
+                viewport.height,
+                `ocr-${lineIndex}`
+              );
+            }
+          }
+
+          ctx.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          canvas.width = 1;
+          canvas.height = 1;
+        }
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      setFindings(nextFindings);
+    } finally {
+      if (ocrWorker) {
+        try {
+          await ocrWorker.terminate();
+        } catch (_) {}
+      }
+
+      try {
+        await pdf.destroy();
+      } catch (_) {}
     }
-
-    setFindings(nextFindings);
-
-    try {
-      await pdf.destroy();
-    } catch (_) {}
   };
 
   const scanFile = async (nextFile: File) => {
@@ -760,11 +1258,24 @@ export const PrivatePiiRedactor: React.FC = () => {
               </span>
             </div>
 
-            {isScanning ? (
-              <Loader2 className="w-5 h-5 animate-spin text-emerald-700" />
-            ) : (
-              <CheckCircle2 className="w-5 h-5 text-emerald-700" />
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {isScanning ? (
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              )}
+
+              <button
+                type="button"
+                onClick={clearAll}
+                disabled={isScanning || isRedacting}
+                className="pii-file-remove inline-flex items-center justify-center w-9 h-9 rounded-lg border transition"
+                aria-label="Remove file"
+                title="Remove file"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 

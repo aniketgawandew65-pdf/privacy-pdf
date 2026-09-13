@@ -271,3 +271,22 @@ a {text-decoration:none}
   background:#f4f4f5 !important;
   color:#000 !important;
 }
+
+
+/* PII Auto-Redactor uploaded-file remove button */
+.pii-redactor .pii-file-remove {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border-color: #d4d4d8 !important;
+}
+
+.pii-redactor .pii-file-remove:hover:not(:disabled) {
+  background: #f4f4f5 !important;
+  color: #000000 !important;
+  border-color: #a1a1aa !important;
+}
+
+.pii-redactor .pii-file-remove:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
