@@ -251,3 +251,23 @@ a {text-decoration:none}
     overflow-anchor: none;
   }
 }
+
+
+/* PII Auto-Redactor: isolate readable hover states from global tool styling */
+.pii-redactor .pii-secondary-button {
+  background:#fff !important;
+  color:#000 !important;
+  border-color:#18181b !important;
+}
+.pii-redactor .pii-secondary-button:hover {
+  background:#f4f4f5 !important;
+  color:#000 !important;
+}
+.pii-redactor .pii-finding-row {
+  background:#fff !important;
+  color:#000 !important;
+}
+.pii-redactor .pii-finding-row:hover {
+  background:#f4f4f5 !important;
+  color:#000 !important;
+}

@@ -73,6 +73,7 @@ const BookletPdf = lazy(() => import('./components/BookletPdf').then((m) => ({ d
 const DeskewPdf = lazy(() => import('./components/DeskewPdf').then((m) => ({ default: m.DeskewPdf })));
 
 const SanitizePdf = lazy(() => import('./components/SanitizePdf').then((m) => ({ default: m.SanitizePdf })));
+const PrivatePiiRedactor = lazy(() => import('./components/PrivatePiiRedactor').then((m) => ({ default: m.PrivatePiiRedactor })));
 const RedactPdf = lazy(() => import('./components/RedactPdf').then((m) => ({ default: m.RedactPdf })));
 const ProtectPdf = lazy(() => import('./components/ProtectPdf').then((m) => ({ default: m.ProtectPdf })));
 const UnlockPdf = lazy(() => import('./components/UnlockPdf').then((m) => ({ default: m.UnlockPdf })));
@@ -137,6 +138,7 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Deskew', path: '/deskew-pdf', category: 'organize', icon: RotateCw },
 
   { name: 'Sanitize', path: '/sanitize-pdf', category: 'security', icon: EyeOff },
+  { name: 'Private PII & Secrets Auto-Redactor', path: '/private-pii-secrets-auto-redactor', category: 'security', icon: ShieldCheck },
   { name: 'Redact', path: '/redact-pdf', category: 'security', icon: SquareSlash },
   { name: 'Protect', path: '/protect-pdf', category: 'security', icon: Lock },
   { name: 'Unlock', path: '/unlock-pdf', category: 'security', icon: Unlock },
@@ -506,6 +508,7 @@ export default function App() {
               <Route path="/deskew-pdf" element={<DeskewPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
 
               <Route path="/sanitize-pdf" element={<SanitizePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/private-pii-secrets-auto-redactor" element={<PrivatePiiRedactor />} />
               <Route path="/redact-pdf" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/protect-pdf" element={<ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/unlock-pdf" element={<UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />} />

@@ -295,6 +295,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Bank Statement PDF to Excel Converter',
     subheading: 'Extract transaction tables into spreadsheet-ready data while processing the PDF locally.',
   },
+  '/private-pii-secrets-auto-redactor': {
+    path: '/private-pii-secrets-auto-redactor',
+    title: 'PII & Secrets Auto-Redactor — Private File Scanner | 1into1',
+    description: 'Scan PDF, TXT and CSV files for common sensitive information and exposed secrets, review every finding, and create a redacted copy locally in your browser.',
+    heading: 'Private PII & Secrets Auto-Redactor',
+    subheading: 'Automatically find common personal information, financial identifiers and exposed secrets before sharing a file.',
+  },
   '/offline-pdf-redaction': {
     path: '/offline-pdf-redaction',
     title: 'Redact PDF Online — Permanent & Private | 1into1',
