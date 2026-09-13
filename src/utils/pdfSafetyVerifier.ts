@@ -6,15 +6,12 @@ export const normalizeForSafetyCheck = (value: string) =>
     .replace(/[^a-z0-9]/g, "");
 
 export type SafetyVerificationTarget = {
-  id?: string;
   value: string;
-  page?: number;
 };
 
 export type FinalVerificationResult = {
   passed: boolean;
   leakedValues: string[];
-  leakedTargets: SafetyVerificationTarget[];
   selectableTextFound: boolean;
 };
 
@@ -30,37 +27,24 @@ export const verifyFinishedPdf = async (
   let worker: any = null;
 
   try {
-    const selectedTargets = selectedFindings
-      .map((target, index) => ({
-        target,
-        normalized: normalizeForSafetyCheck(
-          target.value
-        ),
-        key:
-          target.id ||
-          `${target.page ?? "all"}:${index}`,
+    const selectedValues = selectedFindings
+      .map((finding) => ({
+        original: finding.value,
+        normalized: normalizeForSafetyCheck(finding.value),
       }))
-      .filter(
-        (item) =>
-          item.normalized.length >= 4
-      );
-
-    const leakedKeys =
-      new Set<string>();
+      .filter((item) => item.normalized.length >= 4);
 
     let selectableTextFound = false;
+    let visibleText = "";
 
-    const { createWorker } =
-      await import("tesseract.js");
+    const { createWorker } = await import("tesseract.js");
 
     worker = await createWorker(
       "eng",
       1,
       {
-        workerPath:
-          "/tessdata/worker.min.js",
-        corePath:
-          "/tessdata/tesseract-core-simd-lstm.wasm.js",
+        workerPath: "/tessdata/worker.min.js",
+        corePath: "/tessdata/tesseract-core-simd-lstm.wasm.js",
         langPath: "/tessdata",
         gzip: true,
       } as any
@@ -76,19 +60,14 @@ export const verifyFinishedPdf = async (
       );
 
       const page =
-        await verificationPdf.getPage(
-          pageNumber
-        );
+        await verificationPdf.getPage(pageNumber);
 
       const textContent =
         await page.getTextContent();
 
       const selectableText =
         textContent.items
-          .map(
-            (item: any) =>
-              item?.str || ""
-          )
+          .map((item: any) => item?.str || "")
           .join(" ")
           .trim();
 
@@ -97,14 +76,10 @@ export const verifyFinishedPdf = async (
       }
 
       const viewport =
-        page.getViewport({
-          scale: 1.7,
-        });
+        page.getViewport({ scale: 1.7 });
 
       const canvas =
-        document.createElement(
-          "canvas"
-        );
+        document.createElement("canvas");
 
       canvas.width =
         Math.ceil(viewport.width);
@@ -124,7 +99,6 @@ export const verifyFinishedPdf = async (
       }
 
       ctx.fillStyle = "#ffffff";
-
       ctx.fillRect(
         0,
         0,
@@ -147,63 +121,32 @@ export const verifyFinishedPdf = async (
           } as any
         );
 
-      const normalizedPageText =
-        normalizeForSafetyCheck(
-          data?.text || ""
-        );
-
-      /*
-       * CRITICAL:
-       * A target assigned to Page 3 is checked
-       * ONLY against Page 3.
-       *
-       * Redacting the same value on Page 1 can
-       * no longer resolve a Page 3 finding.
-       */
-      const pageTargets =
-        selectedTargets.filter(
-          (item) =>
-            !item.target.page ||
-            item.target.page ===
-              pageNumber
-        );
-
-      for (const item of pageTargets) {
-        if (
-          normalizedPageText.includes(
-            item.normalized
-          )
-        ) {
-          leakedKeys.add(item.key);
-        }
-      }
+      visibleText +=
+        ` ${data?.text || ""}`;
 
       canvas.width = 1;
       canvas.height = 1;
     }
 
-    const leakedTargets =
-      selectedTargets
+    const normalizedVisibleText =
+      normalizeForSafetyCheck(
+        visibleText
+      );
+
+    const leakedValues =
+      selectedValues
         .filter((item) =>
-          leakedKeys.has(item.key)
+          normalizedVisibleText.includes(
+            item.normalized
+          )
         )
-        .map((item) => item.target);
+        .map((item) => item.original);
 
     return {
       passed:
         !selectableTextFound &&
-        leakedTargets.length === 0,
-
-      leakedTargets,
-
-      /*
-       * Kept for existing automatic repair logic.
-       */
-      leakedValues:
-        leakedTargets.map(
-          (target) => target.value
-        ),
-
+        leakedValues.length === 0,
+      leakedValues,
       selectableTextFound,
     };
   } finally {
