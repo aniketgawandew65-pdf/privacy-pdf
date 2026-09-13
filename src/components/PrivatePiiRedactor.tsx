@@ -1,3 +1,4 @@
+import { createWorker } from 'tesseract.js';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -624,6 +625,21 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     };
   }, [file, findings, sourceText, error, status]);
 
+
+  useEffect(() => {
+    const piiOcrAssets = [
+      "/tessdata/worker.min.js",
+      "/tessdata/tesseract-core-simd-lstm.wasm.js",
+      "/tessdata/eng.traineddata.gz",
+    ];
+
+    piiOcrAssets.forEach((url) => {
+      fetch(url, {
+        cache: "force-cache",
+      }).catch(() => {});
+    });
+  }, []);
+
   const grouped = useMemo(() => {
     const map = new Map<FindingCategory, Finding[]>();
 
@@ -737,7 +753,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     );
   };
 
-  const scanPdf = async (nextFile: File) => {
+  const scanPdfWithTextLayer = async (nextFile: File) => {
     const bytes = new Uint8Array(await nextFile.arrayBuffer());
 
     const loadingTask = pdfjsLib.getDocument({
@@ -1241,6 +1257,691 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       try {
         await pdf.destroy();
       } catch (_) {}
+    }
+  };
+
+
+  const isPdfPasswordError = (err: any) => {
+    const name = String(err?.name || "").toLowerCase();
+    const message = String(err?.message || "").toLowerCase();
+
+    return (
+      name.includes("password") ||
+      message.includes("password") ||
+      message.includes("need_password") ||
+      message.includes("incorrect_password")
+    );
+  };
+
+  type OcrWordBox = {
+    text: string;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  };
+
+  const parseOcrBbox = (
+    title: string | null
+  ): Omit<OcrWordBox, "text"> | null => {
+    if (!title) return null;
+
+    const match = title.match(
+      /bbox\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/
+    );
+
+    if (!match) return null;
+
+    return {
+      x0: Number(match[1]),
+      y0: Number(match[2]),
+      x1: Number(match[3]),
+      y1: Number(match[4]),
+    };
+  };
+
+  const detectOcrLine = (
+    words: OcrWordBox[],
+    pageNumber: number,
+    pageWidth: number,
+    pageHeight: number,
+    renderScale: number,
+    idPrefix: string
+  ): Finding[] => {
+    if (!words.length) return [];
+
+    const cleanWords = words
+      .filter(
+        (word) =>
+          word.text.trim() &&
+          Number.isFinite(word.x0) &&
+          Number.isFinite(word.y0) &&
+          Number.isFinite(word.x1) &&
+          Number.isFinite(word.y1)
+      )
+      .sort((a, b) => a.x0 - b.x0);
+
+    if (!cleanWords.length) return [];
+
+    let lineText = "";
+
+    const mapped: Array<
+      OcrWordBox & {
+        start: number;
+        end: number;
+      }
+    > = [];
+
+    for (const word of cleanWords) {
+      const text = word.text.trim();
+      if (!text) continue;
+
+      if (lineText.length > 0) {
+        lineText += " ";
+      }
+
+      const start = lineText.length;
+      lineText += text;
+      const end = lineText.length;
+
+      mapped.push({
+        ...word,
+        text,
+        start,
+        end,
+      });
+    }
+
+    if (!lineText.trim()) return [];
+
+    const matches = detectText(lineText);
+    const results: Finding[] = [];
+
+    matches.forEach((match, matchIndex) => {
+      const overlapping = mapped.filter(
+        (word) =>
+          match.start < word.end &&
+          match.end > word.start
+      );
+
+      if (!overlapping.length) return;
+
+      const minX = Math.min(...overlapping.map((x) => x.x0));
+      const minY = Math.min(...overlapping.map((x) => x.y0));
+      const maxX = Math.max(...overlapping.map((x) => x.x1));
+      const maxY = Math.max(...overlapping.map((x) => x.y1));
+
+      // Small safety padding around OCR boxes.
+      const padX = Math.max(3, (maxY - minY) * 0.18);
+      const padY = Math.max(2, (maxY - minY) * 0.10);
+
+      const x =
+        Math.max(0, minX - padX) /
+        renderScale;
+
+      const y =
+        Math.max(0, minY - padY) /
+        renderScale;
+
+      const width =
+        Math.min(
+          pageWidth * renderScale,
+          maxX + padX
+        ) /
+          renderScale -
+        x;
+
+      const height =
+        Math.min(
+          pageHeight * renderScale,
+          maxY + padY
+        ) /
+          renderScale -
+        y;
+
+      results.push({
+        id:
+          `ocr-${pageNumber}-${idPrefix}-${matchIndex}-` +
+          `${match.category}-${Math.round(x)}-${Math.round(y)}`,
+        category: match.category,
+        value: match.value,
+        maskedValue: maskValue(match.value),
+        page: pageNumber,
+        box: {
+          x,
+          y,
+          width: Math.max(2, width),
+          height: Math.max(2, height),
+        },
+        pageWidth,
+        pageHeight,
+        selected: true,
+      });
+    });
+
+    return results;
+  };
+
+  const extractOcrLines = (data: any): OcrWordBox[][] => {
+    const result: OcrWordBox[][] = [];
+
+    // --------------------------------------------------------
+    // Preferred path: hOCR gives excellent positional data.
+    // --------------------------------------------------------
+    if (
+      typeof data?.hocr === "string" &&
+      data.hocr.trim()
+    ) {
+      try {
+        const doc = new DOMParser().parseFromString(
+          data.hocr,
+          "text/html"
+        );
+
+        const lineElements = Array.from(
+          doc.querySelectorAll(
+            ".ocr_line, .ocrx_line"
+          )
+        );
+
+        for (const lineElement of lineElements) {
+          const words: OcrWordBox[] = [];
+
+          const wordElements = Array.from(
+            lineElement.querySelectorAll(".ocrx_word")
+          );
+
+          for (const wordElement of wordElements) {
+            const text =
+              wordElement.textContent?.trim() || "";
+
+            const bbox = parseOcrBbox(
+              wordElement.getAttribute("title")
+            );
+
+            if (!text || !bbox) continue;
+
+            words.push({
+              text,
+              ...bbox,
+            });
+          }
+
+          if (words.length) {
+            result.push(words);
+          }
+        }
+      } catch (_) {
+        // Continue to structured fallback below.
+      }
+    }
+
+    if (result.length) {
+      return result;
+    }
+
+    // --------------------------------------------------------
+    // Tesseract structured blocks fallback.
+    // --------------------------------------------------------
+    if (Array.isArray(data?.blocks)) {
+      for (const block of data.blocks) {
+        const paragraphs =
+          Array.isArray(block?.paragraphs)
+            ? block.paragraphs
+            : [];
+
+        for (const paragraph of paragraphs) {
+          const lines =
+            Array.isArray(paragraph?.lines)
+              ? paragraph.lines
+              : [];
+
+          for (const line of lines) {
+            const rawWords =
+              Array.isArray(line?.words)
+                ? line.words
+                : [];
+
+            const words: OcrWordBox[] = [];
+
+            for (const word of rawWords) {
+              const text =
+                String(word?.text || "").trim();
+
+              const bbox = word?.bbox;
+
+              if (
+                !text ||
+                !bbox ||
+                !Number.isFinite(bbox.x0) ||
+                !Number.isFinite(bbox.y0) ||
+                !Number.isFinite(bbox.x1) ||
+                !Number.isFinite(bbox.y1)
+              ) {
+                continue;
+              }
+
+              words.push({
+                text,
+                x0: bbox.x0,
+                y0: bbox.y0,
+                x1: bbox.x1,
+                y1: bbox.y1,
+              });
+            }
+
+            if (words.length) {
+              result.push(words);
+            }
+          }
+        }
+      }
+    }
+
+    if (result.length) {
+      return result;
+    }
+
+    // --------------------------------------------------------
+    // Older Tesseract versions expose data.words directly.
+    // Group them by OCR line.
+    // --------------------------------------------------------
+    if (Array.isArray(data?.words)) {
+      const groups = new Map<string, OcrWordBox[]>();
+
+      data.words.forEach(
+        (word: any) => {
+          const text =
+            String(word?.text || "").trim();
+
+          const bbox = word?.bbox;
+
+          if (
+            !text ||
+            !bbox ||
+            !Number.isFinite(bbox.x0) ||
+            !Number.isFinite(bbox.y0) ||
+            !Number.isFinite(bbox.x1) ||
+            !Number.isFinite(bbox.y1)
+          ) {
+            return;
+          }
+
+          const key =
+            word?.line_num != null
+              ? `${word.block_num ?? 0}:` +
+                `${word.par_num ?? 0}:` +
+                `${word.line_num}`
+              : `fallback-${Math.round(
+                  bbox.y0 / 12
+                )}`;
+
+          const current = groups.get(key) || [];
+
+          current.push({
+            text,
+            x0: bbox.x0,
+            y0: bbox.y0,
+            x1: bbox.x1,
+            y1: bbox.y1,
+          });
+
+          groups.set(key, current);
+        }
+      );
+
+      return Array.from(groups.values());
+    }
+
+    return result;
+  };
+
+  const scanPdfWithOcr = async (
+    nextFile: File,
+    requestedPages?: number[],
+    appendToExisting = false
+  ) => {
+    const bytes = new Uint8Array(
+      await nextFile.arrayBuffer()
+    );
+
+    let pdf: any = null;
+    let ocrWorker: any = null;
+
+    const nextFindings: Finding[] = [];
+
+    try {
+      const loadingTask = pdfjsLib.getDocument({
+        isEvalSupported: false,
+        data: bytes.slice(),
+      });
+
+      pdf = await loadingTask.promise;
+
+      const pagesToScan =
+        requestedPages && requestedPages.length
+          ? requestedPages
+          : Array.from(
+              { length: pdf.numPages },
+              (_, index) => index + 1
+            );
+
+      // Uses the exact same local OCR assets as the
+      // existing 1into1 OCR engine.
+      ocrWorker = await createWorker("eng", 1, {
+        workerPath: "/tessdata/worker.min.js",
+        corePath:
+          "/tessdata/tesseract-core-simd-lstm.wasm.js",
+        langPath: "/tessdata",
+        gzip: true,
+      });
+
+      for (let index = 0; index < pagesToScan.length; index++) {
+        const pageNumber = pagesToScan[index];
+
+        setStatus(
+          `Scanning page ${pageNumber} of ${pdf.numPages} with local OCR…`
+        );
+
+        const page = await pdf.getPage(pageNumber);
+
+        const baseViewport = page.getViewport({
+          scale: 1,
+        });
+
+        const renderScale = 1.6;
+
+        const viewport = page.getViewport({
+          scale: renderScale,
+        });
+
+        const canvas =
+          document.createElement("canvas");
+
+        canvas.width = Math.max(
+          1,
+          Math.ceil(viewport.width)
+        );
+
+        canvas.height = Math.max(
+          1,
+          Math.ceil(viewport.height)
+        );
+
+        canvas.style.position = "fixed";
+        canvas.style.left = "-9999px";
+        canvas.style.top = "0";
+        canvas.style.opacity = "0";
+        canvas.style.pointerEvents = "none";
+
+        document.body.appendChild(canvas);
+
+        try {
+          const ctx = canvas.getContext(
+            "2d",
+            { alpha: false }
+          );
+
+          if (!ctx) {
+            throw new Error(
+              "Unable to create local OCR renderer."
+            );
+          }
+
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          await page.render({
+            canvasContext: ctx as any,
+            viewport,
+            canvas,
+          } as any).promise;
+
+          const result = await (
+            ocrWorker as any
+          ).recognize(
+            canvas,
+            {},
+            {
+              text: true,
+              hocr: true,
+              blocks: true,
+            }
+          );
+
+          const lines = extractOcrLines(
+            result?.data || {}
+          );
+
+          lines.forEach((words, lineIndex) => {
+            nextFindings.push(
+              ...detectOcrLine(
+                words,
+                pageNumber,
+                baseViewport.width,
+                baseViewport.height,
+                renderScale,
+                String(lineIndex)
+              )
+            );
+          });
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+          canvas.remove();
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+      }
+
+      if (appendToExisting) {
+        const replacedPages = new Set(
+          pagesToScan
+        );
+
+        setFindings((current) => [
+          ...current.filter(
+            (finding) =>
+              !finding.page ||
+              !replacedPages.has(finding.page)
+          ),
+          ...nextFindings,
+        ]);
+      } else {
+        setFindings(nextFindings);
+      }
+    } catch (err: any) {
+      if (isPdfPasswordError(err)) {
+        throw new Error(
+          "This PDF is password-protected. Please unlock it first."
+        );
+      }
+
+      throw err;
+    } finally {
+      if (ocrWorker) {
+        try {
+          await ocrWorker.terminate();
+        } catch (_) {}
+      }
+
+      if (pdf) {
+        try {
+          await pdf.destroy();
+        } catch (_) {}
+      }
+    }
+  };
+
+  const inspectPdfForScannedPages = async (
+    nextFile: File
+  ): Promise<{
+    totalPages: number;
+    scannedPages: number[];
+  }> => {
+    const bytes = new Uint8Array(
+      await nextFile.arrayBuffer()
+    );
+
+    let pdf: any = null;
+
+    try {
+      pdf = await pdfjsLib.getDocument({
+        isEvalSupported: false,
+        data: bytes.slice(),
+      }).promise;
+
+      const scannedPages: number[] = [];
+
+      for (
+        let pageNumber = 1;
+        pageNumber <= pdf.numPages;
+        pageNumber++
+      ) {
+        try {
+          const page = await pdf.getPage(
+            pageNumber
+          );
+
+          const content =
+            await page.getTextContent();
+
+          const text = content.items
+            .map((item: any) =>
+              typeof item?.str === "string"
+                ? item.str
+                : ""
+            )
+            .join(" ")
+            .replace(/\s+/g, "")
+            .trim();
+
+          // Tiny/empty hidden text layers should not prevent OCR.
+          if (text.length < 8) {
+            scannedPages.push(pageNumber);
+          }
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+        } catch (_) {
+          // One unusual page should not kill the document.
+          // OCR that page instead.
+          scannedPages.push(pageNumber);
+        }
+      }
+
+      return {
+        totalPages: pdf.numPages,
+        scannedPages,
+      };
+    } catch (err: any) {
+      if (isPdfPasswordError(err)) {
+        throw new Error(
+          "This PDF is password-protected. Please unlock it first."
+        );
+      }
+
+      throw err;
+    } finally {
+      if (pdf) {
+        try {
+          await pdf.destroy();
+        } catch (_) {}
+      }
+    }
+  };
+
+  // ==========================================================
+  // UNIVERSAL PDF SCANNER
+  //
+  // Digital PDF  -> current scanner
+  // Scanned PDF  -> local OCR
+  // Mixed PDF    -> current scanner + OCR only scanned pages
+  // Weird page   -> OCR fallback rather than rejecting PDF
+  // Password PDF -> explicit password message
+  // ==========================================================
+  const scanPdf = async (nextFile: File) => {
+    let inspection: {
+      totalPages: number;
+      scannedPages: number[];
+    };
+
+    try {
+      inspection =
+        await inspectPdfForScannedPages(
+          nextFile
+        );
+    } catch (err: any) {
+      if (isPdfPasswordError(err)) {
+        throw err;
+      }
+
+      // If normal inspection fails but PDF.js can still
+      // render the document through the safer OCR path,
+      // attempt the entire PDF through OCR.
+      await scanPdfWithOcr(
+        nextFile,
+        undefined,
+        false
+      );
+
+      return;
+    }
+
+    const allPagesAreScanned =
+      inspection.totalPages > 0 &&
+      inspection.scannedPages.length ===
+        inspection.totalPages;
+
+    // Image-only / scanned PDF.
+    if (allPagesAreScanned) {
+      await scanPdfWithOcr(
+        nextFile,
+        inspection.scannedPages,
+        false
+      );
+
+      return;
+    }
+
+    // Normal PDF or mixed PDF.
+    // Preserve the existing high-quality digital scanner.
+    try {
+      await scanPdfWithTextLayer(nextFile);
+    } catch (err: any) {
+      if (isPdfPasswordError(err)) {
+        throw new Error(
+          "This PDF is password-protected. Please unlock it first."
+        );
+      }
+
+      // Valid but unusual PDF: don't reject it.
+      // Fall back to full-document OCR.
+      await scanPdfWithOcr(
+        nextFile,
+        undefined,
+        false
+      );
+
+      return;
+    }
+
+    // Mixed document:
+    // OCR only pages that have no meaningful text layer.
+    if (inspection.scannedPages.length > 0) {
+      await scanPdfWithOcr(
+        nextFile,
+        inspection.scannedPages,
+        true
+      );
     }
   };
 
