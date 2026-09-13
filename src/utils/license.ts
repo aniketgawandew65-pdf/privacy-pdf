@@ -13,7 +13,11 @@ let generation = 0;
 const proRequested =
   new URLSearchParams(window.location.search).get('pro') === 'true';
 
-let devEnabled = proRequested;
+const isAdminHost = window.location.hostname === 'pro.1into1.com';
+
+let devEnabled =
+  isAdminHost ||
+  (import.meta.env.DEV && proRequested);
 function emit() { window.dispatchEvent(new Event('storage')); }
 function readStored(): StoredLicense | null { try { return JSON.parse(safeStorage.getItem(LICENSE_STORAGE_KEY) || 'null'); } catch { return null; } }
 function unexpired(record: StoredLicense) {

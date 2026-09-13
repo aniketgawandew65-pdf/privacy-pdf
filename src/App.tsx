@@ -193,7 +193,9 @@ export default function App() {
   const proRequested =
     new URLSearchParams(location.search).get('pro') === 'true';
 
-  const isDevMode = proRequested;
+  const isDevMode =
+    window.location.hostname === 'pro.1into1.com' ||
+    (import.meta.env.DEV && proRequested);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
 
