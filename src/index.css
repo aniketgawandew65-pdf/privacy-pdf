@@ -290,3 +290,47 @@ a {text-decoration:none}
   opacity: 0.45 !important;
   cursor: not-allowed !important;
 }
+
+
+/* PII Auto-Redactor → Manual Redaction handoff */
+.pii-redactor .pii-manual-handoff {
+  background: #18181b !important;
+  color: #ffffff !important;
+  border: 1px solid #18181b !important;
+}
+
+.pii-redactor .pii-manual-handoff:hover {
+  background: #27272a !important;
+  color: #ffffff !important;
+}
+
+
+/* PII → Manual Redaction handoff readability */
+.pii-redactor .pii-manual-card {
+  background: #18181b !important;
+  border-color: #3f3f46 !important;
+  color: #ffffff !important;
+}
+
+/* Manual Redaction Draw / Pan controls */
+.redact-mode-button {
+  min-width: 64px !important;
+  border: 1px solid #d4d4d8 !important;
+}
+
+.redact-mode-active {
+  background: #059669 !important;
+  color: #ffffff !important;
+  border-color: #059669 !important;
+}
+
+.redact-mode-inactive {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border-color: #a1a1aa !important;
+}
+
+.redact-mode-inactive:hover {
+  background: #f4f4f5 !important;
+  color: #000000 !important;
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Download,
   Loader2,
@@ -35,6 +36,21 @@ interface DragState {
 }
 
 export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
+  const location = useLocation();
+
+  const routeState = location.state as
+    | {
+        initialRedactions?: Record<number, RedactionRect[]>;
+        fromAutoRedactor?: boolean;
+      }
+    | null;
+
+  const incomingAutoRedactions =
+    routeState?.fromAutoRedactor &&
+    routeState.initialRedactions
+      ? routeState.initialRedactions
+      : null;
+
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1); 
   const [redactMode, setRedactMode] = useState<"draw" | "pan">("draw");
@@ -91,7 +107,23 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         pdfDocRef.current = pdf;
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
-        setPageRedactions({});
+
+        if (incomingAutoRedactions) {
+          const cloned: Record<number, RedactionRect[]> = {};
+
+          for (const [pageNumber, rects] of Object.entries(
+            incomingAutoRedactions
+          )) {
+            cloned[Number(pageNumber)] = rects.map((rect) => ({
+              ...rect,
+            }));
+          }
+
+          setPageRedactions(cloned);
+        } else {
+          setPageRedactions({});
+        }
+
         setSelectedIndex(null);
       } catch (err) {
         console.error('Redact doc load error:', err);
@@ -482,14 +514,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             <button
               type="button"
               onClick={() => setRedactMode("draw")}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${redactMode === "draw" ? "bg-emerald-600 text-white shadow" : "text-zinc-400 hover:text-white"}`}
+              className={`redact-mode-button px-3 py-1.5 text-xs font-semibold rounded-md transition ${redactMode === "draw" ? "redact-mode-active" : "redact-mode-inactive"}`}
             >
               ⬛ Draw
             </button>
             <button
               type="button"
               onClick={() => setRedactMode("pan")}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition ${redactMode === "pan" ? "bg-emerald-600 text-white shadow" : "text-zinc-400 hover:text-white"}`}
+              className={`redact-mode-button px-3 py-1.5 text-xs font-semibold rounded-md transition ${redactMode === "pan" ? "redact-mode-active" : "redact-mode-inactive"}`}
             >
               ✋ Pan
             </button>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import { Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ProModal } from './components/ProModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getLicenseStatus } from './utils/license';
@@ -182,6 +182,7 @@ function ToolFallback() {
 
 export default function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [sharedFiles, setSharedFiles] = useState<File[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
@@ -429,6 +430,28 @@ export default function App() {
     }
   };
 
+  const handleContinueToManualRedaction = (
+    file: File,
+    initialRedactions: Record<
+      number,
+      Array<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }>
+    >
+  ) => {
+    handleSingleFileChange(file);
+
+    navigate('/redact-pdf', {
+      state: {
+        initialRedactions,
+        fromAutoRedactor: true,
+      },
+    });
+  };
+
   const currentMeta = blogMeta(location.pathname) || TOOLS_METADATA[location.pathname] || { heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
 
   const visibleTools = TOOLS_LIST.filter(tool =>
@@ -508,7 +531,14 @@ export default function App() {
               <Route path="/deskew-pdf" element={<DeskewPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
 
               <Route path="/sanitize-pdf" element={<SanitizePdf file={activeFile} onFileChange={handleSingleFileChange} />} />
-              <Route path="/private-pii-secrets-auto-redactor" element={<PrivatePiiRedactor />} />
+              <Route
+                path="/private-pii-secrets-auto-redactor"
+                element={
+                  <PrivatePiiRedactor
+                    onContinueManual={handleContinueToManualRedaction}
+                  />
+                }
+              />
               <Route path="/redact-pdf" element={<RedactPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/protect-pdf" element={<ProtectPdf file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/unlock-pdf" element={<UnlockPdf file={activeFile} onFileChange={handleSingleFileChange} />} />

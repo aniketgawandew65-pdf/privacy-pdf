@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Download,
   EyeOff,
@@ -22,6 +23,12 @@ type FindingCategory =
   | "Phone"
   | "Credit Card"
   | "US SSN"
+  | "India Aadhaar"
+  | "India PAN"
+  | "UK National Insurance"
+  | "UK NHS Number"
+  | "Canada SIN"
+  | "Australia TFN"
   | "IBAN"
   | "Bank Account"
   | "Passport"
@@ -53,6 +60,8 @@ type Finding = {
   // PDF
   page?: number;
   box?: RedactionBox;
+  pageWidth?: number;
+  pageHeight?: number;
 
   selected: boolean;
 };
@@ -113,6 +122,66 @@ const validPhone = (value: string) => {
   return digits.length >= 7 && digits.length <= 15;
 };
 
+const validUkNhs = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 10) return false;
+
+  const sum = digits
+    .slice(0, 9)
+    .split("")
+    .reduce(
+      (total, digit, index) =>
+        total + Number(digit) * (10 - index),
+      0
+    );
+
+  const remainder = sum % 11;
+  const check = 11 - remainder;
+  const expected = check === 11 ? 0 : check === 10 ? -1 : check;
+
+  return expected >= 0 && expected === Number(digits[9]);
+};
+
+const validCanadaSin = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 9) return false;
+
+  let sum = 0;
+
+  for (let i = 0; i < digits.length; i++) {
+    let n = Number(digits[i]);
+
+    if (i % 2 === 1) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+
+    sum += n;
+  }
+
+  return sum % 10 === 0;
+};
+
+const validAustraliaTfn = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 8 && digits.length !== 9) return false;
+
+  const normalized =
+    digits.length === 8 ? `0${digits}` : digits;
+
+  const weights = [1, 4, 3, 7, 5, 8, 6, 9, 10];
+
+  const sum = normalized
+    .split("")
+    .reduce(
+      (total, digit, index) =>
+        total + Number(digit) * weights[index],
+      0
+    );
+
+  return sum % 11 === 0;
+};
+
 const DETECTORS: Detector[] = [
   {
     category: "Name",
@@ -132,6 +201,45 @@ const DETECTORS: Detector[] = [
   {
     category: "US SSN",
     regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+  },
+  {
+    category: "India Aadhaar",
+    regex:
+      /\b(?:aadhaar|aadhar)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4})\b/gi,
+    captureGroup: 1,
+  },
+  {
+    category: "India PAN",
+    regex:
+      /\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([A-Z]{5}\d{4}[A-Z])\b/gi,
+    captureGroup: 1,
+  },
+  {
+    category: "UK National Insurance",
+    regex:
+      /\b(?:national\s+insurance|ni)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([A-CEGHJ-PR-TW-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D])\b/gi,
+    captureGroup: 1,
+  },
+  {
+    category: "UK NHS Number",
+    regex:
+      /\b(?:nhs)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{3}[\s-]?\d{3}[\s-]?\d{4})\b/gi,
+    captureGroup: 1,
+    validate: validUkNhs,
+  },
+  {
+    category: "Canada SIN",
+    regex:
+      /\b(?:sin|social\s+insurance\s+number)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{3}[\s-]?\d{3}[\s-]?\d{3})\b/gi,
+    captureGroup: 1,
+    validate: validCanadaSin,
+  },
+  {
+    category: "Australia TFN",
+    regex:
+      /\b(?:tfn|tax\s+file\s+number)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{3}[\s-]?\d{3}[\s-]?\d{2,3})\b/gi,
+    captureGroup: 1,
+    validate: validAustraliaTfn,
   },
   {
     category: "Credit Card",
@@ -260,6 +368,12 @@ const detectText = (text: string) => {
   const priority: Record<FindingCategory, number> = {
     "Credit Card": 100,
     "US SSN": 95,
+    "India Aadhaar": 96,
+    "India PAN": 96,
+    "UK National Insurance": 96,
+    "UK NHS Number": 96,
+    "Canada SIN": 96,
+    "Australia TFN": 96,
     "IBAN": 90,
     "Bank Account": 88,
     "Passport": 86,
@@ -300,6 +414,148 @@ const detectText = (text: string) => {
   return accepted.sort((a, b) => a.start - b.start);
 };
 
+
+const normalizeForSafetyCheck = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+type FinalVerificationResult = {
+  passed: boolean;
+  leakedValues: string[];
+  selectableTextFound: boolean;
+};
+
+const verifyFinishedPdf = async (
+  bytes: Uint8Array,
+  selectedFindings: Finding[],
+  onProgress?: (message: string) => void
+): Promise<FinalVerificationResult> => {
+  const verificationPdf = await pdfjsLib.getDocument({
+    data: bytes.slice(),
+  }).promise;
+
+  let worker: any = null;
+
+  try {
+    const selectedValues = selectedFindings
+      .map((finding) => ({
+        original: finding.value,
+        normalized: normalizeForSafetyCheck(finding.value),
+      }))
+      .filter((item) => item.normalized.length >= 4);
+
+    let selectableTextFound = false;
+    let visibleText = "";
+
+    const { createWorker } = await import("tesseract.js");
+
+    worker = await createWorker(
+      "eng",
+      1,
+      {
+        workerPath: "/tessdata/worker.min.js",
+        corePath: "/tessdata/tesseract-core-simd-lstm.wasm.js",
+        langPath: "/tessdata",
+        gzip: true,
+      } as any
+    );
+
+    for (
+      let pageNumber = 1;
+      pageNumber <= verificationPdf.numPages;
+      pageNumber++
+    ) {
+      onProgress?.(
+        `Final safety verification ${pageNumber} of ${verificationPdf.numPages}…`
+      );
+
+      const page = await verificationPdf.getPage(pageNumber);
+
+      // Security check #1:
+      // the flattened secure output should not contain selectable text.
+      const textContent = await page.getTextContent();
+
+      const selectableText = textContent.items
+        .map((item: any) => item?.str || "")
+        .join(" ")
+        .trim();
+
+      if (selectableText.length > 0) {
+        selectableTextFound = true;
+      }
+
+      // Security check #2:
+      // OCR the ACTUAL finished page and make sure selected
+      // sensitive values are not still visibly readable.
+      const viewport = page.getViewport({ scale: 1.7 });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+
+      const ctx = canvas.getContext("2d", {
+        alpha: false,
+      });
+
+      if (!ctx) {
+        throw new Error(
+          "Unable to create final safety verification renderer."
+        );
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        canvas,
+      } as any).promise;
+
+      const { data } = await worker.recognize(
+        canvas,
+        {},
+        {
+          text: true,
+        } as any
+      );
+
+      visibleText += ` ${data?.text || ""}`;
+
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+
+    const normalizedVisibleText =
+      normalizeForSafetyCheck(visibleText);
+
+    const leakedValues = selectedValues
+      .filter((item) =>
+        normalizedVisibleText.includes(item.normalized)
+      )
+      .map((item) => item.original);
+
+    return {
+      passed:
+        !selectableTextFound &&
+        leakedValues.length === 0,
+      leakedValues,
+      selectableTextFound,
+    };
+  } finally {
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch (_) {}
+    }
+
+    try {
+      await verificationPdf.destroy();
+    } catch (_) {}
+  }
+};
+
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -313,7 +569,26 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export const PrivatePiiRedactor: React.FC = () => {
+type ManualRedactionMap = Record<
+  number,
+  Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>
+>;
+
+interface PrivatePiiRedactorProps {
+  onContinueManual?: (
+    file: File,
+    initialRedactions: ManualRedactionMap
+  ) => void;
+}
+
+export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
+  onContinueManual,
+}) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(
@@ -362,6 +637,72 @@ export const PrivatePiiRedactor: React.FC = () => {
   }, [findings]);
 
   const selectedCount = findings.filter((x) => x.selected).length;
+
+  const isPdfFile = Boolean(
+    file &&
+      (
+        file.type === "application/pdf" ||
+        file.name.toLowerCase().endsWith(".pdf")
+      )
+  );
+
+  const continueToManualRedaction = () => {
+    if (!file || !onContinueManual || !isPdfFile) return;
+
+    const initialRedactions: ManualRedactionMap = {};
+
+    for (const finding of findings) {
+      if (
+        !finding.selected ||
+        !finding.page ||
+        !finding.box ||
+        !finding.pageWidth ||
+        !finding.pageHeight
+      ) {
+        continue;
+      }
+
+      const box = finding.box;
+
+      const normalized = {
+        x: Math.max(
+          0,
+          Math.min(1, box.x / finding.pageWidth)
+        ),
+        y: Math.max(
+          0,
+          Math.min(1, box.y / finding.pageHeight)
+        ),
+        width: Math.max(
+          0.002,
+          Math.min(1, box.width / finding.pageWidth)
+        ),
+        height: Math.max(
+          0.002,
+          Math.min(1, box.height / finding.pageHeight)
+        ),
+      };
+
+      // Ensure the rectangle remains inside the page.
+      normalized.width = Math.min(
+        normalized.width,
+        1 - normalized.x
+      );
+
+      normalized.height = Math.min(
+        normalized.height,
+        1 - normalized.y
+      );
+
+      if (!initialRedactions[finding.page]) {
+        initialRedactions[finding.page] = [];
+      }
+
+      initialRedactions[finding.page].push(normalized);
+    }
+
+    onContinueManual(file, initialRedactions);
+  };
 
   const clearAll = () => {
     redactorSessionCache = {
@@ -597,6 +938,8 @@ export const PrivatePiiRedactor: React.FC = () => {
             width,
             height,
           },
+          pageWidth,
+          pageHeight,
           selected: true,
         });
 
@@ -978,8 +1321,8 @@ export const PrivatePiiRedactor: React.FC = () => {
     );
   };
 
-  const redactPlainText = async () => {
-    if (!file) return;
+  const redactPlainText = async (): Promise<boolean> => {
+    if (!file) return false;
 
     const selected = findings
       .filter(
@@ -1007,6 +1350,35 @@ export const PrivatePiiRedactor: React.FC = () => {
         ? "csv"
         : "txt";
 
+    setStatus("Running final safety verification…");
+
+    const normalizedOutput =
+      normalizeForSafetyCheck(output);
+
+    const leakedValues = findings
+      .filter((finding) => finding.selected)
+      .filter((finding) => {
+        const value =
+          normalizeForSafetyCheck(finding.value);
+
+        return (
+          value.length >= 4 &&
+          normalizedOutput.includes(value)
+        );
+      });
+
+    if (leakedValues.length > 0) {
+      setError(
+        `Final safety verification stopped the download because ${leakedValues.length} selected sensitive item${leakedValues.length === 1 ? "" : "s"} may still be visible. Review the document manually.`
+      );
+
+      setStatus(
+        "Final safety verification needs manual review."
+      );
+
+      return false;
+    }
+
     const base = file.name.replace(/\.[^.]+$/, "");
 
     downloadBlob(
@@ -1018,10 +1390,12 @@ export const PrivatePiiRedactor: React.FC = () => {
       }),
       `${base}-redacted.${extension}`
     );
+
+    return true;
   };
 
-  const redactPdf = async () => {
-    if (!file) return;
+  const redactPdf = async (): Promise<boolean> => {
+    if (!file) return false;
 
     const originalBytes = new Uint8Array(await file.arrayBuffer());
 
@@ -1140,6 +1514,52 @@ export const PrivatePiiRedactor: React.FC = () => {
 
     const bytes = await outputPdf.save();
 
+    setStatus(
+      "Running final safety verification on the finished PDF…"
+    );
+
+    const verification = await verifyFinishedPdf(
+      bytes,
+      selected,
+      (message) => setStatus(message)
+    );
+
+    if (!verification.passed) {
+      const reasons: string[] = [];
+
+      if (verification.selectableTextFound) {
+        reasons.push(
+          "the secure output unexpectedly contains selectable text"
+        );
+      }
+
+      if (verification.leakedValues.length > 0) {
+        reasons.push(
+          `${verification.leakedValues.length} selected sensitive item${verification.leakedValues.length === 1 ? "" : "s"} may still be visually readable`
+        );
+      }
+
+      setError(
+        `Final safety verification stopped the download because ${reasons.join(
+          " and "
+        )}. Continue in Manual Redaction and review the affected areas.`
+      );
+
+      setStatus(
+        "Final safety verification needs manual review."
+      );
+
+      try {
+        await pdf.destroy();
+      } catch (_) {}
+
+      return false;
+    }
+
+    setStatus(
+      "Final safety verification passed. Preparing download…"
+    );
+
     const base = file.name.replace(/\.pdf$/i, "");
 
     downloadBlob(
@@ -1152,6 +1572,8 @@ export const PrivatePiiRedactor: React.FC = () => {
     try {
       await pdf.destroy();
     } catch (_) {}
+
+    return true;
   };
 
   const createRedactedCopy = async () => {
@@ -1164,15 +1586,19 @@ export const PrivatePiiRedactor: React.FC = () => {
       const extension =
         file.name.split(".").pop()?.toLowerCase() || "";
 
+      let completed = false;
+
       if (extension === "pdf" || file.type === "application/pdf") {
-        await redactPdf();
+        completed = await redactPdf();
       } else {
-        await redactPlainText();
+        completed = await redactPlainText();
       }
 
-      setStatus(
-        "Redacted copy created locally. Your original file was never uploaded."
-      );
+      if (completed) {
+        setStatus(
+          "Final safety verification passed. Redacted copy created locally and downloaded."
+        );
+      }
     } catch (err: any) {
       console.error(err);
 
@@ -1427,6 +1853,36 @@ export const PrivatePiiRedactor: React.FC = () => {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {isPdfFile && onContinueManual && (
+            <div
+              className="pii-manual-card mt-6 rounded-xl border p-4 sm:flex sm:items-center sm:justify-between gap-4"
+            >
+              <div>
+                <strong className="block text-sm" style={{ color: "#ffffff" }}>
+                  Something sensitive was missed?
+                </strong>
+
+                <span
+                  className="block mt-1 text-xs leading-5"
+                  style={{ color: "#d4d4d8" }}
+                >
+                  Open the same PDF with all selected automatic redaction boxes
+                  already placed. Resize, move or delete them, then add anything
+                  the scanner missed. No second upload required.
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={continueToManualRedaction}
+                className="pii-manual-handoff mt-3 sm:mt-0 shrink-0 min-h-10 px-4 rounded-lg inline-flex items-center justify-center gap-2 text-xs font-semibold transition"
+              >
+                Auto-Redact & Continue Manually
+                <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
           )}
 
