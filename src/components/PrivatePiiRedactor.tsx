@@ -2806,9 +2806,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
               {status && isRedacting && (
                 <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <div className="flex items-center justify-center gap-2 text-xs font-medium text-emerald-900">
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                    <span>{status}</span>
+                  <div className="flex items-center justify-center gap-2 text-xs font-semibold !text-zinc-950">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0 !text-emerald-700" />
+                    <span className="!text-zinc-950">{status}</span>
                   </div>
                 </div>
               )}
