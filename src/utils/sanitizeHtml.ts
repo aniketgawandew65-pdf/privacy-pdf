@@ -1,7 +1,7 @@
 // Allow document formatting, never executable markup or remote resource requests.
 const tags = new Set('p div span br b strong i em u s strike ul ol li h1 h2 h3 h4 h5 h6 blockquote pre code table thead tbody tfoot tr th td hr img font sub sup'.split(' '));
 const drop = new Set(['script','style','iframe','object','embed','link','meta','base','svg','math','template']);
-const properties = new Set('color background-color font-size font-family font-weight font-style text-align text-decoration line-height letter-spacing padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-collapse border-spacing border-radius width max-width min-width height max-height vertical-align display flex justify-content align-items gap white-space word-break'.split(' '));
+const properties = new Set('color background-color font-size font-family font-weight font-style text-align text-decoration text-decoration-line text-decoration-style text-decoration-color text-decoration-thickness line-height letter-spacing padding padding-top padding-bottom padding-left padding-right margin margin-top margin-bottom margin-left margin-right border border-top border-bottom border-left border-right border-collapse border-spacing border-radius width max-width min-width height max-height vertical-align display flex justify-content align-items gap white-space word-break'.split(' '));
 export function sanitizeRichHtml(html: string): string {
   const document = new DOMParser().parseFromString(html, 'text/html');
   const clean = (parent: Element) => {

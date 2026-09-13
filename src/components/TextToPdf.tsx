@@ -40,6 +40,8 @@ const A4_WIDTH_PX = 794;
 const A4_PAGE_HEIGHT_PX = 1123;
 const USABLE_PAGE_HEIGHT_PX = 1011; // 1123px - (56px top + 56px bottom padding)
 
+const FONT_SIZE_OPTIONS = [8, 10, 12, 14, 16, 18, 24, 32];
+
 const FONT_OPTIONS = [
   { label: "Sans-Serif (Modern)", value: "Arial, Helvetica, sans-serif" },
   { label: "Serif (Classic)", value: "'Times New Roman', Times, serif" },
@@ -578,13 +580,9 @@ export const TextToPdf: React.FC<any> = () => {
             onChange={(e) => handleFontSizeChange(Number(e.target.value))}
             className="bg-zinc-900 border border-zinc-700/80 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none cursor-pointer"
           >
-            <option value={10}>10pt</option>
-            <option value={12}>12pt</option>
-            <option value={14}>14pt</option>
-            <option value={16}>16pt</option>
-            <option value={18}>18pt</option>
-            <option value={24}>24pt</option>
-            <option value={32}>32pt</option>
+            {FONT_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>{size}pt</option>
+            ))}
           </select>
 
           <button
@@ -592,7 +590,12 @@ export const TextToPdf: React.FC<any> = () => {
             onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFontSizeChange(Math.min(32, toolbarFontSize + 2))}
+            onClick={() => {
+              const next =
+                FONT_SIZE_OPTIONS.find((size) => size > toolbarFontSize) ??
+                FONT_SIZE_OPTIONS[FONT_SIZE_OPTIONS.length - 1];
+              handleFontSizeChange(next);
+            }}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
             A+
@@ -602,7 +605,12 @@ export const TextToPdf: React.FC<any> = () => {
             onTouchStart={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => handleFontSizeChange(Math.max(8, toolbarFontSize - 2))}
+            onClick={() => {
+              const previous =
+                [...FONT_SIZE_OPTIONS].reverse().find((size) => size < toolbarFontSize) ??
+                FONT_SIZE_OPTIONS[0];
+              handleFontSizeChange(previous);
+            }}
             className="px-2 py-1 text-xs font-bold hover:bg-zinc-800 rounded transition"
           >
             A-
