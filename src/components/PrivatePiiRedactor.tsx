@@ -78,6 +78,7 @@ type RedactorSessionCache = {
   error: string | null;
   status: string | null;
   manualReviewFindings: Finding[];
+  pendingRedactedPdf: Uint8Array | null;
 };
 
 const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
@@ -87,6 +88,7 @@ const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
   error: null,
   status: null,
   manualReviewFindings: [],
+  pendingRedactedPdf: null,
 };
 
 let redactorSessionCache: RedactorSessionCache = {
@@ -500,6 +502,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       () => redactorSessionCache.manualReviewFindings
     );
 
+  /*
+   * Holds the exact auto-redacted PDF when the final
+   * safety check still requires manual review.
+   *
+   * In-memory only — never localStorage/sessionStorage.
+   */
+  const pendingRedactedPdfRef =
+    useRef<Uint8Array | null>(
+      redactorSessionCache.pendingRedactedPdf
+    );
+
   useEffect(() => {
     redactorSessionCache = {
       file,
@@ -508,6 +521,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       error,
       status,
       manualReviewFindings,
+      pendingRedactedPdf:
+        pendingRedactedPdfRef.current,
     };
   }, [
     file,
@@ -692,6 +707,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     setError(null);
     setStatus(null);
     setManualReviewFindings([]);
+    pendingRedactedPdfRef.current = null;
+    redactorSessionCache.pendingRedactedPdf = null;
 
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -2369,6 +2386,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             )
           );
 
+        /*
+         * Keep the exact finished auto-redacted copy.
+         * Download Anyway reuses these bytes directly —
+         * no second OCR or redaction run.
+         */
+        pendingRedactedPdfRef.current =
+          new Uint8Array(bytes);
+
+        redactorSessionCache.pendingRedactedPdf =
+          pendingRedactedPdfRef.current;
+
         setManualReviewFindings(
           reviewItems
         );
@@ -2420,6 +2448,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       // PASSED
       // ======================================================
 
+      pendingRedactedPdfRef.current = null;
+      redactorSessionCache.pendingRedactedPdf = null;
       setManualReviewFindings([]);
 
       setStatus(
@@ -2447,9 +2477,37 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     }
   };
 
+  const downloadCurrentRedactedPdf = () => {
+    if (!file || !pendingRedactedPdfRef.current) {
+      return;
+    }
+
+    const itemCount =
+      manualReviewFindings.length;
+
+    const confirmed = window.confirm(
+      `The final safety check found ${itemCount} item${itemCount === 1 ? "" : "s"} that may still be readable. Downloading now will skip manual review. Download anyway?`
+    );
+
+    if (!confirmed) return;
+
+    const base =
+      file.name.replace(/\.pdf$/i, "");
+
+    downloadBlob(
+      new Blob(
+        [pendingRedactedPdfRef.current as any],
+        { type: "application/pdf" }
+      ),
+      `${base}-redacted-review-needed.pdf`
+    );
+  };
+
   const createRedactedCopy = async () => {
     if (!file || selectedCount === 0) return;
 
+    pendingRedactedPdfRef.current = null;
+    redactorSessionCache.pendingRedactedPdf = null;
     setError(null);
     setManualReviewFindings([]);
     setIsRedacting(true);
@@ -2725,7 +2783,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             </div>
           )}
 
-          {isPdfFile && onContinueManual && (
+          {isPdfFile &&
+            onContinueManual &&
+            manualReviewFindings.length === 0 && (
             <div
               className="pii-manual-card mt-6 rounded-xl border p-4 sm:flex sm:items-center sm:justify-between gap-4"
             >
@@ -2771,7 +2831,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
           {findings.length > 0 && (
             <div className="mt-6">
-              <button
+              {manualReviewFindings.length === 0 && (
+                <button
                 type="button"
                 disabled={
                   selectedCount === 0 || isRedacting
@@ -2787,11 +2848,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 ) : (
                   <>
                     <Download className="w-4 h-4" />
-                    Redact {selectedCount} selected item
-                    {selectedCount === 1 ? "" : "s"} &amp; Download
+                    Auto-Redact {selectedCount} selected item
+                    {selectedCount === 1 ? "" : "s"}
                   </>
                 )}
               </button>
+              )}
 
               {status && isRedacting && (
                 <div
@@ -2871,10 +2933,23 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                     }
                     className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2"
                   >
-                    Review these {manualReviewFindings.length} item
-                    {manualReviewFindings.length === 1 ? "" : "s"} manually
+                    Continue Manual Review ({manualReviewFindings.length})
                     <ArrowRight className="w-4 h-4" />
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={downloadCurrentRedactedPdf}
+                    className="mt-2 w-full min-h-11 rounded-xl border-2 border-amber-700 bg-white px-4 text-sm font-semibold text-amber-950 inline-flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download Current PDF Anyway
+                  </button>
+
+                  <p className="mt-2 text-center text-[11px] leading-4 text-amber-900">
+                    This copy did not pass the final safety check.
+                    Manual review is recommended before sharing it.
+                  </p>
                 </div>
               )}
 
