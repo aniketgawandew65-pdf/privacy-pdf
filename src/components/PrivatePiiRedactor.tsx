@@ -2019,6 +2019,76 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     const nextFindings: Finding[] = [];
 
+    /*
+     * Tesseract's WASM heap can grow over many consecutive
+     * full-page recognitions on mobile.
+     *
+     * Keep OCR single-threaded for low peak RAM, but recycle the
+     * worker periodically so an 80/500/1000-page scanned PDF
+     * does not carry one continuously-growing OCR heap forever.
+     */
+    const getOcrWorker =
+      async () => {
+        if (ocrWorker) {
+          return ocrWorker;
+        }
+
+        ocrWorker =
+          await createWorker(
+            "eng",
+            1,
+            {
+              workerPath:
+                "/tessdata/worker.min.js",
+              corePath:
+                "/tessdata/tesseract-core-simd-lstm.wasm.js",
+              langPath:
+                "/tessdata",
+              gzip: true,
+            }
+          );
+
+        return ocrWorker;
+      };
+
+    const releaseOcrWorker =
+      async () => {
+        const worker =
+          ocrWorker;
+
+        ocrWorker = null;
+
+        if (!worker) {
+          return;
+        }
+
+        try {
+          await worker.terminate();
+        } catch (_) {}
+      };
+
+    /*
+     * Six pages is deliberately conservative for large iPhone
+     * OCR workloads.
+     *
+     * Restarting a local cached worker costs a little time but
+     * puts a hard boundary around accumulated WASM memory.
+     */
+    const OCR_WORKER_BATCH =
+      6;
+
+    const yieldToMobile =
+      (
+        delay = 25
+      ) =>
+        new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              delay
+            )
+        );
+
     try {
       const loaded =
         await loadPdfJsFromBlob(
@@ -2035,16 +2105,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               { length: pdf.numPages },
               (_, index) => index + 1
             );
-
-      // Uses the exact same local OCR assets as the
-      // existing 1into1 OCR engine.
-      ocrWorker = await createWorker("eng", 1, {
-        workerPath: "/tessdata/worker.min.js",
-        corePath:
-          "/tessdata/tesseract-core-simd-lstm.wasm.js",
-        langPath: "/tessdata",
-        gzip: true,
-      });
 
       for (let index = 0; index < pagesToScan.length; index++) {
         const pageNumber = pagesToScan[index];
@@ -2078,14 +2138,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           Math.ceil(viewport.height)
         );
 
-        canvas.style.position = "fixed";
-        canvas.style.left = "-9999px";
-        canvas.style.top = "0";
-        canvas.style.opacity = "0";
-        canvas.style.pointerEvents = "none";
-
-        document.body.appendChild(canvas);
-
         try {
           const ctx = canvas.getContext(
             "2d",
@@ -2112,42 +2164,165 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             canvas,
           } as any).promise;
 
-          const result = await (
-            ocrWorker as any
-          ).recognize(
-            canvas,
-            {},
-            {
-              text: true,
-              hocr: true,
-              blocks: true,
+          const worker =
+            await getOcrWorker();
+
+          /*
+           * Normal path:
+           * request structured block coordinates directly.
+           *
+           * Recognition quality is unchanged — same pixels,
+           * model, language and Tesseract engine.
+           *
+           * We simply avoid also generating/parsing a complete
+           * hOCR HTML document for every normal page.
+           */
+          let result: any =
+            await (
+              worker as any
+            ).recognize(
+              canvas,
+              {},
+              {
+                text: true,
+                blocks: true,
+              }
+            );
+
+          let lines =
+            extractOcrLines(
+              result?.data ||
+                {}
+            );
+
+          /*
+           * Compatibility fallback.
+           *
+           * If an unusual page/browser/Tesseract result does not
+           * expose structured blocks, rerun THIS PAGE with hOCR.
+           *
+           * This preserves the previous positional-detection
+           * capability rather than silently losing findings.
+           */
+          if (
+            lines.length ===
+            0
+          ) {
+            result =
+              await (
+                worker as any
+              ).recognize(
+                canvas,
+                {},
+                {
+                  text: true,
+                  hocr: true,
+                  blocks: true,
+                }
+              );
+
+            lines =
+              extractOcrLines(
+                result?.data ||
+                  {}
+              );
+          }
+
+          lines.forEach(
+            (
+              words,
+              lineIndex
+            ) => {
+              nextFindings.push(
+                ...detectOcrLine(
+                  words,
+                  pageNumber,
+                  baseViewport.width,
+                  baseViewport.height,
+                  renderScale,
+                  String(
+                    lineIndex
+                  )
+                )
+              );
             }
           );
 
-          const lines = extractOcrLines(
-            result?.data || {}
-          );
-
-          lines.forEach((words, lineIndex) => {
-            nextFindings.push(
-              ...detectOcrLine(
-                words,
-                pageNumber,
-                baseViewport.width,
-                baseViewport.height,
-                renderScale,
-                String(lineIndex)
-              )
-            );
-          });
+          /*
+           * Do not keep Tesseract's page result trees reachable
+           * longer than this one page.
+           */
+          result = null;
+          lines.length = 0;
         } finally {
+          /*
+           * Release the full-resolution pixel backing store
+           * before doing anything for the next page.
+           */
           canvas.width = 1;
           canvas.height = 1;
-          canvas.remove();
 
           try {
             page.cleanup();
           } catch (_) {}
+        }
+
+        const processedPages =
+          index + 1;
+
+        /*
+         * Yield after every OCR page.
+         *
+         * 25 ms across an 86-page file adds only ~2 seconds but
+         * prevents a completely uninterrupted CPU/GPU/WASM loop.
+         */
+        if (
+          processedPages <
+          pagesToScan.length
+        ) {
+          await yieldToMobile(
+            25
+          );
+        }
+
+        /*
+         * Hard memory boundary for long scanned documents.
+         *
+         * The user's 147 MB iPhone test restarted around OCR
+         * page 11, so recycle before a worker can accumulate that
+         * many consecutive large-page recognitions.
+         */
+        if (
+          processedPages %
+            OCR_WORKER_BATCH ===
+            0 &&
+          processedPages <
+            pagesToScan.length
+        ) {
+          setStatus(
+            `Releasing OCR memory after ${processedPages} scanned pages…`
+          );
+
+          await releaseOcrWorker();
+
+          /*
+           * Let PDF.js discard page/font/image caches that are no
+           * longer required. The PDF itself stays open.
+           */
+          try {
+            await pdf.cleanup();
+          } catch (_) {}
+
+          /*
+           * Short recovery window for mobile Safari.
+           *
+           * This is intentionally tiny — enough to hand control
+           * back to the browser without materially slowing an
+           * 80+ page job.
+           */
+          await yieldToMobile(
+            120
+          );
         }
       }
 
@@ -2176,11 +2351,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       throw err;
     } finally {
-      if (ocrWorker) {
-        try {
-          await ocrWorker.terminate();
-        } catch (_) {}
-      }
+      await releaseOcrWorker();
 
       if (disposePdf) {
         try {
