@@ -76,8 +76,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     useState<ManualReviewItem[]>(incomingManualReviewItems);
   const [manualCheckStatus, setManualCheckStatus] =
     useState<string | null>(null);
-  const [isCheckingReview, setIsCheckingReview] =
-    useState(false);
 
   /*
    * Immutable original targets from Auto Redactor.
@@ -114,122 +112,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
   const currentRects = pageRedactions[currentPage] || [];
 
-  const handleCheckManualReview = async () => {
-    if (!file) return;
-
-    const verificationTargets =
-      manualVerificationTargetsRef.current;
-
-    if (verificationTargets.length === 0) {
-      setManualCheckStatus(
-        "No flagged verification targets are available."
-      );
-      return;
-    }
-
-    const payload: PageRedaction[] =
-      Object.entries(pageRedactions).map(
-        ([pNum, rects]) => ({
-          pageIndex: parseInt(pNum, 10) - 1,
-          rects,
-        })
-      );
-
-    if (payload.length === 0) {
-      setManualCheckStatus(
-        "Draw at least one blackout rectangle before checking."
-      );
-      return;
-    }
-
-    setIsCheckingReview(true);
-    setManualCheckStatus(
-      "Preparing the current redacted PDF for safety verification…"
-    );
-
-    try {
-      /*
-       * Generate the ACTUAL current manual-redaction result
-       * in memory. Nothing is downloaded here.
-       */
-      const bytes =
-        await redactPDF(file, payload);
-
-      /*
-       * Run the SAME OCR/selectable-text safety verifier
-       * used by Private PII & Secrets Auto-Redactor.
-       */
-      const verification =
-        await verifyFinishedPdf(
-          bytes,
-          verificationTargets.map((item) => ({
-            value: item.value,
-          })),
-          (message) =>
-            setManualCheckStatus(message)
-        );
-
-      if (
-        verification.leakedValues.length > 0
-      ) {
-        const leakedValues =
-          new Set(
-            verification.leakedValues
-          );
-
-        const unresolved =
-          verificationTargets.filter((item) =>
-            leakedValues.has(item.value)
-          );
-
-        setManualReviewItems(unresolved);
-
-        setManualCheckStatus(
-          `${unresolved.length} item${
-            unresolved.length === 1 ? "" : "s"
-          } still readable in the finished PDF. Review ${
-            unresolved.length === 1
-              ? "it"
-              : "them"
-          } and check again.`
-        );
-
-        return;
-      }
-
-      if (
-        verification.selectableTextFound
-      ) {
-        setManualCheckStatus(
-          "The finished PDF still contains selectable text. Safety verification could not pass."
-        );
-
-        return;
-      }
-
-      if (verification.passed) {
-        setManualReviewItems([]);
-
-        setManualCheckStatus(
-          "Safety verification passed. No flagged values remain readable ✓"
-        );
-      }
-    } catch (err: any) {
-      console.error(
-        "Manual safety verification error:",
-        err
-      );
-
-      setManualCheckStatus(
-        err?.message ||
-          "Unable to complete the safety verification."
-      );
-    } finally {
-      setIsCheckingReview(false);
-    }
-  };
-
-
   const handleManualDownloadClick = (
     event: React.MouseEvent<HTMLAnchorElement>
   ) => {
@@ -258,7 +140,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       setPageRedactions({});
       setManualReviewItems([]);
       setManualCheckStatus(null);
-      setIsCheckingReview(false);
       manualVerificationTargetsRef.current = [];
       setSelectedIndex(null);
       setZoomLevel(1.0);
@@ -589,6 +470,33 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
        */
       const bytes =
         await redactPDF(file, payload);
+
+      /*
+       * AUTO REDACTOR -> MANUAL REDACTION
+       *
+       * The Auto Redactor already produced the fixed review list.
+       * Manual Redaction now treats that list as an informational
+       * checklist only.
+       *
+       * We burn the user's current blackout rectangles into the
+       * finished PDF and prepare the exact resulting bytes for
+       * download.
+       *
+       * We intentionally DO NOT run the old second OCR verifier
+       * here because it could incorrectly resolve an item from
+       * another page.
+       */
+      if (routeState?.fromAutoRedactor) {
+        const blob = new Blob(
+          [bytes as unknown as BlobPart],
+          {
+            type: "application/pdf",
+          }
+        );
+
+        createUrl(blob);
+        return;
+      }
 
       const verificationTargets =
         manualVerificationTargetsRef.current;
@@ -1022,8 +930,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                     </strong>
 
                     <p className="mt-1 text-xs leading-5 text-amber-900">
-                      These sensitive items are still readable after verification.
-                      Review the listed pages and adjust or add blackout boxes as needed.
+                      These items were flagged by the safety scan.
+                      Review the listed pages and add or adjust blackout boxes as needed.
+                      The list stays unchanged so you can manually verify every flagged item before downloading.
                     </p>
 
                     <div className="mt-3 max-h-56 overflow-y-auto overscroll-contain space-y-2 pr-1">
@@ -1049,24 +958,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                       ))}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleCheckManualReview}
-                      disabled={isProcessing || isCheckingReview}
-                      className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-white px-4 text-sm font-semibold text-zinc-950 inline-flex items-center justify-center gap-2 hover:bg-zinc-100 transition disabled:opacity-50"
-                    >
-                      {isCheckingReview ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Checking finished PDF…
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          Check reviewed areas
-                        </>
-                      )}
-                    </button>
 
                     {manualCheckStatus && (
                       <div className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs leading-5 text-zinc-800">
@@ -1080,7 +971,6 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                 onClick={handleApplyRedactions}
                 disabled={
                   isProcessing ||
-                  isCheckingReview ||
                   totalRedactionsCount === 0
                 }
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
