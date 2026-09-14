@@ -12,22 +12,25 @@ import {
   PDFCheckBox,
   PDFDropdown,
 } from 'pdf-lib';
-import { pdfjsLib } from './pdfjs';
+import {
+  loadPdfJsFromBlob,
+  pdfjsLib,
+} from './pdfjs';
 if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  
+
 }
 if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  
+
 }
 
 if (typeof window !== "undefined") {  }
-import JSZip from 'jszip';
+import { Zip, ZipPassThrough } from 'fflate';
 import { createWorker } from 'tesseract.js';
 
 
 // Configure offline worker for 100% local processing
 if (typeof window !== 'undefined' && 'Worker' in window) {
-  
+
 }
 /**
  * Safely loads a PDF and verifies whether it has internal encryption dictionaries.
@@ -49,12 +52,54 @@ export async function loadSafe(
  * Fast scanner: detects whether a PDF contains encryption, digital signatures,
  * form widgets, XFA layers, or annotation appearances.
  */
-function isComplexOrProtectedPdf(bytes: Uint8Array): boolean {
+async function isComplexOrProtectedFile(
+  file: File
+): Promise<boolean> {
   try {
-    const head = new TextDecoder("latin1").decode(bytes.slice(0, 4096));
-    const tail = new TextDecoder("latin1").decode(bytes.slice(Math.max(0, bytes.length - 4096)));
-    const scan = head + tail;
-    return scan.includes("/Encrypt") || scan.includes("/encrypt");
+    const chunkSize = 4096;
+
+    const headBytes =
+      new Uint8Array(
+        await file
+          .slice(
+            0,
+            Math.min(
+              chunkSize,
+              file.size
+            )
+          )
+          .arrayBuffer()
+      );
+
+    const tailStart =
+      Math.max(
+        0,
+        file.size - chunkSize
+      );
+
+    const tailBytes =
+      new Uint8Array(
+        await file
+          .slice(
+            tailStart,
+            file.size
+          )
+          .arrayBuffer()
+      );
+
+    const decoder =
+      new TextDecoder(
+        'latin1'
+      );
+
+    const scan =
+      decoder.decode(headBytes) +
+      decoder.decode(tailBytes);
+
+    return (
+      scan.includes('/Encrypt') ||
+      scan.includes('/encrypt')
+    );
   } catch {
     return false;
   }
@@ -120,51 +165,157 @@ export interface CompressOptions {
  * Merges multiple PDF files into one single PDF document.
  */
 export async function mergePDFs(files: File[]): Promise<Uint8Array> {
-  const mergedPdf = await PDFDocument.create();
+  const mergedPdf =
+    await PDFDocument.create();
 
   for (const file of files) {
-    const fileBytes = await file.arrayBuffer();
-    const uint8 = new Uint8Array(fileBytes);
+    let sourceBuffer:
+      | ArrayBuffer
+      | null = null;
 
     try {
-      if (isComplexOrProtectedPdf(uint8)) {
-        throw new Error('Complex or protected document; switching to rendering pipeline');
+      const looksProtected =
+        await isComplexOrProtectedFile(
+          file
+        );
+
+      if (looksProtected) {
+        throw new Error(
+          'Complex or protected document; switching to rendering pipeline'
+        );
       }
 
-      const pdfDoc = await PDFDocument.load(fileBytes);
-      const pageCount = pdfDoc.getPageCount();
+      /*
+       * pdf-lib requires the complete document for the
+       * vector-preserving merge path.
+       */
+      sourceBuffer =
+        await file.arrayBuffer();
 
-      for (let i = 0; i < pageCount; i++) {
-        const page = pdfDoc.getPage(i);
-        if (!page.node.Contents()) {
-          throw new Error('Missing Contents stream');
+      const pdfDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      const pageCount =
+        pdfDoc.getPageCount();
+
+      for (
+        let i = 0;
+        i < pageCount;
+        i++
+      ) {
+        const page =
+          pdfDoc.getPage(i);
+
+        if (
+          !page.node.Contents()
+        ) {
+          throw new Error(
+            'Missing Contents stream'
+          );
         }
       }
 
-      const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices());
-      copiedPages.forEach((page) => mergedPdf.addPage(page));
+      const copiedPages =
+        await mergedPdf.copyPages(
+          pdfDoc,
+          pdfDoc.getPageIndices()
+        );
+
+      copiedPages.forEach(
+        (page) =>
+          mergedPdf.addPage(page)
+      );
+
+      sourceBuffer = null;
     } catch (err) {
-      console.warn(`Vector merge bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+      console.warn(
+        `Vector merge bypassed for "${file.name}". Activating high-res rendering engine:`,
+        err
+      );
 
-      const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-        data: uint8.slice(),
-        stopAtErrors: false,
-      });
-      const fallbackDoc = await loadingTask.promise;
-      const numPages = fallbackDoc.numPages;
+      /*
+       * Do not keep the full vector source buffer alive
+       * while the raster fallback is working.
+       */
+      sourceBuffer = null;
 
-      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await fallbackDoc.getPage(pageNum);
-        const { imgBytes, width, height } = await renderPageAsJpg(page);
-        const embeddedImage = await mergedPdf.embedJpg(imgBytes);
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(resolve, 0)
+      );
 
-        const newPage = mergedPdf.addPage([width, height]);
-        newPage.drawImage(embeddedImage, { x: 0, y: 0, width, height });
+      const loadedFallback =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors: false,
+          }
+        );
+
+      const fallbackDoc =
+        loadedFallback.pdf;
+
+      try {
+        const numPages =
+          fallbackDoc.numPages;
+
+        for (
+          let pageNum = 1;
+          pageNum <= numPages;
+          pageNum++
+        ) {
+          const page =
+            await fallbackDoc.getPage(
+              pageNum
+            );
+
+          try {
+            const {
+              imgBytes,
+              width,
+              height,
+            } =
+              await renderPageAsJpg(
+                page
+              );
+
+            const embeddedImage =
+              await mergedPdf.embedJpg(
+                imgBytes
+              );
+
+            const newPage =
+              mergedPdf.addPage([
+                width,
+                height,
+              ]);
+
+            newPage.drawImage(
+              embeddedImage,
+              {
+                x: 0,
+                y: 0,
+                width,
+                height,
+              }
+            );
+          } finally {
+            try {
+              page.cleanup();
+            } catch (_) {}
+          }
+        }
+      } finally {
+        await loadedFallback.dispose();
       }
     }
   }
 
-  return await mergedPdf.save({ useObjectStreams: false });
+  return await mergedPdf.save({
+    useObjectStreams: false,
+  });
 }
 
 /**
@@ -175,16 +326,38 @@ export async function compressPDFToTarget(
   targetSizeKB: number,
   onProgress?: (progress: CompressionProgress) => void
 ): Promise<Uint8Array> {
-  const fileBytes = await file.arrayBuffer();
-  const originalSizeKB = file.size / 1024;
+  const originalSizeKB =
+    file.size / 1024;
 
-  if (originalSizeKB <= targetSizeKB) {
-    return new Uint8Array(fileBytes);
+  /*
+   * Only the pass-through case needs the original bytes
+   * because those exact bytes become the output.
+   */
+  if (
+    originalSizeKB <=
+    targetSizeKB
+  ) {
+    return new Uint8Array(
+      await file.arrayBuffer()
+    );
   }
 
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  /*
+   * When compression is required, PDF.js reads directly
+   * from the browser-backed File instead of another
+   * full-size JavaScript buffer.
+   */
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file
+    );
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
 
   const targetRatio = targetSizeKB / originalSizeKB;
   const quality = Math.max(0.35, Math.min(0.85, targetRatio * 0.9));
@@ -239,48 +412,134 @@ export async function compressPDFToTarget(
       height: viewport.height,
     });
 
-    canvas.width = 0;
-    canvas.height = 0;
+    canvas.width = 1;
+    canvas.height = 1;
+
+    try {
+      page.cleanup();
+    } catch (_) {}
   }
 
-  return await outputPdf.save();
+    return await outputPdf.save();
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 
 export async function imagesToPDF(imageFiles: File[]): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
 
   for (const file of imageFiles) {
-    const imgBitmap = await createImageBitmap(file);
-    const canvas = document.createElement('canvas');
-    canvas.width = imgBitmap.width;
-    canvas.height = imgBitmap.height;
+    const imgBitmap =
+      await createImageBitmap(file);
 
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) continue;
-    ctx.drawImage(imgBitmap, 0, 0);
+    const canvas =
+      document.createElement('canvas');
 
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', 0.92)
+    try {
+      canvas.width =
+        imgBitmap.width;
+
+      canvas.height =
+        imgBitmap.height;
+
+      const ctx =
+        canvas.getContext(
+          "2d",
+          { alpha: false }
+        );
+
+      canvas.style.position =
+        "fixed";
+
+      canvas.style.left =
+        "-9999px";
+
+      canvas.style.opacity =
+        "0";
+
+      document.body.appendChild(
+        canvas
+      );
+
+      if (!ctx) {
+        continue;
+      }
+
+      ctx.drawImage(
+        imgBitmap,
+        0,
+        0
+      );
+
+      const blob =
+        await new Promise<Blob | null>(
+          (resolve) =>
+            canvas.toBlob(
+              resolve,
+              'image/jpeg',
+              0.92
+            )
+        );
+
+      if (!blob) {
+        continue;
+      }
+
+      const jpegBytes =
+        await blob.arrayBuffer();
+
+      const embeddedImage =
+        await pdfDoc.embedJpg(
+          jpegBytes
+        );
+
+      const page =
+        pdfDoc.addPage([
+          embeddedImage.width,
+          embeddedImage.height,
+        ]);
+
+      page.drawImage(
+        embeddedImage,
+        {
+          x: 0,
+          y: 0,
+          width:
+            embeddedImage.width,
+          height:
+            embeddedImage.height,
+        }
+      );
+    } finally {
+      /*
+       * Full-resolution photo canvases can consume tens
+       * of megabytes. Release the pixel backing store
+       * immediately after each image.
+       */
+      canvas.width = 1;
+      canvas.height = 1;
+
+      try {
+        canvas.remove();
+      } catch (_) {}
+
+      try {
+        imgBitmap.close();
+      } catch (_) {}
+    }
+
+    /*
+     * Give the browser a chance to reclaim the previous
+     * bitmap/canvas before decoding the next image.
+     */
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
     );
-    if (!blob) continue;
-
-    const jpegBytes = await blob.arrayBuffer();
-    const embeddedImage = await pdfDoc.embedJpg(jpegBytes);
-
-    const page = pdfDoc.addPage([embeddedImage.width, embeddedImage.height]);
-    page.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: embeddedImage.width,
-      height: embeddedImage.height,
-    });
-
-    canvas.width = 0;
-    canvas.height = 0;
   }
 
   return await pdfDoc.save();
@@ -290,72 +549,286 @@ export async function rotatePDF(
   file: File,
   rotations: Record<number, number> | number
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const { doc, isEncrypted } = await loadSafe(arrayBuffer);
+  let sourceBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
 
-  // If the document has internal encryption, pdf-lib cannot re-encrypt or save
-  // vector streams without corruption. Route through the clean rendering path.
+  const loadedSafe =
+    await loadSafe(
+      sourceBuffer
+    );
+
+  let doc:
+    | PDFDocument
+    | null =
+      loadedSafe.doc;
+
+  const isEncrypted =
+    loadedSafe.isEncrypted;
+
+  /*
+   * loadSafe() has finished parsing the source.
+   * Drop our separate complete ArrayBuffer reference before
+   * either vector editing or the raster fallback.
+   */
+  sourceBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+  // If the document has internal encryption, pdf-lib cannot
+  // safely save its original vector streams.
   if (isEncrypted) {
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-    const pdf = await loadingTask.promise;
-    const totalPages = pdf.numPages;
-    const newPdfDoc = await PDFDocument.create();
+    /*
+     * Drop our references to the full pdf-lib source before
+     * starting the raster fallback.
+     */
+    sourceBuffer = null;
+    doc = null;
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const angle = typeof rotations === 'number' ? rotations : (rotations[pageNum] || 0);
-      const viewport = page.getViewport({ scale: 2.0, rotation: ((angle % 360) + 360) % 360 });
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(resolve, 0)
+    );
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
+    const loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
 
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await (page.render({ canvasContext: ctx as any, viewport, canvas } as any) as any).promise;
+    const pdf =
+      loadedPdf.pdf;
 
-        const blob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92)
+    try {
+      const totalPages =
+        pdf.numPages;
+
+      const newPdfDoc =
+        await PDFDocument.create();
+
+      for (
+        let pageNum = 1;
+        pageNum <= totalPages;
+        pageNum++
+      ) {
+        const page =
+          await pdf.getPage(
+            pageNum
+          );
+
+        try {
+          const angle =
+            typeof rotations === 'number'
+              ? rotations
+              : (
+                  rotations[
+                    pageNum
+                  ] || 0
+                );
+
+          const viewport =
+            page.getViewport({
+              scale: 2.0,
+              rotation:
+                (
+                  (
+                    angle % 360
+                  ) + 360
+                ) % 360,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+          try {
+            canvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            canvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+            const ctx =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha: false,
+                }
+              );
+
+            if (ctx) {
+              ctx.fillStyle =
+                '#ffffff';
+
+              ctx.fillRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+
+              await (
+                page.render({
+                  canvasContext:
+                    ctx as any,
+                  viewport,
+                  canvas,
+                } as any) as any
+              ).promise;
+
+              const blob =
+                await new Promise<Blob>(
+                  (resolve) =>
+                    canvas.toBlob(
+                      (b) =>
+                        resolve(
+                          b ||
+                            new Blob()
+                        ),
+                      'image/jpeg',
+                      0.92
+                    )
+                );
+
+              const imgBytes =
+                await blob.arrayBuffer();
+
+              const embeddedImg =
+                await newPdfDoc.embedJpg(
+                  imgBytes
+                );
+
+              const newPage =
+                newPdfDoc.addPage([
+                  viewport.width /
+                    2.0,
+                  viewport.height /
+                    2.0,
+                ]);
+
+              newPage.drawImage(
+                embeddedImg,
+                {
+                  x: 0,
+                  y: 0,
+                  width:
+                    viewport.width /
+                    2.0,
+                  height:
+                    viewport.height /
+                    2.0,
+                }
+              );
+            }
+          } finally {
+            canvas.width = 1;
+            canvas.height = 1;
+          }
+        } finally {
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
         );
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.width = 0;
-        canvas.height = 0;
-
-        const imgBytes = await blob.arrayBuffer();
-        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
-        const newPage = newPdfDoc.addPage([viewport.width / 2.0, viewport.height / 2.0]);
-        newPage.drawImage(embeddedImg, {
-          x: 0,
-          y: 0,
-          width: viewport.width / 2.0,
-          height: viewport.height / 2.0,
-        });
       }
-      try { page.cleanup(); } catch {}
+
+      /*
+       * All rotated raster pages are already embedded.
+       * Release PDF.js before allocating the complete
+       * serialized output.
+       */
+      await loadedPdf.dispose();
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+      return await newPdfDoc.save({
+        useObjectStreams: false,
+      });
+    } finally {
+      await loadedPdf.dispose();
     }
-    return await newPdfDoc.save({ useObjectStreams: false });
   }
 
-  // Standard unencrypted vector path (fast & 100% lossless)
-  const pages = doc.getPages();
-  pages.forEach((page, idx) => {
-    const pageNum = idx + 1;
-    const additionalAngle = typeof rotations === 'number' ? rotations : (rotations[pageNum] || 0);
-    if (additionalAngle !== 0) {
-      const currentRotation = page.getRotation().angle;
-      const finalAngle = ((currentRotation + additionalAngle) % 360 + 360) % 360;
-      page.setRotation(degrees(finalAngle));
-    }
-  });
+  // Standard unencrypted vector path
+  // remains fast and lossless.
+  if (!doc) {
+    throw new Error(
+      'Unable to load PDF for rotation.'
+    );
+  }
 
-  return await doc.save({ useObjectStreams: false });
+  const pages =
+    doc.getPages();
+
+  pages.forEach(
+    (page, idx) => {
+      const pageNum =
+        idx + 1;
+
+      const additionalAngle =
+        typeof rotations === 'number'
+          ? rotations
+          : (
+              rotations[
+                pageNum
+              ] || 0
+            );
+
+      if (
+        additionalAngle !== 0
+      ) {
+        const currentRotation =
+          page.getRotation().angle;
+
+        const finalAngle =
+          (
+            (
+              currentRotation +
+              additionalAngle
+            ) %
+              360 +
+            360
+          ) % 360;
+
+        page.setRotation(
+          degrees(
+            finalAngle
+          )
+        );
+      }
+    }
+  );
+
+  return await doc.save({
+    useObjectStreams: false,
+  });
 }
 
 export type PdfImageFormat = 'jpg' | 'png' | 'webp';
@@ -364,16 +837,16 @@ export async function pdfToImages(
   file: File,
   format: PdfImageFormat = 'jpg',
   quality: number = 0.9
-): Promise<string[]> {
-  const fileBytes = await file.arrayBuffer();
+): Promise<Blob[]> {
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file
+    );
 
-  const loadingTask = pdfjsLib.getDocument({
-    isEvalSupported: false,
-    data: new Uint8Array(fileBytes).slice(),
-  });
+  const pdfDoc =
+    loadedPdf.pdf;
 
-  const pdfDoc = await loadingTask.promise;
-  const imageUrls: string[] = [];
+  const imageBlobs: Blob[] = [];
 
   const mimeType =
     format === 'png'
@@ -382,57 +855,113 @@ export async function pdfToImages(
         ? 'image/webp'
         : 'image/jpeg';
 
-  for (
-    let pageNum = 1;
-    pageNum <= pdfDoc.numPages;
-    pageNum++
-  ) {
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
+  try {
+    for (
+      let pageNum = 1;
+      pageNum <= pdfDoc.numPages;
+      pageNum++
+    ) {
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
 
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
 
-    const ctx = canvas.getContext('2d', {
-      alpha: false,
-    });
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
 
-    if (!ctx) continue;
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
 
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
 
-    await (
-      page.render({
-        canvasContext: ctx as any,
-        viewport,
-      } as any) as any
-    ).promise;
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
 
-    imageUrls.push(
-      canvas.toDataURL(
-        mimeType,
-        format === 'png' ? undefined : quality
-      )
-    );
+        if (!ctx) {
+          throw new Error(
+            'Failed to create canvas rendering context'
+          );
+        }
 
-    ctx.clearRect(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+        ctx.fillStyle =
+          '#ffffff';
 
-    canvas.width = 0;
-    canvas.height = 0;
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
 
-    try {
-      page.cleanup();
-    } catch {}
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+
+        /*
+         * Keep encoded image bytes as Blob data.
+         *
+         * Avoid base64/Data URLs, which expand the encoded
+         * image in JavaScript memory and then require callers
+         * to convert it back into binary data.
+         */
+        const imageBlob =
+          await new Promise<Blob | null>(
+            (resolve) => {
+              canvas.toBlob(
+                resolve,
+                mimeType,
+                format === 'png'
+                  ? undefined
+                  : quality
+              );
+            }
+          );
+
+        if (!imageBlob) {
+          throw new Error(
+            `Failed to encode page ${pageNum} as ${format.toUpperCase()}`
+          );
+        }
+
+        imageBlobs.push(
+          imageBlob
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+    }
+
+    return imageBlobs;
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  return imageUrls;
 }
 
 //**
@@ -440,101 +969,344 @@ export async function pdfToImages(
  * Splits a PDF document by page ranges (e.g. "1-3, 5").
  * Guaranteed support for bank statements, government files, and signed legal documents.
  */
-export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  const pageCount = await getPDFPageCount(file);
+export async function splitPDF(
+  file: File,
+  ranges: string
+): Promise<Uint8Array> {
+  /*
+   * First inspect only the small head/tail chunks.
+   * This matches the existing encryption detection without
+   * allocating the complete PDF.
+   */
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
 
-  const pagesToInclude = new Set<number>();
-  if (!ranges || ranges.trim().toLowerCase() === 'all') {
-    for (let i = 0; i < pageCount; i++) pagesToInclude.add(i);
+  let pageCount = 0;
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+  let vectorDoc:
+    | PDFDocument
+    | null = null;
+
+  let fallbackLoaded:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
+
+
+  /*
+   * Clean PDFs need pdf-lib for the lossless vector path.
+   * Protected PDFs skip that full-file allocation entirely.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      vectorDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      pageCount =
+        vectorDoc.getPageCount();
+    } catch {
+      vectorDoc = null;
+      sourceBuffer = null;
+    }
+  }
+
+
+  /*
+   * If vector loading was skipped or failed, get the page
+   * count from browser-backed PDF.js.
+   */
+  if (!vectorDoc) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    pageCount =
+      fallbackLoaded.pdf.numPages;
+  }
+
+
+  const pagesToInclude =
+    new Set<number>();
+
+  if (
+    !ranges ||
+    ranges
+      .trim()
+      .toLowerCase() === 'all'
+  ) {
+    for (
+      let i = 0;
+      i < pageCount;
+      i++
+    ) {
+      pagesToInclude.add(i);
+    }
   } else {
-    ranges.split(',').forEach((part) => {
-      const p = part.trim();
-      if (p.includes('-')) {
-        const [start, end] = p.split('-').map((n) => parseInt(n.trim(), 10));
-        if (!isNaN(start) && !isNaN(end)) {
-          for (let i = start; i <= end; i++) {
-            if (i >= 1 && i <= pageCount) pagesToInclude.add(i - 1);
+    ranges
+      .split(',')
+      .forEach((part) => {
+        const p =
+          part.trim();
+
+        if (p.includes('-')) {
+          const [
+            rangeStart,
+            rangeEnd,
+          ] =
+            p
+              .split('-')
+              .map((n) =>
+                parseInt(
+                  n.trim(),
+                  10
+                )
+              );
+
+          if (
+            !isNaN(rangeStart) &&
+            !isNaN(rangeEnd)
+          ) {
+            for (
+              let i = rangeStart;
+              i <= rangeEnd;
+              i++
+            ) {
+              if (
+                i >= 1 &&
+                i <= pageCount
+              ) {
+                pagesToInclude.add(
+                  i - 1
+                );
+              }
+            }
+          }
+        } else {
+          const num =
+            parseInt(
+              p,
+              10
+            );
+
+          if (
+            !isNaN(num) &&
+            num >= 1 &&
+            num <= pageCount
+          ) {
+            pagesToInclude.add(
+              num - 1
+            );
           }
         }
-      } else {
-        const num = parseInt(p, 10);
-        if (!isNaN(num) && num >= 1 && num <= pageCount) pagesToInclude.add(num - 1);
-      }
-    });
+      });
   }
 
-  const indices = Array.from(pagesToInclude).sort((a, b) => a - b);
+
+  const indices =
+    Array.from(
+      pagesToInclude
+    ).sort(
+      (a, b) =>
+        a - b
+    );
+
+
   if (indices.length === 0) {
-    throw new Error('No valid pages specified for extraction.');
+    if (fallbackLoaded) {
+      await fallbackLoaded.dispose();
+    }
+
+    throw new Error(
+      'No valid pages specified for extraction.'
+    );
   }
 
-  // Check whether native vector splitting is safe
-  let isVectorSafe = false;
-  try {
-    const isProtected = isComplexOrProtectedPdf(uint8);
-    if (!isProtected) {
-      const testDoc = await PDFDocument.load(arrayBuffer);
-      let hasMissingResources = false;
 
+  /*
+   * Check whether the existing vector PDF is safe to copy.
+   * Reuse the same parsed pdf-lib document instead of loading
+   * the complete source a second time.
+   */
+  let isVectorSafe =
+    Boolean(vectorDoc);
+
+  if (vectorDoc) {
+    try {
       for (const idx of indices) {
-        const page = testDoc.getPage(idx);
-        // Bank statements fail here: their /Resources dictionary is inherited from parent /Pages
-        const res = page.node.get(PDFName.of('Resources'));
-        const contents = page.node.Contents();
-        if (!res || !contents || page.node.Annots()) {
-          hasMissingResources = true;
+        const page =
+          vectorDoc.getPage(
+            idx
+          );
+
+        const res =
+          page.node.get(
+            PDFName.of(
+              'Resources'
+            )
+          );
+
+        const contents =
+          page.node.Contents();
+
+        if (
+          !res ||
+          !contents ||
+          page.node.Annots()
+        ) {
+          isVectorSafe =
+            false;
+
           break;
         }
       }
+    } catch {
+      isVectorSafe =
+        false;
+    }
+  }
 
-      if (!hasMissingResources) {
-        isVectorSafe = true;
+
+  /*
+   * 1. Native vector path.
+   * Lossless and preserves fonts/text for clean PDFs.
+   */
+  if (
+    isVectorSafe &&
+    vectorDoc
+  ) {
+    try {
+      const newDoc =
+        await PDFDocument.create();
+
+      const copied =
+        await newDoc.copyPages(
+          vectorDoc,
+          indices
+        );
+
+      copied.forEach(
+        (page) =>
+          newDoc.addPage(
+            page
+          )
+      );
+
+      return await newDoc.save({
+        useObjectStreams: false,
+      });
+    } catch (error) {
+      console.warn(
+        'Vector split failed, proceeding to high-res engine:',
+        error
+      );
+    }
+  }
+
+
+  /*
+   * Vector processing is finished.
+   * Release our full-file references before opening PDF.js.
+   */
+  vectorDoc = null;
+  sourceBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+
+  if (!fallbackLoaded) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+  }
+
+
+  const fallbackDoc =
+    fallbackLoaded.pdf;
+
+  try {
+    const salvageDoc =
+      await PDFDocument.create();
+
+    for (const idx of indices) {
+      const pageNum =
+        idx + 1;
+
+      const page =
+        await fallbackDoc.getPage(
+          pageNum
+        );
+
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+        const embeddedImage =
+          await salvageDoc.embedJpg(
+            imgBytes
+          );
+
+        const newPage =
+          salvageDoc.addPage([
+            width,
+            height,
+          ]);
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
     }
-  } catch {
-    isVectorSafe = false;
-  }
 
-  // 1. Native Vector Path (Only for clean documents where fonts won't vanish)
-  if (isVectorSafe) {
-    try {
-      const srcDoc = await PDFDocument.load(arrayBuffer);
-      const newDoc = await PDFDocument.create();
-      const copied = await newDoc.copyPages(srcDoc, indices);
-      copied.forEach((p) => newDoc.addPage(p));
-      return await newDoc.save({ useObjectStreams: false });
-    } catch (e) {
-      console.warn('Vector split failed, proceeding to high-res engine:', e);
-    }
-  }
-
-  // 2. High-Res Visual Pipeline (The exact engine that works in Compressor)
-  // Renders all bank transactions, stamps, barcodes, and logos at 2.0x Retina resolution
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    stopAtErrors: false,
-  });
-  const fallbackDoc = await loadingTask.promise;
-  const salvageDoc = await PDFDocument.create();
-
-  for (const idx of indices) {
-    const pageNum = idx + 1;
-    const page = await fallbackDoc.getPage(pageNum);
-    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-    const embeddedImage = await salvageDoc.embedJpg(imgBytes);
-
-    const newPage = salvageDoc.addPage([width, height]);
-    newPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width,
-      height,
+    return await salvageDoc.save({
+      useObjectStreams: false,
     });
+  } finally {
+    await fallbackLoaded.dispose();
   }
-
-  return await salvageDoc.save({ useObjectStreams: false });
 }
 
 /**
@@ -542,163 +1314,784 @@ export async function splitPDF(file: File, ranges: string): Promise<Uint8Array> 
  */
 export async function splitPdfToZip(
   file: File,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void
 ): Promise<Blob> {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  const totalPages = await getPDFPageCount(file);
-  const zip = new JSZip();
-  const baseName = file.name.replace(/\.[^/.]+$/, '');
+  /*
+   * fflate's streaming ZIP writer emits archive bytes as
+   * each page is added instead of retaining every page PDF
+   * internally until final generation.
+   *
+   * We still keep the final ZIP chunks because this function
+   * returns a Blob, but the individual uncompressed page PDFs
+   * can be released after each iteration.
+   */
+  const createStreamingZip = () => {
+    const chunks:
+      ArrayBuffer[] = [];
 
-  let isVectorSafe = false;
-  try {
-    if (!isComplexOrProtectedPdf(uint8)) {
-      const testDoc = await PDFDocument.load(arrayBuffer);
-      let missing = false;
-      for (let i = 0; i < totalPages; i++) {
-        const page = testDoc.getPage(i);
-        if (!page.node.get(PDFName.of('Resources')) || !page.node.Contents() || page.node.Annots()) {
-          missing = true;
+    let resolveZip!:
+      (blob: Blob) => void;
+
+    let rejectZip!:
+      (error: unknown) => void;
+
+    const result =
+      new Promise<Blob>(
+        (resolve, reject) => {
+          resolveZip =
+            resolve;
+
+          rejectZip =
+            reject;
+        }
+      );
+
+    const zip =
+      new Zip(
+        (
+          error,
+          data,
+          final
+        ) => {
+          if (error) {
+            rejectZip(
+              error
+            );
+            return;
+          }
+
+          if (
+            data &&
+            data.length
+          ) {
+            /*
+             * fflate types its output buffer as
+             * ArrayBufferLike. Copy it into a regular
+             * ArrayBuffer so Blob construction is portable
+             * across TypeScript/browser definitions.
+             */
+            const copy =
+              new Uint8Array(
+                data.length
+              );
+
+            copy.set(
+              data
+            );
+
+            chunks.push(
+              copy.buffer
+            );
+          }
+
+          if (final) {
+            resolveZip(
+              new Blob(
+                chunks,
+                {
+                  type:
+                    'application/zip',
+                }
+              )
+            );
+          }
+        }
+      );
+
+    return {
+      addFile: (
+        name: string,
+        data: Uint8Array
+      ) => {
+        /*
+         * PDF files already contain compressed streams,
+         * so storing them directly avoids another expensive
+         * in-memory DEFLATE pass.
+         */
+        const entry =
+          new ZipPassThrough(
+            name
+          );
+
+        zip.add(
+          entry
+        );
+
+        entry.push(
+          data,
+          true
+        );
+      },
+
+      finish: async () => {
+        zip.end();
+        return await result;
+      },
+    };
+  };
+
+  let zipWriter =
+    createStreamingZip();
+
+  const baseName =
+    file.name.replace(
+      /\.[^/.]+$/,
+      ''
+    );
+
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+  let vectorDoc:
+    | PDFDocument
+    | null = null;
+
+  let fallbackLoaded:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
+
+  let totalPages = 0;
+
+  /*
+   * Keep the existing lossless vector path for ordinary PDFs.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      vectorDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      totalPages =
+        vectorDoc.getPageCount();
+    } catch {
+      vectorDoc = null;
+      sourceBuffer = null;
+    }
+  }
+
+  /*
+   * Protected/unreadable vector PDFs use the existing
+   * browser-backed PDF.js fallback.
+   */
+  if (!vectorDoc) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    totalPages =
+      fallbackLoaded.pdf.numPages;
+  }
+
+  /*
+   * Preserve the existing vector-safety check.
+   */
+  let isVectorSafe =
+    Boolean(vectorDoc);
+
+  if (vectorDoc) {
+    try {
+      for (
+        let i = 0;
+        i < totalPages;
+        i++
+      ) {
+        const page =
+          vectorDoc.getPage(i);
+
+        if (
+          !page.node.get(
+            PDFName.of(
+              'Resources'
+            )
+          ) ||
+          !page.node.Contents() ||
+          page.node.Annots()
+        ) {
+          isVectorSafe =
+            false;
           break;
         }
       }
-      if (!missing) isVectorSafe = true;
+    } catch {
+      isVectorSafe =
+        false;
     }
-  } catch {
-    isVectorSafe = false;
   }
 
-  if (isVectorSafe) {
+  /*
+   * Lossless vector split.
+   */
+  if (
+    isVectorSafe &&
+    vectorDoc
+  ) {
     try {
-      const sourceDoc = await PDFDocument.load(arrayBuffer);
-      for (let i = 0; i < totalPages; i++) {
-        onProgress?.(i + 1, totalPages);
-        const singleDoc = await PDFDocument.create();
-        const [copiedPage] = await singleDoc.copyPages(sourceDoc, [i]);
-        singleDoc.addPage(copiedPage);
+      for (
+        let i = 0;
+        i < totalPages;
+        i++
+      ) {
+        onProgress?.(
+          i + 1,
+          totalPages
+        );
 
-        const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-        const paddedIndex = String(i + 1).padStart(2, '0');
-        zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+        const singleDoc =
+          await PDFDocument.create();
+
+        const [copiedPage] =
+          await singleDoc.copyPages(
+            vectorDoc,
+            [i]
+          );
+
+        singleDoc.addPage(
+          copiedPage
+        );
+
+        const pdfBytes =
+          await singleDoc.save({
+            useObjectStreams:
+              false,
+          });
+
+        const paddedIndex =
+          String(
+            i + 1
+          ).padStart(
+            2,
+            '0'
+          );
+
+        zipWriter.addFile(
+          `${baseName}_page_${paddedIndex}.pdf`,
+          pdfBytes
+        );
+
+        /*
+         * Yield after each page so completed page objects can
+         * become collectible before the next one is created.
+         */
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
       }
-      return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-    } catch (e) {
-      console.warn('Vector ZIP split failed, proceeding to high-res engine:', e);
+
+      vectorDoc = null;
+      sourceBuffer = null;
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+      return await zipWriter.finish();
+    } catch (error) {
+      console.warn(
+        'Vector ZIP split failed, proceeding to high-res engine:',
+        error
+      );
+
+      /*
+       * Discard the incomplete archive and start a clean one
+       * before entering the raster fallback.
+       */
+      zipWriter =
+        createStreamingZip();
     }
   }
 
-  // Visual Fallback
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    stopAtErrors: false,
-  });
-  const fallbackDoc = await loadingTask.promise;
+  vectorDoc = null;
+  sourceBuffer = null;
 
-  for (let i = 0; i < totalPages; i++) {
-    onProgress?.(i + 1, totalPages);
-    const pageNum = i + 1;
-    const page = await fallbackDoc.getPage(pageNum);
-    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-    const singleDoc = await PDFDocument.create();
-    const embeddedImage = await singleDoc.embedJpg(imgBytes);
-
-    const newPage = singleDoc.addPage([width, height]);
-    newPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width,
-      height,
-    });
-
-    const pdfBytes = await singleDoc.save({ useObjectStreams: false });
-    const paddedIndex = String(i + 1).padStart(2, '0');
-    zip.file(`${baseName}_page_${paddedIndex}.pdf`, pdfBytes);
+  if (!fallbackLoaded) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
   }
 
-  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const fallbackDoc =
+    fallbackLoaded.pdf;
+
+  try {
+    for (
+      let i = 0;
+      i < totalPages;
+      i++
+    ) {
+      onProgress?.(
+        i + 1,
+        totalPages
+      );
+
+      const page =
+        await fallbackDoc.getPage(
+          i + 1
+        );
+
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+        const singleDoc =
+          await PDFDocument.create();
+
+        const embeddedImage =
+          await singleDoc.embedJpg(
+            imgBytes
+          );
+
+        const newPage =
+          singleDoc.addPage([
+            width,
+            height,
+          ]);
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
+
+        const pdfBytes =
+          await singleDoc.save({
+            useObjectStreams:
+              false,
+          });
+
+        const paddedIndex =
+          String(
+            i + 1
+          ).padStart(
+            2,
+            '0'
+          );
+
+        zipWriter.addFile(
+          `${baseName}_page_${paddedIndex}.pdf`,
+          pdfBytes
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+        )
+      );
+    }
+
+    await fallbackLoaded.dispose();
+    fallbackLoaded = null;
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await zipWriter.finish();
+  } finally {
+    if (fallbackLoaded) {
+      await fallbackLoaded.dispose();
+    }
+  }
 }
-/**
- * Removes specified pages from a PDF document.
- */
+
 export async function removePagesFromPDF(
   file: File,
   pageNumbersToRemove: number[]
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  const pageCount = await getPDFPageCount(file);
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
 
-  const removeSet = new Set(pageNumbersToRemove.map((n) => n - 1));
-  const indicesToKeep: number[] = [];
-  for (let i = 0; i < pageCount; i++) {
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+  let vectorDoc:
+    | PDFDocument
+    | null = null;
+
+  let fallbackLoaded:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
+
+  let pageCount = 0;
+
+
+  /*
+   * Clean PDFs keep the fast, lossless pdf-lib path.
+   * Protected files skip the complete source allocation.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      vectorDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      pageCount =
+        vectorDoc.getPageCount();
+    } catch {
+      vectorDoc = null;
+      sourceBuffer = null;
+    }
+  }
+
+
+  /*
+   * If vector loading was skipped or failed,
+   * obtain the page count through browser-backed PDF.js.
+   */
+  if (!vectorDoc) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    pageCount =
+      fallbackLoaded.pdf.numPages;
+  }
+
+
+  const removeSet =
+    new Set(
+      pageNumbersToRemove.map(
+        (n) => n - 1
+      )
+    );
+
+  const indicesToKeep:
+    number[] = [];
+
+  for (
+    let i = 0;
+    i < pageCount;
+    i++
+  ) {
     if (!removeSet.has(i)) {
       indicesToKeep.push(i);
     }
   }
 
-  if (indicesToKeep.length === 0) {
-    throw new Error('Cannot remove all pages from the document.');
-  }
 
-  try {
-    if (isComplexOrProtectedPdf(uint8)) {
-      throw new Error('Protected document; switching to rendering engine.');
+  if (
+    indicesToKeep.length === 0
+  ) {
+    if (fallbackLoaded) {
+      await fallbackLoaded.dispose();
     }
 
-    const srcDoc = await PDFDocument.load(arrayBuffer);
+    throw new Error(
+      'Cannot remove all pages from the document.'
+    );
+  }
 
-    for (const idx of indicesToKeep) {
-      const page = srcDoc.getPage(idx);
-      if (!page.node.Contents() || page.node.Annots()) {
-        throw new Error('Page missing Contents or has annotations');
+
+  /*
+   * Validate whether vector page copying is safe.
+   */
+  let isVectorSafe =
+    Boolean(vectorDoc);
+
+  if (vectorDoc) {
+    try {
+      for (
+        const idx of
+        indicesToKeep
+      ) {
+        const page =
+          vectorDoc.getPage(
+            idx
+          );
+
+        if (
+          !page.node.Contents() ||
+          page.node.Annots()
+        ) {
+          isVectorSafe =
+            false;
+
+          break;
+        }
+      }
+    } catch {
+      isVectorSafe =
+        false;
+    }
+  }
+
+
+  /*
+   * 1. Lossless vector removal.
+   */
+  if (
+    isVectorSafe &&
+    vectorDoc
+  ) {
+    try {
+      const newDoc =
+        await PDFDocument.create();
+
+      const copied =
+        await newDoc.copyPages(
+          vectorDoc,
+          indicesToKeep
+        );
+
+      copied.forEach(
+        (page) =>
+          newDoc.addPage(
+            page
+          )
+      );
+
+      return await newDoc.save({
+        useObjectStreams: false,
+      });
+    } catch (error) {
+      console.warn(
+        `Vector removal bypassed for "${file.name}". Activating high-res rendering engine:`,
+        error
+      );
+    }
+  }
+
+
+  /*
+   * Release complete vector-source references before
+   * entering the visual fallback.
+   */
+  vectorDoc = null;
+  sourceBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+
+  if (!fallbackLoaded) {
+    fallbackLoaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+  }
+
+
+  const fallbackDoc =
+    fallbackLoaded.pdf;
+
+  try {
+    const newDoc =
+      await PDFDocument.create();
+
+    for (
+      const idx of
+      indicesToKeep
+    ) {
+      const pageNum =
+        idx + 1;
+
+      const page =
+        await fallbackDoc.getPage(
+          pageNum
+        );
+
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+        const embeddedImage =
+          await newDoc.embedJpg(
+            imgBytes
+          );
+
+        const newPage =
+          newDoc.addPage([
+            width,
+            height,
+          ]);
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
     }
 
-    const newDoc = await PDFDocument.create();
-    const copied = await newDoc.copyPages(srcDoc, indicesToKeep);
-    copied.forEach((p) => newDoc.addPage(p));
-    return await newDoc.save({ useObjectStreams: false });
-  } catch (err) {
-    console.warn(`Vector removal bypassed for "${file.name}". Activating high-res rendering engine:`, err);
-
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-      data: uint8.slice(),
-      stopAtErrors: false,
+    return await newDoc.save({
+      useObjectStreams: false,
     });
-    const fallbackDoc = await loadingTask.promise;
-    const newDoc = await PDFDocument.create();
-
-    for (const idx of indicesToKeep) {
-      const pageNum = idx + 1;
-      const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-      const embeddedImage = await newDoc.embedJpg(imgBytes);
-
-      const newPage = newDoc.addPage([width, height]);
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width,
-        height,
-      });
-    }
-
-    return await newDoc.save({ useObjectStreams: false });
+  } finally {
+    await fallbackLoaded.dispose();
   }
 }
 
 /**
  * Dual-engine page counter.
  */
-export async function getPDFPageCount(file: File): Promise<number> {
-  const bytes = await file.arrayBuffer();
+export async function getPDFPageCount(
+  file: File
+): Promise<number> {
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  /*
+   * Normal PDFs do not need a complete JavaScript copy
+   * merely to read the page count.
+   */
+  if (!looksProtected) {
+    try {
+      const loaded =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors: false,
+          }
+        );
+
+      try {
+        return loaded.pdf.numPages;
+      } finally {
+        await loaded.dispose();
+      }
+    } catch (_) {
+      /*
+       * Fall through to the compatibility path below.
+       */
+    }
+  }
+
+  /*
+   * Preserve compatibility with protected / unusual PDFs.
+   * pdf-lib with ignoreEncryption can count some documents
+   * that PDF.js refuses to open without a password.
+   */
+  const bytes =
+    await file.arrayBuffer();
+
   try {
-    const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const pdfDoc =
+      await PDFDocument.load(
+        bytes,
+        {
+          ignoreEncryption: true,
+        }
+      );
+
     return pdfDoc.getPageCount();
-  } catch {
-    const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(bytes).slice() }).promise;
-    return doc.numPages;
+  } catch (_) {
+    /*
+     * Final browser-backed attempt.
+     * Do not create another Uint8Array/slice copy.
+     */
+    const loaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    try {
+      return loaded.pdf.numPages;
+    } finally {
+      await loaded.dispose();
+    }
   }
 }
 
@@ -719,13 +2112,23 @@ export async function addWatermarkToPDF(
   file: File,
   options: WatermarkOptions
 ): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const uint8 = new Uint8Array(bytes);
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
-  const pdfDoc = await loadingTask.promise;
-  const numPages = pdfDoc.numPages;
-  const newPdfDoc = await PDFDocument.create();
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  try {
+    const numPages =
+      pdfDoc.numPages;
+
+    const newPdfDoc =
+      await PDFDocument.create();
 
   const opacity = options.opacity ?? 0.25;
   const angleDeg = options.angle ?? -45;
@@ -817,10 +2220,37 @@ export async function addWatermarkToPDF(
 
     ctx.restore();
 
-    const stampedJpg = compositeCanvas.toDataURL('image/jpeg', 0.95);
-    const b64 = stampedJpg.split(',')[1];
-    const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const finalPageImg = await newPdfDoc.embedJpg(stampedBytes);
+    const stampedBlob =
+      await new Promise<Blob>(
+        (
+          resolve,
+          reject
+        ) => {
+          compositeCanvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(
+                  new Error(
+                    'Failed to encode watermarked page.'
+                  )
+                );
+              }
+            },
+            'image/jpeg',
+            0.95
+          );
+        }
+      );
+
+    const stampedBytes =
+      await stampedBlob.arrayBuffer();
+
+    const finalPageImg =
+      await newPdfDoc.embedJpg(
+        stampedBytes
+      );
 
     const newPage = newPdfDoc.addPage([pWidth, pHeight]);
     newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
@@ -832,172 +2262,447 @@ export async function addWatermarkToPDF(
     try { page.cleanup(); } catch {}
   }
 
-  return await newPdfDoc.save({ useObjectStreams: false });
+    return await newPdfDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 export async function addPageNumbersToPDF(
   file: File,
   position: 'bottom-center' | 'bottom-right'
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
 
-  // 1. Detect whether the file has encryption/permissions locks
-  let isEncrypted = false;
-  let pdfDoc: PDFDocument | null = null;
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
 
-  try {
-    pdfDoc = await PDFDocument.load(arrayBuffer);
-    if (pdfDoc.isEncrypted) {
+  let pdfDoc:
+    | PDFDocument
+    | null = null;
+
+  let isEncrypted =
+    looksProtected;
+
+
+  /*
+   * Normal PDFs keep the fast, lossless vector path.
+   * Files already detected as protected skip this full
+   * source allocation entirely.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      pdfDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      if (pdfDoc.isEncrypted) {
+        isEncrypted = true;
+      }
+    } catch {
       isEncrypted = true;
+      pdfDoc = null;
     }
-  } catch {
-    // If PDFDocument.load throws an error, it is encrypted/locked
-    isEncrypted = true;
   }
 
-  // =========================================================================
-  // PATH A: Standard Unencrypted PDFs (Fast Native Vector Stamping)
-  // =========================================================================
-  if (!isEncrypted && pdfDoc) {
+
+  /*
+   * PATH A:
+   * Standard unencrypted PDF.
+   * Preserve the existing native vector stamping behavior.
+   */
+  if (
+    !isEncrypted &&
+    pdfDoc
+  ) {
     try {
-      const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      const pages = pdfDoc.getPages();
-      const totalPages = pages.length;
+      const helveticaFont =
+        await pdfDoc.embedFont(
+          StandardFonts.HelveticaBold
+        );
 
-      for (let i = 0; i < totalPages; i++) {
-        const page = pages[i];
-        const box = page.getCropBox() || page.getMediaBox();
-        const text = `${i + 1} of ${totalPages}`;
+      const pages =
+        pdfDoc.getPages();
+
+      const totalPages =
+        pages.length;
+
+      for (
+        let i = 0;
+        i < totalPages;
+        i++
+      ) {
+        const page =
+          pages[i];
+
+        const box =
+          page.getCropBox() ||
+          page.getMediaBox();
+
+        const text =
+          (i + 1) +
+          ' of ' +
+          totalPages;
+
         const size = 11;
-        const textWidth = helveticaFont.widthOfTextAtSize(text, size);
 
-        let xPos = box.x + (box.width / 2) - (textWidth / 2);
-        if (position === 'bottom-right') {
-          xPos = box.x + box.width - textWidth - 36;
+        const textWidth =
+          helveticaFont.widthOfTextAtSize(
+            text,
+            size
+          );
+
+        let xPos =
+          box.x +
+          box.width / 2 -
+          textWidth / 2;
+
+        if (
+          position ===
+          'bottom-right'
+        ) {
+          xPos =
+            box.x +
+            box.width -
+            textWidth -
+            36;
         }
-        const yPos = box.y + 28;
+
+        const yPos =
+          box.y + 28;
 
         page.drawRectangle({
           x: xPos - 6,
           y: yPos - 3,
-          width: textWidth + 12,
-          height: size + 6,
-          color: rgb(1, 1, 1),
+          width:
+            textWidth + 12,
+          height:
+            size + 6,
+          color: rgb(
+            1,
+            1,
+            1
+          ),
           opacity: 0.9,
         });
 
-        page.drawText(text, {
-          x: xPos,
-          y: yPos,
-          size,
-          font: helveticaFont,
-          color: rgb(0, 0, 0),
-        });
+        page.drawText(
+          text,
+          {
+            x: xPos,
+            y: yPos,
+            size,
+            font:
+              helveticaFont,
+            color: rgb(
+              0,
+              0,
+              0
+            ),
+          }
+        );
       }
 
       return await pdfDoc.save({
         useObjectStreams: false,
         addDefaultPage: false,
       });
-    } catch (e) {
-      console.warn('Path A failed, shifting to universal reconstruction...', e);
+    } catch (error) {
+      console.warn(
+        'Path A failed, shifting to universal reconstruction...',
+        error
+      );
     }
   }
 
-  // =========================================================================
-  // PATH B: Encrypted Bank Statements & Scanned Agreements (Universal Reconstruction)
-  // =========================================================================
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: new Uint8Array(arrayBuffer.slice(0)),
-  });
-  const pdf = await loadingTask.promise;
-  const totalPages = pdf.numPages;
 
-  const reconstructedDoc = await PDFDocument.create();
-  const helvetica = await reconstructedDoc.embedFont(StandardFonts.HelveticaBold);
+  /*
+   * PATH B:
+   * Encrypted bank statements, scanned agreements,
+   * and PDFs whose vector save failed.
+   *
+   * Release the full pdf-lib source references before
+   * opening the raster engine.
+   */
+  pdfDoc = null;
+  sourceBuffer = null;
 
-  for (let i = 1; i <= totalPages; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 });
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
 
-    if (!ctx) {
-      page.cleanup();
-      continue;
-    }
-
-    await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-
-    const imageBlob: Blob = await new Promise((resolve) =>
-      canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.92)
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
     );
-    const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
-    const embeddedImage = await reconstructedDoc.embedJpg(imageBytes);
 
-    canvas.width = 0;
-    canvas.height = 0;
-    page.cleanup();
+  const pdf =
+    loadedPdf.pdf;
 
-    const originalWidth = viewport.width / 2.0;
-    const originalHeight = viewport.height / 2.0;
-    const newPage = reconstructedDoc.addPage([originalWidth, originalHeight]);
+  try {
+    const totalPages =
+      pdf.numPages;
 
-    newPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: originalWidth,
-      height: originalHeight,
-    });
+    const reconstructedDoc =
+      await PDFDocument.create();
 
-    const text = `${i} of ${totalPages}`;
-    const size = 11;
-    const textWidth = helvetica.widthOfTextAtSize(text, size);
+    const helvetica =
+      await reconstructedDoc.embedFont(
+        StandardFonts.HelveticaBold
+      );
 
-    let xPos = (originalWidth / 2) - (textWidth / 2);
-    if (position === 'bottom-right') {
-      xPos = originalWidth - textWidth - 36;
+
+    for (
+      let i = 1;
+      i <= totalPages;
+      i++
+    ) {
+      const page =
+        await pdf.getPage(i);
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+        canvas.style.position =
+          'fixed';
+
+        canvas.style.left =
+          '-9999px';
+
+        canvas.style.opacity =
+          '0';
+
+        document.body.appendChild(
+          canvas
+        );
+
+
+        if (!ctx) {
+          continue;
+        }
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        const imageBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode reconstructed PDF page.'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
+            }
+          );
+
+
+        const imageBytes =
+          await imageBlob.arrayBuffer();
+
+        const embeddedImage =
+          await reconstructedDoc.embedJpg(
+            imageBytes
+          );
+
+
+        const originalWidth =
+          viewport.width /
+          2.0;
+
+        const originalHeight =
+          viewport.height /
+          2.0;
+
+
+        const newPage =
+          reconstructedDoc.addPage([
+            originalWidth,
+            originalHeight,
+          ]);
+
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width:
+              originalWidth,
+            height:
+              originalHeight,
+          }
+        );
+
+
+        const text =
+          i +
+          ' of ' +
+          totalPages;
+
+        const size = 11;
+
+        const textWidth =
+          helvetica.widthOfTextAtSize(
+            text,
+            size
+          );
+
+
+        let xPos =
+          originalWidth /
+            2 -
+          textWidth /
+            2;
+
+        if (
+          position ===
+          'bottom-right'
+        ) {
+          xPos =
+            originalWidth -
+            textWidth -
+            36;
+        }
+
+
+        const yPos = 24;
+
+
+        newPage.drawRectangle({
+          x: xPos - 8,
+          y: yPos - 4,
+          width:
+            textWidth + 16,
+          height:
+            size + 8,
+          color: rgb(
+            1,
+            1,
+            1
+          ),
+          opacity: 0.95,
+        });
+
+
+        newPage.drawText(
+          text,
+          {
+            x: xPos,
+            y: yPos,
+            size,
+            font:
+              helvetica,
+            color: rgb(
+              0,
+              0,
+              0
+            ),
+          }
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
     }
-    const yPos = 24;
 
-    newPage.drawRectangle({
-      x: xPos - 8,
-      y: yPos - 4,
-      width: textWidth + 16,
-      height: size + 8,
-      color: rgb(1, 1, 1),
-      opacity: 0.95,
-    });
 
-    newPage.drawText(text, {
-      x: xPos,
-      y: yPos,
-      size,
-      font: helvetica,
-      color: rgb(0, 0, 0),
+    return await reconstructedDoc.save({
+      useObjectStreams: false,
+      addDefaultPage: false,
     });
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  return await reconstructedDoc.save({
-    useObjectStreams: false,
-    addDefaultPage: false,
-  });
 }
 
 export async function extractTextFromPDF(
   file: File,
   onProgress?: (status: string) => void
 ): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  const totalPages =
+    pdfDoc.numPages;
 
   let fullDocumentText = '';
   let ocrWorker: any = null;
@@ -1007,7 +2712,7 @@ export async function extractTextFromPDF(
       onProgress?.(`Processing page ${i} of ${totalPages}...`);
       const page = await pdfDoc.getPage(i);
       const textContent = await page.getTextContent();
-      
+
       const digitalText = textContent.items
         .map((item: any) => item.str || '')
         .filter(Boolean)
@@ -1020,7 +2725,7 @@ export async function extractTextFromPDF(
       } else {
         // Page is an image, screenshot, or flat scan -> Run Page-Level OCR
         onProgress?.(`Page ${i} is visual/scanned. Running OCR...`);
-        
+
         if (!ocrWorker) {
           ocrWorker = await createWorker('eng', 1, {
             workerPath: '/tessdata/worker.min.js',
@@ -1052,8 +2757,12 @@ export async function extractTextFromPDF(
           }
         }
 
-        canvas.width = 0;
-        canvas.height = 0;
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
       }
 
       page.cleanup();
@@ -1062,6 +2771,8 @@ export async function extractTextFromPDF(
     if (ocrWorker) {
       await ocrWorker.terminate();
     }
+
+    await loadedPdf.dispose();
   }
 
   return fullDocumentText.trim() || 'No readable text could be extracted.';
@@ -1074,32 +2785,57 @@ export interface PDFMetadata {
   keywords?: string;
 }
 
-export async function getPDFMetadata(file: File): Promise<PDFMetadata> {
-  const arrayBuffer = await file.arrayBuffer();
+export async function getPDFMetadata(
+  file: File
+): Promise<PDFMetadata> {
+  let disposePdf:
+    | (() => Promise<void>)
+    | null = null;
 
   try {
-    // Read directly via pdfjsLib which reads info on ALL PDFs (even bank statements)
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-      data: new Uint8Array(arrayBuffer.slice(0)),
-    });
-    const pdf = await loadingTask.promise;
-    const meta = await pdf.getMetadata();
-    const info = (meta?.info as any) || {};
+    const loaded =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    disposePdf =
+      loaded.dispose;
+
+    const meta =
+      await loaded.pdf.getMetadata();
+
+    const info =
+      (meta?.info as any) || {};
 
     return {
-      title: info.Title || '',
-      author: info.Author || '',
-      subject: info.Subject || '',
-      keywords: info.Keywords || '',
+      title:
+        info.Title || '',
+      author:
+        info.Author || '',
+      subject:
+        info.Subject || '',
+      keywords:
+        info.Keywords || '',
     };
   } catch (err: any) {
-    console.error('getPDFMetadata error:', err);
+    console.error(
+      'getPDFMetadata error:',
+      err
+    );
+
     return {
       title: '',
       author: '',
       subject: '',
       keywords: '',
     };
+  } finally {
+    if (disposePdf) {
+      await disposePdf();
+    }
   }
 }
 
@@ -1107,17 +2843,43 @@ export async function updatePDFMetadata(
   file: File,
   metadata: PDFMetadata
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
+  let arrayBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
 
   let pdfDoc: PDFDocument;
 
   try {
     // Attempt standard load
-    pdfDoc = await PDFDocument.load(arrayBuffer);
+    pdfDoc =
+      await PDFDocument.load(
+        arrayBuffer
+      );
   } catch {
     // If bank statement / permissions-locked, bypass permission checks
-    pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    pdfDoc =
+      await PDFDocument.load(
+        arrayBuffer!,
+        {
+          ignoreEncryption: true,
+        }
+      );
   }
+
+  /*
+   * pdf-lib has parsed the source. Drop the separate
+   * complete input-buffer reference before final save.
+   */
+  arrayBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
   // Set the requested metadata fields
   if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
@@ -1158,208 +2920,644 @@ export async function signPDF(
   placements: SignaturePlacement[],
   password?: string
 ): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const uint8 = new Uint8Array(bytes);
+  const base64Data =
+    signaturePngDataUrl.split(',')[1];
 
-  const base64Data = signaturePngDataUrl.split(',')[1];
-  const signatureBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+  const signatureBytes =
+    Uint8Array.from(
+      atob(base64Data),
+      (c) => c.charCodeAt(0)
+    );
 
-  // Group placements by pageIndex
-  const placementMap = new Map<number, SignaturePlacement[]>();
-  placements.forEach((p) => {
-    const list = placementMap.get(p.pageIndex) || [];
-    list.push(p);
-    placementMap.set(p.pageIndex, list);
+  const placementMap =
+    new Map<
+      number,
+      SignaturePlacement[]
+    >();
+
+  placements.forEach((placement) => {
+    const list =
+      placementMap.get(
+        placement.pageIndex
+      ) || [];
+
+    list.push(
+      placement
+    );
+
+    placementMap.set(
+      placement.pageIndex,
+      list
+    );
   });
 
-  // 1. Decryption & High-Res Rendering Path (for protected or complex documents)
-  if (password || isComplexOrProtectedPdf(uint8)) {
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-      data: uint8.slice(),
-      password: password || undefined,
-      stopAtErrors: false,
-    });
 
-    loadingTask.onPassword = () => {
-      throw new Error('INCORRECT_PASSWORD');
+  const renderSignedPdf =
+    async (
+      loadedPdf: {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    ): Promise<Uint8Array> => {
+      const pdfDoc =
+        loadedPdf.pdf;
+
+      try {
+        const newPdfDoc =
+          await PDFDocument.create();
+
+        const embeddedSignature =
+          await newPdfDoc.embedPng(
+            signatureBytes
+          );
+
+        for (
+          let i = 1;
+          i <= pdfDoc.numPages;
+          i++
+        ) {
+          const page =
+            await pdfDoc.getPage(i);
+
+          try {
+            const {
+              imgBytes,
+              width: pWidth,
+              height: pHeight,
+            } =
+              await renderPageAsJpg(
+                page,
+                2.0
+              );
+
+            const embeddedPageImg =
+              await newPdfDoc.embedJpg(
+                imgBytes
+              );
+
+            const newPage =
+              newPdfDoc.addPage([
+                pWidth,
+                pHeight,
+              ]);
+
+            newPage.drawImage(
+              embeddedPageImg,
+              {
+                x: 0,
+                y: 0,
+                width: pWidth,
+                height: pHeight,
+              }
+            );
+
+            const pagePlacements =
+              placementMap.get(
+                i - 1
+              ) || [];
+
+            for (
+              const placement of
+              pagePlacements
+            ) {
+              const signW =
+                pWidth *
+                placement.widthPercent;
+
+              const signH =
+                pHeight *
+                placement.heightPercent;
+
+              const signX =
+                pWidth *
+                placement.xPercent;
+
+              const signY =
+                pHeight -
+                (
+                  placement.yPercent *
+                  pHeight
+                ) -
+                signH;
+
+              newPage.drawImage(
+                embeddedSignature,
+                {
+                  x: signX,
+                  y: signY,
+                  width: signW,
+                  height: signH,
+                }
+              );
+            }
+          } finally {
+            try {
+              page.cleanup();
+            } catch (_) {}
+          }
+
+          /*
+           * Let the completed page's rendering/JPEG
+           * temporaries become collectible before moving
+           * to the next page.
+           */
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+        }
+
+        /*
+         * All source pages and signatures are already
+         * embedded in newPdfDoc. Release PDF.js before
+         * allocating the complete serialized signed PDF.
+         */
+        await loadedPdf.dispose();
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
+        return await newPdfDoc.save({
+          useObjectStreams: false,
+        });
+      } finally {
+        await loadedPdf.dispose();
+      }
     };
 
-    let pdfDoc;
+
+  /*
+   * Protected/password path.
+   *
+   * Do not allocate a complete source ArrayBuffer before
+   * PDF.js. The browser-backed File is sufficient.
+   */
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  if (
+    password ||
+    looksProtected
+  ) {
+    let loadedPdf:
+      | {
+          pdf: any;
+          dispose: () => Promise<void>;
+        }
+      | null = null;
+
     try {
-      pdfDoc = await loadingTask.promise;
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            password:
+              password ||
+              undefined,
+            stopAtErrors: false,
+          }
+        );
     } catch (err: any) {
       if (
-        err?.name === 'PasswordException' ||
-        err?.message?.includes('password') ||
-        err?.message === 'INCORRECT_PASSWORD'
+        err?.name ===
+          'PasswordException' ||
+        err?.message
+          ?.toLowerCase()
+          .includes(
+            'password'
+          ) ||
+        err?.message ===
+          'INCORRECT_PASSWORD'
       ) {
-        throw new Error('INCORRECT_PASSWORD');
+        throw new Error(
+          'INCORRECT_PASSWORD'
+        );
       }
+
       throw err;
     }
 
-    const numPages = pdfDoc.numPages;
-    const newPdfDoc = await PDFDocument.create();
-    const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
-
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdfDoc.getPage(i);
-      const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
-      const embeddedPageImg = await newPdfDoc.embedJpg(imgBytes);
-
-      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-      newPage.drawImage(embeddedPageImg, {
-        x: 0,
-        y: 0,
-        width: pWidth,
-        height: pHeight,
-      });
-
-      const pagePlacements = placementMap.get(i - 1) || [];
-      for (const pl of pagePlacements) {
-        const signW = pWidth * pl.widthPercent;
-        const signH = pHeight * pl.heightPercent;
-        const signX = pWidth * pl.xPercent;
-        const signY = pHeight - (pl.yPercent * pHeight) - signH;
-
-        newPage.drawImage(embeddedSignature, {
-          x: signX,
-          y: signY,
-          width: signW,
-          height: signH,
-        });
-      }
-    }
-
-    return await newPdfDoc.save({ useObjectStreams: false });
+    return await renderSignedPdf(
+      loadedPdf
+    );
   }
 
-  // 2. Vector Path for clean unencrypted files
+
+  /*
+   * Clean unencrypted PDFs retain the native,
+   * lossless vector signing path.
+   */
+  let sourceBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
+
   try {
-    const pdfDoc = await PDFDocument.load(bytes);
-    const pages = pdfDoc.getPages();
-    const embeddedSignature = await pdfDoc.embedPng(signatureBytes);
+    const pdfDoc =
+      await PDFDocument.load(
+        sourceBuffer
+      );
 
-    pages.forEach((page, idx) => {
-      const { width: pageWidth, height: pageHeight } = page.getSize();
-      const pagePlacements = placementMap.get(idx) || [];
+    /*
+     * pdf-lib has parsed the source document.
+     * Drop our separate complete input-buffer reference
+     * before signing and final serialization.
+     */
+    sourceBuffer = null;
 
-      for (const pl of pagePlacements) {
-        const signW = pageWidth * pl.widthPercent;
-        const signH = pageHeight * pl.heightPercent;
-        const signX = pageWidth * pl.xPercent;
-        const signY = pageHeight - (pl.yPercent * pageHeight) - signH;
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
 
-        page.drawImage(embeddedSignature, {
-          x: signX,
-          y: signY,
-          width: signW,
-          height: signH,
-        });
+    const pages =
+      pdfDoc.getPages();
+
+    const embeddedSignature =
+      await pdfDoc.embedPng(
+        signatureBytes
+      );
+
+    pages.forEach(
+      (page, idx) => {
+        const {
+          width: pageWidth,
+          height: pageHeight,
+        } =
+          page.getSize();
+
+        const pagePlacements =
+          placementMap.get(
+            idx
+          ) || [];
+
+        for (
+          const placement of
+          pagePlacements
+        ) {
+          const signW =
+            pageWidth *
+            placement.widthPercent;
+
+          const signH =
+            pageHeight *
+            placement.heightPercent;
+
+          const signX =
+            pageWidth *
+            placement.xPercent;
+
+          const signY =
+            pageHeight -
+            (
+              placement.yPercent *
+              pageHeight
+            ) -
+            signH;
+
+          page.drawImage(
+            embeddedSignature,
+            {
+              x: signX,
+              y: signY,
+              width: signW,
+              height: signH,
+            }
+          );
+        }
       }
+    );
+
+    return await pdfDoc.save({
+      useObjectStreams: false,
     });
-
-    return await pdfDoc.save({ useObjectStreams: false });
   } catch (err) {
-    console.warn('Native vector sign fallback to visual engine:', err);
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
-    const fallbackDoc = await loadingTask.promise;
-    const newPdfDoc = await PDFDocument.create();
-    const embeddedSignature = await newPdfDoc.embedPng(signatureBytes);
+    console.warn(
+      'Native vector sign fallback to visual engine:',
+      err
+    );
 
-    for (let i = 1; i <= fallbackDoc.numPages; i++) {
-      const page = await fallbackDoc.getPage(i);
-      const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
-      const embeddedPageImg = await newPdfDoc.embedJpg(imgBytes);
+    /*
+     * Release our complete source reference before opening
+     * the raster fallback.
+     */
+    sourceBuffer = null;
 
-      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-      newPage.drawImage(embeddedPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
 
-      const pagePlacements = placementMap.get(i - 1) || [];
-      for (const pl of pagePlacements) {
-        const signW = pWidth * pl.widthPercent;
-        const signH = pHeight * pl.heightPercent;
-        const signX = pWidth * pl.xPercent;
-        const signY = pHeight - (pl.yPercent * pHeight) - signH;
+    let loadedFallback:
+      | {
+          pdf: any;
+          dispose: () => Promise<void>;
+        }
+      | null = null;
 
-        newPage.drawImage(embeddedSignature, {
-          x: signX,
-          y: signY,
-          width: signW,
-          height: signH,
-        });
+    try {
+      loadedFallback =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors: false,
+          }
+        );
+    } catch (fallbackError: any) {
+      if (
+        fallbackError?.name ===
+          'PasswordException' ||
+        fallbackError?.message
+          ?.toLowerCase()
+          .includes(
+            'password'
+          )
+      ) {
+        throw new Error(
+          'INCORRECT_PASSWORD'
+        );
       }
+
+      throw fallbackError;
     }
 
-    return await newPdfDoc.save({ useObjectStreams: false });
+    return await renderSignedPdf(
+      loadedFallback
+    );
   }
 }
+
 export async function encryptPDF(
   file: File,
   userPassword: string,
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() }).promise;
-  const numPages = pdf.numPages;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-  let doc: jsPDF | null = null;
+  const pdf =
+    loadedPdf.pdf;
 
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdf.getPage(i);
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
-    const renderViewport = page.getViewport({ scale: 2.0 });
+  try {
+    const numPages =
+      pdf.numPages;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = renderViewport.width;
-    canvas.height = renderViewport.height;
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) throw new Error('Canvas context unavailable');
+    let doc:
+      | jsPDF
+      | null = null;
 
-    await (
-      page.render({
-        canvasContext: ctx as any,
-        viewport: renderViewport,
-        canvas,
-      } as any) as any
-    ).promise;
+    for (
+      let i = 1;
+      i <= numPages;
+      i++
+    ) {
+      const page =
+        await pdf.getPage(i);
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
-    const pageWidth = unscaledViewport.width;
-    const pageHeight = unscaledViewport.height;
-    const orientation = pageWidth > pageHeight ? 'landscape' : 'portrait';
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
 
-    if (i === 1) {
-      doc = new jsPDF({
-        orientation,
-        unit: 'pt',
-        format: [pageWidth, pageHeight],
-        encryption: {
-          userPassword,
-          ownerPassword: userPassword,
-          userPermissions: ['print', 'copy'],
-        },
-      });
-      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
-    } else if (doc) {
-      doc.addPage([pageWidth, pageHeight], orientation);
-      doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+      try {
+        const unscaledViewport =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const renderViewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+        canvas.width =
+          Math.floor(
+            renderViewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            renderViewport.height
+          );
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas context unavailable'
+          );
+        }
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport:
+              renderViewport,
+            canvas,
+          } as any) as any
+        ).promise;
+
+
+        /*
+         * Avoid a large base64 data URL.
+         * Encode directly to a JPEG Blob and pass its bytes
+         * to jsPDF.
+         */
+        const imageBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode PDF page.'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
+            }
+          );
+
+        const imageBytes =
+          new Uint8Array(
+            await imageBlob.arrayBuffer()
+          );
+
+        const pageWidth =
+          unscaledViewport.width;
+
+        const pageHeight =
+          unscaledViewport.height;
+
+        const orientation =
+          pageWidth >
+          pageHeight
+            ? 'landscape'
+            : 'portrait';
+
+
+        if (i === 1) {
+          doc =
+            new jsPDF({
+              orientation,
+              unit: 'pt',
+              format: [
+                pageWidth,
+                pageHeight,
+              ],
+              encryption: {
+                userPassword,
+                ownerPassword:
+                  userPassword,
+                userPermissions: [
+                  'print',
+                  'copy',
+                ],
+              },
+            });
+
+          doc.addImage(
+            imageBytes,
+            'JPEG',
+            0,
+            0,
+            pageWidth,
+            pageHeight
+          );
+        } else if (doc) {
+          doc.addPage(
+            [
+              pageWidth,
+              pageHeight,
+            ],
+            orientation
+          );
+
+          doc.addImage(
+            imageBytes,
+            'JPEG',
+            0,
+            0,
+            pageWidth,
+            pageHeight
+          );
+        }
+
+
+        onProgress?.(
+          Math.round(
+            (
+              i /
+              numPages
+            ) *
+              100
+          )
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser a chance to reclaim the
+       * completed page's render/JPEG temporaries
+       * before starting the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    if (onProgress) {
-      onProgress(Math.round((i / numPages) * 100));
+
+    if (!doc) {
+      throw new Error(
+        'Failed to generate encrypted PDF'
+      );
     }
 
-    canvas.width = 0;
-    canvas.height = 0;
+
+    /*
+     * The source PDF is no longer needed once every page
+     * has been rendered into jsPDF.
+     *
+     * Release PDF.js before allocating the complete
+     * encrypted output buffer so both large documents
+     * do not remain live during final serialization.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    const outputBuffer =
+      doc.output(
+        'arraybuffer'
+      );
+
+    return new Uint8Array(
+      outputBuffer
+    );
+  } finally {
+    /*
+     * loadPdfJsFromBlob.dispose() is idempotent, so this
+     * also safely covers errors before final serialization.
+     */
+    await loadedPdf.dispose();
   }
-
-  if (!doc) throw new Error('Failed to generate encrypted PDF');
-  return new Uint8Array(doc.output('arraybuffer'));
 }
 
 export async function unlockPDF(
@@ -1367,206 +3565,731 @@ export async function unlockPDF(
   password: string,
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
+  let loadedPdf:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
 
-  // 1. Authenticate and decrypt stream via pdfjsLib
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    password,
-  });
-
-  // Handle wrong password immediately without stalling
-  loadingTask.onPassword = () => {
-    throw new Error('INCORRECT_PASSWORD');
-  };
-  
-  let pdfDoc;
+  /*
+   * Authenticate and decrypt directly from the browser-backed
+   * File. No complete ArrayBuffer/Uint8Array source copy.
+   */
   try {
-    pdfDoc = await loadingTask.promise;
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          password,
+          stopAtErrors: false,
+        }
+      );
   } catch (err: any) {
     if (
-      err?.name === 'PasswordException' ||
-      err?.message?.includes('password') ||
-      err?.message === 'INCORRECT_PASSWORD'
+      err?.name ===
+        'PasswordException' ||
+      err?.message
+        ?.toLowerCase()
+        .includes(
+          'password'
+        ) ||
+      err?.message ===
+        'INCORRECT_PASSWORD'
     ) {
-      throw new Error('INCORRECT_PASSWORD');
+      throw new Error(
+        'INCORRECT_PASSWORD'
+      );
     }
-    throw new Error('CORRUPTED_PDF');
+
+    throw new Error(
+      'CORRUPTED_PDF'
+    );
   }
 
-  const numPages = pdfDoc.numPages;
-  const newPdfDoc = await PDFDocument.create();
 
-  // 2. Render and embed each decrypted page into a fresh, unencrypted PDF
-  for (let i = 1; i <= numPages; i++) {
-    onProgress?.(Math.round((i / numPages) * 100));
+  const pdfDoc =
+    loadedPdf.pdf;
 
-    const page = await pdfDoc.getPage(i);
-    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-    const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+  try {
+    const numPages =
+      pdfDoc.numPages;
 
-    const newPage = newPdfDoc.addPage([width, height]);
-    newPage.drawImage(embeddedImg, {
-      x: 0,
-      y: 0,
-      width,
-      height,
+    const newPdfDoc =
+      await PDFDocument.create();
+
+
+    /*
+     * Render and embed every decrypted page into a fresh,
+     * unencrypted PDF exactly as before.
+     */
+    for (
+      let i = 1;
+      i <= numPages;
+      i++
+    ) {
+      onProgress?.(
+        Math.round(
+          (
+            i /
+            numPages
+          ) *
+            100
+        )
+      );
+
+      const page =
+        await pdfDoc.getPage(i);
+
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+        const embeddedImg =
+          await newPdfDoc.embedJpg(
+            imgBytes
+          );
+
+        const newPage =
+          newPdfDoc.addPage([
+            width,
+            height,
+          ]);
+
+        newPage.drawImage(
+          embeddedImg,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim
+       * the completed page's temporary render memory
+       * before processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
+    /*
+     * Every decrypted page is now embedded in the new
+     * document, so the original PDF.js source is no
+     * longer required.
+     *
+     * Release it before serializing the complete unlocked
+     * PDF to reduce source/output memory overlap.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    /*
+     * Save as a clean PDF with no encryption dictionary.
+     */
+    return await newPdfDoc.save({
+      useObjectStreams: false,
     });
+  } finally {
+    /*
+     * dispose() is idempotent, so this still safely
+     * handles errors before final serialization.
+     */
+    await loadedPdf.dispose();
   }
-
-  // 3. Save as clean PDF with zero encryption dictionary
-  return await newPdfDoc.save({ useObjectStreams: false });
 }
-/**
- * Calibrated target-size compression matching the user's slider target within ±5-10 KB.
- */
 
-// ✅ Replace that top section with this:
 export async function compressPDF(
   file: File,
   options: CompressOptions
 ): Promise<Uint8Array> {
-  const { level, targetKb = 200, onProgress } = options;
-  const rawBytes = await file.arrayBuffer();
+  const {
+    level,
+    targetKb = 200,
+    onProgress,
+  } = options;
 
-  // 1. Lossless Vector Path (ONLY for pristine, unsigned/unencrypted documents)
+  let vectorSource:
+    | ArrayBuffer
+    | null = null;
+
+
+  /*
+   * Recommended mode first attempts the existing
+   * lossless pdf-lib save.
+   *
+   * Extreme/Target skip this complete source allocation.
+   */
   if (level === 'recommended') {
     try {
-      const testDoc = await PDFDocument.load(rawBytes.slice(0));
+      vectorSource =
+        await file.arrayBuffer();
+
+      const testDoc =
+        await PDFDocument.load(
+          vectorSource
+        );
+
+      /*
+       * pdf-lib has parsed the source. Drop our separate
+       * full input-buffer reference before serialization
+       * or raster fallback.
+       */
+      vectorSource = null;
+
       if (!testDoc.isEncrypted) {
-        return await testDoc.save({ useObjectStreams: true, addDefaultPage: false });
+        return await testDoc.save({
+          useObjectStreams: true,
+          addDefaultPage: false,
+        });
       }
-    } catch {
-      // If pdf-lib rejects signatures/permissions, fall straight through to universal renderer
+    } catch (_) {
+      /*
+       * Preserve existing behavior:
+       * signed/protected/problematic PDFs fall through
+       * to the universal raster renderer.
+       */
     }
   }
 
-  // 2. Universal PDF.js Engine (Handles any government, signed, scanned, or registered PDF)
-  // ✅ To this:
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: new Uint8Array(rawBytes.slice(0)),
-    stopAtErrors: false,
-  });
 
-  const pdf = await loadingTask.promise;
-  const totalPages = pdf.numPages;
+  /*
+   * Drop the full pdf-lib source reference before opening
+   * PDF.js for the universal compression path.
+   */
+  vectorSource = null;
 
-  const targetBytes = (level === 'extreme' ? Math.max(12 * totalPages, 35) : targetKb) * 1024;
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-  const newPdfDoc = await PDFDocument.create();
 
-  const pdfOverhead = 1024 + totalPages * 200;
-  const baseTargetBytes = level === 'target' ? Math.floor(targetBytes * 0.93) : targetBytes;
-  let remainingImageBudget = Math.max(baseTargetBytes - pdfOverhead, totalPages * 250);
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.({
-      currentPage: pageNum,
-      totalPages,
-      stage: `Compressing page ${pageNum} of ${totalPages}...`,
-    });
+  const pdf =
+    loadedPdf.pdf;
 
-    const page = await pdf.getPage(pageNum);
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
+  try {
+    const totalPages =
+      pdf.numPages;
 
-    const pagesLeft = totalPages - pageNum + 1;
-    const budgetPerPage = Math.floor(remainingImageBudget / pagesLeft);
+    const targetBytes =
+      (
+        level === 'extreme'
+          ? Math.max(
+              12 * totalPages,
+              35
+            )
+          : targetKb
+      ) * 1024;
 
-    // Strict Single-Pass Execution (Safe Scale Floor, Zero WebAssembly Memory Spikes)
-      let scale = 0.85;
-      let quality = 0.50;
+    const newPdfDoc =
+      await PDFDocument.create();
 
-      if (budgetPerPage < 35 * 1024) {
-        scale = 0.70;
-        quality = 0.12;
-      } else if (budgetPerPage < 80 * 1024) {
-        scale = 0.75;
-        quality = 0.25;
-      } else if (budgetPerPage < 180 * 1024) {
-        scale = 0.90;
-        quality = 0.50;
-      } else {
-        scale = 1.0;
-        quality = 0.80;
+    const pdfOverhead =
+      1024 +
+      totalPages * 200;
+
+    const baseTargetBytes =
+      level === 'target'
+        ? Math.floor(
+            targetBytes * 0.93
+          )
+        : targetBytes;
+
+    let remainingImageBudget =
+      Math.max(
+        baseTargetBytes -
+          pdfOverhead,
+        totalPages * 250
+      );
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.({
+        currentPage:
+          pageNum,
+        totalPages,
+        stage:
+          'Compressing page ' +
+          pageNum +
+          ' of ' +
+          totalPages +
+          '...',
+      });
+
+      const page =
+        await pdf.getPage(
+          pageNum
+        );
+
+      try {
+        const unscaledViewport =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const pagesLeft =
+          totalPages -
+          pageNum +
+          1;
+
+        const budgetPerPage =
+          Math.floor(
+            remainingImageBudget /
+              pagesLeft
+          );
+
+
+        let scale = 0.85;
+        let quality = 0.50;
+
+        if (
+          budgetPerPage <
+          35 * 1024
+        ) {
+          scale = 0.70;
+          quality = 0.12;
+        } else if (
+          budgetPerPage <
+          80 * 1024
+        ) {
+          scale = 0.75;
+          quality = 0.25;
+        } else if (
+          budgetPerPage <
+          180 * 1024
+        ) {
+          scale = 0.90;
+          quality = 0.50;
+        } else {
+          scale = 1.0;
+          quality = 0.80;
+        }
+
+
+        const viewport =
+          page.getViewport({
+            scale,
+          });
+
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
+
+        try {
+          canvas.width =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.width
+              )
+            );
+
+          canvas.height =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.height
+              )
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                alpha: false,
+              }
+            );
+
+          let validBlob:
+            Blob =
+              new Blob(
+                [],
+                {
+                  type:
+                    'image/jpeg',
+                }
+              );
+
+
+          if (ctx) {
+            ctx.fillStyle =
+              '#ffffff';
+
+            ctx.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
+            await (
+              page.render({
+                canvasContext:
+                  ctx as any,
+                viewport,
+              } as any) as any
+            ).promise;
+
+
+            const generatedBlob =
+              await new Promise<
+                Blob | null
+              >(
+                (resolve) =>
+                  canvas.toBlob(
+                    (blob) =>
+                      resolve(
+                        blob
+                      ),
+                    'image/jpeg',
+                    quality
+                  )
+              );
+
+
+            if (
+              generatedBlob &&
+              generatedBlob.size >
+                0
+            ) {
+              validBlob =
+                generatedBlob;
+            }
+          }
+
+
+          if (
+            validBlob.size ===
+            0
+          ) {
+            validBlob =
+              new Blob(
+                [
+                  new Uint8Array(
+                    100
+                  ),
+                ],
+                {
+                  type:
+                    'image/jpeg',
+                }
+              );
+          }
+
+
+          remainingImageBudget -=
+            validBlob.size;
+
+
+          const imageBytes =
+            await validBlob.arrayBuffer();
+
+          const embeddedImage =
+            await newPdfDoc.embedJpg(
+              imageBytes
+            );
+
+
+          const newPage =
+            newPdfDoc.addPage([
+              unscaledViewport.width,
+              unscaledViewport.height,
+            ]);
+
+
+          newPage.drawImage(
+            embeddedImage,
+            {
+              x: 0,
+              y: 0,
+              width:
+                unscaledViewport.width,
+              height:
+                unscaledViewport.height,
+            }
+          );
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+        }
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
 
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.floor(viewport.width));
-      canvas.height = Math.max(1, Math.floor(viewport.height));
-      const ctx = canvas.getContext('2d', { alpha: false });
+      /*
+       * Allow the completed page's canvas/JPEG temporaries
+       * to be reclaimed before rendering the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
 
-      let validBlob: Blob = new Blob([], { type: 'image/jpeg' });
 
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    /*
+     * Every compressed page is already embedded in
+     * newPdfDoc. Release the original PDF.js source before
+     * allocating the complete serialized compressed PDF.
+     */
+    await loadedPdf.dispose();
 
-        await (
-          page.render({
-            canvasContext: ctx as any,
-            viewport,
-          } as any) as any
-        ).promise;
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
 
-        const generatedBlob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((b) => resolve(b), 'image/jpeg', quality)
+
+    let outputBytes =
+      await newPdfDoc.save({
+        useObjectStreams: false,
+      });
+
+
+    /*
+     * Exact-target padding logic intentionally preserved.
+     * We will inspect its large allocation separately.
+     */
+    if (
+      level === 'target'
+    ) {
+      const desiredLength =
+        Math.floor(
+          targetBytes
         );
-        if (generatedBlob && generatedBlob.size > 0) {
-          validBlob = generatedBlob;
+
+      const diff =
+        desiredLength -
+        outputBytes.length;
+
+      /*
+       * Keep the existing tolerance behavior:
+       * tiny differences do not justify padding.
+       *
+       * For larger differences, build only the final
+       * required output buffer. Do not create a separate
+       * padCount-sized stream and do not serialize pdf-lib
+       * a second time.
+       */
+      if (diff > 1024) {
+        const eofMarker =
+          new Uint8Array([
+            0x25,
+            0x25,
+            0x45,
+            0x4f,
+            0x46,
+          ]);
+
+        let eofIndex = -1;
+
+        /*
+         * Search near the end of the PDF for %%EOF.
+         */
+        const searchStart =
+          Math.max(
+            0,
+            outputBytes.length -
+              4096
+          );
+
+        outer:
+        for (
+          let i =
+            outputBytes.length -
+            eofMarker.length;
+          i >= searchStart;
+          i--
+        ) {
+          for (
+            let j = 0;
+            j <
+            eofMarker.length;
+            j++
+          ) {
+            if (
+              outputBytes[
+                i + j
+              ] !==
+              eofMarker[j]
+            ) {
+              continue outer;
+            }
+          }
+
+          eofIndex = i;
+          break;
+        }
+
+
+        if (eofIndex >= 0) {
+          const oldLength =
+            outputBytes.length;
+
+          const isWholeBuffer =
+            outputBytes.byteOffset === 0 &&
+            outputBytes.byteLength ===
+              outputBytes.buffer.byteLength;
+
+          const transferableBuffer =
+            outputBytes.buffer as ArrayBuffer & {
+              transfer?: (
+                newByteLength?: number
+              ) => ArrayBuffer;
+            };
+
+          /*
+           * Modern browsers can expand the backing
+           * ArrayBuffer by transferring it. This detaches
+           * the old buffer instead of holding two complete
+           * PDF-sized allocations simultaneously.
+           */
+          if (
+            isWholeBuffer &&
+            typeof transferableBuffer.transfer ===
+              'function'
+          ) {
+            const expandedBuffer =
+              transferableBuffer.transfer(
+                desiredLength
+              );
+
+            const paddedBytes =
+              new Uint8Array(
+                expandedBuffer
+              );
+
+            /*
+             * Move %%EOF/trailing bytes to their new final
+             * position. copyWithin handles overlapping memory.
+             */
+            paddedBytes.copyWithin(
+              eofIndex + diff,
+              eofIndex,
+              oldLength
+            );
+
+            paddedBytes.fill(
+              0x20,
+              eofIndex,
+              eofIndex + diff
+            );
+
+            outputBytes =
+              paddedBytes;
+          } else if (
+            desiredLength <=
+            32 * 1024 * 1024
+          ) {
+            /*
+             * Compatibility fallback for older browsers.
+             * Keep it only for modest outputs where a second
+             * allocation is unlikely to kill a mobile tab.
+             */
+            const paddedBytes =
+              new Uint8Array(
+                desiredLength
+              );
+
+            paddedBytes.set(
+              outputBytes.subarray(
+                0,
+                eofIndex
+              ),
+              0
+            );
+
+            paddedBytes.fill(
+              0x20,
+              eofIndex,
+              eofIndex + diff
+            );
+
+            paddedBytes.set(
+              outputBytes.subarray(
+                eofIndex
+              ),
+              eofIndex + diff
+            );
+
+            outputBytes =
+              paddedBytes;
+          } else {
+            /*
+             * The compressed PDF is already valid and below
+             * the requested target. On browsers without
+             * ArrayBuffer.transfer, do not risk another huge
+             * allocation merely to add artificial whitespace.
+             */
+            console.warn(
+              'Exact target padding skipped on this browser to avoid a large duplicate allocation.'
+            );
+          }
+        } else {
+          console.warn(
+            'Exact target padding skipped because %%EOF was not found.'
+          );
         }
       }
-
-      // Explicit memory cleanup: release canvas pixels and PDF.js WASM buffers immediately
-      canvas.width = 0;
-      canvas.height = 0;
-      if (typeof (page as any).cleanup === 'function') {
-        (page as any).cleanup();
-      }
-
-      if (validBlob.size === 0) {
-        validBlob = new Blob([new Uint8Array(100)], { type: 'image/jpeg' });
-      }
-
-    if (validBlob) {
-      remainingImageBudget -= validBlob.size;
-
-      const imageBytes = await validBlob.arrayBuffer();
-      const embeddedImage = await newPdfDoc.embedJpg(imageBytes);
-
-      const newPage = newPdfDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width: unscaledViewport.width,
-        height: unscaledViewport.height,
-      });
     }
 
-    try {
-      page.cleanup();
-    } catch {}
+
+    return outputBytes;
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  let outputBytes = await newPdfDoc.save({ useObjectStreams: false });
-
-  if (level === 'target') {
-    const diff = targetBytes - outputBytes.length;
-    if (diff > 1024) {
-      const paddingStreamOverhead = 78;
-      const padCount = Math.max(0, diff - paddingStreamOverhead);
-      if (padCount > 0) {
-        try {
-          const rawPadStream = (newPdfDoc.context as any).stream(new Uint8Array(padCount));
-          newPdfDoc.context.register(rawPadStream);
-          outputBytes = await newPdfDoc.save({ useObjectStreams: false });
-        } catch {}
-      }
-    }
-  }
-
-  return outputBytes;
 }
 
 export interface PageConfig {
@@ -1583,58 +4306,217 @@ export async function reorderAndProcessPDF(
   file: File,
   pages: PageConfig[]
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  const outputDoc = await PDFDocument.create();
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+
+  /*
+   * Clean PDFs retain the native lossless vector path.
+   * Protected PDFs skip the complete source allocation.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      const sourceDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      const outputDoc =
+        await PDFDocument.create();
+
+      const indicesToCopy =
+        pages.map(
+          (page) =>
+            page.originalIndex
+        );
+
+      const copiedPages =
+        await outputDoc.copyPages(
+          sourceDoc,
+          indicesToCopy
+        );
+
+      copiedPages.forEach(
+        (
+          page,
+          idx
+        ) => {
+          const desiredRotation =
+            pages[idx].rotation;
+
+          const currentRotation =
+            page
+              .getRotation()
+              .angle;
+
+          page.setRotation(
+            degrees(
+              (
+                currentRotation +
+                desiredRotation
+              ) % 360
+            )
+          );
+
+          outputDoc.addPage(
+            page
+          );
+        }
+      );
+
+      return await outputDoc.save({
+        useObjectStreams: false,
+      });
+    } catch (err) {
+      console.warn(
+        `Vector organize bypassed for "${file.name}". Activating high-res rendering engine:`,
+        err
+      );
+    }
+  }
+
+
+  /*
+   * Release the vector source before starting
+   * the browser-backed raster fallback.
+   */
+  sourceBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+
+  const loadedFallback =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const fallbackDoc =
+    loadedFallback.pdf;
 
   try {
-    if (isComplexOrProtectedPdf(uint8)) {
-      throw new Error('Encrypted or signed document; routing to fallback renderer');
-    }
+    const outputDoc =
+      await PDFDocument.create();
 
-    const sourceDoc = await PDFDocument.load(arrayBuffer);
+    for (
+      let idx = 0;
+      idx < pages.length;
+      idx++
+    ) {
+      const pageConfig =
+        pages[idx];
 
-    const indicesToCopy = pages.map((p) => p.originalIndex);
-    const copiedPages = await outputDoc.copyPages(sourceDoc, indicesToCopy);
+      const pageNum =
+        pageConfig.originalIndex +
+        1;
 
-    copiedPages.forEach((page, idx) => {
-      const desiredRotation = pages[idx].rotation;
-      const currentRotation = page.getRotation().angle;
-      page.setRotation(degrees((currentRotation + desiredRotation) % 360));
-      outputDoc.addPage(page);
-    });
+      const page =
+        await fallbackDoc.getPage(
+          pageNum
+        );
 
-    return await outputDoc.save({ useObjectStreams: false });
-  } catch (err) {
-    console.warn(`Vector organize bypassed for "${file.name}". Activating high-res rendering engine:`, err);
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
 
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-      data: uint8.slice(),
-      stopAtErrors: false,
-    });
-    const fallbackDoc = await loadingTask.promise;
+        const embeddedImage =
+          await outputDoc.embedJpg(
+            imgBytes
+          );
 
-    for (let idx = 0; idx < pages.length; idx++) {
-      const pageConfig = pages[idx];
-      const pageNum = pageConfig.originalIndex + 1;
-      const page = await fallbackDoc.getPage(pageNum);
-      const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-      const embeddedImage = await outputDoc.embedJpg(imgBytes);
+        const newPage =
+          outputDoc.addPage([
+            width,
+            height,
+          ]);
 
-      const newPage = outputDoc.addPage([width, height]);
-      newPage.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width,
-        height,
-      });
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
 
-      if (pageConfig.rotation !== 0) {
-        newPage.setRotation(degrees(pageConfig.rotation % 360));
+        if (
+          pageConfig.rotation !==
+          0
+        ) {
+          newPage.setRotation(
+            degrees(
+              pageConfig.rotation %
+                360
+            )
+          );
+        }
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
+
+      /*
+       * Release temporary render memory before the next
+       * reordered page is processed.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    return await outputDoc.save({ useObjectStreams: false });
+    /*
+     * All fallback pages are now embedded in outputDoc.
+     * Release the original PDF.js source before allocating
+     * the complete serialized output.
+     */
+    await loadedFallback.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await outputDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    /*
+     * dispose() is idempotent and also protects error paths.
+     */
+    await loadedFallback.dispose();
   }
 }
 
@@ -1643,8 +4525,33 @@ export async function reorderAndProcessPDF(
  * and date tags without corrupting xref tables.
  */
 export async function sanitizePDF(file: File): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  let arrayBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
+
+  const pdfDoc =
+    await PDFDocument.load(
+      arrayBuffer,
+      {
+        ignoreEncryption: true,
+      }
+    );
+
+  /*
+   * pdf-lib has parsed the source. Release the separate
+   * complete input-buffer reference before sanitization
+   * and final serialization.
+   */
+  arrayBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
   pdfDoc.setTitle('');
   pdfDoc.setAuthor('');
@@ -1683,76 +4590,261 @@ export interface PageRedaction {
 export async function redactPDF(
   file: File,
   redactions: PageRedaction[],
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-  const sourcePdf = await loadingTask.promise;
-  const totalPages = sourcePdf.numPages;
-
-  const outputDoc = await PDFDocument.create();
-  const redactionMap = new Map<number, RedactionRect[]>();
-  redactions.forEach((r) => redactionMap.set(r.pageIndex, r.rects));
-
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const pageIndex = pageNum - 1;
-    const page = await sourcePdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) throw new Error('Canvas rendering context unavailable');
-
-    await (
-      page.render({
-        canvasContext: ctx as any, viewport,
-      } as any) as any
-    ).promise;
-
-    const pageRects = redactionMap.get(pageIndex) || [];
-    if (pageRects.length > 0) {
-      ctx.fillStyle = '#000000';
-      for (const rect of pageRects) {
-        const rx = rect.x * canvas.width;
-        const ry = rect.y * canvas.height;
-        const rw = rect.width * canvas.width;
-        const rh = rect.height * canvas.height;
-        ctx.fillRect(rx, ry, rw, rh);
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
       }
+    );
+
+  const sourcePdf =
+    loadedPdf.pdf;
+
+  try {
+    const totalPages =
+      sourcePdf.numPages;
+
+    const outputDoc =
+      await PDFDocument.create();
+
+    const redactionMap =
+      new Map<
+        number,
+        RedactionRect[]
+      >();
+
+    redactions.forEach(
+      (redaction) =>
+        redactionMap.set(
+          redaction.pageIndex,
+          redaction.rects
+        )
+    );
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+      const pageIndex =
+        pageNum - 1;
+
+      const page =
+        await sourcePdf.getPage(
+          pageNum
+        );
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        const pageRects =
+          redactionMap.get(
+            pageIndex
+          ) || [];
+
+
+        if (
+          pageRects.length >
+          0
+        ) {
+          ctx.fillStyle =
+            '#000000';
+
+          for (
+            const rect of
+            pageRects
+          ) {
+            const rx =
+              rect.x *
+              canvas.width;
+
+            const ry =
+              rect.y *
+              canvas.height;
+
+            const rw =
+              rect.width *
+              canvas.width;
+
+            const rh =
+              rect.height *
+              canvas.height;
+
+            ctx.fillRect(
+              rx,
+              ry,
+              rw,
+              rh
+            );
+          }
+        }
+
+
+        const jpegBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode redaction canvas'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
+            }
+          );
+
+
+        const jpegBytes =
+          await jpegBlob.arrayBuffer();
+
+        const embeddedImage =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+
+        const unscaledViewport =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+
+        const newPage =
+          outputDoc.addPage([
+            unscaledViewport.width,
+            unscaledViewport.height,
+          ]);
+
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width:
+              unscaledViewport.width,
+            height:
+              unscaledViewport.height,
+          }
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim
+       * the completed page's temporary canvas/JPEG
+       * memory before rendering the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Failed to encode redaction canvas'))),
-        'image/jpeg',
-        0.92
-      );
+
+    /*
+     * Every redacted page is now embedded in outputDoc.
+     * Release the original PDF.js source before allocating
+     * the complete serialized redacted PDF.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await outputDoc.save({
+      useObjectStreams: true,
     });
-
-    canvas.width = 0;
-    canvas.height = 0;
-
-    const jpegBytes = await jpegBlob.arrayBuffer();
-    const embeddedImage = await outputDoc.embedJpg(jpegBytes);
-
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
-    const newPage = outputDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-    newPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: unscaledViewport.width,
-      height: unscaledViewport.height,
-    });
+  } finally {
+    /*
+     * dispose() is idempotent and still covers errors
+     * that happen before final serialization.
+     */
+    await loadedPdf.dispose();
   }
-
-  return await outputDoc.save({ useObjectStreams: true });
 }
 
 export interface CropBox {
@@ -1764,81 +4856,320 @@ export interface CropBox {
 
 export async function cropPDF(
   file: File,
-  pageBoxes: Record<number, { x: number; y: number; width: number; height: number }>,
+  pageBoxes: Record<
+    number,
+    {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }
+  >,
   applyToAll: boolean = false
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  const { doc, isEncrypted } = await loadSafe(arrayBuffer);
+  const firstBox =
+    pageBoxes[1] ||
+    Object.values(
+      pageBoxes
+    )[0];
 
-  const firstBox = pageBoxes[1] || Object.values(pageBoxes)[0];
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
 
-  if (isEncrypted) {
-    const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-    const pdf = await loadingTask.promise;
-    const totalPages = pdf.numPages;
-    const newPdfDoc = await PDFDocument.create();
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const box = applyToAll ? firstBox : (pageBoxes[pageNum] || firstBox);
+  let doc:
+    | PDFDocument
+    | null = null;
 
-      if (!box) continue;
+  let isEncrypted =
+    looksProtected;
 
-      const viewport = page.getViewport({ scale: 2.0 });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.floor(box.width * 2.0));
-      canvas.height = Math.max(1, Math.floor(box.height * 2.0));
-      const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
 
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+  /*
+   * Clean PDFs retain the native lossless crop-box path.
+   * Protected PDFs can skip the complete source allocation.
+   */
+  if (!looksProtected) {
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
 
-        await (page.render({
-          canvasContext: ctx as any,
-          viewport,
-          transform: [1, 0, 0, 1, -box.x * 2.0, -box.y * 2.0] as any,
-          canvas,
-        } as any) as any).promise;
-
-        const blob = await new Promise<Blob>((resolve) =>
-          canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92)
+      const loadedSafe =
+        await loadSafe(
+          sourceBuffer
         );
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.width = 0;
-        canvas.height = 0;
+      doc =
+        loadedSafe.doc;
 
-        const imgBytes = await blob.arrayBuffer();
-        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
-        const newPage = newPdfDoc.addPage([box.width, box.height]);
-        newPage.drawImage(embeddedImg, {
-          x: 0,
-          y: 0,
-          width: box.width,
-          height: box.height,
-        });
-      }
-      try { page.cleanup(); } catch {}
+      isEncrypted =
+        loadedSafe.isEncrypted;
+    } catch (_) {
+      doc = null;
+      isEncrypted = true;
     }
-    return await newPdfDoc.save({ useObjectStreams: false });
   }
 
-  // Standard unencrypted vector path
-  const pages = doc.getPages();
-  pages.forEach((page, idx) => {
-    const pageNum = idx + 1;
-    const box = applyToAll ? firstBox : (pageBoxes[pageNum] || firstBox);
-    if (box) {
-      page.setCropBox(box.x, box.y, box.width, box.height);
-    }
-  });
 
-  return await doc.save({ useObjectStreams: false });
+  /*
+   * Protected/encrypted documents use visual reconstruction.
+   */
+  if (isEncrypted || !doc) {
+    sourceBuffer = null;
+    doc = null;
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    const loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+    const pdf =
+      loadedPdf.pdf;
+
+    try {
+      const totalPages =
+        pdf.numPages;
+
+      const newPdfDoc =
+        await PDFDocument.create();
+
+
+      for (
+        let pageNum = 1;
+        pageNum <= totalPages;
+        pageNum++
+      ) {
+        const page =
+          await pdf.getPage(
+            pageNum
+          );
+
+        const box =
+          applyToAll
+            ? firstBox
+            : (
+                pageBoxes[
+                  pageNum
+                ] ||
+                firstBox
+              );
+
+
+        if (!box) {
+          try {
+            page.cleanup();
+          } catch (_) {}
+
+          continue;
+        }
+
+
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
+
+        try {
+          const viewport =
+            page.getViewport({
+              scale: 2.0,
+            });
+
+          canvas.width =
+            Math.max(
+              1,
+              Math.floor(
+                box.width *
+                  2.0
+              )
+            );
+
+          canvas.height =
+            Math.max(
+              1,
+              Math.floor(
+                box.height *
+                  2.0
+              )
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                alpha: false,
+              }
+            );
+
+          if (!ctx) {
+            throw new Error(
+              'Canvas rendering context unavailable'
+            );
+          }
+
+
+          ctx.fillStyle =
+            '#ffffff';
+
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+          await (
+            page.render({
+              canvasContext:
+                ctx as any,
+              viewport,
+              transform: [
+                1,
+                0,
+                0,
+                1,
+                -box.x *
+                  2.0,
+                -box.y *
+                  2.0,
+              ] as any,
+              canvas,
+            } as any) as any
+          ).promise;
+
+
+          const blob =
+            await new Promise<Blob>(
+              (
+                resolve,
+                reject
+              ) => {
+                canvas.toBlob(
+                  (result) => {
+                    if (result) {
+                      resolve(
+                        result
+                      );
+                    } else {
+                      reject(
+                        new Error(
+                          'Failed to encode cropped page.'
+                        )
+                      );
+                    }
+                  },
+                  'image/jpeg',
+                  0.92
+                );
+              }
+            );
+
+
+          const imgBytes =
+            await blob.arrayBuffer();
+
+          const embeddedImg =
+            await newPdfDoc.embedJpg(
+              imgBytes
+            );
+
+          const newPage =
+            newPdfDoc.addPage([
+              box.width,
+              box.height,
+            ]);
+
+          newPage.drawImage(
+            embeddedImg,
+            {
+              x: 0,
+              y: 0,
+              width:
+                box.width,
+              height:
+                box.height,
+            }
+          );
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+
+          try {
+            canvas.remove();
+          } catch (_) {}
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+      }
+
+
+      return await newPdfDoc.save({
+        useObjectStreams: false,
+      });
+    } finally {
+      await loadedPdf.dispose();
+    }
+  }
+
+
+  /*
+   * Standard unencrypted vector path.
+   */
+  const pages =
+    doc.getPages();
+
+  pages.forEach(
+    (
+      page,
+      idx
+    ) => {
+      const pageNum =
+        idx + 1;
+
+      const box =
+        applyToAll
+          ? firstBox
+          : (
+              pageBoxes[
+                pageNum
+              ] ||
+              firstBox
+            );
+
+      if (box) {
+        page.setCropBox(
+          box.x,
+          box.y,
+          box.width,
+          box.height
+        );
+      }
+    }
+  );
+
+
+  return await doc.save({
+    useObjectStreams: false,
+  });
 }
 
 export interface FormFieldData {
@@ -1877,9 +5208,35 @@ export async function fillAndFlattenPDF(
   values: Record<string, string | boolean>,
   flatten: boolean = true
 ): Promise<Uint8Array> {
-  const buffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-  const form = pdfDoc.getForm();
+  let buffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
+
+  const pdfDoc =
+    await PDFDocument.load(
+      buffer,
+      {
+        ignoreEncryption: true,
+      }
+    );
+
+  /*
+   * pdf-lib has parsed the form document. Drop the separate
+   * complete source-buffer reference before editing/save.
+   */
+  buffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+  const form =
+    pdfDoc.getForm();
 
   for (const [name, val] of Object.entries(values)) {
     try {
@@ -1942,55 +5299,71 @@ export async function createFillablePDF(
   file: File,
   fields: FillableFieldSpec[]
 ): Promise<Uint8Array> {
-  const buffer = await file.arrayBuffer();
-  const sourceBytes = new Uint8Array(buffer);
-
   const isRealPasswordError = (error: any) => {
-    const name = String(error?.name || '').toLowerCase();
-    const message = String(error?.message || '').toLowerCase();
-    const code = error?.code;
+    const name =
+      String(
+        error?.name || ''
+      ).toLowerCase();
+
+    const message =
+      String(
+        error?.message || ''
+      ).toLowerCase();
+
+    const code =
+      error?.code;
 
     const passwordResponses =
-      (pdfjsLib as any).PasswordResponses;
+      (pdfjsLib as any)
+        .PasswordResponses;
 
     return (
-      name.includes('passwordexception') ||
-      name === 'passwordexception' ||
-      code === passwordResponses?.NEED_PASSWORD ||
-      code === passwordResponses?.INCORRECT_PASSWORD ||
-      message.includes('password required') ||
-      message.includes('incorrect password')
+      name.includes(
+        'passwordexception'
+      ) ||
+      name ===
+        'passwordexception' ||
+      code ===
+        passwordResponses?.NEED_PASSWORD ||
+      code ===
+        passwordResponses?.INCORRECT_PASSWORD ||
+      message.includes(
+        'password required'
+      ) ||
+      message.includes(
+        'incorrect password'
+      )
     );
   };
+
 
   /*
    * REAL PASSWORD CHECK
    *
-   * We use PDF.js as the authority here because it is also
-   * the engine that successfully renders PDFs in the browser.
+   * PDF.js remains the authority for whether this PDF
+   * actually requires a password.
    *
-   * If PDF.js can open the document without requesting a
-   * password, the document is considered usable.
-   *
-   * An encryption dictionary / owner permissions alone do
-   * NOT mean the user must be blocked.
+   * It now reads directly from the browser-backed File
+   * instead of receiving a second complete Uint8Array copy.
    */
   const assertReadableWithoutPassword =
     async () => {
       try {
-        const loadingTask =
-          pdfjsLib.getDocument({
-            isEvalSupported: false,
-            data: sourceBytes.slice(),
-            stopAtErrors: false,
-          });
+        const loadedReadable =
+          await loadPdfJsFromBlob(
+            file,
+            {
+              stopAtErrors: false,
+            }
+          );
 
-        const readablePdf =
-          await loadingTask.promise;
-
-        await readablePdf.destroy();
+        await loadedReadable.dispose();
       } catch (error: any) {
-        if (isRealPasswordError(error)) {
+        if (
+          isRealPasswordError(
+            error
+          )
+        ) {
           throw new Error(
             'This PDF requires a password. Unlock it first, then create fillable fields.'
           );
@@ -2002,28 +5375,31 @@ export async function createFillablePDF(
       }
     };
 
+
   await assertReadableWithoutPassword();
+
 
   /*
    * Compatibility fallback.
    *
-   * If the document is readable but pdf-lib cannot safely
-   * modify its internal structure, render every visible page
-   * locally and rebuild a clean PDF.
+   * Readable PDFs that pdf-lib cannot safely modify are
+   * rebuilt locally from rendered pages.
    *
-   * Still 100% browser-side.
+   * PDF.js again reads from File/Blob directly, so no
+   * complete source copy is created for the fallback.
    */
   const rebuildFromRenderedPages =
     async (): Promise<PDFDocument> => {
-      const loadingTask =
-        pdfjsLib.getDocument({
-          isEvalSupported: false,
-          data: sourceBytes.slice(),
-          stopAtErrors: false,
-        });
+      const loadedSource =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors: false,
+          }
+        );
 
       const sourcePdf =
-        await loadingTask.promise;
+        loadedSource.pdf;
 
       const rebuilt =
         await PDFDocument.create();
@@ -2031,7 +5407,8 @@ export async function createFillablePDF(
       try {
         for (
           let pageNumber = 1;
-          pageNumber <= sourcePdf.numPages;
+          pageNumber <=
+            sourcePdf.numPages;
           pageNumber++
         ) {
           const sourcePage =
@@ -2039,149 +5416,219 @@ export async function createFillablePDF(
               pageNumber
             );
 
-          /*
-           * Render at high resolution for visual quality,
-           * but NEVER use image pixels as PDF page points.
-           *
-           * A scanned document can be 2000-4000 pixels tall.
-           * Using those numbers as PDF points makes AcroForm
-           * controls microscopic or inconsistent in viewers.
-           */
-          const {
-            imgBytes,
-          } = await renderPageAsJpg(
-            sourcePage,
-            1.5
-          );
+          try {
+            const {
+              imgBytes,
+            } =
+              await renderPageAsJpg(
+                sourcePage,
+                1.5
+              );
 
-          const sourceViewport =
-            sourcePage.getViewport({
-              scale: 1,
-            });
 
-          const sourceWidth =
-            sourceViewport.width;
+            const sourceViewport =
+              sourcePage.getViewport({
+                scale: 1,
+              });
 
-          const sourceHeight =
-            sourceViewport.height;
 
-          const aspectRatio =
-            sourceWidth /
-            sourceHeight;
+            const sourceWidth =
+              sourceViewport.width;
 
-          /*
-           * Normalize unusually large scanned/image PDFs to
-           * a normal PDF physical size.
-           *
-           * 842pt is approximately the long edge of A4.
-           * Aspect ratio is preserved, so Letter, A4,
-           * photographs and other page shapes still look
-           * correct.
-           */
-          let pageWidth =
-            sourceWidth;
+            const sourceHeight =
+              sourceViewport.height;
 
-          let pageHeight =
-            sourceHeight;
 
-          const longestEdge =
-            Math.max(
-              sourceWidth,
-              sourceHeight
-            );
+            const aspectRatio =
+              sourceWidth /
+              sourceHeight;
 
-          if (longestEdge > 1000) {
+
+            let pageWidth =
+              sourceWidth;
+
+            let pageHeight =
+              sourceHeight;
+
+
+            const longestEdge =
+              Math.max(
+                sourceWidth,
+                sourceHeight
+              );
+
+
             if (
-              sourceHeight >=
-              sourceWidth
+              longestEdge >
+              1000
             ) {
-              pageHeight = 842;
-              pageWidth =
-                842 *
-                aspectRatio;
-            } else {
-              pageWidth = 842;
-              pageHeight =
-                842 /
-                aspectRatio;
+              if (
+                sourceHeight >=
+                sourceWidth
+              ) {
+                pageHeight =
+                  842;
+
+                pageWidth =
+                  842 *
+                  aspectRatio;
+              } else {
+                pageWidth =
+                  842;
+
+                pageHeight =
+                  842 /
+                  aspectRatio;
+              }
             }
-          }
 
-          const image =
-            await rebuilt.embedJpg(
-              imgBytes
+
+            const image =
+              await rebuilt.embedJpg(
+                imgBytes
+              );
+
+
+            const page =
+              rebuilt.addPage([
+                pageWidth,
+                pageHeight,
+              ]);
+
+
+            page.drawImage(
+              image,
+              {
+                x: 0,
+                y: 0,
+                width:
+                  pageWidth,
+                height:
+                  pageHeight,
+              }
             );
-
-          const page =
-            rebuilt.addPage([
-              pageWidth,
-              pageHeight,
-            ]);
-
-          page.drawImage(image, {
-            x: 0,
-            y: 0,
-            width:
-              pageWidth,
-            height:
-              pageHeight,
-          });
+          } finally {
+            try {
+              sourcePage.cleanup();
+            } catch (_) {}
+          }
         }
       } finally {
-        await sourcePdf.destroy();
+        await loadedSource.dispose();
       }
+
 
       return rebuilt;
     };
 
+
   /*
-   * Try to preserve the original PDF structure first.
+   * Preserve original vector structure whenever pdf-lib
+   * can safely edit it.
    *
-   * If it contains encryption/permission structures but does
-   * NOT actually require a password, we rebuild instead of
-   * falsely rejecting it.
+   * Only this vector route performs one complete source read.
    */
   const loadWorkingDocument =
     async (): Promise<PDFDocument> => {
+      let sourceBuffer:
+        | ArrayBuffer
+        | null =
+          await file.arrayBuffer();
+
+
       try {
-        const pdfDoc =
-          await PDFDocument.load(
-            buffer
-          );
-
-        if (pdfDoc.isEncrypted) {
-          console.info(
-            'Readable PDF contains encryption/permission structures. Using local compatibility rebuild.'
-          );
-
-          return await rebuildFromRenderedPages();
-        }
-
-        return pdfDoc;
-      } catch (error) {
-        /*
-         * Some readable PDFs make pdf-lib reject the source
-         * structure even though PDF.js can display them.
-         */
         try {
           const pdfDoc =
             await PDFDocument.load(
-              buffer,
-              {
-                ignoreEncryption: true,
-              }
+              sourceBuffer
             );
 
-          if (pdfDoc.isEncrypted) {
+
+          if (
+            pdfDoc.isEncrypted
+          ) {
+            console.info(
+              'Readable PDF contains encryption/permission structures. Using local compatibility rebuild.'
+            );
+
+            sourceBuffer =
+              null;
+
+            await new Promise<void>(
+              (resolve) =>
+                setTimeout(
+                  resolve,
+                  0
+                )
+            );
+
             return await rebuildFromRenderedPages();
           }
 
+
+          sourceBuffer =
+            null;
+
           return pdfDoc;
-        } catch {
-          return await rebuildFromRenderedPages();
+        } catch (_) {
+          /*
+           * Some readable PDFs make pdf-lib reject the
+           * normal source structure even though PDF.js
+           * can display them.
+           */
+          try {
+            const pdfDoc =
+              await PDFDocument.load(
+                sourceBuffer!,
+                {
+                  ignoreEncryption: true,
+                }
+              );
+
+
+            if (
+              pdfDoc.isEncrypted
+            ) {
+              sourceBuffer =
+                null;
+
+              await new Promise<void>(
+                (resolve) =>
+                  setTimeout(
+                    resolve,
+                    0
+                  )
+              );
+
+              return await rebuildFromRenderedPages();
+            }
+
+
+            sourceBuffer =
+              null;
+
+            return pdfDoc;
+          } catch (_) {
+            sourceBuffer =
+              null;
+
+            await new Promise<void>(
+              (resolve) =>
+                setTimeout(
+                  resolve,
+                  0
+                )
+            );
+
+            return await rebuildFromRenderedPages();
+          }
         }
+      } finally {
+        sourceBuffer =
+          null;
       }
     };
+
 
   const applyFields = async (
     pdfDoc: PDFDocument
@@ -2739,80 +6186,265 @@ export async function convertToGrayscalePDF(
   file: File,
   options: GrayscaleOptions
 ): Promise<Uint8Array> {
-  const { mode = 'grayscale', threshold = 135, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const {
+    mode = 'grayscale',
+    threshold = 135,
+    onProgress,
+  } = options;
 
-  const outputDoc = await PDFDocument.create();
-
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) throw new Error('Canvas rendering context unavailable');
-
-    await (
-      page.render({
-        canvasContext: ctx as any, viewport,
-      } as any) as any
-    ).promise;
-
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imgData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-
-      if (mode === 'pure-bw') {
-        const val = gray < threshold ? 0 : 255;
-        data[i] = val;
-        data[i + 1] = val;
-        data[i + 2] = val;
-      } else {
-        data[i] = gray;
-        data[i + 1] = gray;
-        data[i + 2] = gray;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
       }
+    );
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
+
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        const imgData =
+          ctx.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+        const data =
+          imgData.data;
+
+
+        for (
+          let i = 0;
+          i < data.length;
+          i += 4
+        ) {
+          const gray =
+            0.299 *
+              data[i] +
+            0.587 *
+              data[i + 1] +
+            0.114 *
+              data[i + 2];
+
+          if (
+            mode ===
+            'pure-bw'
+          ) {
+            const val =
+              gray <
+              threshold
+                ? 0
+                : 255;
+
+            data[i] =
+              val;
+
+            data[i + 1] =
+              val;
+
+            data[i + 2] =
+              val;
+          } else {
+            data[i] =
+              gray;
+
+            data[i + 1] =
+              gray;
+
+            data[i + 2] =
+              gray;
+          }
+        }
+
+
+        ctx.putImageData(
+          imgData,
+          0,
+          0
+        );
+
+
+        const jpegBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode page'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.88
+              );
+            }
+          );
+
+
+        const jpegBytes =
+          await jpegBlob.arrayBuffer();
+
+        const embeddedImage =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+
+        const unscaledViewport =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+
+        const newPage =
+          outputDoc.addPage([
+            unscaledViewport.width,
+            unscaledViewport.height,
+          ]);
+
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: 0,
+            y: 0,
+            width:
+              unscaledViewport.width,
+            height:
+              unscaledViewport.height,
+          }
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Allow the browser to reclaim the completed
+       * page's temporary pixel/JPEG memory before
+       * processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    ctx.putImageData(imgData, 0, 0);
 
-    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Failed to encode page'))),
-        'image/jpeg',
-        0.88
-      );
+    /*
+     * All converted pages are already embedded in the
+     * output document. Release the original PDF.js source
+     * before serializing the complete grayscale PDF.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await outputDoc.save({
+      useObjectStreams: true,
     });
-
-    canvas.width = 0;
-    canvas.height = 0;
-
-    const jpegBytes = await jpegBlob.arrayBuffer();
-    const embeddedImage = await outputDoc.embedJpg(jpegBytes);
-
-    const unscaledViewport = page.getViewport({ scale: 1.0 });
-    const newPage = outputDoc.addPage([unscaledViewport.width, unscaledViewport.height]);
-    newPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: unscaledViewport.width,
-      height: unscaledViewport.height,
-    });
+  } finally {
+    /*
+     * dispose() is idempotent and also protects
+     * errors before final serialization.
+     */
+    await loadedPdf.dispose();
   }
-
-  return await outputDoc.save({ useObjectStreams: true });
 }
 
 export type PageSizePreset = 'A4' | 'LETTER' | 'LEGAL' | 'A3' | 'A5';
@@ -2837,138 +6469,479 @@ export async function resizePDF(
   file: File,
   options: ResizeOptions
 ): Promise<Uint8Array> {
-  const { size = 'A4', fitMode = 'fit', autoOrientation = true, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
-  const [baseWidth, baseHeight] = PAGE_DIMENSIONS[size];
+  const {
+    size = 'A4',
+    fitMode = 'fit',
+    autoOrientation = true,
+    onProgress,
+  } = options;
 
-  // 1. Primary Vector Path (for standard, unencrypted PDFs)
-  if (!isComplexOrProtectedPdf(uint8)) {
+  const [
+    baseWidth,
+    baseHeight,
+  ] =
+    PAGE_DIMENSIONS[size];
+
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+
+  /*
+   * Clean PDFs retain the lossless vector resize path.
+   * Protected PDFs skip the complete pdf-lib source read.
+   */
+  if (!looksProtected) {
     try {
-      const sourceDoc = await PDFDocument.load(arrayBuffer);
-      const outputDoc = await PDFDocument.create();
-      const totalPages = sourceDoc.getPageCount();
+      sourceBuffer =
+        await file.arrayBuffer();
 
-      for (let i = 0; i < totalPages; i++) {
-        onProgress?.(i + 1, totalPages);
-        const srcPage = sourceDoc.getPage(i);
-        const { width: origWidth, height: origHeight } = srcPage.getSize();
+      const sourceDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
 
-        let targetWidth = baseWidth;
-        let targetHeight = baseHeight;
+      const outputDoc =
+        await PDFDocument.create();
 
-        if (autoOrientation && origWidth > origHeight) {
-          targetWidth = Math.max(baseWidth, baseHeight);
-          targetHeight = Math.min(baseWidth, baseHeight);
-        } else if (autoOrientation) {
-          targetWidth = Math.min(baseWidth, baseHeight);
-          targetHeight = Math.max(baseWidth, baseHeight);
+      const totalPages =
+        sourceDoc.getPageCount();
+
+
+      for (
+        let i = 0;
+        i < totalPages;
+        i++
+      ) {
+        onProgress?.(
+          i + 1,
+          totalPages
+        );
+
+        const srcPage =
+          sourceDoc.getPage(i);
+
+        const {
+          width: origWidth,
+          height: origHeight,
+        } =
+          srcPage.getSize();
+
+
+        let targetWidth =
+          baseWidth;
+
+        let targetHeight =
+          baseHeight;
+
+
+        if (
+          autoOrientation &&
+          origWidth >
+            origHeight
+        ) {
+          targetWidth =
+            Math.max(
+              baseWidth,
+              baseHeight
+            );
+
+          targetHeight =
+            Math.min(
+              baseWidth,
+              baseHeight
+            );
+        } else if (
+          autoOrientation
+        ) {
+          targetWidth =
+            Math.min(
+              baseWidth,
+              baseHeight
+            );
+
+          targetHeight =
+            Math.max(
+              baseWidth,
+              baseHeight
+            );
         }
 
-        const embeddedPage = await outputDoc.embedPage(srcPage);
-        const newPage = outputDoc.addPage([targetWidth, targetHeight]);
 
-        let drawWidth = targetWidth;
-        let drawHeight = targetHeight;
+        const embeddedPage =
+          await outputDoc.embedPage(
+            srcPage
+          );
+
+        const newPage =
+          outputDoc.addPage([
+            targetWidth,
+            targetHeight,
+          ]);
+
+
+        let drawWidth =
+          targetWidth;
+
+        let drawHeight =
+          targetHeight;
+
         let drawX = 0;
         let drawY = 0;
 
-        if (fitMode === 'fit') {
-          const scale = Math.min(targetWidth / origWidth, targetHeight / origHeight);
-          drawWidth = origWidth * scale;
-          drawHeight = origHeight * scale;
-          drawX = (targetWidth - drawWidth) / 2;
-          drawY = (targetHeight - drawHeight) / 2;
-        } else if (fitMode === 'center') {
-          drawWidth = origWidth;
-          drawHeight = origHeight;
-          drawX = (targetWidth - origWidth) / 2;
-          drawY = (targetHeight - origHeight) / 2;
-        } else if (fitMode === 'stretch') {
-          drawWidth = targetWidth;
-          drawHeight = targetHeight;
+
+        if (
+          fitMode === 'fit'
+        ) {
+          const scale =
+            Math.min(
+              targetWidth /
+                origWidth,
+              targetHeight /
+                origHeight
+            );
+
+          drawWidth =
+            origWidth *
+            scale;
+
+          drawHeight =
+            origHeight *
+            scale;
+
+          drawX =
+            (
+              targetWidth -
+              drawWidth
+            ) / 2;
+
+          drawY =
+            (
+              targetHeight -
+              drawHeight
+            ) / 2;
+        } else if (
+          fitMode ===
+          'center'
+        ) {
+          drawWidth =
+            origWidth;
+
+          drawHeight =
+            origHeight;
+
+          drawX =
+            (
+              targetWidth -
+              origWidth
+            ) / 2;
+
+          drawY =
+            (
+              targetHeight -
+              origHeight
+            ) / 2;
+        } else if (
+          fitMode ===
+          'stretch'
+        ) {
+          drawWidth =
+            targetWidth;
+
+          drawHeight =
+            targetHeight;
+
           drawX = 0;
           drawY = 0;
         }
 
-        newPage.drawPage(embeddedPage, {
-          x: drawX,
-          y: drawY,
-          width: drawWidth,
-          height: drawHeight,
-        });
+
+        newPage.drawPage(
+          embeddedPage,
+          {
+            x: drawX,
+            y: drawY,
+            width:
+              drawWidth,
+            height:
+              drawHeight,
+          }
+        );
       }
 
-      return await outputDoc.save({ useObjectStreams: false });
+
+      return await outputDoc.save({
+        useObjectStreams: false,
+      });
     } catch (vectorErr) {
-      console.warn('Vector resize bypassed; falling back to high-res rendering engine:', vectorErr);
+      console.warn(
+        'Vector resize bypassed; falling back to high-res rendering engine:',
+        vectorErr
+      );
     }
   }
 
-  // 2. High-Res Rendering Fallback (decrypts and resizes bank statements & legal forms)
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    stopAtErrors: false,
-  });
-  const fallbackDoc = await loadingTask.promise;
-  const totalPages = fallbackDoc.numPages;
-  const outputDoc = await PDFDocument.create();
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await fallbackDoc.getPage(pageNum);
-    const unscaled = page.getViewport({ scale: 1.0 });
-    const origWidth = unscaled.width;
-    const origHeight = unscaled.height;
+  /*
+   * Release vector source reference before raster fallback.
+   */
+  sourceBuffer = null;
 
-    let targetWidth = baseWidth;
-    let targetHeight = baseHeight;
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-    if (autoOrientation && origWidth > origHeight) {
-      targetWidth = Math.max(baseWidth, baseHeight);
-      targetHeight = Math.min(baseWidth, baseHeight);
-    } else if (autoOrientation) {
-      targetWidth = Math.min(baseWidth, baseHeight);
-      targetHeight = Math.max(baseWidth, baseHeight);
+
+  const loadedFallback =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const fallbackDoc =
+    loadedFallback.pdf;
+
+  try {
+    const totalPages =
+      fallbackDoc.numPages;
+
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+      const page =
+        await fallbackDoc.getPage(
+          pageNum
+        );
+
+      try {
+        const unscaled =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const origWidth =
+          unscaled.width;
+
+        const origHeight =
+          unscaled.height;
+
+
+        let targetWidth =
+          baseWidth;
+
+        let targetHeight =
+          baseHeight;
+
+
+        if (
+          autoOrientation &&
+          origWidth >
+            origHeight
+        ) {
+          targetWidth =
+            Math.max(
+              baseWidth,
+              baseHeight
+            );
+
+          targetHeight =
+            Math.min(
+              baseWidth,
+              baseHeight
+            );
+        } else if (
+          autoOrientation
+        ) {
+          targetWidth =
+            Math.min(
+              baseWidth,
+              baseHeight
+            );
+
+          targetHeight =
+            Math.max(
+              baseWidth,
+              baseHeight
+            );
+        }
+
+
+        const {
+          imgBytes,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+
+        const embeddedImage =
+          await outputDoc.embedJpg(
+            imgBytes
+          );
+
+        const newPage =
+          outputDoc.addPage([
+            targetWidth,
+            targetHeight,
+          ]);
+
+
+        let drawWidth =
+          targetWidth;
+
+        let drawHeight =
+          targetHeight;
+
+        let drawX = 0;
+        let drawY = 0;
+
+
+        if (
+          fitMode === 'fit'
+        ) {
+          const scale =
+            Math.min(
+              targetWidth /
+                origWidth,
+              targetHeight /
+                origHeight
+            );
+
+          drawWidth =
+            origWidth *
+            scale;
+
+          drawHeight =
+            origHeight *
+            scale;
+
+          drawX =
+            (
+              targetWidth -
+              drawWidth
+            ) / 2;
+
+          drawY =
+            (
+              targetHeight -
+              drawHeight
+            ) / 2;
+        } else if (
+          fitMode ===
+          'center'
+        ) {
+          drawWidth =
+            origWidth;
+
+          drawHeight =
+            origHeight;
+
+          drawX =
+            (
+              targetWidth -
+              origWidth
+            ) / 2;
+
+          drawY =
+            (
+              targetHeight -
+              origHeight
+            ) / 2;
+        } else if (
+          fitMode ===
+          'stretch'
+        ) {
+          drawWidth =
+            targetWidth;
+
+          drawHeight =
+            targetHeight;
+
+          drawX = 0;
+          drawY = 0;
+        }
+
+
+        newPage.drawImage(
+          embeddedImage,
+          {
+            x: drawX,
+            y: drawY,
+            width:
+              drawWidth,
+            height:
+              drawHeight,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser a chance to reclaim the
+       * completed fallback page's temporary render
+       * memory before processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    // Render crisp 2.0x image of the page with full stamps and bank formatting
-    const { imgBytes } = await renderPageAsJpg(page, 2.0);
-    const embeddedImage = await outputDoc.embedJpg(imgBytes);
-    const newPage = outputDoc.addPage([targetWidth, targetHeight]);
 
-    let drawWidth = targetWidth;
-    let drawHeight = targetHeight;
-    let drawX = 0;
-    let drawY = 0;
+    /*
+     * Every fallback page is now embedded in outputDoc.
+     * Release the original PDF.js source before allocating
+     * the complete resized output during serialization.
+     */
+    await loadedFallback.dispose();
 
-    if (fitMode === 'fit') {
-      const scale = Math.min(targetWidth / origWidth, targetHeight / origHeight);
-      drawWidth = origWidth * scale;
-      drawHeight = origHeight * scale;
-      drawX = (targetWidth - drawWidth) / 2;
-      drawY = (targetHeight - drawHeight) / 2;
-    } else if (fitMode === 'center') {
-      drawWidth = origWidth;
-      drawHeight = origHeight;
-      drawX = (targetWidth - origWidth) / 2;
-      drawY = (targetHeight - origHeight) / 2;
-    } else if (fitMode === 'stretch') {
-      drawWidth = targetWidth;
-      drawHeight = targetHeight;
-      drawX = 0;
-      drawY = 0;
-    }
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
 
-    newPage.drawImage(embeddedImage, {
-      x: drawX,
-      y: drawY,
-      width: drawWidth,
-      height: drawHeight,
+    return await outputDoc.save({
+      useObjectStreams: false,
     });
+  } finally {
+    /*
+     * dispose() is idempotent and still protects
+     * all earlier error paths.
+     */
+    await loadedFallback.dispose();
   }
-
-  return await outputDoc.save({ useObjectStreams: false });
 }
 
 export type NUpLayout = 2 | 4 | 9;
@@ -2983,152 +6956,495 @@ export async function createNUpPDF(
   file: File,
   options: NUpOptions
 ): Promise<Uint8Array> {
-  const { pagesPerSheet = 2, drawPageBorders = true, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
+  const {
+    pagesPerSheet = 2,
+    drawPageBorders = true,
+    onProgress,
+  } = options;
 
-  const [cols, rows, sheetWidth, sheetHeight] =
+  const [
+    cols,
+    rows,
+    sheetWidth,
+    sheetHeight,
+  ] =
     pagesPerSheet === 2
-      ? [2, 1, 841.89, 595.28]
+      ? [
+          2,
+          1,
+          841.89,
+          595.28,
+        ]
       : pagesPerSheet === 4
-      ? [2, 2, 595.28, 841.89]
-      : [3, 3, 595.28, 841.89];
+        ? [
+            2,
+            2,
+            595.28,
+            841.89,
+          ]
+        : [
+            3,
+            3,
+            595.28,
+            841.89,
+          ];
 
-  const cellWidth = sheetWidth / cols;
-  const cellHeight = sheetHeight / rows;
+  const cellWidth =
+    sheetWidth / cols;
+
+  const cellHeight =
+    sheetHeight / rows;
+
   const margin = 12;
 
-  // 1. Primary Vector Path (for standard, unencrypted PDFs)
-  if (!isComplexOrProtectedPdf(uint8)) {
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+
+  /*
+   * Clean PDFs retain vector N-Up composition.
+   */
+  if (!looksProtected) {
     try {
-      const sourceDoc = await PDFDocument.load(arrayBuffer);
-      const totalPages = sourceDoc.getPageCount();
-      const outputDoc = await PDFDocument.create();
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      const sourceDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      /*
+       * pdf-lib has parsed the source document.
+       * Drop our separate complete input-buffer reference
+       * before building the N-Up output document.
+       */
+      sourceBuffer = null;
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+      const totalPages =
+        sourceDoc.getPageCount();
+
+      const outputDoc =
+        await PDFDocument.create();
 
       let pageCursor = 0;
-      while (pageCursor < totalPages) {
-        const sheet = outputDoc.addPage([sheetWidth, sheetHeight]);
 
-        for (let row = 0; row < rows; row++) {
-          for (let col = 0; col < cols; col++) {
-            if (pageCursor >= totalPages) break;
 
-            onProgress?.(pageCursor + 1, totalPages);
-            const srcPage = sourceDoc.getPage(pageCursor);
-            const { width: origW, height: origH } = srcPage.getSize();
-            const embedded = await outputDoc.embedPage(srcPage);
+      while (
+        pageCursor <
+        totalPages
+      ) {
+        const sheet =
+          outputDoc.addPage([
+            sheetWidth,
+            sheetHeight,
+          ]);
 
-            const usableW = cellWidth - margin * 2;
-            const usableH = cellHeight - margin * 2;
 
-            const scale = Math.min(usableW / origW, usableH / origH);
-            const scaledW = origW * scale;
-            const scaledH = origH * scale;
+        for (
+          let row = 0;
+          row < rows;
+          row++
+        ) {
+          for (
+            let col = 0;
+            col < cols;
+            col++
+          ) {
+            if (
+              pageCursor >=
+              totalPages
+            ) {
+              break;
+            }
 
-            const cellOriginX = col * cellWidth;
-            const cellOriginY = sheetHeight - (row + 1) * cellHeight;
 
-            const drawX = cellOriginX + (cellWidth - scaledW) / 2;
-            const drawY = cellOriginY + (cellHeight - scaledH) / 2;
+            onProgress?.(
+              pageCursor + 1,
+              totalPages
+            );
 
-            sheet.drawPage(embedded, {
-              x: drawX,
-              y: drawY,
-              width: scaledW,
-              height: scaledH,
-            });
 
-            if (drawPageBorders) {
+            const srcPage =
+              sourceDoc.getPage(
+                pageCursor
+              );
+
+            const {
+              width: origW,
+              height: origH,
+            } =
+              srcPage.getSize();
+
+
+            const embedded =
+              await outputDoc.embedPage(
+                srcPage
+              );
+
+
+            const usableW =
+              cellWidth -
+              margin * 2;
+
+            const usableH =
+              cellHeight -
+              margin * 2;
+
+
+            const scale =
+              Math.min(
+                usableW /
+                  origW,
+                usableH /
+                  origH
+              );
+
+            const scaledW =
+              origW * scale;
+
+            const scaledH =
+              origH * scale;
+
+
+            const cellOriginX =
+              col *
+              cellWidth;
+
+            const cellOriginY =
+              sheetHeight -
+              (
+                row + 1
+              ) *
+                cellHeight;
+
+
+            const drawX =
+              cellOriginX +
+              (
+                cellWidth -
+                scaledW
+              ) /
+                2;
+
+            const drawY =
+              cellOriginY +
+              (
+                cellHeight -
+                scaledH
+              ) /
+                2;
+
+
+            sheet.drawPage(
+              embedded,
+              {
+                x: drawX,
+                y: drawY,
+                width:
+                  scaledW,
+                height:
+                  scaledH,
+              }
+            );
+
+
+            if (
+              drawPageBorders
+            ) {
               sheet.drawRectangle({
                 x: drawX,
                 y: drawY,
-                width: scaledW,
-                height: scaledH,
-                borderColor: rgb(0.8, 0.8, 0.8),
-                borderWidth: 0.5,
+                width:
+                  scaledW,
+                height:
+                  scaledH,
+                borderColor:
+                  rgb(
+                    0.8,
+                    0.8,
+                    0.8
+                  ),
+                borderWidth:
+                  0.5,
               });
             }
+
 
             pageCursor++;
           }
         }
       }
 
-      return await outputDoc.save({ useObjectStreams: false });
+
+      return await outputDoc.save({
+        useObjectStreams: false,
+      });
     } catch (vectorErr) {
-      console.warn('Vector N-Up bypassed; activating high-res rendering pipeline:', vectorErr);
+      console.warn(
+        'Vector N-Up bypassed; activating high-res rendering pipeline:',
+        vectorErr
+      );
     }
   }
 
-  // 2. High-Res Rendering Fallback (decrypts and arranges bank statements & legal forms)
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    stopAtErrors: false,
-  });
-  const fallbackDoc = await loadingTask.promise;
-  const totalPages = fallbackDoc.numPages;
-  const outputDoc = await PDFDocument.create();
 
-  let pageCursor = 0;
+  /*
+   * Release vector source before entering raster fallback.
+   */
+  sourceBuffer = null;
 
-  while (pageCursor < totalPages) {
-    const sheet = outputDoc.addPage([sheetWidth, sheetHeight]);
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        if (pageCursor >= totalPages) break;
 
-        onProgress?.(pageCursor + 1, totalPages);
-        const pageNum = pageCursor + 1;
-        const page = await fallbackDoc.getPage(pageNum);
-        const { imgBytes, width: origW, height: origH } = await renderPageAsJpg(page, 2.0);
-        const embeddedImg = await outputDoc.embedJpg(imgBytes);
+  const loadedFallback =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-        const usableW = cellWidth - margin * 2;
-        const usableH = cellHeight - margin * 2;
+  const fallbackDoc =
+    loadedFallback.pdf;
 
-        const scale = Math.min(usableW / origW, usableH / origH);
-        const scaledW = origW * scale;
-        const scaledH = origH * scale;
 
-        const cellOriginX = col * cellWidth;
-        const cellOriginY = sheetHeight - (row + 1) * cellHeight;
+  try {
+    const totalPages =
+      fallbackDoc.numPages;
 
-        const drawX = cellOriginX + (cellWidth - scaledW) / 2;
-        const drawY = cellOriginY + (cellHeight - scaledH) / 2;
+    const outputDoc =
+      await PDFDocument.create();
 
-        sheet.drawImage(embeddedImg, {
-          x: drawX,
-          y: drawY,
-          width: scaledW,
-          height: scaledH,
-        });
+    let pageCursor = 0;
 
-        if (drawPageBorders) {
-          sheet.drawRectangle({
-            x: drawX,
-            y: drawY,
-            width: scaledW,
-            height: scaledH,
-            borderColor: rgb(0.8, 0.8, 0.8),
-            borderWidth: 0.5,
-          });
+
+    while (
+      pageCursor <
+      totalPages
+    ) {
+      const sheet =
+        outputDoc.addPage([
+          sheetWidth,
+          sheetHeight,
+        ]);
+
+
+      for (
+        let row = 0;
+        row < rows;
+        row++
+      ) {
+        for (
+          let col = 0;
+          col < cols;
+          col++
+        ) {
+          if (
+            pageCursor >=
+            totalPages
+          ) {
+            break;
+          }
+
+
+          onProgress?.(
+            pageCursor + 1,
+            totalPages
+          );
+
+
+          const pageNum =
+            pageCursor + 1;
+
+          const page =
+            await fallbackDoc.getPage(
+              pageNum
+            );
+
+          try {
+            const {
+              imgBytes,
+              width: origW,
+              height: origH,
+            } =
+              await renderPageAsJpg(
+                page,
+                2.0
+              );
+
+
+            const embeddedImg =
+              await outputDoc.embedJpg(
+                imgBytes
+              );
+
+
+            const usableW =
+              cellWidth -
+              margin * 2;
+
+            const usableH =
+              cellHeight -
+              margin * 2;
+
+
+            const scale =
+              Math.min(
+                usableW /
+                  origW,
+                usableH /
+                  origH
+              );
+
+            const scaledW =
+              origW * scale;
+
+            const scaledH =
+              origH * scale;
+
+
+            const cellOriginX =
+              col *
+              cellWidth;
+
+            const cellOriginY =
+              sheetHeight -
+              (
+                row + 1
+              ) *
+                cellHeight;
+
+
+            const drawX =
+              cellOriginX +
+              (
+                cellWidth -
+                scaledW
+              ) /
+                2;
+
+            const drawY =
+              cellOriginY +
+              (
+                cellHeight -
+                scaledH
+              ) /
+                2;
+
+
+            sheet.drawImage(
+              embeddedImg,
+              {
+                x: drawX,
+                y: drawY,
+                width:
+                  scaledW,
+                height:
+                  scaledH,
+              }
+            );
+
+
+            if (
+              drawPageBorders
+            ) {
+              sheet.drawRectangle({
+                x: drawX,
+                y: drawY,
+                width:
+                  scaledW,
+                height:
+                  scaledH,
+                borderColor:
+                  rgb(
+                    0.8,
+                    0.8,
+                    0.8
+                  ),
+                borderWidth:
+                  0.5,
+              });
+            }
+          } finally {
+            try {
+              page.cleanup();
+            } catch (_) {}
+          }
+
+
+          pageCursor++;
+
+          /*
+           * Give the browser an opportunity to reclaim
+           * the completed page's temporary render/JPEG
+           * memory before processing the next source page.
+           */
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
         }
-
-        pageCursor++;
       }
     }
-  }
 
-  return await outputDoc.save({ useObjectStreams: false });
+
+    /*
+     * Every fallback source page is already embedded in
+     * outputDoc. Release the original PDF.js document before
+     * allocating the complete serialized N-Up output.
+     */
+    await loadedFallback.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await outputDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    /*
+     * dispose() is idempotent and also protects all
+     * earlier error paths.
+     */
+    await loadedFallback.dispose();
+  }
 }
 
-export type BatesPosition = 
-  | 'top-left' 
-  | 'top-center' 
-  | 'top-right' 
-  | 'bottom-left' 
-  | 'bottom-center' 
+export type BatesPosition =
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-center'
   | 'bottom-right';
 
 export interface BatesOptions {
@@ -3146,364 +7462,1329 @@ export async function addBatesNumberingToPDF(
   file: File,
   options: BatesOptions
 ): Promise<Uint8Array> {
-  const bytes = await file.arrayBuffer();
-  const uint8 = new Uint8Array(bytes);
+  const prefix =
+    options.prefix || '';
 
-  const prefix = options.prefix || '';
-  const suffix = options.suffix || '';
-  const startNum = options.startNumber || 1;
-  const digits = Math.max(1, options.digits ?? options.totalDigits ?? 6);
-  const fontSize = options.fontSize || 10;
-  const position = options.position || 'bottom-right';
+  const suffix =
+    options.suffix || '';
 
-  // 1. Analyze PDF structure with pdfjs to determine the document profile
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice(), stopAtErrors: false });
-  const pdfDoc = await loadingTask.promise;
-  const numPages = pdfDoc.numPages;
+  const startNum =
+    options.startNumber || 1;
 
-  const kbPerPage = (file.size / 1024) / Math.max(1, numPages);
-  let hasDenseDigitalText = false;
+  const digits =
+    Math.max(
+      1,
+      options.digits ??
+        options.totalDigits ??
+        6
+    );
+
+  const fontSize =
+    options.fontSize || 10;
+
+  const position =
+    options.position ||
+    'bottom-right';
+
+
+  let loadedPdf:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+
+  /*
+   * Profile the document without creating a complete
+   * ArrayBuffer/Uint8Array source copy.
+   */
+  const profilePdf =
+    loadedPdf.pdf;
+
+  const numPages =
+    profilePdf.numPages;
+
+  const kbPerPage =
+    (
+      file.size /
+      1024
+    ) /
+    Math.max(
+      1,
+      numPages
+    );
+
+  let hasDenseDigitalText =
+    false;
 
   try {
-    const firstPage = await pdfDoc.getPage(1);
-    const textContent = await firstPage.getTextContent();
-    hasDenseDigitalText = textContent.items.length > 25;
-  } catch {
-    hasDenseDigitalText = false;
-  }
+    const firstPage =
+      await profilePdf.getPage(
+        1
+      );
 
-  // True digital vector PDFs (e-statements, bank exports) have low KB/page and digital text
-  const isDigitalVector = kbPerPage < 180 || (hasDenseDigitalText && kbPerPage < 400);
-
-  // ==========================================
-  // PATH A: Native Vector Engine (Bank Statements & Digital Docs)
-  // Keeps 100% original vector clarity, crisp fonts, and tiny file size
-  // ==========================================
-  if (isDigitalVector) {
     try {
-      const nativeDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      const pages = nativeDoc.getPages();
-      const font = await nativeDoc.embedFont(StandardFonts.HelveticaBold);
+      const textContent =
+        await firstPage.getTextContent();
 
-      pages.forEach((page, idx) => {
-        if (options.onProgress) {
-          options.onProgress(idx + 1, numPages);
+      hasDenseDigitalText =
+        textContent.items.length >
+        25;
+    } finally {
+      try {
+        firstPage.cleanup();
+      } catch (_) {}
+    }
+  } catch (_) {
+    hasDenseDigitalText =
+      false;
+  }
+
+
+  const isDigitalVector =
+    kbPerPage < 180 ||
+    (
+      hasDenseDigitalText &&
+      kbPerPage < 400
+    );
+
+
+  /*
+   * Native vector route for digital PDFs.
+   *
+   * Dispose PDF.js first so pdf-lib and PDF.js do not
+   * hold the large source at the same time.
+   */
+  if (isDigitalVector) {
+    await loadedPdf.dispose();
+    loadedPdf = null;
+
+    let vectorSource:
+      | ArrayBuffer
+      | null =
+        await file.arrayBuffer();
+
+    try {
+      const nativeDoc =
+        await PDFDocument.load(
+          vectorSource,
+          {
+            ignoreEncryption: true,
+          }
+        );
+
+      /*
+       * pdf-lib has parsed the document, so our separate
+       * complete source ArrayBuffer reference can go away
+       * before Bates stamping begins.
+       */
+      vectorSource = null;
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+      const pages =
+        nativeDoc.getPages();
+
+      const font =
+        await nativeDoc.embedFont(
+          StandardFonts.HelveticaBold
+        );
+
+
+      pages.forEach(
+        (
+          page,
+          idx
+        ) => {
+          options.onProgress?.(
+            idx + 1,
+            numPages
+          );
+
+          const pageNumStr =
+            String(
+              startNum + idx
+            ).padStart(
+              digits,
+              '0'
+            );
+
+          const stampText =
+            prefix +
+            pageNumStr +
+            suffix;
+
+          const {
+            width,
+            height,
+          } =
+            page.getSize();
+
+          const textWidth =
+            font.widthOfTextAtSize(
+              stampText,
+              fontSize
+            );
+
+          const textHeight =
+            font.heightAtSize(
+              fontSize
+            );
+
+          const marginX = 28;
+          const marginY = 24;
+
+          let posX =
+            marginX;
+
+          let posY =
+            marginY;
+
+
+          if (
+            position.includes(
+              'center'
+            )
+          ) {
+            posX =
+              (
+                width -
+                textWidth
+              ) / 2;
+          } else if (
+            position.includes(
+              'right'
+            )
+          ) {
+            posX =
+              width -
+              textWidth -
+              marginX;
+          }
+
+
+          if (
+            position.includes(
+              'top'
+            )
+          ) {
+            posY =
+              height -
+              marginY -
+              textHeight;
+          }
+
+
+          const padX = 6;
+          const padY = 3;
+
+          page.drawRectangle({
+            x:
+              posX -
+              padX,
+            y:
+              posY -
+              padY,
+            width:
+              textWidth +
+              padX * 2,
+            height:
+              textHeight +
+              padY * 2,
+            color:
+              rgb(
+                1,
+                1,
+                1
+              ),
+            opacity:
+              0.95,
+          });
+
+
+          page.drawText(
+            stampText,
+            {
+              x: posX,
+              y: posY,
+              size:
+                fontSize,
+              font,
+              color:
+                rgb(
+                  0,
+                  0,
+                  0
+                ),
+            }
+          );
         }
+      );
 
-        const pageNumStr = String(startNum + idx).padStart(digits, '0');
-        const stampText = `${prefix}${pageNumStr}${suffix}`;
 
-        const { width, height } = page.getSize();
-        const textWidth = font.widthOfTextAtSize(stampText, fontSize);
-        const textHeight = font.heightAtSize(fontSize);
-
-        const marginX = 28;
-        const marginY = 24;
-
-        let posX = marginX;
-        let posY = marginY;
-
-        if (position.includes('center')) {
-          posX = (width - textWidth) / 2;
-        } else if (position.includes('right')) {
-          posX = width - textWidth - marginX;
-        }
-
-        if (position.includes('top')) {
-          posY = height - marginY - textHeight;
-        }
-
-        // Protective white pill for readability
-        const padX = 6;
-        const padY = 3;
-        page.drawRectangle({
-          x: posX - padX,
-          y: posY - padY,
-          width: textWidth + padX * 2,
-          height: textHeight + padY * 2,
-          color: rgb(1, 1, 1),
-          opacity: 0.95,
-        });
-
-        // Stamp vector text directly into the original stream
-        page.drawText(stampText, {
-          x: posX,
-          y: posY,
-          size: fontSize,
-          font,
-          color: rgb(0, 0, 0),
-        });
+      return await nativeDoc.save({
+        useObjectStreams: false,
       });
-
-      return await nativeDoc.save({ useObjectStreams: false });
     } catch (err) {
-      console.warn('Native vector route failed, falling back to canvas compositor:', err);
+      console.warn(
+        'Native vector route failed, falling back to canvas compositor:',
+        err
+      );
+    } finally {
+      vectorSource = null;
     }
+
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
   }
 
-  // ==========================================
-  // PATH B: High-Definition Canvas Compositor (Scanned Agreements & Photo PDFs)
-  // Burns stamps visibly on top of full-page photo scans
-  // ==========================================
-  const newPdfDoc = await PDFDocument.create();
 
-  for (let i = 1; i <= numPages; i++) {
-    if (options.onProgress) {
-      options.onProgress(i, numPages);
-    }
-
-    const pageNumStr = String(startNum + (i - 1)).padStart(digits, '0');
-    const stampText = `${prefix}${pageNumStr}${suffix}`;
-
-    const page = await pdfDoc.getPage(i);
-    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.5);
-
-    const compositeCanvas = document.createElement('canvas');
-    compositeCanvas.width = pWidth;
-    compositeCanvas.height = pHeight;
-    const ctx = compositeCanvas.getContext('2d');
-
-    if (ctx) {
-      const pageImg = new Image();
-      await new Promise<void>((resolve) => {
-        pageImg.onload = () => {
-          ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
-          resolve();
-        };
-        pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
-      });
-
-      ctx.save();
-      const scaleNormalization = pWidth / 540;
-      const finalFontSize = fontSize * scaleNormalization;
-
-      ctx.font = `bold ${finalFontSize}px Helvetica, Arial, sans-serif`;
-      ctx.fillStyle = '#000000';
-
-      const metrics = ctx.measureText(stampText);
-      const textWidth = metrics.width;
-      const textHeight = finalFontSize;
-
-      const marginX = pWidth * 0.05;
-      const marginY = pHeight * 0.04;
-
-      let posX = marginX;
-      let posY = pHeight - marginY;
-
-      if (position.includes('center')) {
-        posX = (pWidth - textWidth) / 2;
-      } else if (position.includes('right')) {
-        posX = pWidth - textWidth - marginX;
-      }
-
-      if (position.includes('top')) {
-        posY = marginY + textHeight;
-      }
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.fillRect(posX - 6, posY - textHeight - 4, textWidth + 12, textHeight + 8);
-
-      ctx.fillStyle = '#000000';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillText(stampText, posX, posY);
-      ctx.restore();
-
-      const stampedPng = compositeCanvas.toDataURL('image/png');
-      const b64 = stampedPng.split(',')[1];
-      const stampedBytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const finalPageImg = await newPdfDoc.embedPng(stampedBytes);
-
-      const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-      newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
-    }
+  /*
+   * Scanned/photo fallback.
+   *
+   * If the document was non-vector, reuse the PDF.js
+   * profile document instead of loading the source again.
+   */
+  if (!loadedPdf) {
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
   }
 
-  return await newPdfDoc.save({ useObjectStreams: false });
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  try {
+    const newPdfDoc =
+      await PDFDocument.create();
+
+
+    for (
+      let i = 1;
+      i <= numPages;
+      i++
+    ) {
+      options.onProgress?.(
+        i,
+        numPages
+      );
+
+      const pageNumStr =
+        String(
+          startNum +
+            (
+              i - 1
+            )
+        ).padStart(
+          digits,
+          '0'
+        );
+
+      const stampText =
+        prefix +
+        pageNumStr +
+        suffix;
+
+
+      const page =
+        await pdfDoc.getPage(
+          i
+        );
+
+      const compositeCanvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const renderedPage =
+          await renderPageAsJpg(
+            page,
+            2.5
+          );
+
+        let imgBytes =
+          renderedPage.imgBytes;
+
+        const pWidth =
+          renderedPage.width;
+
+        const pHeight =
+          renderedPage.height;
+
+
+        compositeCanvas.width =
+          pWidth;
+
+        compositeCanvas.height =
+          pHeight;
+
+
+        const ctx =
+          compositeCanvas.getContext(
+            '2d'
+          );
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        const pageImg =
+          new Image();
+
+        const pageBlobUrl =
+          URL.createObjectURL(
+            new Blob(
+              [
+                imgBytes as unknown as BlobPart,
+              ],
+              {
+                type:
+                  'image/jpeg',
+              }
+            )
+          );
+
+
+        try {
+          await new Promise<void>(
+            (
+              resolve,
+              reject
+            ) => {
+              pageImg.onload =
+                () => {
+                  ctx.drawImage(
+                    pageImg,
+                    0,
+                    0,
+                    pWidth,
+                    pHeight
+                  );
+
+                  resolve();
+                };
+
+              pageImg.onerror =
+                () =>
+                  reject(
+                    new Error(
+                      'Failed to decode rendered PDF page.'
+                    )
+                  );
+
+              pageImg.src =
+                pageBlobUrl;
+            }
+          );
+        } finally {
+          URL.revokeObjectURL(
+            pageBlobUrl
+          );
+
+          /*
+           * The rendered page has already been painted onto
+           * compositeCanvas. Drop the Image's decoded source
+           * and our compressed JPEG byte reference before
+           * creating the stamped output image.
+           */
+          try {
+            pageImg.src = '';
+          } catch (_) {}
+
+          imgBytes =
+            new Uint8Array(0);
+        }
+
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
+
+        ctx.save();
+
+        const scaleNormalization =
+          pWidth / 540;
+
+        const finalFontSize =
+          fontSize *
+          scaleNormalization;
+
+        ctx.font =
+          'bold ' +
+          finalFontSize +
+          'px Helvetica, Arial, sans-serif';
+
+        ctx.fillStyle =
+          '#000000';
+
+
+        const metrics =
+          ctx.measureText(
+            stampText
+          );
+
+        const textWidth =
+          metrics.width;
+
+        const textHeight =
+          finalFontSize;
+
+        const marginX =
+          pWidth * 0.05;
+
+        const marginY =
+          pHeight * 0.04;
+
+        let posX =
+          marginX;
+
+        let posY =
+          pHeight -
+          marginY;
+
+
+        if (
+          position.includes(
+            'center'
+          )
+        ) {
+          posX =
+            (
+              pWidth -
+              textWidth
+            ) / 2;
+        } else if (
+          position.includes(
+            'right'
+          )
+        ) {
+          posX =
+            pWidth -
+            textWidth -
+            marginX;
+        }
+
+
+        if (
+          position.includes(
+            'top'
+          )
+        ) {
+          posY =
+            marginY +
+            textHeight;
+        }
+
+
+        ctx.fillStyle =
+          'rgba(255, 255, 255, 0.95)';
+
+        ctx.fillRect(
+          posX - 6,
+          posY -
+            textHeight -
+            4,
+          textWidth + 12,
+          textHeight + 8
+        );
+
+
+        ctx.fillStyle =
+          '#000000';
+
+        ctx.textBaseline =
+          'alphabetic';
+
+        ctx.fillText(
+          stampText,
+          posX,
+          posY
+        );
+
+        ctx.restore();
+
+
+        /*
+         * Avoid PNG base64 duplication.
+         */
+        const stampedBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              compositeCanvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode Bates page.'
+                      )
+                    );
+                  }
+                },
+                'image/png'
+              );
+            }
+          );
+
+
+        const stampedBytes =
+          await stampedBlob.arrayBuffer();
+
+        const finalPageImg =
+          await newPdfDoc.embedPng(
+            stampedBytes
+          );
+
+
+        const newPage =
+          newPdfDoc.addPage([
+            pWidth,
+            pHeight,
+          ]);
+
+
+        newPage.drawImage(
+          finalPageImg,
+          {
+            x: 0,
+            y: 0,
+            width:
+              pWidth,
+            height:
+              pHeight,
+          }
+        );
+      } finally {
+        compositeCanvas.width =
+          1;
+
+        compositeCanvas.height =
+          1;
+
+        try {
+          compositeCanvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Allow the browser to reclaim completed page
+       * canvas/image temporaries before Bates processing
+       * starts on the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
+    /*
+     * All stamped pages are now embedded in newPdfDoc.
+     * Release the original PDF.js source before allocating
+     * the complete serialized Bates PDF.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    return await newPdfDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 
 export interface ExtractedImage {
   id: string;
   name: string;
   blob: Blob;
-  dataUrl: string;
   width: number;
   height: number;
 }
 
 export async function extractImagesFromPDF(
   file: File,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void
 ): Promise<ExtractedImage[]> {
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
-  const images: ExtractedImage[] = [];
-  const seenImageHashes = new Set<string>();
-  let counter = 0;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const operatorList = await page.getOperatorList();
+  const pdfDoc =
+    loadedPdf.pdf;
 
-    const validOps = [
-      pdfjsLib.OPS.paintImageXObject,
-      pdfjsLib.OPS.paintInlineImageXObject,
-      pdfjsLib.OPS.paintImageXObjectRepeat,
-    ];
+  try {
+    const totalPages =
+      pdfDoc.numPages;
 
-    for (let i = 0; i < operatorList.fnArray.length; i++) {
-      const fn = operatorList.fnArray[i];
-      if (!validOps.includes(fn)) continue;
+    const images:
+      ExtractedImage[] = [];
 
-      const imgArg = operatorList.argsArray[i][0];
+    const seenImageHashes =
+      new Set<string>();
+
+    let counter = 0;
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
 
       try {
-        // 1. Resolve image object safely across inline dicts, page.objs, and commonObjs
-        const imgObj: any = await new Promise((resolve) => {
-          // Failsafe timeout: if an asset cannot be decoded within 1.2s, skip it instead of freezing
-          const timeout = setTimeout(() => resolve(null), 1200);
+        const operatorList =
+          await page.getOperatorList();
 
-          // Case A: Inline image where the argument is already the decoded object
-          if (imgArg && typeof imgArg === 'object') {
-            clearTimeout(timeout);
-            resolve(imgArg);
-            return;
-          }
+        const validOps = [
+          pdfjsLib.OPS
+            .paintImageXObject,
+          pdfjsLib.OPS
+            .paintInlineImageXObject,
+          pdfjsLib.OPS
+            .paintImageXObjectRepeat,
+        ];
 
-          if (!imgArg || typeof imgArg !== 'string') {
-            clearTimeout(timeout);
-            resolve(null);
-            return;
-          }
 
-          let handled = false;
-          const handleResult = (data: any) => {
-            if (!handled && data) {
-              handled = true;
-              clearTimeout(timeout);
-              resolve(data);
-            }
-          };
+        for (
+          let i = 0;
+          i <
+          operatorList.fnArray.length;
+          i++
+        ) {
+          const fn =
+            operatorList.fnArray[i];
 
-          // Case B: Check page.objs first
-          try {
-            const syncObj = (page.objs as any).get(imgArg, handleResult);
-            if (syncObj) handleResult(syncObj);
-          } catch {}
-
-          // Case C: Check shared commonObjs (header/footer logos, book art)
-          if (!handled) {
-            try {
-              const commonStore = (page as any).commonObjs || (pdfDoc as any).commonObjs;
-              if (commonStore) {
-                const syncCommon = commonStore.get(imgArg, handleResult);
-                if (syncCommon) handleResult(syncCommon);
-              }
-            } catch {}
-          }
-        });
-
-        if (!imgObj) continue;
-
-        const width = imgObj.width;
-        const height = imgObj.height;
-        if (!width || !height || width < 10 || height < 10) continue;
-
-        // Skip duplicate images reused across pages
-        const dedupeKey = `${width}x${height}_${imgObj.data?.length || 0}`;
-        if (seenImageHashes.has(dedupeKey)) continue;
-        seenImageHashes.add(dedupeKey);
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-        if (!ctx) continue;
-
-        // 2. Render image data to canvas
-        if (imgObj.bitmap) {
-          ctx.drawImage(imgObj.bitmap, 0, 0);
-        } else if (imgObj instanceof ImageBitmap) {
-          ctx.drawImage(imgObj, 0, 0);
-        } else if (imgObj.data) {
-          let imgData: ImageData;
-          if (imgObj.data.length === width * height * 4) {
-            imgData = new ImageData(new Uint8ClampedArray(imgObj.data), width, height);
-          } else if (imgObj.data.length === width * height * 3) {
-            const rgba = new Uint8ClampedArray(width * height * 4);
-            for (let p = 0, q = 0; p < imgObj.data.length; p += 3, q += 4) {
-              rgba[q] = imgObj.data[p];
-              rgba[q + 1] = imgObj.data[p + 1];
-              rgba[q + 2] = imgObj.data[p + 2];
-              rgba[q + 3] = 255;
-            }
-            imgData = new ImageData(rgba, width, height);
-          } else if (imgObj.data.length === width * height) {
-            const rgba = new Uint8ClampedArray(width * height * 4);
-            for (let p = 0, q = 0; p < imgObj.data.length; p++, q += 4) {
-              const val = imgObj.data[p];
-              rgba[q] = val;
-              rgba[q + 1] = val;
-              rgba[q + 2] = val;
-              rgba[q + 3] = 255;
-            }
-            imgData = new ImageData(rgba, width, height);
-          } else {
+          if (
+            !validOps.includes(
+              fn
+            )
+          ) {
             continue;
           }
-          ctx.putImageData(imgData, 0, 0);
-        } else {
-          continue;
+
+
+          const imgArg =
+            operatorList
+              .argsArray[i][0];
+
+
+          try {
+            const imgObj: any =
+              await new Promise(
+                (resolve) => {
+                  const timeout =
+                    setTimeout(
+                      () =>
+                        resolve(
+                          null
+                        ),
+                      1200
+                    );
+
+
+                  if (
+                    imgArg &&
+                    typeof imgArg ===
+                      'object'
+                  ) {
+                    clearTimeout(
+                      timeout
+                    );
+
+                    resolve(
+                      imgArg
+                    );
+
+                    return;
+                  }
+
+
+                  if (
+                    !imgArg ||
+                    typeof imgArg !==
+                      'string'
+                  ) {
+                    clearTimeout(
+                      timeout
+                    );
+
+                    resolve(
+                      null
+                    );
+
+                    return;
+                  }
+
+
+                  let handled =
+                    false;
+
+                  const handleResult =
+                    (
+                      data: any
+                    ) => {
+                      if (
+                        !handled &&
+                        data
+                      ) {
+                        handled =
+                          true;
+
+                        clearTimeout(
+                          timeout
+                        );
+
+                        resolve(
+                          data
+                        );
+                      }
+                    };
+
+
+                  try {
+                    const syncObj =
+                      (
+                        page.objs as any
+                      ).get(
+                        imgArg,
+                        handleResult
+                      );
+
+                    if (syncObj) {
+                      handleResult(
+                        syncObj
+                      );
+                    }
+                  } catch (_) {}
+
+
+                  if (!handled) {
+                    try {
+                      const commonStore =
+                        (
+                          page as any
+                        ).commonObjs ||
+                        (
+                          pdfDoc as any
+                        ).commonObjs;
+
+                      if (
+                        commonStore
+                      ) {
+                        const syncCommon =
+                          commonStore.get(
+                            imgArg,
+                            handleResult
+                          );
+
+                        if (
+                          syncCommon
+                        ) {
+                          handleResult(
+                            syncCommon
+                          );
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                }
+              );
+
+
+            if (!imgObj) {
+              continue;
+            }
+
+
+            const width =
+              imgObj.width;
+
+            const height =
+              imgObj.height;
+
+
+            if (
+              !width ||
+              !height ||
+              width < 10 ||
+              height < 10
+            ) {
+              continue;
+            }
+
+
+            const dedupeKey =
+              width +
+              'x' +
+              height +
+              '_' +
+              (
+                imgObj.data
+                  ?.length ||
+                0
+              );
+
+
+            if (
+              seenImageHashes.has(
+                dedupeKey
+              )
+            ) {
+              continue;
+            }
+
+
+            seenImageHashes.add(
+              dedupeKey
+            );
+
+
+            const canvas =
+              document.createElement(
+                'canvas'
+              );
+
+            try {
+              canvas.width =
+                width;
+
+              canvas.height =
+                height;
+
+
+              const ctx =
+                canvas.getContext(
+                  '2d',
+                  {
+                    alpha: false,
+                  }
+                );
+
+
+              if (!ctx) {
+                continue;
+              }
+
+
+              if (
+                imgObj.bitmap
+              ) {
+                ctx.drawImage(
+                  imgObj.bitmap,
+                  0,
+                  0
+                );
+              } else if (
+                typeof ImageBitmap !==
+                  'undefined' &&
+                imgObj instanceof
+                  ImageBitmap
+              ) {
+                ctx.drawImage(
+                  imgObj,
+                  0,
+                  0
+                );
+              } else if (
+                imgObj.data
+              ) {
+                let imgData:
+                  ImageData;
+
+
+                if (
+                  imgObj.data
+                    .length ===
+                  width *
+                    height *
+                    4
+                ) {
+                  imgData =
+                    new ImageData(
+                      new Uint8ClampedArray(
+                        imgObj.data
+                      ),
+                      width,
+                      height
+                    );
+                } else if (
+                  imgObj.data
+                    .length ===
+                  width *
+                    height *
+                    3
+                ) {
+                  const rgba =
+                    new Uint8ClampedArray(
+                      width *
+                        height *
+                        4
+                    );
+
+
+                  for (
+                    let p = 0,
+                      q = 0;
+                    p <
+                    imgObj.data
+                      .length;
+                    p += 3,
+                      q += 4
+                  ) {
+                    rgba[q] =
+                      imgObj.data[p];
+
+                    rgba[q + 1] =
+                      imgObj.data[
+                        p + 1
+                      ];
+
+                    rgba[q + 2] =
+                      imgObj.data[
+                        p + 2
+                      ];
+
+                    rgba[q + 3] =
+                      255;
+                  }
+
+
+                  imgData =
+                    new ImageData(
+                      rgba,
+                      width,
+                      height
+                    );
+                } else if (
+                  imgObj.data
+                    .length ===
+                  width *
+                    height
+                ) {
+                  const rgba =
+                    new Uint8ClampedArray(
+                      width *
+                        height *
+                        4
+                    );
+
+
+                  for (
+                    let p = 0,
+                      q = 0;
+                    p <
+                    imgObj.data
+                      .length;
+                    p++,
+                      q += 4
+                  ) {
+                    const val =
+                      imgObj.data[p];
+
+                    rgba[q] =
+                      val;
+
+                    rgba[q + 1] =
+                      val;
+
+                    rgba[q + 2] =
+                      val;
+
+                    rgba[q + 3] =
+                      255;
+                  }
+
+
+                  imgData =
+                    new ImageData(
+                      rgba,
+                      width,
+                      height
+                    );
+                } else {
+                  continue;
+                }
+
+
+                ctx.putImageData(
+                  imgData,
+                  0,
+                  0
+                );
+              } else {
+                continue;
+              }
+
+
+              const blob =
+                await new Promise<
+                  Blob | null
+                >(
+                  (resolve) =>
+                    canvas.toBlob(
+                      resolve,
+                      'image/png'
+                    )
+                );
+
+
+              if (!blob) {
+                continue;
+              }
+
+
+              counter++;
+
+
+              images.push({
+                id:
+                  'img-' +
+                  counter +
+                  '-p' +
+                  pageNum,
+
+                name:
+                  'extracted_img_' +
+                  counter +
+                  '_p' +
+                  pageNum +
+                  '.png',
+
+                blob,
+                width,
+                height,
+              });
+            } finally {
+              canvas.width =
+                1;
+
+              canvas.height =
+                1;
+
+              try {
+                canvas.remove();
+              } catch (_) {}
+            }
+          } catch (err) {
+            console.warn(
+              'Skipping unparseable image on page ' +
+                pageNum +
+                ':',
+              err
+            );
+          }
         }
-
-        const blob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob(resolve, 'image/png')
-        );
-        if (!blob) continue;
-
-        counter++;
-        images.push({
-          id: `img-${counter}-p${pageNum}`,
-          name: `extracted_img_${counter}_p${pageNum}.png`,
-          blob,
-          dataUrl: canvas.toDataURL('image/png'),
-          width,
-          height,
-        });
-
-        canvas.width = 0;
-        canvas.height = 0;
-      } catch (err) {
-        console.warn(`Skipping unparseable image on page ${pageNum}:`, err);
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
     }
 
-    try {
-      page.cleanup();
-    } catch {}
-  }
 
-  return images;
+    return images;
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 
 export async function packageImagesToZip(
   images: ExtractedImage[],
   baseName: string
 ): Promise<Blob> {
-  const zip = new JSZip();
-  const cleanName = baseName.replace(/\.[^/.]+$/, '');
+  const cleanName =
+    baseName.replace(
+      /\.[^/.]+$/,
+      ''
+    );
 
-  images.forEach((img) => {
-    zip.file(`${cleanName}_${img.name}`, img.blob);
-  });
+  const chunks:
+    ArrayBuffer[] = [];
 
-  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  let resolveZip!:
+    (blob: Blob) => void;
+
+  let rejectZip!:
+    (error: unknown) => void;
+
+  const result =
+    new Promise<Blob>(
+      (resolve, reject) => {
+        resolveZip =
+          resolve;
+
+        rejectZip =
+          reject;
+      }
+    );
+
+  const zip =
+    new Zip(
+      (
+        error,
+        data,
+        final
+      ) => {
+        if (error) {
+          rejectZip(
+            error
+          );
+          return;
+        }
+
+        if (
+          data &&
+          data.length
+        ) {
+          const copy =
+            new Uint8Array(
+              data.length
+            );
+
+          copy.set(
+            data
+          );
+
+          chunks.push(
+            copy.buffer
+          );
+        }
+
+        if (final) {
+          resolveZip(
+            new Blob(
+              chunks,
+              {
+                type:
+                  'application/zip',
+              }
+            )
+          );
+        }
+      }
+    );
+
+  /*
+   * Extracted JPG/PNG/WebP images are already compressed.
+   * Store each one directly rather than running another
+   * expensive DEFLATE pass over every image.
+   */
+  for (
+    const image of images
+  ) {
+    const entry =
+      new ZipPassThrough(
+        `${cleanName}_${image.name}`
+      );
+
+    zip.add(
+      entry
+    );
+
+    const bytes =
+      new Uint8Array(
+        await image.blob.arrayBuffer()
+      );
+
+    entry.push(
+      bytes,
+      true
+    );
+
+    /*
+     * Yield after each image so its temporary ArrayBuffer
+     * can become collectible before the next one is read.
+     */
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+  }
+
+  zip.end();
+
+  return await result;
 }
 
 export interface OcrProgress {
@@ -3514,135 +8795,569 @@ export interface OcrProgress {
 export async function ocrPDFToSearchable(
   file: File,
   language: string = 'eng',
-  onProgress?: (p: OcrProgress) => void
+  onProgress?: (
+    p: OcrProgress
+  ) => void
 ): Promise<Uint8Array> {
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+  if (
+    !pdfjsLib
+      .GlobalWorkerOptions
+      .workerSrc
+  ) {
     try {
-      
-    } catch {
-      
+    } catch (_) {
     }
   }
 
-  onProgress?.({ status: 'Initializing Local OCR Engine...', progress: 10 });
 
-  const worker = await createWorker(language, 1, {
-    workerPath: '/tessdata/worker.min.js',
-    corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-    langPath: '/tessdata',
-    gzip: true,
-    logger: (m) => {
-      if (m.status === 'recognizing text' && onProgress) {
-        onProgress({
-          status: 'Recognizing text...',
-          progress: Math.min(95, Math.round(m.progress * 85) + 10),
-        });
-      }
-    },
+  onProgress?.({
+    status:
+      'Initializing Local OCR Engine...',
+    progress: 10,
   });
 
+
+  const worker =
+    await createWorker(
+      language,
+      1,
+      {
+        workerPath:
+          '/tessdata/worker.min.js',
+
+        corePath:
+          '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+        langPath:
+          '/tessdata',
+
+        gzip: true,
+
+        logger: (m) => {
+          if (
+            m.status ===
+              'recognizing text' &&
+            onProgress
+          ) {
+            onProgress({
+              status:
+                'Recognizing text...',
+
+              progress:
+                Math.min(
+                  95,
+                  Math.round(
+                    m.progress *
+                      85
+                  ) + 10
+                ),
+            });
+          }
+        },
+      }
+    );
+
+  let workerTerminated =
+    false;
+
+
+  let loadedPdf:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
+
+
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdfJsDoc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
-    const pdfLibDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-    const helveticaFont = await pdfLibDoc.embedFont(StandardFonts.Helvetica);
+    /*
+     * pdf-lib still needs one complete source read because
+     * this tool preserves the original PDF and overlays an
+     * invisible searchable text layer.
+     *
+     * PDF.js now reads from the browser-backed File instead
+     * of receiving a second complete Uint8Array copy.
+     */
+    let sourceBuffer:
+      | ArrayBuffer
+      | null =
+        await file.arrayBuffer();
 
-    const totalPages = pdfJsDoc.numPages;
 
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    const pdfLibDoc =
+      await PDFDocument.load(
+        sourceBuffer,
+        {
+          ignoreEncryption: true,
+        }
+      );
+
+
+    /*
+     * Drop our explicit ArrayBuffer reference as soon as
+     * pdf-lib has parsed the source.
+     */
+    sourceBuffer = null;
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
+
+
+    const pdfJsDoc =
+      loadedPdf.pdf;
+
+
+    const helveticaFont =
+      await pdfLibDoc.embedFont(
+        StandardFonts.Helvetica
+      );
+
+
+    const totalPages =
+      pdfJsDoc.numPages;
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
       onProgress?.({
-        status: `Scanning Page ${pageNum} of ${totalPages}...`,
-        progress: Math.round(((pageNum - 1) / totalPages) * 85) + 10,
+        status:
+          'Scanning Page ' +
+          pageNum +
+          ' of ' +
+          totalPages +
+          '...',
+
+        progress:
+          Math.round(
+            (
+              (
+                pageNum - 1
+              ) /
+              totalPages
+            ) *
+              85
+          ) + 10,
       });
 
-      const pdfJsPage = await pdfJsDoc.getPage(pageNum);
-      const viewport = pdfJsPage.getViewport({ scale: 2.0 });
 
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const ctx = canvas.getContext('2d', {});
+      const pdfJsPage =
+        await pdfJsDoc.getPage(
+          pageNum
+        );
 
-      if (!ctx) continue;
-      await (pdfJsPage.render({ canvasContext: ctx, viewport } as any) as any).promise;
 
-      // Dark mode detection & brightness check
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-      let totalBrightness = 0;
-      const sampleStep = 16;
-      let sampleCount = 0;
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
 
-      for (let i = 0; i < d.length; i += 4 * sampleStep) {
-        totalBrightness += (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
-        sampleCount++;
-      }
 
-      const avgBrightness = totalBrightness / sampleCount;
-
-      if (avgBrightness < 128) {
-        for (let i = 0; i < d.length; i += 4) {
-          d[i] = 255 - d[i];
-          d[i + 1] = 255 - d[i + 1];
-          d[i + 2] = 255 - d[i + 2];
-        }
-        ctx.putImageData(imgData, 0, 0);
-      }
-
-      const { data } = await worker.recognize(canvas);
-
-      // Free canvas memory immediately
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      canvas.width = 0;
-      canvas.height = 0;
       try {
-        pdfJsPage.cleanup();
-      } catch {}
+        const viewport =
+          pdfJsPage.getViewport({
+            scale: 2.0,
+          });
 
-      const pdfLibPage = pdfLibDoc.getPage(pageNum - 1);
-      const { width: pageWidth, height: pageHeight } = pdfLibPage.getSize();
 
-      const scaleX = pageWidth / viewport.width;
-      const scaleY = pageHeight / viewport.height;
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
 
-      // Universal word extraction hierarchy (Tesseract v4 + v5 blocks fallback)
-      let words: any[] = [];
-      if (Array.isArray((data as any)?.words) && (data as any).words.length > 0) {
-        words = (data as any).words;
-      } else if (Array.isArray((data as any)?.blocks)) {
-        words = (data as any).blocks
-          .flatMap((b: any) => b.paragraphs ?? [])
-          .flatMap((p: any) => p.lines ?? [])
-          .flatMap((l: any) => l.words ?? []);
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        await (
+          pdfJsPage.render({
+            canvasContext:
+              ctx as any,
+
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        /*
+         * Preserve the existing dark-mode detection and
+         * inversion behavior.
+         */
+        const imgData =
+          ctx.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+        const d =
+          imgData.data;
+
+
+        let totalBrightness =
+          0;
+
+        const sampleStep =
+          16;
+
+        let sampleCount =
+          0;
+
+
+        for (
+          let i = 0;
+          i < d.length;
+          i +=
+            4 *
+            sampleStep
+        ) {
+          totalBrightness +=
+            d[i] *
+              0.299 +
+            d[i + 1] *
+              0.587 +
+            d[i + 2] *
+              0.114;
+
+          sampleCount++;
+        }
+
+
+        const avgBrightness =
+          totalBrightness /
+          Math.max(
+            1,
+            sampleCount
+          );
+
+
+        if (
+          avgBrightness <
+          128
+        ) {
+          for (
+            let i = 0;
+            i < d.length;
+            i += 4
+          ) {
+            d[i] =
+              255 -
+              d[i];
+
+            d[i + 1] =
+              255 -
+              d[i + 1];
+
+            d[i + 2] =
+              255 -
+              d[i + 2];
+          }
+
+
+          ctx.putImageData(
+            imgData,
+            0,
+            0
+          );
+        }
+
+
+        const {
+          data,
+        } =
+          await worker.recognize(
+            canvas
+          );
+
+
+        const pdfLibPage =
+          pdfLibDoc.getPage(
+            pageNum - 1
+          );
+
+
+        const {
+          width:
+            pageWidth,
+          height:
+            pageHeight,
+        } =
+          pdfLibPage.getSize();
+
+
+        const scaleX =
+          pageWidth /
+          viewport.width;
+
+        const scaleY =
+          pageHeight /
+          viewport.height;
+
+
+        /*
+         * Universal word extraction hierarchy
+         * for Tesseract v4/v5 compatibility.
+         */
+        let words:
+          any[] = [];
+
+
+        if (
+          Array.isArray(
+            (data as any)
+              ?.words
+          ) &&
+          (data as any)
+            .words.length >
+            0
+        ) {
+          words =
+            (data as any)
+              .words;
+        } else if (
+          Array.isArray(
+            (data as any)
+              ?.blocks
+          )
+        ) {
+          words =
+            (data as any)
+              .blocks
+              .flatMap(
+                (
+                  b: any
+                ) =>
+                  b.paragraphs ??
+                  []
+              )
+              .flatMap(
+                (
+                  p: any
+                ) =>
+                  p.lines ??
+                  []
+              )
+              .flatMap(
+                (
+                  l: any
+                ) =>
+                  l.words ??
+                  []
+              );
+        }
+
+
+        for (
+          const word of
+          words
+        ) {
+          if (
+            !word ||
+            !word.text ||
+            !word.bbox
+          ) {
+            continue;
+          }
+
+
+          const clean =
+            word.text
+              .replace(
+                /[^ -~ -ÿ]/g,
+                ''
+              )
+              .trim();
+
+
+          if (!clean) {
+            continue;
+          }
+
+
+          const box =
+            word.bbox;
+
+
+          const posX =
+            box.x0 *
+            scaleX;
+
+
+          const posY =
+            pageHeight -
+            box.y1 *
+              scaleY;
+
+
+          const wordHeight =
+            (
+              box.y1 -
+              box.y0
+            ) *
+            scaleY;
+
+
+          pdfLibPage.drawText(
+            clean,
+            {
+              x:
+                Math.max(
+                  0,
+                  posX
+                ),
+
+              y:
+                Math.max(
+                  0,
+                  posY
+                ),
+
+              size:
+                Math.max(
+                  4,
+                  Math.round(
+                    wordHeight *
+                      0.85
+                  )
+                ),
+
+              font:
+                helveticaFont,
+
+              color:
+                rgb(
+                  0,
+                  0,
+                  0
+                ),
+
+              opacity:
+                0.01,
+            }
+          );
+        }
+      } finally {
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
+
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+
+        try {
+          pdfJsPage.cleanup();
+        } catch (_) {}
       }
 
-      for (const word of words) {
-        if (!word || !word.text || !word.bbox) continue;
-        const clean = word.text.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').trim();
-        if (!clean) continue;
-
-        const box = word.bbox;
-        const posX = box.x0 * scaleX;
-        const posY = pageHeight - (box.y1 * scaleY);
-        const wordHeight = (box.y1 - box.y0) * scaleY;
-
-        pdfLibPage.drawText(clean, {
-          x: Math.max(0, posX),
-          y: Math.max(0, posY),
-          size: Math.max(4, Math.round(wordHeight * 0.85)),
-          font: helveticaFont,
-          color: rgb(0, 0, 0),
-          opacity: 0.01,
-        });
-      }
+      /*
+       * OCR pages are memory-heavy: rendered pixels,
+       * Tesseract recognition data, and PDF.js page state.
+       * Yield before starting the next page so completed
+       * page temporaries can be reclaimed.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    onProgress?.({ status: 'Finalizing Searchable PDF...', progress: 98 });
-    return await pdfLibDoc.save({ useObjectStreams: false });
+
+    onProgress?.({
+      status:
+        'Finalizing Searchable PDF...',
+
+      progress: 98,
+    });
+
+
+    /*
+     * OCR is completely finished and every searchable word
+     * has already been written into pdfLibDoc.
+     *
+     * Release the browser-backed PDF.js source and the
+     * Tesseract WASM worker before allocating the complete
+     * serialized searchable PDF.
+     */
+    if (loadedPdf) {
+      await loadedPdf.dispose();
+      loadedPdf = null;
+    }
+
+    if (!workerTerminated) {
+      await worker.terminate();
+      workerTerminated =
+        true;
+    }
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    return await pdfLibDoc.save({
+      useObjectStreams: false,
+    });
   } finally {
-    await worker.terminate();
+    if (loadedPdf) {
+      await loadedPdf.dispose();
+    }
+
+    if (!workerTerminated) {
+      await worker.terminate();
+      workerTerminated =
+        true;
+    }
   }
 }
+
 export interface RepairResult {
   bytes: Uint8Array;
   method: 'lossless' | 'stream-salvage';
@@ -3651,111 +9366,384 @@ export interface RepairResult {
 
 export async function repairPDF(
   file: File,
-  onProgress?: (stage: string) => void
+  onProgress?: (
+    stage: string
+  ) => void
 ): Promise<RepairResult> {
-  const arrayBuffer = await file.arrayBuffer();
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
 
+  let sourceDoc:
+    | PDFDocument
+    | null = null;
+
+
+  /*
+   * Tier 1:
+   * structural/lossless recovery with pdf-lib.
+   */
   try {
-    onProgress?.('Attempting structural cross-reference rebuild...');
-    const sourceDoc = await PDFDocument.load(arrayBuffer, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-    });
+    onProgress?.(
+      'Attempting structural cross-reference rebuild...'
+    );
 
-    const pageCount = sourceDoc.getPageCount();
-    if (pageCount > 0) {
-      let hasEmptyPages = false;
-      for (let i = 0; i < pageCount; i++) {
-        if (!sourceDoc.getPage(i).node.Contents()) {
-          hasEmptyPages = true;
+
+    sourceBuffer =
+      await file.arrayBuffer();
+
+
+    sourceDoc =
+      await PDFDocument.load(
+        sourceBuffer,
+        {
+          ignoreEncryption: true,
+          updateMetadata: false,
+        }
+      );
+
+
+    const pageCount =
+      sourceDoc.getPageCount();
+
+
+    if (
+      pageCount > 0
+    ) {
+      let hasEmptyPages =
+        false;
+
+
+      for (
+        let i = 0;
+        i < pageCount;
+        i++
+      ) {
+        if (
+          !sourceDoc
+            .getPage(i)
+            .node
+            .Contents()
+        ) {
+          hasEmptyPages =
+            true;
+
           break;
         }
       }
 
-      if (!hasEmptyPages) {
-        const recoveredDoc = await PDFDocument.create();
-        const pages = await recoveredDoc.copyPages(sourceDoc, sourceDoc.getPageIndices());
-        pages.forEach((page) => recoveredDoc.addPage(page));
 
-        const bytes = await recoveredDoc.save({ useObjectStreams: true });
+      if (!hasEmptyPages) {
+        const recoveredDoc =
+          await PDFDocument.create();
+
+
+        const pages =
+          await recoveredDoc.copyPages(
+            sourceDoc,
+            sourceDoc.getPageIndices()
+          );
+
+
+        pages.forEach(
+          (page) =>
+            recoveredDoc.addPage(
+              page
+            )
+        );
+
+
+        /*
+         * copyPages has imported the required page objects
+         * into recoveredDoc. Release our original parsed
+         * document and complete source buffer before
+         * serializing the repaired copy.
+         */
+        sourceDoc = null;
+        sourceBuffer = null;
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
+
+        const bytes =
+          await recoveredDoc.save({
+            useObjectStreams: true,
+          });
+
+
         return {
           bytes,
-          method: 'lossless',
-          recoveredPages: pageCount,
+          method:
+            'lossless',
+          recoveredPages:
+            pageCount,
         };
       }
     }
-  } catch (structuralError) {
-    console.warn('Tier 1 repair failed, advancing to stream salvage:', structuralError);
+  } catch (
+    structuralError
+  ) {
+    console.warn(
+      'Tier 1 repair failed, advancing to stream salvage:',
+      structuralError
+    );
   }
 
-  onProgress?.('Extracting raw page streams via salvage worker...');
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: new Uint8Array(arrayBuffer).slice(),
-    stopAtErrors: false,
-  });
 
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  /*
+   * Release Tier 1 references before PDF.js salvage.
+   */
+  sourceDoc = null;
+  sourceBuffer = null;
 
-  if (totalPages === 0) {
-    throw new Error('No recoverable page data found in document streams.');
-  }
 
-  const outputDoc = await PDFDocument.create();
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(`Salvaging page ${pageNum} of ${totalPages}...`);
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
 
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
+  onProgress?.(
+    'Extracting raw page streams via salvage worker...'
+  );
 
-    if (!ctx) continue;
 
-    await (
-      page.render({
-        canvasContext: ctx as any, viewport,
-      } as any) as any
-    ).promise;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Canvas buffer conversion failed'))),
-        'image/jpeg',
-        0.92
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
+
+
+    if (
+      totalPages === 0
+    ) {
+      throw new Error(
+        'No recoverable page data found in document streams.'
       );
-    });
+    }
 
-    canvas.width = 0;
-    canvas.height = 0;
 
-    const jpegBytes = await jpegBlob.arrayBuffer();
-    const embeddedImg = await outputDoc.embedJpg(jpegBytes);
+    const outputDoc =
+      await PDFDocument.create();
 
-    const unscaled = page.getViewport({ scale: 1.0 });
-    const newPage = outputDoc.addPage([unscaled.width, unscaled.height]);
-    newPage.drawImage(embeddedImg, {
-      x: 0,
-      y: 0,
-      width: unscaled.width,
-      height: unscaled.height,
-    });
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        'Salvaging page ' +
+        pageNum +
+        ' of ' +
+        totalPages +
+        '...'
+      );
+
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        const jpegBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Canvas buffer conversion failed'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
+            }
+          );
+
+
+        const jpegBytes =
+          await jpegBlob.arrayBuffer();
+
+
+        const embeddedImg =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+
+        const unscaled =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+
+        const newPage =
+          outputDoc.addPage([
+            unscaled.width,
+            unscaled.height,
+          ]);
+
+
+        newPage.drawImage(
+          embeddedImg,
+          {
+            x: 0,
+            y: 0,
+            width:
+              unscaled.width,
+            height:
+              unscaled.height,
+          }
+        );
+      } finally {
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
+
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim the
+       * completed salvage page's canvas/JPEG temporaries
+       * before rendering the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
+    /*
+     * All recoverable pages are now embedded in outputDoc.
+     * Release the original PDF.js document before allocating
+     * the complete serialized repaired PDF.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    const bytes =
+      await outputDoc.save({
+        useObjectStreams: true,
+      });
+
+
+    return {
+      bytes,
+      method:
+        'stream-salvage',
+      recoveredPages:
+        totalPages,
+    };
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  const bytes = await outputDoc.save({ useObjectStreams: true });
-  return {
-    bytes,
-    method: 'stream-salvage',
-    recoveredPages: totalPages,
-  };
 }
 
 export type DarkModeFilter = 'invert' | 'oled' | 'sepia';
@@ -3769,99 +9757,348 @@ export async function invertPDF(
   file: File,
   options: DarkModeOptions
 ): Promise<Uint8Array> {
-  const { filter = 'invert', onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const {
+    filter = 'invert',
+    onProgress,
+  } = options;
 
-  const outputDoc = await PDFDocument.create();
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) throw new Error('Canvas rendering context unavailable');
-
-    await (
-      page.render({
-        canvasContext: ctx as any, viewport,
-      } as any) as any
-    ).promise;
-
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imgData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      if (filter === 'invert') {
-        data[i] = 255 - r;
-        data[i + 1] = 255 - g;
-        data[i + 2] = 255 - b;
-      } else if (filter === 'oled') {
-        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        if (luminance > 210) {
-          data[i] = 10;
-          data[i + 1] = 10;
-          data[i + 2] = 10;
-        } else if (luminance < 80) {
-          data[i] = 225;
-          data[i + 1] = 225;
-          data[i + 2] = 225;
-        } else {
-          data[i] = 255 - r;
-          data[i + 1] = 255 - g;
-          data[i + 2] = 255 - b;
-        }
-      } else if (filter === 'sepia') {
-        const tr = 0.393 * r + 0.769 * g + 0.189 * b;
-        const tg = 0.349 * r + 0.686 * g + 0.168 * b;
-        const tb = 0.272 * r + 0.534 * g + 0.131 * b;
-        data[i] = Math.min(255, tr);
-        data[i + 1] = Math.min(255, tg);
-        data[i + 2] = Math.min(255, tb);
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
       }
+    );
+
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
+
+
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas rendering context unavailable'
+          );
+        }
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+
+            viewport,
+          } as any) as any
+        ).promise;
+
+
+        const imgData =
+          ctx.getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+
+        const data =
+          imgData.data;
+
+
+        for (
+          let i = 0;
+          i < data.length;
+          i += 4
+        ) {
+          const r =
+            data[i];
+
+          const g =
+            data[i + 1];
+
+          const b =
+            data[i + 2];
+
+
+          if (
+            filter ===
+            'invert'
+          ) {
+            data[i] =
+              255 - r;
+
+            data[i + 1] =
+              255 - g;
+
+            data[i + 2] =
+              255 - b;
+          } else if (
+            filter ===
+            'oled'
+          ) {
+            const luminance =
+              0.299 * r +
+              0.587 * g +
+              0.114 * b;
+
+
+            if (
+              luminance >
+              210
+            ) {
+              data[i] = 10;
+              data[i + 1] = 10;
+              data[i + 2] = 10;
+            } else if (
+              luminance <
+              80
+            ) {
+              data[i] =
+                225;
+
+              data[i + 1] =
+                225;
+
+              data[i + 2] =
+                225;
+            } else {
+              data[i] =
+                255 - r;
+
+              data[i + 1] =
+                255 - g;
+
+              data[i + 2] =
+                255 - b;
+            }
+          } else if (
+            filter ===
+            'sepia'
+          ) {
+            const tr =
+              0.393 * r +
+              0.769 * g +
+              0.189 * b;
+
+            const tg =
+              0.349 * r +
+              0.686 * g +
+              0.168 * b;
+
+            const tb =
+              0.272 * r +
+              0.534 * g +
+              0.131 * b;
+
+
+            data[i] =
+              Math.min(
+                255,
+                tr
+              );
+
+            data[i + 1] =
+              Math.min(
+                255,
+                tg
+              );
+
+            data[i + 2] =
+              Math.min(
+                255,
+                tb
+              );
+          }
+        }
+
+
+        ctx.putImageData(
+          imgData,
+          0,
+          0
+        );
+
+
+        const jpegBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Canvas buffer conversion failed'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.9
+              );
+            }
+          );
+
+
+        const jpegBytes =
+          await jpegBlob.arrayBuffer();
+
+
+        const embeddedImg =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+
+        const unscaled =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+
+        const newPage =
+          outputDoc.addPage([
+            unscaled.width,
+            unscaled.height,
+          ]);
+
+
+        newPage.drawImage(
+          embeddedImg,
+          {
+            x: 0,
+            y: 0,
+            width:
+              unscaled.width,
+            height:
+              unscaled.height,
+          }
+        );
+      } finally {
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
+
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim
+       * completed page pixel/JPEG memory before the
+       * next dark-mode page is processed.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
 
-    ctx.putImageData(imgData, 0, 0);
 
-    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Canvas buffer conversion failed'))),
-        'image/jpeg',
-        0.9
-      );
+    /*
+     * All transformed pages are already embedded in
+     * outputDoc. Release the original PDF.js source before
+     * allocating the complete serialized dark-mode PDF.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    return await outputDoc.save({
+      useObjectStreams: true,
     });
-
-    canvas.width = 0;
-    canvas.height = 0;
-
-    const jpegBytes = await jpegBlob.arrayBuffer();
-    const embeddedImg = await outputDoc.embedJpg(jpegBytes);
-
-    const unscaled = page.getViewport({ scale: 1.0 });
-    const newPage = outputDoc.addPage([unscaled.width, unscaled.height]);
-    newPage.drawImage(embeddedImg, {
-      x: 0,
-      y: 0,
-      width: unscaled.width,
-      height: unscaled.height,
-    });
+  } finally {
+    /*
+     * dispose() is idempotent and still protects
+     * all earlier error paths.
+     */
+    await loadedPdf.dispose();
   }
-
-  return await outputDoc.save({ useObjectStreams: true });
 }
 
 export interface BookletOptions {
@@ -3874,195 +10111,777 @@ export async function createBookletPDF(
   file: File,
   options: BookletOptions = {}
 ): Promise<Uint8Array> {
-  const { sheetSize = 'A4', addFoldLine = true, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const uint8 = new Uint8Array(arrayBuffer);
+  const {
+    sheetSize = 'A4',
+    addFoldLine = true,
+    onProgress,
+  } = options;
 
-  const [sheetW, sheetH] =
-    sheetSize === 'LETTER' ? [792.0, 612.0] : [841.89, 595.28];
-  const halfW = sheetW / 2;
-  const halfH = sheetH;
 
-  // 1. Primary Vector Path (for standard, unencrypted PDFs)
-  if (!isComplexOrProtectedPdf(uint8)) {
+  const [
+    sheetW,
+    sheetH,
+  ] =
+    sheetSize === 'LETTER'
+      ? [
+          792.0,
+          612.0,
+        ]
+      : [
+          841.89,
+          595.28,
+        ];
+
+
+  const halfW =
+    sheetW / 2;
+
+  const halfH =
+    sheetH;
+
+
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null = null;
+
+
+  /*
+   * Clean PDFs retain the native vector booklet path.
+   */
+  if (!looksProtected) {
     try {
-      const sourceDoc = await PDFDocument.load(arrayBuffer);
-      const origPageCount = sourceDoc.getPageCount();
-      const targetPageCount = Math.ceil(origPageCount / 4) * 4;
-      const pagesToPad = targetPageCount - origPageCount;
+      sourceBuffer =
+        await file.arrayBuffer();
 
-      for (let i = 0; i < pagesToPad; i++) {
+
+      const sourceDoc =
+        await PDFDocument.load(
+          sourceBuffer
+        );
+
+      /*
+       * pdf-lib has parsed the source document.
+       * Drop our separate complete ArrayBuffer reference
+       * before booklet composition begins.
+       */
+      sourceBuffer = null;
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+
+      const origPageCount =
+        sourceDoc.getPageCount();
+
+
+      const targetPageCount =
+        Math.ceil(
+          origPageCount / 4
+        ) * 4;
+
+
+      const pagesToPad =
+        targetPageCount -
+        origPageCount;
+
+
+      for (
+        let i = 0;
+        i < pagesToPad;
+        i++
+      ) {
         sourceDoc.addPage();
       }
 
-      for (let i = 0; i < sourceDoc.getPageCount(); i++) {
-        const page = sourceDoc.getPage(i);
-        if (!page.node.Contents()) {
-          const emptyStream = sourceDoc.context.flateStream('');
-          const ref = sourceDoc.context.register(emptyStream);
-          page.node.set(PDFName.of('Contents'), ref);
+
+      for (
+        let i = 0;
+        i <
+        sourceDoc.getPageCount();
+        i++
+      ) {
+        const page =
+          sourceDoc.getPage(
+            i
+          );
+
+
+        if (
+          !page.node.Contents()
+        ) {
+          const emptyStream =
+            sourceDoc.context.flateStream(
+              ''
+            );
+
+
+          const ref =
+            sourceDoc.context.register(
+              emptyStream
+            );
+
+
+          page.node.set(
+            PDFName.of(
+              'Contents'
+            ),
+            ref
+          );
         }
       }
 
-      const outputDoc = await PDFDocument.create();
-      const totalSpreads = targetPageCount / 2;
 
-      for (let i = 0; i < totalSpreads; i++) {
-        onProgress?.(i + 1, totalSpreads);
-        const k = Math.floor(i / 2);
+      const outputDoc =
+        await PDFDocument.create();
 
-        let leftIndex: number;
-        let rightIndex: number;
 
-        if (i % 2 === 0) {
-          leftIndex = targetPageCount - 2 * k - 1;
-          rightIndex = 2 * k;
+      const totalSpreads =
+        targetPageCount / 2;
+
+
+      for (
+        let i = 0;
+        i < totalSpreads;
+        i++
+      ) {
+        onProgress?.(
+          i + 1,
+          totalSpreads
+        );
+
+
+        const k =
+          Math.floor(
+            i / 2
+          );
+
+
+        let leftIndex:
+          number;
+
+        let rightIndex:
+          number;
+
+
+        if (
+          i % 2 === 0
+        ) {
+          leftIndex =
+            targetPageCount -
+            2 * k -
+            1;
+
+          rightIndex =
+            2 * k;
         } else {
-          leftIndex = 2 * k + 1;
-          rightIndex = targetPageCount - 2 * k - 2;
+          leftIndex =
+            2 * k + 1;
+
+          rightIndex =
+            targetPageCount -
+            2 * k -
+            2;
         }
 
-        const newSheet = outputDoc.addPage([sheetW, sheetH]);
 
-        const leftSrc = sourceDoc.getPage(leftIndex);
-        const { width: leftW, height: leftH } = leftSrc.getSize();
-        const embeddedLeft = await outputDoc.embedPage(leftSrc);
-        const scaleLeft = Math.min(halfW / leftW, halfH / leftH);
-        const drawLeftW = leftW * scaleLeft;
-        const drawLeftH = leftH * scaleLeft;
-        const drawLeftX = (halfW - drawLeftW) / 2;
-        const drawLeftY = (halfH - drawLeftH) / 2;
+        const newSheet =
+          outputDoc.addPage([
+            sheetW,
+            sheetH,
+          ]);
 
-        newSheet.drawPage(embeddedLeft, {
-          x: drawLeftX,
-          y: drawLeftY,
-          width: drawLeftW,
-          height: drawLeftH,
-        });
 
-        const rightSrc = sourceDoc.getPage(rightIndex);
-        const { width: rightW, height: rightH } = rightSrc.getSize();
-        const embeddedRight = await outputDoc.embedPage(rightSrc);
-        const scaleRight = Math.min(halfW / rightW, halfH / rightH);
-        const drawRightW = rightW * scaleRight;
-        const drawRightH = rightH * scaleRight;
-        const drawRightX = halfW + (halfW - drawRightW) / 2;
-        const drawRightY = (halfH - drawRightH) / 2;
+        const leftSrc =
+          sourceDoc.getPage(
+            leftIndex
+          );
 
-        newSheet.drawPage(embeddedRight, {
-          x: drawRightX,
-          y: drawRightY,
-          width: drawRightW,
-          height: drawRightH,
-        });
+
+        const {
+          width: leftW,
+          height: leftH,
+        } =
+          leftSrc.getSize();
+
+
+        const embeddedLeft =
+          await outputDoc.embedPage(
+            leftSrc
+          );
+
+
+        const scaleLeft =
+          Math.min(
+            halfW / leftW,
+            halfH / leftH
+          );
+
+
+        const drawLeftW =
+          leftW *
+          scaleLeft;
+
+
+        const drawLeftH =
+          leftH *
+          scaleLeft;
+
+
+        const drawLeftX =
+          (
+            halfW -
+            drawLeftW
+          ) / 2;
+
+
+        const drawLeftY =
+          (
+            halfH -
+            drawLeftH
+          ) / 2;
+
+
+        newSheet.drawPage(
+          embeddedLeft,
+          {
+            x:
+              drawLeftX,
+
+            y:
+              drawLeftY,
+
+            width:
+              drawLeftW,
+
+            height:
+              drawLeftH,
+          }
+        );
+
+
+        const rightSrc =
+          sourceDoc.getPage(
+            rightIndex
+          );
+
+
+        const {
+          width: rightW,
+          height: rightH,
+        } =
+          rightSrc.getSize();
+
+
+        const embeddedRight =
+          await outputDoc.embedPage(
+            rightSrc
+          );
+
+
+        const scaleRight =
+          Math.min(
+            halfW / rightW,
+            halfH / rightH
+          );
+
+
+        const drawRightW =
+          rightW *
+          scaleRight;
+
+
+        const drawRightH =
+          rightH *
+          scaleRight;
+
+
+        const drawRightX =
+          halfW +
+          (
+            halfW -
+            drawRightW
+          ) / 2;
+
+
+        const drawRightY =
+          (
+            halfH -
+            drawRightH
+          ) / 2;
+
+
+        newSheet.drawPage(
+          embeddedRight,
+          {
+            x:
+              drawRightX,
+
+            y:
+              drawRightY,
+
+            width:
+              drawRightW,
+
+            height:
+              drawRightH,
+          }
+        );
+
 
         if (addFoldLine) {
           newSheet.drawLine({
-            start: { x: halfW, y: 15 },
-            end: { x: halfW, y: sheetH - 15 },
-            thickness: 0.5,
-            color: rgb(0.82, 0.82, 0.82),
-            dashArray: [4, 4],
+            start: {
+              x: halfW,
+              y: 15,
+            },
+
+            end: {
+              x: halfW,
+              y:
+                sheetH -
+                15,
+            },
+
+            thickness:
+              0.5,
+
+            color:
+              rgb(
+                0.82,
+                0.82,
+                0.82
+              ),
+
+            dashArray: [
+              4,
+              4,
+            ],
           });
         }
       }
 
-      return await outputDoc.save({ useObjectStreams: false });
+
+      return await outputDoc.save({
+        useObjectStreams: false,
+      });
     } catch (vectorErr) {
-      console.warn('Vector booklet bypassed; activating high-res rendering pipeline:', vectorErr);
+      console.warn(
+        'Vector booklet bypassed; activating high-res rendering pipeline:',
+        vectorErr
+      );
     }
   }
 
-  // 2. High-Res Rendering Fallback (decrypts bank statements, signed docs, and rent agreements)
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: uint8.slice(),
-    stopAtErrors: false,
-  });
-  const fallbackDoc = await loadingTask.promise;
-  const origPageCount = fallbackDoc.numPages;
-  const targetPageCount = Math.ceil(origPageCount / 4) * 4;
-  const totalSpreads = targetPageCount / 2;
-  const outputDoc = await PDFDocument.create();
 
-  // Render and embed existing document pages
-  const embeddedImages: ({ image: any; width: number; height: number } | null)[] = [];
+  /*
+   * Release vector source before raster fallback.
+   */
+  sourceBuffer = null;
 
-  for (let p = 1; p <= origPageCount; p++) {
-    onProgress?.(p, origPageCount + totalSpreads);
-    const page = await fallbackDoc.getPage(p);
-    const { imgBytes, width, height } = await renderPageAsJpg(page, 2.0);
-    const image = await outputDoc.embedJpg(imgBytes);
-    embeddedImages.push({ image, width, height });
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+
+  const loadedFallback =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+
+  const fallbackDoc =
+    loadedFallback.pdf;
+
+
+  try {
+    const origPageCount =
+      fallbackDoc.numPages;
+
+
+    const targetPageCount =
+      Math.ceil(
+        origPageCount / 4
+      ) * 4;
+
+
+    const totalSpreads =
+      targetPageCount / 2;
+
+
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    const embeddedImages:
+      (
+        | {
+            image: any;
+            width: number;
+            height: number;
+          }
+        | null
+      )[] = [];
+
+
+    /*
+     * Preserve existing two-phase fallback behavior:
+     * first render source pages, then impose spreads.
+     */
+    for (
+      let p = 1;
+      p <= origPageCount;
+      p++
+    ) {
+      onProgress?.(
+        p,
+        origPageCount +
+          totalSpreads
+      );
+
+
+      const page =
+        await fallbackDoc.getPage(
+          p
+        );
+
+
+      try {
+        const {
+          imgBytes,
+          width,
+          height,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+
+        const image =
+          await outputDoc.embedJpg(
+            imgBytes
+          );
+
+
+        embeddedImages.push({
+          image,
+          width,
+          height,
+        });
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim the
+       * completed source page's temporary render memory
+       * before processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
+    /*
+     * Every real source page has now been embedded into
+     * outputDoc. PDF.js is no longer needed for booklet
+     * imposition, so release it before building the spreads.
+     */
+    await loadedFallback.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    while (
+      embeddedImages.length <
+      targetPageCount
+    ) {
+      embeddedImages.push(
+        null
+      );
+    }
+
+
+    for (
+      let i = 0;
+      i < totalSpreads;
+      i++
+    ) {
+      onProgress?.(
+        origPageCount +
+          i +
+          1,
+        origPageCount +
+          totalSpreads
+      );
+
+
+      const k =
+        Math.floor(
+          i / 2
+        );
+
+
+      let leftIndex:
+        number;
+
+      let rightIndex:
+        number;
+
+
+      if (
+        i % 2 === 0
+      ) {
+        leftIndex =
+          targetPageCount -
+          2 * k -
+          1;
+
+        rightIndex =
+          2 * k;
+      } else {
+        leftIndex =
+          2 * k + 1;
+
+        rightIndex =
+          targetPageCount -
+          2 * k -
+          2;
+      }
+
+
+      const newSheet =
+        outputDoc.addPage([
+          sheetW,
+          sheetH,
+        ]);
+
+
+      const leftItem =
+        embeddedImages[
+          leftIndex
+        ];
+
+
+      if (leftItem) {
+        const {
+          image,
+          width: leftW,
+          height: leftH,
+        } =
+          leftItem;
+
+
+        const scaleLeft =
+          Math.min(
+            halfW / leftW,
+            halfH / leftH
+          );
+
+
+        const drawLeftW =
+          leftW *
+          scaleLeft;
+
+
+        const drawLeftH =
+          leftH *
+          scaleLeft;
+
+
+        const drawLeftX =
+          (
+            halfW -
+            drawLeftW
+          ) / 2;
+
+
+        const drawLeftY =
+          (
+            halfH -
+            drawLeftH
+          ) / 2;
+
+
+        newSheet.drawImage(
+          image,
+          {
+            x:
+              drawLeftX,
+
+            y:
+              drawLeftY,
+
+            width:
+              drawLeftW,
+
+            height:
+              drawLeftH,
+          }
+        );
+      }
+
+
+      const rightItem =
+        embeddedImages[
+          rightIndex
+        ];
+
+
+      if (rightItem) {
+        const {
+          image,
+          width: rightW,
+          height: rightH,
+        } =
+          rightItem;
+
+
+        const scaleRight =
+          Math.min(
+            halfW / rightW,
+            halfH / rightH
+          );
+
+
+        const drawRightW =
+          rightW *
+          scaleRight;
+
+
+        const drawRightH =
+          rightH *
+          scaleRight;
+
+
+        const drawRightX =
+          halfW +
+          (
+            halfW -
+            drawRightW
+          ) / 2;
+
+
+        const drawRightY =
+          (
+            halfH -
+            drawRightH
+          ) / 2;
+
+
+        newSheet.drawImage(
+          image,
+          {
+            x:
+              drawRightX,
+
+            y:
+              drawRightY,
+
+            width:
+              drawRightW,
+
+            height:
+              drawRightH,
+          }
+        );
+      }
+
+
+      if (addFoldLine) {
+        newSheet.drawLine({
+          start: {
+            x: halfW,
+            y: 15,
+          },
+
+          end: {
+            x: halfW,
+            y:
+              sheetH -
+              15,
+          },
+
+          thickness:
+            0.5,
+
+          color:
+            rgb(
+              0.82,
+              0.82,
+              0.82
+            ),
+
+          dashArray: [
+            4,
+            4,
+          ],
+        });
+      }
+    }
+
+
+    /*
+     * Every embedded image has already been referenced by
+     * its booklet sheet. Drop the temporary JavaScript array
+     * before allocating the complete serialized PDF.
+     *
+     * outputDoc retains the PDF image objects it actually
+     * needs for final serialization.
+     */
+    embeddedImages.length = 0;
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+
+    return await outputDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    /*
+     * dispose() is idempotent, so this also safely covers
+     * failures that happen before the early disposal above.
+     */
+    await loadedFallback.dispose();
   }
-
-  // Pad remaining booklet slots with null for clean blank pages
-  while (embeddedImages.length < targetPageCount) {
-    embeddedImages.push(null);
-  }
-
-  for (let i = 0; i < totalSpreads; i++) {
-    onProgress?.(origPageCount + i + 1, origPageCount + totalSpreads);
-    const k = Math.floor(i / 2);
-
-    let leftIndex: number;
-    let rightIndex: number;
-
-    if (i % 2 === 0) {
-      leftIndex = targetPageCount - 2 * k - 1;
-      rightIndex = 2 * k;
-    } else {
-      leftIndex = 2 * k + 1;
-      rightIndex = targetPageCount - 2 * k - 2;
-    }
-
-    const newSheet = outputDoc.addPage([sheetW, sheetH]);
-
-    const leftItem = embeddedImages[leftIndex];
-    if (leftItem) {
-      const { image, width: leftW, height: leftH } = leftItem;
-      const scaleLeft = Math.min(halfW / leftW, halfH / leftH);
-      const drawLeftW = leftW * scaleLeft;
-      const drawLeftH = leftH * scaleLeft;
-      const drawLeftX = (halfW - drawLeftW) / 2;
-      const drawLeftY = (halfH - drawLeftH) / 2;
-
-      newSheet.drawImage(image, {
-        x: drawLeftX,
-        y: drawLeftY,
-        width: drawLeftW,
-        height: drawLeftH,
-      });
-    }
-
-    const rightItem = embeddedImages[rightIndex];
-    if (rightItem) {
-      const { image, width: rightW, height: rightH } = rightItem;
-      const scaleRight = Math.min(halfW / rightW, halfH / rightH);
-      const drawRightW = rightW * scaleRight;
-      const drawRightH = rightH * scaleRight;
-      const drawRightX = halfW + (halfW - drawRightW) / 2;
-      const drawRightY = (halfH - drawRightH) / 2;
-
-      newSheet.drawImage(image, {
-        x: drawRightX,
-        y: drawRightY,
-        width: drawRightW,
-        height: drawRightH,
-      });
-    }
-
-    if (addFoldLine) {
-      newSheet.drawLine({
-        start: { x: halfW, y: 15 },
-        end: { x: halfW, y: sheetH - 15 },
-        thickness: 0.5,
-        color: rgb(0.82, 0.82, 0.82),
-        dashArray: [4, 4],
-      });
-    }
-  }
-
-  return await outputDoc.save({ useObjectStreams: false });
 }
 
 export function estimateSkewAngle(ctx: CanvasRenderingContext2D, width: number, height: number): number {
@@ -4139,79 +10958,276 @@ export async function deskewPDF(
   file: File,
   options: DeskewOptions
 ): Promise<Uint8Array> {
-  const { angle = 0, onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer).slice() });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const {
+    angle = 0,
+    onProgress,
+  } = options;
 
-  const outputDoc = await PDFDocument.create();
-  const rad = (angle * Math.PI) / 180;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
+  const pdfDoc =
+    loadedPdf.pdf;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) throw new Error('Canvas context unavailable');
+  try {
+    const totalPages =
+      pdfDoc.numPages;
 
-    await (
-      page.render({
-        canvasContext: ctx as any, viewport,
-      } as any) as any
-    ).promise;
+    const outputDoc =
+      await PDFDocument.create();
 
-    const rotatedCanvas = document.createElement('canvas');
-    rotatedCanvas.width = canvas.width;
-    rotatedCanvas.height = canvas.height;
-    const rCtx = rotatedCanvas.getContext('2d');
-    if (!rCtx) throw new Error('Rotated canvas context unavailable');
+    const rad =
+      (
+        angle *
+        Math.PI
+      ) / 180;
 
-    rCtx.fillStyle = '#FFFFFF';
-    rCtx.fillRect(0, 0, rotatedCanvas.width, rotatedCanvas.height);
-
-    rCtx.save();
-    rCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
-    rCtx.rotate(rad);
-    rCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-    rCtx.restore();
-
-    canvas.width = 0;
-    canvas.height = 0;
-
-    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
-      rotatedCanvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error('Failed to encode deskewed page'))),
-        'image/jpeg',
-        0.92
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
       );
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      const rotatedCanvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const viewport =
+          page.getViewport({
+            scale: 2.0,
+          });
+
+        canvas.width =
+          Math.floor(
+            viewport.width
+          );
+
+        canvas.height =
+          Math.floor(
+            viewport.height
+          );
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha: false,
+            }
+          );
+
+        if (!ctx) {
+          throw new Error(
+            'Canvas context unavailable'
+          );
+        }
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+            viewport,
+          } as any) as any
+        ).promise;
+
+        rotatedCanvas.width =
+          canvas.width;
+
+        rotatedCanvas.height =
+          canvas.height;
+
+        const rCtx =
+          rotatedCanvas.getContext(
+            '2d'
+          );
+
+        if (!rCtx) {
+          throw new Error(
+            'Rotated canvas context unavailable'
+          );
+        }
+
+        rCtx.fillStyle =
+          '#FFFFFF';
+
+        rCtx.fillRect(
+          0,
+          0,
+          rotatedCanvas.width,
+          rotatedCanvas.height
+        );
+
+        rCtx.save();
+
+        rCtx.translate(
+          rotatedCanvas.width / 2,
+          rotatedCanvas.height / 2
+        );
+
+        rCtx.rotate(
+          rad
+        );
+
+        rCtx.drawImage(
+          canvas,
+          -canvas.width / 2,
+          -canvas.height / 2
+        );
+
+        rCtx.restore();
+
+        /*
+         * The rendered source page has already been copied
+         * into rotatedCanvas. Release its full-size pixel
+         * backing store before JPEG encoding begins so two
+         * large canvases do not remain live unnecessarily.
+         */
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
+        const jpegBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              rotatedCanvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode deskewed page'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
+            }
+          );
+
+        const jpegBytes =
+          await jpegBlob.arrayBuffer();
+
+        const embeddedImg =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+        const unscaled =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const newPage =
+          outputDoc.addPage([
+            unscaled.width,
+            unscaled.height,
+          ]);
+
+        newPage.drawImage(
+          embeddedImg,
+          {
+            x: 0,
+            y: 0,
+            width:
+              unscaled.width,
+            height:
+              unscaled.height,
+          }
+        );
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+
+        rotatedCanvas.width = 1;
+        rotatedCanvas.height = 1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          rotatedCanvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      /*
+       * Give the browser an opportunity to reclaim the
+       * completed page's canvas/JPEG temporaries before
+       * processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+    /*
+     * Every deskewed page is already embedded in outputDoc.
+     * Release the original PDF.js document before allocating
+     * the complete serialized output.
+     */
+    await loadedPdf.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await outputDoc.save({
+      useObjectStreams: true,
     });
-
-    rotatedCanvas.width = 0;
-    rotatedCanvas.height = 0;
-
-    const jpegBytes = await jpegBlob.arrayBuffer();
-    const embeddedImg = await outputDoc.embedJpg(jpegBytes);
-
-    const unscaled = page.getViewport({ scale: 1.0 });
-    const newPage = outputDoc.addPage([unscaled.width, unscaled.height]);
-    newPage.drawImage(embeddedImg, {
-      x: 0,
-      y: 0,
-      width: unscaled.width,
-      height: unscaled.height,
-    });
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  return await outputDoc.save({ useObjectStreams: true });
 }
 
 export interface TableExtractOptions {
@@ -4238,259 +11254,860 @@ export async function extractTableFromPDF(
   file: File,
   options: TableExtractOptions = {}
 ): Promise<ExtractedTableResult> {
-  const { yTolerance = 4, minColumnGap = 12, delimiter = ',', onProgress } = options;
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const {
+    yTolerance = 4,
+    minColumnGap = 12,
+    delimiter = ',',
+    onProgress,
+  } = options;
 
-  interface RawItem {
-    str: string;
-    x: number;
-    y: number;
-    width: number;
-  }
 
-  interface Chunk {
-    str: string;
-    x: number;
-    width: number;
-    endX: number;
-  }
-
-  const allRows: string[][] = [];
-  let isScannedDoc = true;
-
-  // Step 1: Rapid digital layer scan
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const textContent = await page.getTextContent();
-
-    const items: RawItem[] = [];
-    for (const item of textContent.items as any[]) {
-      if (!item.str || !item.str.trim()) continue;
-      items.push({
-        str: item.str,
-        x: item.transform[4],
-        y: item.transform[5],
-        width: item.width || 0,
-      });
-    }
-
-    if (items.length > 5) {
-      isScannedDoc = false;
-    }
-
-    if (items.length > 0) {
-      // Sort items top-to-bottom (PDF y goes up), then left-to-right
-      items.sort((a, b) => {
-        if (Math.abs(b.y - a.y) > yTolerance) {
-          return b.y - a.y;
-        }
-        return a.x - b.x;
-      });
-
-      // Group into horizontal lines
-      const lines: RawItem[][] = [];
-      let currentLine: RawItem[] = [];
-      let currentY: number | null = null;
-
-      for (const item of items) {
-        if (currentY === null || Math.abs(item.y - currentY) <= yTolerance) {
-          currentLine.push(item);
-          currentY = item.y;
-        } else {
-          if (currentLine.length > 0) lines.push(currentLine);
-          currentLine = [item];
-          currentY = item.y;
-        }
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
       }
-      if (currentLine.length > 0) lines.push(currentLine);
+    );
 
-      // Build text chunks per line based on minColumnGap
-      const lineChunks: Chunk[][] = [];
-      const multiChunkXStarts: number[] = [];
 
-      for (const line of lines) {
-        line.sort((a, b) => a.x - b.x);
-        const chunks: Chunk[] = [];
-        let currentChunkText = '';
-        let chunkStartX = -1;
-        let lastRightEdge = -1;
+  const pdfDoc =
+    loadedPdf.pdf;
 
-        for (const item of line) {
-          if (lastRightEdge === -1) {
-            currentChunkText = item.str;
-            chunkStartX = item.x;
-            lastRightEdge = item.x + item.width;
-          } else {
-            const gap = item.x - lastRightEdge;
-            if (gap > minColumnGap) {
-              chunks.push({
-                str: currentChunkText.trim(),
-                x: chunkStartX,
-                width: lastRightEdge - chunkStartX,
-                endX: lastRightEdge,
-              });
-              currentChunkText = item.str;
-              chunkStartX = item.x;
-            } else {
-              currentChunkText += (gap > 2 ? ' ' : '') + item.str;
-            }
-            lastRightEdge = item.x + item.width;
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
+
+
+    interface RawItem {
+      str: string;
+      x: number;
+      y: number;
+      width: number;
+    }
+
+
+    interface Chunk {
+      str: string;
+      x: number;
+      width: number;
+      endX: number;
+    }
+
+
+    const allRows:
+      string[][] = [];
+
+
+    let isScannedDoc =
+      true;
+
+
+    /*
+     * Step 1:
+     * Rapid digital text-layer scan.
+     */
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+
+      try {
+        const textContent =
+          await page.getTextContent();
+
+
+        const items:
+          RawItem[] = [];
+
+
+        for (
+          const item of
+          textContent.items as any[]
+        ) {
+          if (
+            !item.str ||
+            !item.str.trim()
+          ) {
+            continue;
           }
-        }
 
-        if (currentChunkText.trim()) {
-          chunks.push({
-            str: currentChunkText.trim(),
-            x: chunkStartX,
-            width: lastRightEdge - chunkStartX,
-            endX: lastRightEdge,
+
+          items.push({
+            str:
+              item.str,
+
+            x:
+              item.transform[4],
+
+            y:
+              item.transform[5],
+
+            width:
+              item.width || 0,
           });
         }
 
-        if (chunks.length > 0) {
-          lineChunks.push(chunks);
-          if (chunks.length >= 2) {
-            for (const ch of chunks) {
-              multiChunkXStarts.push(ch.x);
+
+        if (
+          items.length > 5
+        ) {
+          isScannedDoc =
+            false;
+        }
+
+
+        if (
+          items.length >
+          0
+        ) {
+          items.sort(
+            (
+              a,
+              b
+            ) => {
+              if (
+                Math.abs(
+                  b.y -
+                    a.y
+                ) >
+                yTolerance
+              ) {
+                return (
+                  b.y -
+                  a.y
+                );
+              }
+
+              return (
+                a.x -
+                b.x
+              );
+            }
+          );
+
+
+          const lines:
+            RawItem[][] = [];
+
+
+          let currentLine:
+            RawItem[] = [];
+
+
+          let currentY:
+            number | null =
+              null;
+
+
+          for (
+            const item of
+            items
+          ) {
+            if (
+              currentY ===
+                null ||
+              Math.abs(
+                item.y -
+                  currentY
+              ) <=
+                yTolerance
+            ) {
+              currentLine.push(
+                item
+              );
+
+              currentY =
+                item.y;
+            } else {
+              if (
+                currentLine.length >
+                0
+              ) {
+                lines.push(
+                  currentLine
+                );
+              }
+
+              currentLine = [
+                item,
+              ];
+
+              currentY =
+                item.y;
             }
           }
-        }
-      }
 
-      // Step 2: Calculate Global Column Intervals for the page
-      multiChunkXStarts.sort((a, b) => a - b);
-      const clusters: number[][] = [];
-      for (const x of multiChunkXStarts) {
-        if (clusters.length === 0 || x - clusters[clusters.length - 1][clusters[clusters.length - 1].length - 1] > minColumnGap * 1.5) {
-          clusters.push([x]);
-        } else {
-          clusters[clusters.length - 1].push(x);
-        }
-      }
-
-      const columnCenters = clusters
-        .filter((c) => c.length >= 1)
-        .map((c) => c.reduce((sum, v) => sum + v, 0) / c.length);
-
-      const boundaries: number[] = [];
-      for (let cIdx = 0; cIdx < columnCenters.length - 1; cIdx++) {
-        boundaries.push((columnCenters[cIdx] + columnCenters[cIdx + 1]) / 2);
-      }
-
-      // Step 3: Map chunks to structured columns
-      const pageRows: string[][] = [];
-
-      for (const chunks of lineChunks) {
-        if (columnCenters.length >= 2) {
-          const row = new Array(columnCenters.length).fill('');
-          for (const ch of chunks) {
-            let colIdx = boundaries.findIndex((b) => ch.x < b);
-            if (colIdx === -1) colIdx = columnCenters.length - 1;
-
-            row[colIdx] = row[colIdx] ? `${row[colIdx]} ${ch.str}` : ch.str;
-          }
-
-          // Check if this row is a multi-line continuation of the previous row
-          const nonBlankIndices = row
-            .map((val, idx) => (val.trim() ? idx : -1))
-            .filter((idx) => idx !== -1);
-
-          const isNumeric = (val: string) => /^[\d,.-]+$/.test(val.trim().replace(/[A-Za-z]/g, ''));
-          const hasDateOrNumber = row.some((c) => /\d{2}-[A-Za-z]{3}-\d{4}/.test(c) || (isNumeric(c) && c.includes('.')));
 
           if (
-            nonBlankIndices.length === 1 &&
-            !hasDateOrNumber &&
-            pageRows.length > 0
+            currentLine.length >
+            0
           ) {
-            const contIdx = nonBlankIndices[0];
-            pageRows[pageRows.length - 1][contIdx] = `${pageRows[pageRows.length - 1][contIdx]} ${row[contIdx]}`.trim();
-          } else {
-            pageRows.push(row);
+            lines.push(
+              currentLine
+            );
           }
-        } else {
-          pageRows.push(chunks.map((c) => c.str));
-        }
-      }
 
-      allRows.push(...pageRows);
-    }
 
-    page.cleanup();
-  }
+          const lineChunks:
+            Chunk[][] = [];
 
-  // Step 4: Fallback for Scanned Documents (Address agreement.pdf)
-  if (isScannedDoc || allRows.length === 0) {
-    onProgress?.(1, totalPages);
-    const ocrWorker = await createWorker('eng', 1, {
-      workerPath: '/tessdata/worker.min.js',
-      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-      langPath: '/tessdata',
-      gzip: true,
-    });
 
-    try {
-      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-        onProgress?.(pageNum, totalPages);
-        const page = await pdfDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.5 });
+          const multiChunkXStarts:
+            number[] = [];
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
 
-        if (ctx) {
-          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-          const { data } = await ocrWorker.recognize(canvas);
+          for (
+            const line of
+            lines
+          ) {
+            line.sort(
+              (
+                a,
+                b
+              ) =>
+                a.x -
+                b.x
+            );
 
-          if (data?.text) {
-            const rawLines = data.text.split('\n');
-            for (const line of rawLines) {
-              const text = line.trim();
-              if (text) {
-                // Split multi-tab/spaced columns in scanned tables, or capture clause paragraphs
-                const parts = text.split(/\s{3,}|\t/).map((p) => p.trim()).filter(Boolean);
-                allRows.push(parts.length > 0 ? parts : [text]);
+
+            const chunks:
+              Chunk[] = [];
+
+
+            let currentChunkText =
+              '';
+
+
+            let chunkStartX =
+              -1;
+
+
+            let lastRightEdge =
+              -1;
+
+
+            for (
+              const item of
+              line
+            ) {
+              if (
+                lastRightEdge ===
+                -1
+              ) {
+                currentChunkText =
+                  item.str;
+
+                chunkStartX =
+                  item.x;
+
+                lastRightEdge =
+                  item.x +
+                  item.width;
+              } else {
+                const gap =
+                  item.x -
+                  lastRightEdge;
+
+
+                if (
+                  gap >
+                  minColumnGap
+                ) {
+                  chunks.push({
+                    str:
+                      currentChunkText.trim(),
+
+                    x:
+                      chunkStartX,
+
+                    width:
+                      lastRightEdge -
+                      chunkStartX,
+
+                    endX:
+                      lastRightEdge,
+                  });
+
+
+                  currentChunkText =
+                    item.str;
+
+                  chunkStartX =
+                    item.x;
+                } else {
+                  currentChunkText +=
+                    (
+                      gap > 2
+                        ? ' '
+                        : ''
+                    ) +
+                    item.str;
+                }
+
+
+                lastRightEdge =
+                  item.x +
+                  item.width;
+              }
+            }
+
+
+            if (
+              currentChunkText.trim()
+            ) {
+              chunks.push({
+                str:
+                  currentChunkText.trim(),
+
+                x:
+                  chunkStartX,
+
+                width:
+                  lastRightEdge -
+                  chunkStartX,
+
+                endX:
+                  lastRightEdge,
+              });
+            }
+
+
+            if (
+              chunks.length >
+              0
+            ) {
+              lineChunks.push(
+                chunks
+              );
+
+
+              if (
+                chunks.length >=
+                2
+              ) {
+                for (
+                  const ch of
+                  chunks
+                ) {
+                  multiChunkXStarts.push(
+                    ch.x
+                  );
+                }
               }
             }
           }
+
+
+          /*
+           * Step 2:
+           * Calculate global column intervals.
+           */
+          multiChunkXStarts.sort(
+            (
+              a,
+              b
+            ) =>
+              a - b
+          );
+
+
+          const clusters:
+            number[][] = [];
+
+
+          for (
+            const x of
+            multiChunkXStarts
+          ) {
+            if (
+              clusters.length ===
+                0 ||
+              x -
+                clusters[
+                  clusters.length -
+                    1
+                ][
+                  clusters[
+                    clusters.length -
+                      1
+                  ].length - 1
+                ] >
+                minColumnGap *
+                  1.5
+            ) {
+              clusters.push([
+                x,
+              ]);
+            } else {
+              clusters[
+                clusters.length -
+                  1
+              ].push(
+                x
+              );
+            }
+          }
+
+
+          const columnCenters =
+            clusters
+              .filter(
+                (cluster) =>
+                  cluster.length >=
+                  1
+              )
+              .map(
+                (cluster) =>
+                  cluster.reduce(
+                    (
+                      sum,
+                      value
+                    ) =>
+                      sum +
+                      value,
+                    0
+                  ) /
+                  cluster.length
+              );
+
+
+          const boundaries:
+            number[] = [];
+
+
+          for (
+            let cIdx = 0;
+            cIdx <
+            columnCenters.length -
+              1;
+            cIdx++
+          ) {
+            boundaries.push(
+              (
+                columnCenters[
+                  cIdx
+                ] +
+                columnCenters[
+                  cIdx + 1
+                ]
+              ) / 2
+            );
+          }
+
+
+          /*
+           * Step 3:
+           * Map chunks to structured columns.
+           */
+          const pageRows:
+            string[][] = [];
+
+
+          for (
+            const chunks of
+            lineChunks
+          ) {
+            if (
+              columnCenters.length >=
+              2
+            ) {
+              const row =
+                new Array(
+                  columnCenters.length
+                ).fill(
+                  ''
+                );
+
+
+              for (
+                const ch of
+                chunks
+              ) {
+                let colIdx =
+                  boundaries.findIndex(
+                    (boundary) =>
+                      ch.x <
+                      boundary
+                  );
+
+
+                if (
+                  colIdx ===
+                  -1
+                ) {
+                  colIdx =
+                    columnCenters.length -
+                    1;
+                }
+
+
+                row[colIdx] =
+                  row[colIdx]
+                    ? row[colIdx] +
+                      ' ' +
+                      ch.str
+                    : ch.str;
+              }
+
+
+              const nonBlankIndices =
+                row
+                  .map(
+                    (
+                      value,
+                      index
+                    ) =>
+                      value.trim()
+                        ? index
+                        : -1
+                  )
+                  .filter(
+                    (index) =>
+                      index !==
+                      -1
+                  );
+
+
+              const isNumeric =
+                (
+                  value: string
+                ) =>
+                  /^[\d,.-]+$/.test(
+                    value
+                      .trim()
+                      .replace(
+                        /[A-Za-z]/g,
+                        ''
+                      )
+                  );
+
+
+              const hasDateOrNumber =
+                row.some(
+                  (cell) =>
+                    /\d{2}-[A-Za-z]{3}-\d{4}/.test(
+                      cell
+                    ) ||
+                    (
+                      isNumeric(
+                        cell
+                      ) &&
+                      cell.includes(
+                        '.'
+                      )
+                    )
+                );
+
+
+              if (
+                nonBlankIndices.length ===
+                  1 &&
+                !hasDateOrNumber &&
+                pageRows.length >
+                  0
+              ) {
+                const contIdx =
+                  nonBlankIndices[0];
+
+
+                pageRows[
+                  pageRows.length -
+                    1
+                ][contIdx] =
+                  (
+                    pageRows[
+                      pageRows.length -
+                        1
+                    ][contIdx] +
+                    ' ' +
+                    row[contIdx]
+                  ).trim();
+              } else {
+                pageRows.push(
+                  row
+                );
+              }
+            } else {
+              pageRows.push(
+                chunks.map(
+                  (chunk) =>
+                    chunk.str
+                )
+              );
+            }
+          }
+
+
+          allRows.push(
+            ...pageRows
+          );
+        }
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+    }
+
+
+    /*
+     * Step 4:
+     * OCR fallback for scanned documents.
+     */
+    if (
+      isScannedDoc ||
+      allRows.length === 0
+    ) {
+      onProgress?.(
+        1,
+        totalPages
+      );
+
+
+      const ocrWorker =
+        await createWorker(
+          'eng',
+          1,
+          {
+            workerPath:
+              '/tessdata/worker.min.js',
+
+            corePath:
+              '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+            langPath:
+              '/tessdata',
+
+            gzip: true,
+          }
+        );
+
+
+      try {
+        for (
+          let pageNum = 1;
+          pageNum <= totalPages;
+          pageNum++
+        ) {
+          onProgress?.(
+            pageNum,
+            totalPages
+          );
+
+
+          const page =
+            await pdfDoc.getPage(
+              pageNum
+            );
+
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+
+          try {
+            const viewport =
+              page.getViewport({
+                scale: 1.5,
+              });
+
+
+            canvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            canvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+
+            const ctx =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha: false,
+                }
+              );
+
+
+            if (ctx) {
+              await (
+                page.render({
+                  canvasContext:
+                    ctx as any,
+
+                  viewport,
+                } as any) as any
+              ).promise;
+
+
+              const {
+                data,
+              } =
+                await ocrWorker.recognize(
+                  canvas
+                );
+
+
+              if (
+                data?.text
+              ) {
+                const rawLines =
+                  data.text.split(
+                    '\n'
+                  );
+
+
+                for (
+                  const line of
+                  rawLines
+                ) {
+                  const text =
+                    line.trim();
+
+
+                  if (!text) {
+                    continue;
+                  }
+
+
+                  const parts =
+                    text
+                      .split(
+                        /\s{3,}|\t/
+                      )
+                      .map(
+                        (part) =>
+                          part.trim()
+                      )
+                      .filter(
+                        Boolean
+                      );
+
+
+                  allRows.push(
+                    parts.length >
+                      0
+                      ? parts
+                      : [
+                          text,
+                        ]
+                  );
+                }
+              }
+            }
+          } finally {
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+
+            try {
+              canvas.remove();
+            } catch (_) {}
+
+
+            try {
+              page.cleanup();
+            } catch (_) {}
+          }
+        }
+      } finally {
+        await ocrWorker.terminate();
+      }
+    }
+
+
+    /*
+     * Step 5:
+     * Format CSV with clean escaping.
+     */
+    const escapeCell =
+      (
+        value: string
+      ): string => {
+        const clean =
+          value.trim();
+
+
+        if (
+          clean.includes(
+            delimiter
+          ) ||
+          clean.includes(
+            '"'
+          ) ||
+          clean.includes(
+            '\n'
+          ) ||
+          clean.includes(
+            '\r'
+          )
+        ) {
+          return (
+            '"' +
+            clean.replace(
+              /"/g,
+              '""'
+            ) +
+            '"'
+          );
         }
 
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
-      }
-    } finally {
-      await ocrWorker.terminate();
-    }
+
+        return clean;
+      };
+
+
+    const csvLines =
+      allRows.map(
+        (row) =>
+          row
+            .map(
+              escapeCell
+            )
+            .join(
+              delimiter
+            )
+      );
+
+
+    const csv =
+      csvLines.join(
+        '\r\n'
+      );
+
+
+    return {
+      csv,
+      rows:
+        allRows,
+      totalRows:
+        allRows.length,
+    };
+  } finally {
+    await loadedPdf.dispose();
   }
-
-  // Step 5: Format CSV with clean escaping
-  const escapeCell = (val: string): string => {
-    const clean = val.trim();
-    if (clean.includes(delimiter) || clean.includes('"') || clean.includes('\n') || clean.includes('\r')) {
-      return `"${clean.replace(/"/g, '""')}"`;
-    }
-    return clean;
-  };
-
-  const csvLines = allRows.map((row) => row.map(escapeCell).join(delimiter));
-  const csv = csvLines.join('\r\n');
-
-  return {
-    csv,
-    rows: allRows,
-    totalRows: allRows.length,
-  };
 }
 
 
@@ -4800,42 +12417,61 @@ const universalBuildKeyValueRows = (
 async function universalIsMostlyScannedPdf(
   file: File
 ): Promise<boolean> {
-  const bytes = await file.arrayBuffer();
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file
+    );
 
-  const pdf = await pdfjsLib.getDocument({
-    isEvalSupported: false,
-    data: new Uint8Array(bytes.slice(0)),
-  }).promise;
+  const pdf =
+    loadedPdf.pdf;
+
+  const totalPages =
+    pdf.numPages;
 
   let textItems = 0;
 
   try {
     for (
       let pageNumber = 1;
-      pageNumber <= pdf.numPages;
+      pageNumber <= totalPages;
       pageNumber++
     ) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-
-      textItems += (content.items as any[]).filter(
-        (item) =>
-          item?.str &&
-          String(item.str).trim()
-      ).length;
+      const page =
+        await pdf.getPage(
+          pageNumber
+        );
 
       try {
-        page.cleanup();
-      } catch {}
-    }
-  } finally {
-    try {
-      await pdf.destroy();
-    } catch {}
-  }
+        const content =
+          await page.getTextContent();
 
-  return textItems <
-    Math.max(10, pdf.numPages * 3);
+        textItems +=
+          (
+            content.items as any[]
+          ).filter(
+            (item) =>
+              item?.str &&
+              String(
+                item.str
+              ).trim()
+          ).length;
+      } finally {
+        try {
+          page.cleanup();
+        } catch {}
+      }
+    }
+
+    return (
+      textItems <
+      Math.max(
+        10,
+        totalPages * 3
+      )
+    );
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 
 type UniversalOcrWord = {
@@ -6127,16 +13763,13 @@ async function universalExtractScannedPages(
   file: File,
   options: TableExtractOptions
 ): Promise<UniversalScannedPageData[]> {
-  const bytes =
-    await file.arrayBuffer();
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file
+    );
 
   const pdf =
-    await pdfjsLib.getDocument({
-      isEvalSupported: false,
-      data: new Uint8Array(
-        bytes.slice(0)
-      ),
-    }).promise;
+    loadedPdf.pdf;
 
   const worker =
     await createWorker(
@@ -6433,7 +14066,7 @@ async function universalExtractScannedPages(
     } catch {}
 
     try {
-      await pdf.destroy();
+      await loadedPdf.dispose();
     } catch {}
   }
 
@@ -6745,10 +14378,20 @@ export async function extractMarkdownFromPDF(
     onProgress,
   } = options;
 
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+  try {
+    const totalPages =
+      pdfDoc.numPages;
 
   interface TextItemData {
     str: string;
@@ -6802,51 +14445,136 @@ export async function extractMarkdownFromPDF(
     try {
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         onProgress?.(pageNum, totalPages);
-        const page = await pdfDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.5 });
+        const page =
+          await pdfDoc.getPage(
+            pageNum
+          );
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
 
-        if (ctx) {
-          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-          const { data } = await ocrWorker.recognize(canvas);
+        try {
+          const viewport =
+            page.getViewport({
+              scale: 1.5,
+            });
 
-          if (data?.text) {
-            const rawLines = data.text.split('\n');
-            for (const rLine of rawLines) {
-              const trimmed = rLine.trim();
-              if (!trimmed) continue;
+          canvas.width =
+            Math.floor(
+              viewport.width
+            );
 
-              // Detect scanned legal headers (e.g., "LEAVE AND LICENSE AGREEMENT", "ARTICLE 1")
-              if (
-                detectHeadings &&
-                trimmed.length < 60 &&
-                (trimmed === trimmed.toUpperCase() || /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(trimmed)) &&
-                /[A-Za-z]{3,}/.test(trimmed)
+          canvas.height =
+            Math.floor(
+              viewport.height
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                alpha: false,
+              }
+            );
+
+          if (ctx) {
+            await (
+              page.render({
+                canvasContext:
+                  ctx as any,
+                viewport,
+              } as any) as any
+            ).promise;
+
+            const {
+              data,
+            } =
+              await ocrWorker.recognize(
+                canvas
+              );
+
+            if (
+              data?.text
+            ) {
+              const rawLines =
+                data.text.split(
+                  '\n'
+                );
+
+              for (
+                const rLine of
+                rawLines
               ) {
-                markdownBlocks.push(`\n### ${trimmed}\n`);
-              } else if (detectLists && /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*(.*)$/.test(trimmed)) {
-                markdownBlocks.push(`- ${trimmed.replace(/^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*/, '')}`);
-              } else {
-                markdownBlocks.push(trimmed);
+                const trimmed =
+                  rLine.trim();
+
+                if (!trimmed) {
+                  continue;
+                }
+
+                if (
+                  detectHeadings &&
+                  trimmed.length <
+                    60 &&
+                  (
+                    trimmed ===
+                      trimmed.toUpperCase() ||
+                    /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(
+                      trimmed
+                    )
+                  ) &&
+                  /[A-Za-z]{3,}/.test(
+                    trimmed
+                  )
+                ) {
+                  markdownBlocks.push(
+                    '\n### ' +
+                      trimmed +
+                      '\n'
+                  );
+                } else if (
+                  detectLists &&
+                  /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*(.*)$/.test(
+                    trimmed
+                  )
+                ) {
+                  markdownBlocks.push(
+                    '- ' +
+                      trimmed.replace(
+                        /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*/,
+                        ''
+                      )
+                  );
+                } else {
+                  markdownBlocks.push(
+                    trimmed
+                  );
+                }
               }
             }
           }
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+
+          try {
+            canvas.remove();
+          } catch (_) {}
+
+          try {
+            page.cleanup();
+          } catch (_) {}
         }
 
-        canvas.width = 0;
-        canvas.height = 0;
-        page.cleanup();
-
-        if (pageNum < totalPages) {
-          markdownBlocks.push('\n---\n');
+        if (
+          pageNum <
+          totalPages
+        ) {
+          markdownBlocks.push(
+            '\n---\n'
+          );
         }
       }
     } finally {
@@ -6971,12 +14699,15 @@ export async function extractMarkdownFromPDF(
   const wordCount = markdown.trim() ? markdown.trim().split(/\s+/).length : 0;
   const estimatedTokens = Math.round(charCount / 4);
 
-  return {
-    markdown,
-    charCount,
-    wordCount,
-    estimatedTokens,
-  };
+    return {
+      markdown,
+      charCount,
+      wordCount,
+      estimatedTokens,
+    };
+  } finally {
+    await loadedPdf.dispose();
+  }
 }
 
 export interface TextToPdfOptions {
@@ -7310,14 +15041,29 @@ export async function applyVisualOverlays(
   file: File,
   overlays: VisualOverlayItem[]
 ): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
+  let arrayBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
 
   // Check if PDF is encrypted
   let isEncrypted = false;
   let pdfDoc: PDFDocument | null = null;
   try {
-    pdfDoc = await PDFDocument.load(arrayBuffer);
-    if (pdfDoc.isEncrypted) isEncrypted = true;
+    pdfDoc =
+      await PDFDocument.load(
+        arrayBuffer
+      );
+
+    /*
+     * pdf-lib has parsed the source document. Our separate
+     * complete ArrayBuffer reference is no longer required.
+     */
+    arrayBuffer = null;
+
+    if (pdfDoc.isEncrypted) {
+      isEncrypted = true;
+    }
   } catch {
     isEncrypted = true;
   }
@@ -7488,25 +15234,84 @@ export async function applyVisualOverlays(
   // =========================================================================
   // PATH B: Universal Canvas Reconstruction (For Encrypted Bank Statements)
   // =========================================================================
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer.slice(0)) });
-  const pdf = await loadingTask.promise;
-  const reconstructedDoc = await PDFDocument.create();
+  /*
+   * Native editing is no longer needed. Drop any remaining
+   * pdf-lib/source references before opening the browser-backed
+   * PDF.js fallback.
+   */
+  pdfDoc = null;
+  arrayBuffer = null;
 
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+  const loadedFallback =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const pdf =
+    loadedFallback.pdf;
+
+  try {
+    const reconstructedDoc =
+      await PDFDocument.create();
+
+    for (
+      let pageNum = 1;
+      pageNum <= pdf.numPages;
+      pageNum++
+    ) {
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale: 2.0 });
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
-    if (!ctx) continue;
+    try {
+      const ctx =
+        canvas.getContext(
+          "2d",
+          {
+            alpha: false,
+          }
+        );
 
-    await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
+      canvas.style.position =
+        "fixed";
+
+      canvas.style.left =
+        "-9999px";
+
+      canvas.style.opacity =
+        "0";
+
+      document.body.appendChild(
+        canvas
+      );
+
+      if (!ctx) {
+        throw new Error(
+          'Canvas rendering context unavailable'
+        );
+      }
+
+      await (
+        page.render({
+          canvasContext:
+            ctx as any,
+          viewport,
+          canvas,
+        } as any) as any
+      ).promise;
 
     // Burn overlays directly onto canvas for encrypted files
     const pageOverlays = overlays.filter((o) => o.pageIndex === pageNum - 1);
@@ -7644,12 +15449,55 @@ export async function applyVisualOverlays(
     const newPage = reconstructedDoc.addPage([origW, origH]);
     newPage.drawImage(embeddedImg, { x: 0, y: 0, width: origW, height: origH });
 
-    canvas.width = 0;
-    canvas.height = 0;
-    page.cleanup();
+    } finally {
+      canvas.width = 1;
+      canvas.height = 1;
+
+      try {
+        canvas.remove();
+      } catch (_) {}
+
+      try {
+        page.cleanup();
+      } catch (_) {}
+    }
+
+    /*
+     * Allow completed fallback page pixels/JPEG temporaries
+     * to be reclaimed before processing the next page.
+     */
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
   }
 
-  return await reconstructedDoc.save({ useObjectStreams: false });
+    /*
+     * All reconstructed pages are now embedded. Release
+     * PDF.js before allocating the complete final PDF.
+     */
+    await loadedFallback.dispose();
+
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+    return await reconstructedDoc.save({
+      useObjectStreams: false,
+    });
+  } finally {
+    /*
+     * dispose() is idempotent and also protects error paths.
+     */
+    await loadedFallback.dispose();
+  }
 }
 
 export interface CsvToPdfOptions {
@@ -7694,7 +15542,7 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
   // 1. Calculate Proportional Column Widths based on max content length per column
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(fontSize);
-  
+
   const colMaxChars = new Array(colCount).fill(3);
   for (const row of rows) {
     for (let c = 0; c < colCount; c++) {
@@ -8178,15 +16026,63 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
 
     // 80mm Thermal Receipt continuous output
     if (isReceipt) {
-      const receiptHeightPt = Math.max(100, (rawCanvas.height / rawCanvas.width) * targetWidthPt);
-      const imgData = rawCanvas.toDataURL('image/jpeg', 0.98);
+      const receiptHeightPt = Math.max(
+        100,
+        (rawCanvas.height / rawCanvas.width) *
+          targetWidthPt
+      );
+
+      const receiptBlob =
+        await new Promise<Blob | null>(
+          (resolve) => {
+            rawCanvas.toBlob(
+              resolve,
+              'image/jpeg',
+              0.98
+            );
+          }
+        );
+
+      if (!receiptBlob) {
+        throw new Error(
+          'Failed to encode receipt image.'
+        );
+      }
+
+      const receiptBytes =
+        new Uint8Array(
+          await receiptBlob.arrayBuffer()
+        );
+
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'pt',
-        format: [targetWidthPt, receiptHeightPt],
+        format: [
+          targetWidthPt,
+          receiptHeightPt,
+        ],
       });
-      pdf.addImage(imgData, 'JPEG', 0, 0, targetWidthPt, receiptHeightPt);
-      return new Uint8Array(pdf.output('arraybuffer'));
+
+      pdf.addImage(
+        receiptBytes,
+        'JPEG',
+        0,
+        0,
+        targetWidthPt,
+        receiptHeightPt
+      );
+
+      const output =
+        new Uint8Array(
+          pdf.output(
+            'arraybuffer'
+          )
+        );
+
+      rawCanvas.width = 1;
+      rawCanvas.height = 1;
+
+      return output;
     }
 
     // A4 / Letter Multi-Page Export
@@ -8205,14 +16101,39 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       const sourceY = pageIdx * pageHeightPx;
       const currentSliceHeight = Math.min(pageHeightPx, rawCanvas.height - sourceY);
 
-      const sliceCanvas = document.createElement('canvas');
-      sliceCanvas.width = rawCanvas.width;
-      sliceCanvas.height = pageHeightPx;
-      const sliceCtx = sliceCanvas.getContext('2d');
+      const sliceCanvas =
+        document.createElement(
+          'canvas'
+        );
 
-      if (sliceCtx) {
-        sliceCtx.fillStyle = '#ffffff';
-        sliceCtx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+      sliceCanvas.width =
+        rawCanvas.width;
+
+      sliceCanvas.height =
+        pageHeightPx;
+
+      try {
+        const sliceCtx =
+          sliceCanvas.getContext(
+            '2d'
+          );
+
+        if (!sliceCtx) {
+          throw new Error(
+            'Failed to create HTML-to-PDF page canvas.'
+          );
+        }
+
+        sliceCtx.fillStyle =
+          '#ffffff';
+
+        sliceCtx.fillRect(
+          0,
+          0,
+          sliceCanvas.width,
+          sliceCanvas.height
+        );
+
         sliceCtx.drawImage(
           rawCanvas,
           0,
@@ -8225,12 +16146,57 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
           currentSliceHeight
         );
 
-        const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.98);
-        pdf.addImage(sliceData, 'JPEG', 0, 0, targetWidthPt, targetHeightPt);
+        const sliceBlob =
+          await new Promise<Blob | null>(
+            (resolve) => {
+              sliceCanvas.toBlob(
+                resolve,
+                'image/jpeg',
+                0.98
+              );
+            }
+          );
+
+        if (!sliceBlob) {
+          throw new Error(
+            `Failed to encode HTML-to-PDF page ${pageIdx + 1}.`
+          );
+        }
+
+        const sliceBytes =
+          new Uint8Array(
+            await sliceBlob.arrayBuffer()
+          );
+
+        pdf.addImage(
+          sliceBytes,
+          'JPEG',
+          0,
+          0,
+          targetWidthPt,
+          targetHeightPt
+        );
+      } finally {
+        /*
+         * Release decoded RGBA pixels before rendering
+         * the next page slice.
+         */
+        sliceCanvas.width = 1;
+        sliceCanvas.height = 1;
       }
     }
 
-    return new Uint8Array(pdf.output('arraybuffer'));
+    const output =
+      new Uint8Array(
+        pdf.output(
+          'arraybuffer'
+        )
+      );
+
+    rawCanvas.width = 1;
+    rawCanvas.height = 1;
+
+    return output;
   } finally {
     if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
   }
@@ -8762,8 +16728,10 @@ export async function annotatePDF(
   file: File,
   annotations: PdfAnnotationItem[]
 ): Promise<Uint8Array> {
-  const arrayBuffer =
-    await file.arrayBuffer();
+  let arrayBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
 
   // ==========================================================================
   // PATH A — Preserve original PDF whenever pdf-lib can edit it safely
@@ -8797,31 +16765,36 @@ export async function annotatePDF(
   // PATH B — Universal readable-PDF fallback
   // ==========================================================================
 
-  let sourcePdf:
-    | Awaited<
-        ReturnType<
-          typeof pdfjsLib.getDocument
-        >
-      >['promise']
-    | any;
+  /*
+   * Native editing is finished. Drop the complete
+   * ArrayBuffer before opening the browser-backed PDF.js
+   * document so the fallback does not duplicate the source.
+   */
+  arrayBuffer = null;
+
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
+
+  let loadedFallback:
+    | {
+        pdf: any;
+        dispose: () => Promise<void>;
+      }
+    | null = null;
 
   try {
-    const loadingTask =
-      pdfjsLib.getDocument({
-        isEvalSupported:
-          false,
-
-        data:
-          new Uint8Array(
-            arrayBuffer.slice(0)
-          ),
-
-        stopAtErrors:
-          false,
-      });
-
-    sourcePdf =
-      await loadingTask.promise;
+    loadedFallback =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors: false,
+        }
+      );
   } catch (error: any) {
     const passwordResponses =
       (pdfjsLib as any)
@@ -8847,6 +16820,9 @@ export async function annotatePDF(
     );
   }
 
+  const sourcePdf =
+    loadedFallback.pdf;
+
   const rebuilt =
     await PDFDocument.create();
 
@@ -8862,58 +16838,86 @@ export async function annotatePDF(
           pageNumber
         );
 
-      /*
-       * Preserve the real PDF page dimensions.
-       * Render resolution stays high, but image pixels are
-       * NOT used as PDF points.
-       */
-      const viewport =
-        sourcePage.getViewport({
-          scale: 1,
-        });
-
-      const {
-        imgBytes,
-      } =
-        await renderPageAsJpg(
-          sourcePage,
-          2
-        );
-
-      const embedded =
-        await rebuilt.embedJpg(
-          imgBytes
-        );
-
-      const page =
-        rebuilt.addPage([
-          viewport.width,
-          viewport.height,
-        ]);
-
-      page.drawImage(
-        embedded,
-        {
-          x: 0,
-          y: 0,
-
-          width:
-            viewport.width,
-
-          height:
-            viewport.height,
-        }
-      );
-
       try {
-        sourcePage.cleanup();
-      } catch {}
+        /*
+         * Preserve the real PDF page dimensions.
+         * Render resolution stays high, but image pixels are
+         * NOT used as PDF points.
+         */
+        const viewport =
+          sourcePage.getViewport({
+            scale: 1,
+          });
+
+        const {
+          imgBytes,
+        } =
+          await renderPageAsJpg(
+            sourcePage,
+            2
+          );
+
+        const embedded =
+          await rebuilt.embedJpg(
+            imgBytes
+          );
+
+        const page =
+          rebuilt.addPage([
+            viewport.width,
+            viewport.height,
+          ]);
+
+        page.drawImage(
+          embedded,
+          {
+            x: 0,
+            y: 0,
+
+            width:
+              viewport.width,
+
+            height:
+              viewport.height,
+          }
+        );
+      } finally {
+        try {
+          sourcePage.cleanup();
+        } catch {}
+      }
+
+      /*
+       * Let completed page render/JPEG temporaries become
+       * collectible before processing the next page.
+       */
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
     }
   } finally {
-    try {
-      await sourcePdf.destroy();
-    } catch {}
+    if (loadedFallback) {
+      await loadedFallback.dispose();
+      loadedFallback = null;
+    }
   }
+
+  /*
+   * The fallback source is fully rebuilt now.
+   * Draw annotations only after PDF.js has been released,
+   * then serialize the final annotated PDF.
+   */
+  await new Promise<void>(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        0
+      )
+  );
 
   await drawFlattenedAnnotations(
     rebuilt,

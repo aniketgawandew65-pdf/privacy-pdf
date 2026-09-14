@@ -13,7 +13,7 @@ import {
   ChevronRight,
   AlertCircle,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { addWatermarkToPDF, type WatermarkOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -57,43 +57,105 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfDocRef = useRef<any>(null);
+  const pdfDisposeRef =
+    useRef<(() => Promise<void>) | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   // Load PDF for live preview
   useEffect(() => {
     if (!file) {
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
+
       setTotalPages(1);
       setCurrentPage(1);
       revokeDownloadUrl();
       setError(null);
-      pdfDocRef.current = null;
       return;
     }
 
     let isMounted = true;
+
+    /*
+     * Release any previous preview document before opening
+     * the newly selected source PDF.
+     */
+    const previousDispose =
+      pdfDisposeRef.current;
+
+    pdfDisposeRef.current = null;
+    pdfDocRef.current = null;
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     setIsLoadingPage(true);
     revokeDownloadUrl();
     setError(null);
 
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
-        if (!isMounted) return;
-        pdfDocRef.current = pdf;
-        setTotalPages(pdf.numPages);
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        if (!isMounted) {
+          await loaded.dispose();
+          return;
+        }
+
+        pdfDocRef.current =
+          loaded.pdf;
+
+        pdfDisposeRef.current =
+          loaded.dispose;
+
+        setTotalPages(
+          loaded.pdf.numPages
+        );
+
         setCurrentPage(1);
       } catch (err) {
-        console.error('Error loading PDF for preview:', err);
-        if (isMounted) setError((err as any)?.message || String(err));
+        console.error(
+          'Error loading PDF for preview:',
+          err
+        );
+
+        if (isMounted) {
+          setError(
+            (err as any)?.message ||
+              String(err)
+          );
+        }
       } finally {
-        if (isMounted) setIsLoadingPage(false);
+        if (isMounted) {
+          setIsLoadingPage(false);
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
     };
   }, [file, revokeDownloadUrl]);
 
@@ -124,6 +186,9 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
           viewport,
         } as any).promise;
       }
+      try {
+        page.cleanup();
+      } catch (_) {}
     } catch (err) {
       console.error('Preview render error:', err);
     } finally {

@@ -13,7 +13,7 @@ import {
   ZoomOut,
   RotateCcw,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { convertToGrayscalePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -36,11 +36,24 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const previewObjectUrlRef =
+    useRef<string | null>(null);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   // Generate real-time preview of page 1
   useEffect(() => {
     if (!file) {
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(
+          previewObjectUrlRef.current
+        );
+
+        previewObjectUrlRef.current =
+          null;
+      }
+
       setPreviewUrl(null);
       setTotalPages(0);
       setZoomLevel(1);
@@ -50,61 +63,238 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     }
 
     let isMounted = true;
+
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
+    let generatedPreviewUrl:
+      | string
+      | null = null;
+
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(
+        previewObjectUrlRef.current
+      );
+
+      previewObjectUrlRef.current =
+        null;
+    }
+
+    setPreviewUrl(null);
     setIsLoadingPreview(true);
     setErrorMessage(null);
     revokeDownloadUrl();
 
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
-        if (!isMounted) return;
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
 
-        setTotalPages(pdf.numPages);
-        const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 1.2 });
+        disposePdf =
+          loaded.dispose;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
-
-        if (ctx) {
-          await page.render({
-            canvasContext: ctx as any,
-            viewport,
-          } as any).promise;
-
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imgData.data;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-            const val = mode === 'pure-bw' ? (gray < threshold ? 0 : 255) : gray;
-            data[i] = val;
-            data[i + 1] = val;
-            data[i + 2] = val;
-          }
-
-          ctx.putImageData(imgData, 0, 0);
-          if (isMounted) {
-            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.9));
-          }
+        if (!isMounted) {
+          await disposePdf();
+          disposePdf = null;
+          return;
         }
-        canvas.width = 0;
-        canvas.height = 0;
+
+        const pdf =
+          loaded.pdf;
+
+        setTotalPages(
+          pdf.numPages
+        );
+
+        const page =
+          await pdf.getPage(1);
+
+        try {
+          const viewport =
+            page.getViewport({
+              scale: 1.2,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+          try {
+            canvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            canvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+            const ctx =
+              canvas.getContext(
+                '2d'
+              );
+
+            if (ctx) {
+              await page.render({
+                canvasContext:
+                  ctx as any,
+                viewport,
+              } as any).promise;
+
+              const imgData =
+                ctx.getImageData(
+                  0,
+                  0,
+                  canvas.width,
+                  canvas.height
+                );
+
+              const data =
+                imgData.data;
+
+              for (
+                let i = 0;
+                i < data.length;
+                i += 4
+              ) {
+                const gray =
+                  0.299 * data[i] +
+                  0.587 * data[i + 1] +
+                  0.114 * data[i + 2];
+
+                const val =
+                  mode === 'pure-bw'
+                    ? (
+                        gray < threshold
+                          ? 0
+                          : 255
+                      )
+                    : gray;
+
+                data[i] = val;
+                data[i + 1] = val;
+                data[i + 2] = val;
+              }
+
+              ctx.putImageData(
+                imgData,
+                0,
+                0
+              );
+
+              const previewBlob =
+                await new Promise<Blob>(
+                  (
+                    resolve,
+                    reject
+                  ) => {
+                    canvas.toBlob(
+                      (blob) => {
+                        if (blob) {
+                          resolve(
+                            blob
+                          );
+                        } else {
+                          reject(
+                            new Error(
+                              'Unable to create preview.'
+                            )
+                          );
+                        }
+                      },
+                      'image/jpeg',
+                      0.9
+                    );
+                  }
+                );
+
+              generatedPreviewUrl =
+                URL.createObjectURL(
+                  previewBlob
+                );
+
+              if (isMounted) {
+                previewObjectUrlRef.current =
+                  generatedPreviewUrl;
+
+                setPreviewUrl(
+                  generatedPreviewUrl
+                );
+              } else {
+                URL.revokeObjectURL(
+                  generatedPreviewUrl
+                );
+
+                generatedPreviewUrl =
+                  null;
+              }
+            }
+          } finally {
+            canvas.width = 1;
+            canvas.height = 1;
+          }
+        } finally {
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
       } catch (err) {
-        console.error('Preview error:', err);
+        console.error(
+          'Preview error:',
+          err
+        );
+
         if (isMounted) {
-          setErrorMessage('Could not render document preview.');
+          setErrorMessage(
+            'Could not render document preview.'
+          );
         }
       } finally {
-        if (isMounted) setIsLoadingPreview(false);
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+
+          disposePdf = null;
+        }
+
+        if (isMounted) {
+          setIsLoadingPreview(
+            false
+          );
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
+
+      if (generatedPreviewUrl) {
+        URL.revokeObjectURL(
+          generatedPreviewUrl
+        );
+
+        if (
+          previewObjectUrlRef.current ===
+          generatedPreviewUrl
+        ) {
+          previewObjectUrlRef.current =
+            null;
+        }
+
+        generatedPreviewUrl =
+          null;
+      }
     };
   }, [file, mode, threshold]);
 

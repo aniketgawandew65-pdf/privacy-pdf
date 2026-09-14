@@ -28,7 +28,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 
 import {
   annotatePDF,
@@ -266,28 +266,33 @@ React.FC<AnnotatePdfProps> = ({
 
     let cancelled = false;
 
-    let pdfDocument: any = null;
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
+    let activePage: any = null;
+    let renderTask: any = null;
 
     const render = async () => {
       try {
         setErrorMessage(null);
 
-        const bytes =
-          await file.arrayBuffer();
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
 
-        const loadingTask =
-          pdfjsLib.getDocument({
-            isEvalSupported: false,
-            data:
-              new Uint8Array(
-                bytes
-              ).slice(),
-          });
+        disposePdf =
+          loaded.dispose;
 
-        pdfDocument =
-          await loadingTask.promise;
+        if (cancelled) {
+          await disposePdf();
+          disposePdf = null;
+          return;
+        }
 
-        if (cancelled) return;
+        const pdfDocument =
+          loaded.pdf;
 
         setTotalPages(
           pdfDocument.numPages
@@ -306,6 +311,8 @@ React.FC<AnnotatePdfProps> = ({
           await pdfDocument.getPage(
             safePage
           );
+
+        activePage = page;
 
         const baseViewport =
           page.getViewport({
@@ -388,28 +395,46 @@ React.FC<AnnotatePdfProps> = ({
           canvas.height
         );
 
-        await (
+        renderTask =
           page.render({
             canvasContext:
               context as any,
             viewport,
-          } as any) as any
-        ).promise;
+          } as any);
 
-        try {
-          page.cleanup();
-        } catch {}
+        await renderTask.promise;
 
-      } catch (error) {
-        console.error(
-          'Annotate PDF render error:',
-          error
-        );
-
-        if (!cancelled) {
-          setErrorMessage(
-            'Failed to render this PDF.'
+      } catch (error: any) {
+        if (
+          error?.name !==
+          'RenderingCancelledException'
+        ) {
+          console.error(
+            'Annotate PDF render error:',
+            error
           );
+
+          if (!cancelled) {
+            setErrorMessage(
+              'Failed to render this PDF.'
+            );
+          }
+        }
+      } finally {
+        if (activePage) {
+          try {
+            activePage.cleanup();
+          } catch {}
+
+          activePage = null;
+        }
+
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch {}
+
+          disposePdf = null;
         }
       }
     };
@@ -419,9 +444,24 @@ React.FC<AnnotatePdfProps> = ({
     return () => {
       cancelled = true;
 
-      try {
-        pdfDocument?.destroy();
-      } catch {}
+      if (renderTask) {
+        try {
+          renderTask.cancel();
+        } catch {}
+      }
+
+      if (activePage) {
+        try {
+          activePage.cleanup();
+        } catch {}
+
+        activePage = null;
+      }
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
     };
   }, [
     file,

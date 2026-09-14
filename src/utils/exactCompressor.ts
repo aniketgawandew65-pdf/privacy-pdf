@@ -1,11 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import { pdfjsLib } from './pdfjs';
-
-try {
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
-  }
-} catch (_) {}
+import { loadPdfJsFromBlob } from './pdfjs';
 
 export interface CompressionProgress {
   currentPage: number;
@@ -21,14 +15,19 @@ export interface CompressOptions {
   onProgress?: (progress: CompressionProgress) => void;
 }
 
-export async function getPDFPageCount(file: File): Promise<number> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(arrayBuffer) }).promise;
-  const count = pdf.numPages;
-  if (typeof (pdf as any).destroy === 'function') {
-    (pdf as any).destroy();
+export async function getPDFPageCount(
+  file: File
+): Promise<number> {
+  const loaded =
+    await loadPdfJsFromBlob(
+      file
+    );
+
+  try {
+    return loaded.pdf.numPages;
+  } finally {
+    await loaded.dispose();
   }
-  return count;
 }
 
 export async function compressPDF(
@@ -51,16 +50,21 @@ export async function compressPDF(
     onProgress = onProgressArg;
   }
 
-  const rawBytes = await file.arrayBuffer();
   if (level === 'target' && (!Number.isFinite(targetKb) || !targetKb || targetKb <= 0)) {
     throw new Error('Choose a valid target size in KB.');
   }
 
-  const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-    data: new Uint8Array(rawBytes),
-    stopAtErrors: false,
-  });
-  const pdf = await loadingTask.promise;
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors: false,
+      }
+    );
+
+  const pdf =
+    loadedPdf.pdf;
+
   try {
   const totalPages = pdf.numPages;
 
@@ -208,20 +212,131 @@ export async function compressPDF(
     continue;
   }
 
-  if (level === 'target' && targetBytes && outputBytes.byteLength < targetBytes) {
-    const diff = targetBytes - outputBytes.byteLength;
+  if (
+    level === 'target' &&
+    targetBytes &&
+    outputBytes.byteLength < targetBytes
+  ) {
+    const originalLength =
+      outputBytes.byteLength;
+
+    const diff =
+      targetBytes -
+      originalLength;
+
     if (diff > 0) {
-      const padded = new Uint8Array(targetBytes);
-      padded.set(outputBytes, 0);
-      padded[outputBytes.byteLength] = 0x0A;
-      padded[outputBytes.byteLength + 1] = 0x25;
-      for (let i = outputBytes.byteLength + 2; i < targetBytes - 1; i++) {
-        padded[i] = 0x20;
+      const backingBuffer =
+        outputBytes.buffer;
+
+      const ownsWholeBuffer =
+        outputBytes.byteOffset === 0 &&
+        outputBytes.byteLength ===
+          backingBuffer.byteLength;
+
+      const transfer =
+        (backingBuffer as any)
+          .transfer;
+
+
+      /*
+       * Modern browsers can expand an ArrayBuffer by
+       * transferring it to a new size.
+       *
+       * The original backing buffer is detached, which
+       * avoids deliberately retaining both the compressed
+       * PDF and another target-sized copy.
+       */
+      if (
+        ownsWholeBuffer &&
+        typeof transfer ===
+          'function'
+      ) {
+        const expandedBuffer =
+          transfer.call(
+            backingBuffer,
+            targetBytes
+          ) as ArrayBuffer;
+
+        outputBytes =
+          new Uint8Array(
+            expandedBuffer
+          );
+      } else if (
+        targetBytes <=
+        32 * 1024 * 1024
+      ) {
+        /*
+         * Compatibility fallback for older browsers.
+         *
+         * Keep the traditional copy only for modest output
+         * sizes where the temporary duplicate is bounded.
+         */
+        const expanded =
+          new Uint8Array(
+            targetBytes
+          );
+
+        expanded.set(
+          outputBytes,
+          0
+        );
+
+        outputBytes =
+          expanded;
+      } else {
+        /*
+         * Never inflate a large PDF by allocating another
+         * 32+ MB target-sized buffer merely for whitespace.
+         *
+         * The compressed PDF is already valid and below
+         * the requested maximum size.
+         */
+        console.warn(
+          'Exact padding skipped on this browser to protect memory. Output remains below the requested target size.'
+        );
+
+        return outputBytes;
       }
-      if (diff > 2) {
-        padded[targetBytes - 1] = 0x0A;
+
+
+      /*
+       * Preserve the existing trailing PDF-comment padding
+       * format without touching the compressed PDF bytes.
+       */
+      if (
+        diff >= 1
+      ) {
+        outputBytes[
+          originalLength
+        ] = 0x0A;
       }
-      outputBytes = padded;
+
+      if (
+        diff >= 2
+      ) {
+        outputBytes[
+          originalLength + 1
+        ] = 0x25;
+      }
+
+      for (
+        let i =
+          originalLength + 2;
+        i <
+        targetBytes - 1;
+        i++
+      ) {
+        outputBytes[i] =
+          0x20;
+      }
+
+      if (
+        diff > 2
+      ) {
+        outputBytes[
+          targetBytes - 1
+        ] = 0x0A;
+      }
     }
   }
 
@@ -229,6 +344,6 @@ export async function compressPDF(
   }
   throw new Error(`Could not fit all ${totalPages} pages into ${targetKb} KB after maximum image reduction. PDF structure also needs space. Split the PDF or choose a larger size.`);
   } finally {
-    await pdf.destroy();
+    await loadedPdf.dispose();
   }
 }

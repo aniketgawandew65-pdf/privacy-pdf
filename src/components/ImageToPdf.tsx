@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import heic2any from 'heic2any';
-import JSZip from 'jszip';
+import { Zip, ZipPassThrough } from 'fflate';
 import {
   Upload,
   Image as ImageIcon,
@@ -164,6 +164,7 @@ export const ImageToPdf: React.FC = () => {
     useState<OutputFormat>(defaultOutput);
   const [quality, setQuality] = useState(92);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isBuildingZip, setIsBuildingZip] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [zipUrl, setZipUrl] = useState<string | null>(null);
   const [converted, setConverted] = useState<ConvertedImage[]>([]);
@@ -366,20 +367,13 @@ export const ImageToPdf: React.FC = () => {
 
       setConverted(results);
 
-      if (results.length > 1) {
-        const zip = new JSZip();
-
-        results.forEach((result) => {
-          zip.file(result.name, result.blob);
-        });
-
-        const zipBlob = await zip.generateAsync({
-          type: 'blob',
-          compression: 'DEFLATE',
-        });
-
-        setZipUrl(URL.createObjectURL(zipBlob));
-      }
+      /*
+       * Do not build a ZIP automatically.
+       *
+       * Keep conversion memory limited to the converted
+       * image Blobs. The archive is created only if the
+       * user explicitly requests it.
+       */
     } catch (err: any) {
       console.error('Image conversion error:', err);
       setErrorMessage(
@@ -387,6 +381,174 @@ export const ImageToPdf: React.FC = () => {
       );
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    if (
+      converted.length <= 1
+    ) {
+      return;
+    }
+
+    setIsBuildingZip(true);
+    setErrorMessage(null);
+
+    try {
+      let downloadUrl =
+        zipUrl;
+
+      if (!downloadUrl) {
+        const chunks:
+          ArrayBuffer[] = [];
+
+        let resolveZip!:
+          (blob: Blob) => void;
+
+        let rejectZip!:
+          (error: unknown) => void;
+
+        const zipResult =
+          new Promise<Blob>(
+            (resolve, reject) => {
+              resolveZip =
+                resolve;
+
+              rejectZip =
+                reject;
+            }
+          );
+
+        const zip =
+          new Zip(
+            (
+              error,
+              data,
+              final
+            ) => {
+              if (error) {
+                rejectZip(
+                  error
+                );
+                return;
+              }
+
+              if (
+                data &&
+                data.length
+              ) {
+                /*
+                 * Copy fflate output into regular
+                 * ArrayBuffer-backed chunks for Blob
+                 * compatibility.
+                 */
+                const copy =
+                  new Uint8Array(
+                    data.length
+                  );
+
+                copy.set(
+                  data
+                );
+
+                chunks.push(
+                  copy.buffer
+                );
+              }
+
+              if (final) {
+                resolveZip(
+                  new Blob(
+                    chunks,
+                    {
+                      type:
+                        'application/zip',
+                    }
+                  )
+                );
+              }
+            }
+          );
+
+        for (
+          const item of converted
+        ) {
+          const entry =
+            new ZipPassThrough(
+              item.name
+            );
+
+          zip.add(
+            entry
+          );
+
+          /*
+           * Read only one converted image into an
+           * ArrayBuffer at a time.
+           */
+          const bytes =
+            new Uint8Array(
+              await item.blob.arrayBuffer()
+            );
+
+          entry.push(
+            bytes,
+            true
+          );
+
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+        }
+
+        zip.end();
+
+        const zipBlob =
+          await zipResult;
+
+        downloadUrl =
+          URL.createObjectURL(
+            zipBlob
+          );
+
+        setZipUrl(
+          downloadUrl
+        );
+      }
+
+      const anchor =
+        document.createElement(
+          'a'
+        );
+
+      anchor.href =
+        downloadUrl;
+
+      anchor.download =
+        `converted_${outputFormat}_images.zip`;
+
+      document.body.appendChild(
+        anchor
+      );
+
+      anchor.click();
+      anchor.remove();
+    } catch (err: any) {
+      console.error(
+        'Image ZIP creation error:',
+        err
+      );
+
+      setErrorMessage(
+        err?.message ||
+          'Could not create the ZIP archive.'
+      );
+    } finally {
+      setIsBuildingZip(false);
     }
   };
 
@@ -591,15 +753,23 @@ export const ImageToPdf: React.FC = () => {
                   {converted.length === 1 ? 'file' : 'files'} ready
                 </div>
 
-                {zipUrl && (
-                  <a
-                    href={zipUrl}
-                    download={`converted_${outputFormat}_images.zip`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 text-black rounded-lg text-xs font-semibold"
+                {converted.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadZip}
+                    disabled={isBuildingZip}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 disabled:opacity-50 text-black rounded-lg text-xs font-semibold"
                   >
-                    <Archive className="w-3.5 h-3.5" />
-                    ZIP
-                  </a>
+                    {isBuildingZip ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Archive className="w-3.5 h-3.5" />
+                    )}
+
+                    {isBuildingZip
+                      ? 'Creating...'
+                      : 'ZIP'}
+                  </button>
                 )}
               </div>
 

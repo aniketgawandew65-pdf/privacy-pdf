@@ -268,24 +268,179 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   
 
   const handleDownloadBatchZip = async () => {
-    const { default: JSZip } = await import('jszip');
-    const zip = new JSZip();
-    Object.entries(tasksState).forEach(([fileName, task]) => {
-      if (task.status === 'completed' && task.result) {
-        const baseName = fileName.replace(/\.[^/.]+$/, '');
-        zip.file(`${baseName}_compressed.pdf`, task.result);
+    const {
+      Zip,
+      ZipPassThrough,
+    } = await import(
+      'fflate'
+    );
+
+    const completedTasks =
+      Object.entries(
+        tasksState
+      ).filter(
+        ([, task]) =>
+          task.status ===
+            'completed' &&
+          Boolean(
+            task.result
+          )
+      );
+
+    if (
+      completedTasks.length === 0
+    ) {
+      return;
+    }
+
+    const chunks:
+      ArrayBuffer[] = [];
+
+    let resolveZip!:
+      (blob: Blob) => void;
+
+    let rejectZip!:
+      (error: unknown) => void;
+
+    const zipResult =
+      new Promise<Blob>(
+        (resolve, reject) => {
+          resolveZip =
+            resolve;
+
+          rejectZip =
+            reject;
+        }
+      );
+
+    const zip =
+      new Zip(
+        (
+          error,
+          data,
+          final
+        ) => {
+          if (error) {
+            rejectZip(
+              error
+            );
+            return;
+          }
+
+          if (
+            data &&
+            data.length
+          ) {
+            const copy =
+              new Uint8Array(
+                data.length
+              );
+
+            copy.set(
+              data
+            );
+
+            chunks.push(
+              copy.buffer
+            );
+          }
+
+          if (final) {
+            resolveZip(
+              new Blob(
+                chunks,
+                {
+                  type:
+                    'application/zip',
+                }
+              )
+            );
+          }
+        }
+      );
+
+    for (
+      const [
+        fileName,
+        task,
+      ] of completedTasks
+    ) {
+      if (!task.result) {
+        continue;
       }
-    });
 
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    createZipUrl(zipBlob);
+      const baseName =
+        fileName.replace(
+          /\.[^/.]+$/,
+          ''
+        );
 
-    const tempLink = document.createElement('a');
-    tempLink.href = URL.createObjectURL(zipBlob);
-    tempLink.download = 'compressed_bundle.zip';
-    document.body.appendChild(tempLink);
+      const entry =
+        new ZipPassThrough(
+          `${baseName}_compressed.pdf`
+        );
+
+      zip.add(
+        entry
+      );
+
+      /*
+       * Materialize only one compressed PDF
+       * into an ArrayBuffer at a time.
+       */
+      const bytes =
+        new Uint8Array(
+          await task.result.arrayBuffer()
+        );
+
+      entry.push(
+        bytes,
+        true
+      );
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+    zip.end();
+
+    const zipBlob =
+      await zipResult;
+
+    /*
+     * Reuse the managed object URL instead
+     * of creating a second untracked URL.
+     */
+    const downloadUrl =
+      createZipUrl(
+        zipBlob
+      );
+
+    const tempLink =
+      document.createElement(
+        'a'
+      );
+
+    tempLink.href =
+      downloadUrl;
+
+    tempLink.download =
+      'compressed_bundle.zip';
+
+    document.body.appendChild(
+      tempLink
+    );
+
     tempLink.click();
-    document.body.removeChild(tempLink);
+
+    document.body.removeChild(
+      tempLink
+    );
   };
 
   const handleClearAll = () => {

@@ -66,6 +66,11 @@ export const CodeToPdf: React.FC = () => {
             'code-to-pdf'
           );
 
+        const restoredContentFiles =
+          await restoreToolWorkspaceFiles(
+            'code-to-pdf-content'
+          );
+
         const savedState =
           restoreToolWorkspaceState<{
             activeTab?: 'paste' | 'upload';
@@ -88,12 +93,52 @@ export const CodeToPdf: React.FC = () => {
           setActiveTab(savedState.activeTab);
         }
 
+        let restoredCode:
+          | string
+          | null =
+            null;
+
         if (
+          savedState?.activeTab ===
+            'upload' &&
+          restored[0]
+        ) {
+          try {
+            restoredCode =
+              await restored[0].text();
+          } catch (_) {
+            restoredCode = null;
+          }
+        } else if (
+          restoredContentFiles[0]
+        ) {
+          try {
+            restoredCode =
+              await restoredContentFiles[0]
+                .text();
+          } catch (_) {
+            restoredCode = null;
+          }
+        }
+
+        /*
+         * One-time migration from old sessionStorage content.
+         */
+        if (
+          restoredCode === null &&
           typeof savedState?.codeContent ===
-          'string'
+            'string'
+        ) {
+          restoredCode =
+            savedState.codeContent;
+        }
+
+        if (
+          !cancelled &&
+          restoredCode !== null
         ) {
           setCodeContent(
-            savedState.codeContent
+            restoredCode
           );
         }
 
@@ -173,7 +218,7 @@ export const CodeToPdf: React.FC = () => {
   ]);
 
   /*
-   * Preserve editor content and formatting controls.
+   * Keep only lightweight editor controls in sessionStorage.
    */
   useEffect(() => {
     if (!workspaceHydrated) return;
@@ -182,7 +227,6 @@ export const CodeToPdf: React.FC = () => {
       'code-to-pdf',
       {
         activeTab,
-        codeContent,
         title,
         theme,
         showLineNumbers,
@@ -193,13 +237,70 @@ export const CodeToPdf: React.FC = () => {
     );
   }, [
     activeTab,
-    codeContent,
     title,
     theme,
     showLineNumbers,
     fontSize,
     pageSize,
     orientation,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Paste-mode code stays in browser-local OPFS.
+   * Upload mode already has its source file persisted.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (
+      activeTab === 'upload' &&
+      file
+    ) {
+      void clearToolWorkspace(
+        'code-to-pdf-content'
+      );
+      return;
+    }
+
+    if (!codeContent.trim()) {
+      void clearToolWorkspace(
+        'code-to-pdf-content'
+      );
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void saveToolWorkspaceFiles(
+            'code-to-pdf-content',
+            [
+              new File(
+                [codeContent],
+                'editor-code.txt',
+                {
+                  type:
+                    'text/plain;charset=utf-8',
+                  lastModified:
+                    Date.now(),
+                }
+              ),
+            ]
+          );
+        },
+        400
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    activeTab,
+    file,
+    codeContent,
     workspaceHydrated,
   ]);
 
@@ -276,6 +377,10 @@ export const CodeToPdf: React.FC = () => {
 
     void clearToolWorkspace(
       'code-to-pdf'
+    );
+
+    void clearToolWorkspace(
+      'code-to-pdf-content'
     );
   };
 

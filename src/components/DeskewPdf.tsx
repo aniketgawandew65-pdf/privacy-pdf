@@ -11,7 +11,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { deskewPDF, estimateSkewAngle } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -30,9 +30,27 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef =
+    useRef<string | null>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   useEffect(() => {
+    const previousPreviewUrl =
+      previewUrlRef.current;
+
+    if (previousPreviewUrl) {
+      try {
+        URL.revokeObjectURL(
+          previousPreviewUrl
+        );
+      } catch (_) {}
+
+      previewUrlRef.current =
+        null;
+    }
+
+    setPreviewUrl(null);
+
     if (!file) {
       setPreviewUrl(null);
       setAngle(0);
@@ -47,11 +65,31 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
     setErrorMessage(null);
     revokeDownloadUrl();
 
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
-        const page = await pdf.getPage(1);
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        disposePdf =
+          loaded.dispose;
+
+        if (!isMounted) {
+          await disposePdf();
+          disposePdf = null;
+          return;
+        }
+
+        const pdf =
+          loaded.pdf;
+
+        const page =
+          await pdf.getPage(1);
 
         const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
         const unscaled = page.getViewport({ scale: 1.0 });
@@ -67,22 +105,85 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           await page.render({ canvasContext: ctx as any, viewport } as any).promise;
-          if (isMounted) setPreviewUrl(canvas.toDataURL('image/jpeg', 0.95));
+          const previewBlob =
+            await new Promise<Blob | null>(
+              (resolve) => {
+                canvas.toBlob(
+                  resolve,
+                  'image/jpeg',
+                  0.95
+                );
+              }
+            );
+
+          if (
+            previewBlob &&
+            isMounted
+          ) {
+            const nextPreviewUrl =
+              URL.createObjectURL(
+                previewBlob
+              );
+
+            previewUrlRef.current =
+              nextPreviewUrl;
+
+            setPreviewUrl(
+              nextPreviewUrl
+            );
+          }
         }
-        canvas.width = 0;
-        canvas.height = 0;
+        canvas.width = 1;
+        canvas.height = 1;
+
+        try {
+          page.cleanup();
+        } catch (_) {}
       } catch (err) {
         console.error('Deskew preview error:', err);
         if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
-        if (isMounted) setIsLoadingPreview(false);
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+
+          disposePdf = null;
+        }
+
+        if (isMounted) {
+          setIsLoadingPreview(false);
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
     };
   }, [file]);
+
+  useEffect(() => {
+    return () => {
+      const currentPreviewUrl =
+        previewUrlRef.current;
+
+      if (currentPreviewUrl) {
+        try {
+          URL.revokeObjectURL(
+            currentPreviewUrl
+          );
+        } catch (_) {}
+
+        previewUrlRef.current =
+          null;
+      }
+    };
+  }, []);
 
   const handleAutoEstimate = async () => {
     if (!previewUrl) return;

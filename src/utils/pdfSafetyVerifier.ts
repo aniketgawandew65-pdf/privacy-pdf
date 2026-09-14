@@ -1,4 +1,6 @@
-import { pdfjsLib } from "./pdfjs";
+import {
+  loadPdfJsFromBlob,
+} from "./pdfjs";
 
 export const normalizeForSafetyCheck = (value: string) =>
   value
@@ -20,9 +22,22 @@ export const verifyFinishedPdf = async (
   selectedFindings: SafetyVerificationTarget[],
   onProgress?: (message: string) => void
 ): Promise<FinalVerificationResult> => {
-  const verificationPdf = await pdfjsLib.getDocument({
-    data: bytes.slice(),
-  }).promise;
+  const verificationBlob =
+    new Blob(
+      [
+        bytes as unknown as BlobPart,
+      ],
+      {
+        type: "application/pdf",
+      }
+    );
+
+  const {
+    pdf: verificationPdf,
+    dispose: disposeVerificationPdf,
+  } = await loadPdfJsFromBlob(
+    verificationBlob
+  );
 
   let worker: any = null;
 
@@ -35,7 +50,26 @@ export const verifyFinishedPdf = async (
       .filter((item) => item.normalized.length >= 4);
 
     let selectableTextFound = false;
-    let visibleText = "";
+
+    /*
+     * Keep verification document-global while bounding memory.
+     * We remember only matched sensitive values plus a short
+     * rolling tail for matches crossing OCR page boundaries.
+     */
+    const leakedNormalized =
+      new Set<string>();
+
+    const maxTargetLength =
+      selectedValues.reduce(
+        (max, item) =>
+          Math.max(
+            max,
+            item.normalized.length
+          ),
+        0
+      );
+
+    let rollingTail = "";
 
     const { createWorker } = await import("tesseract.js");
 
@@ -121,22 +155,56 @@ export const verifyFinishedPdf = async (
           } as any
         );
 
-      visibleText +=
-        ` ${data?.text || ""}`;
+      const normalizedPageText =
+        normalizeForSafetyCheck(
+          data?.text || ""
+        );
+
+      const searchableText =
+        rollingTail +
+        normalizedPageText;
+
+      for (const item of selectedValues) {
+        if (
+          leakedNormalized.has(
+            item.normalized
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          searchableText.includes(
+            item.normalized
+          )
+        ) {
+          leakedNormalized.add(
+            item.normalized
+          );
+        }
+      }
+
+      if (maxTargetLength > 1) {
+        rollingTail =
+          searchableText.slice(
+            -(maxTargetLength - 1)
+          );
+      } else {
+        rollingTail = "";
+      }
 
       canvas.width = 1;
       canvas.height = 1;
-    }
 
-    const normalizedVisibleText =
-      normalizeForSafetyCheck(
-        visibleText
-      );
+      try {
+        page.cleanup();
+      } catch (_) {}
+    }
 
     const leakedValues =
       selectedValues
         .filter((item) =>
-          normalizedVisibleText.includes(
+          leakedNormalized.has(
             item.normalized
           )
         )
@@ -157,7 +225,7 @@ export const verifyFinishedPdf = async (
     }
 
     try {
-      await verificationPdf.destroy();
+      await disposeVerificationPdf();
     } catch (_) {}
   }
 };

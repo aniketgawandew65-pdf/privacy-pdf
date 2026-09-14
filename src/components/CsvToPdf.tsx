@@ -52,6 +52,11 @@ export const CsvToPdf: React.FC = () => {
             'csv-to-pdf'
           );
 
+        const restoredContentFiles =
+          await restoreToolWorkspaceFiles(
+            'csv-to-pdf-content'
+          );
+
         const savedState =
           restoreToolWorkspaceState<{
             activeTab?: 'upload' | 'paste';
@@ -90,13 +95,51 @@ export const CsvToPdf: React.FC = () => {
           );
         }
 
+        let restoredPaste:
+          | string
+          | null =
+            null;
+
         if (
+          restoredContentFiles[0]
+        ) {
+          try {
+            restoredPaste =
+              await restoredContentFiles[0]
+                .text();
+          } catch (_) {
+            restoredPaste = null;
+          }
+        }
+
+        /*
+         * One-time migration from the previous sessionStorage
+         * representation.
+         */
+        if (
+          restoredPaste === null &&
           typeof savedState?.pastedText ===
-          'string'
+            'string'
+        ) {
+          restoredPaste =
+            savedState.pastedText;
+        }
+
+        if (
+          !cancelled &&
+          restoredPaste !== null
         ) {
           setPastedText(
-            savedState.pastedText
+            restoredPaste
           );
+
+          try {
+            setRowCount(
+              parseDelimitedData(
+                restoredPaste
+              ).length
+            );
+          } catch (_) {}
         }
 
         if (
@@ -162,7 +205,7 @@ export const CsvToPdf: React.FC = () => {
   ]);
 
   /*
-   * Persist paste-mode data and tool settings.
+   * Keep only lightweight controls in sessionStorage.
    */
   useEffect(() => {
     if (!workspaceHydrated) return;
@@ -171,7 +214,6 @@ export const CsvToPdf: React.FC = () => {
       'csv-to-pdf',
       {
         activeTab,
-        pastedText,
         documentTitle,
         orientation,
         theme,
@@ -180,11 +222,68 @@ export const CsvToPdf: React.FC = () => {
     );
   }, [
     activeTab,
-    pastedText,
     documentTitle,
     orientation,
     theme,
     pageSize,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Paste-mode spreadsheet data is browser-local OPFS data,
+   * not sessionStorage JSON.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (
+      activeTab === 'upload' &&
+      file
+    ) {
+      void clearToolWorkspace(
+        'csv-to-pdf-content'
+      );
+      return;
+    }
+
+    if (!pastedText.trim()) {
+      void clearToolWorkspace(
+        'csv-to-pdf-content'
+      );
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void saveToolWorkspaceFiles(
+            'csv-to-pdf-content',
+            [
+              new File(
+                [pastedText],
+                'pasted-data.txt',
+                {
+                  type:
+                    'text/plain;charset=utf-8',
+                  lastModified:
+                    Date.now(),
+                }
+              ),
+            ]
+          );
+        },
+        400
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    activeTab,
+    file,
+    pastedText,
     workspaceHydrated,
   ]);
 
@@ -301,6 +400,10 @@ export const CsvToPdf: React.FC = () => {
 
     void clearToolWorkspace(
       'csv-to-pdf'
+    );
+
+    void clearToolWorkspace(
+      'csv-to-pdf-content'
     );
   };
 

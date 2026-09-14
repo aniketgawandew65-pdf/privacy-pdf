@@ -20,9 +20,28 @@ export class HardwareWorkerPool<TInput, TOutput> {
   private onTaskUpdate?: (status: TaskProgress<TOutput>) => void;
 
   constructor(customConcurrency?: number) {
-    const detectedCores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
-    // Leave at least 1 core free for UI rendering thread
-    this.maxConcurrency = customConcurrency || Math.max(1, Math.min(detectedCores - 1, 2));
+    /*
+     * PDF/image/OCR tasks can consume hundreds of MB once
+     * decoded into canvases, PDF.js structures and output
+     * buffers.
+     *
+     * Serial processing is therefore the safe default.
+     * This prevents two large jobs from overlapping on
+     * mobile and also protects desktop browsers during
+     * near-150 MB workloads.
+     *
+     * A caller may still explicitly opt into higher
+     * concurrency for known-lightweight work.
+     */
+    this.maxConcurrency =
+      customConcurrency === undefined
+        ? 1
+        : Math.max(
+            1,
+            Math.floor(
+              customConcurrency
+            )
+          );
   }
 
   public setListener(listener: (status: TaskProgress<TOutput>) => void) {

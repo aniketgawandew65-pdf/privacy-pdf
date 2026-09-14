@@ -16,7 +16,10 @@ import {
   Trash2
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
-import { pdfjsLib } from '../utils/pdfjs';
+import {
+  loadPdfJsFromBlob,
+  pdfjsLib,
+} from '../utils/pdfjs';
 
 // PDF.js worker setup
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -61,6 +64,9 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  const pdfDisposeRef =
+    useRef<(() => Promise<void>) | null>(null);
+
   // Invalidate generated download URL whenever crop changes occur
   const updateCropBox = (updater: any) => {
     setDownloadUrl(null);
@@ -69,36 +75,104 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
   // Load PDF file
   useEffect(() => {
-    if (!file) return;
+    if (!file) {
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
+
+      setPdfDoc(null);
+      setNumPages(0);
+      return;
+    }
+
     let isMounted = true;
+
+    const previousDispose =
+      pdfDisposeRef.current;
+
+    pdfDisposeRef.current = null;
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     const loadPdf = async () => {
       try {
         setError(null);
         setDownloadUrl(null);
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: arrayBuffer });
-        const doc = await loadingTask.promise;
-        if (!isMounted) return;
+
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        if (!isMounted) {
+          await loaded.dispose();
+          return;
+        }
+
+        pdfDisposeRef.current =
+          loaded.dispose;
+
+        const doc = loaded.pdf;
+
         setPdfDoc(doc);
         setNumPages(doc.numPages);
         setCurrentPage(1);
         setCrops({});
-        setCropBox({ x: 25, y: 25, width: 250, height: 340 });
+        setCropBox({
+          x: 25,
+          y: 25,
+          width: 250,
+          height: 340,
+        });
       } catch (err: any) {
-        if (isMounted) setError("Failed to load PDF file: " + err.message);
+        if (isMounted) {
+          setError(
+            "Failed to load PDF file: " +
+              err.message
+          );
+        }
       }
     };
+
     loadPdf();
-    return () => { isMounted = false; };
+
+    return () => {
+      isMounted = false;
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
+
+      setPdfDoc(null);
+    };
   }, [file]);
 
   // Render current page to canvas with high-DPI Retina resolution
   useEffect(() => {
     if (!pdfDoc || !canvasRef.current) return;
     let renderTask: any = null;
+    let activePage: any = null;
+
     const renderPage = async () => {
       try {
-        const page = await pdfDoc.getPage(currentPage);
+        const page =
+          await pdfDoc.getPage(
+            currentPage
+          );
+
+        activePage = page;
         const container = containerRef.current;
         const padding = 32;
         const availW = Math.max(200, (container ? container.clientWidth : window.innerWidth) - padding);
@@ -122,12 +196,41 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
 
-        renderTask = page.render({ canvasContext: ctx, viewport: renderViewport });
+        renderTask = page.render({
+          canvasContext: ctx,
+          viewport: renderViewport,
+        });
+
         await renderTask.promise;
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        if (activePage) {
+          try {
+            activePage.cleanup();
+          } catch (_) {}
+
+          activePage = null;
+        }
+      }
     };
+
     renderPage();
-    return () => { if (renderTask) renderTask.cancel(); };
+
+    return () => {
+      if (renderTask) {
+        try {
+          renderTask.cancel();
+        } catch (_) {}
+      }
+
+      if (activePage) {
+        try {
+          activePage.cleanup();
+        } catch (_) {}
+
+        activePage = null;
+      }
+    };
   }, [pdfDoc, currentPage, zoom]);
 
   // Lock container scroll engine during Crop mode
@@ -305,13 +408,38 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     setDownloadUrl(null);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      let outputBytes: Uint8Array | null = null;
+      let sourceBuffer:
+        | ArrayBuffer
+        | null =
+          await file.arrayBuffer();
+
+      let outputBytes:
+        | Uint8Array
+        | null = null;
       let needsDecryptedRender = false;
 
       // Pipeline 1: Ultra-fast 40ms vector crop for standard PDFs
       try {
-        const testDoc = await PDFDocument.load(arrayBuffer);
+        const testDoc =
+          await PDFDocument.load(
+            sourceBuffer
+          );
+
+        /*
+         * pdf-lib has parsed the source document.
+         * Drop our separate complete ArrayBuffer reference
+         * before crop editing and final serialization.
+         */
+        sourceBuffer = null;
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+
         const pages = testDoc.getPages();
         if (pages.length === 0) throw new Error("Zero pages");
 
@@ -359,15 +487,42 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         needsDecryptedRender = true;
       }
 
+      /*
+       * The vector attempt is finished.
+       *
+       * The raster fallback no longer needs this full source
+       * ArrayBuffer because PDF.js can reopen the original File
+       * through a browser-backed Blob URL.
+       *
+       * Release our 150 MB-class JS reference before starting
+       * page rasterization.
+       */
+      sourceBuffer = null;
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(resolve, 0)
+      );
+
       // Pipeline 2: High-speed decrypted canvas pipeline for locked receipts
       if (needsDecryptedRender) {
-        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-          data: new Uint8Array(arrayBuffer),
-          stopAtErrors: false,
-        });
-        const pdfDoc = await loadingTask.promise;
-        const numPages = pdfDoc.numPages;
-        const outPdf = await PDFDocument.create();
+        const loadedFallbackPdf =
+          await loadPdfJsFromBlob(
+            file,
+            {
+              stopAtErrors: false,
+            }
+          );
+
+        const pdfDoc =
+          loadedFallbackPdf.pdf;
+
+        try {
+          const numPages =
+            pdfDoc.numPages;
+
+          const outPdf =
+            await PDFDocument.create();
 
         const canvasEl = canvasRef.current;
         const dispW = canvasEl ? (canvasEl.clientWidth || 600) : 600;
@@ -381,15 +536,41 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                 ? (crops as any)[pageIdx]
                 : (pageIdx === (typeof currentPage !== "undefined" ? currentPage : 1) ? cropBox : null));
 
-          const page = await pdfDoc.getPage(pageNum);
-          const viewport = page.getViewport({ scale: 1.35 });
+          const page =
+            await pdfDoc.getPage(
+              pageNum
+            );
 
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = Math.floor(viewport.width);
-          pageCanvas.height = Math.floor(viewport.height);
-          const pCtx = pageCanvas.getContext("2d", { alpha: false });
+          const viewport =
+            page.getViewport({
+              scale: 1.35,
+            });
 
-          if (pCtx) {
+          const pageCanvas =
+            document.createElement(
+              "canvas"
+            );
+
+          try {
+            pageCanvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            pageCanvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+            const pCtx =
+              pageCanvas.getContext(
+                "2d",
+                {
+                  alpha: false,
+                }
+              );
+
+            if (pCtx) {
             pCtx.fillStyle = "#ffffff";
             pCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
             await (page.render({ canvasContext: pCtx as any, viewport } as any) as any).promise;
@@ -444,14 +625,61 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             }
           }
 
-          pageCanvas.width = 0;
-          pageCanvas.height = 0;
-          if (typeof (page as any).cleanup === "function") {
-            (page as any).cleanup();
+          } finally {
+            pageCanvas.width = 1;
+            pageCanvas.height = 1;
+
+            try {
+              pageCanvas.remove();
+            } catch (_) {}
+
+            try {
+              if (
+                typeof (page as any)
+                  .cleanup ===
+                "function"
+              ) {
+                (page as any)
+                  .cleanup();
+              }
+            } catch (_) {}
           }
+
+          /*
+           * Allow completed page canvas/JPEG memory to be
+           * reclaimed before rendering the next source page.
+           */
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
         }
 
-        outputBytes = await outPdf.save();
+          /*
+           * Every cropped fallback page is already embedded
+           * in outPdf. Release PDF.js before allocating the
+           * complete serialized output.
+           */
+          await loadedFallbackPdf.dispose();
+
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+
+          outputBytes =
+            await outPdf.save();
+        } finally {
+          try {
+            await loadedFallbackPdf.dispose();
+          } catch (_) {}
+        }
       }
 
       // Store download URL in state instead of auto-clicking (User clicks to save)

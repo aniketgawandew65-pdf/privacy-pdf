@@ -12,7 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { reorderAndProcessPDF, type PageConfig } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -24,10 +24,29 @@ interface OrganizePdfProps {
 interface PageThumbnail {
   originalIndex: number;
   rotation: number;
-  dataUrl: string;
+
+  /*
+   * Browser-backed JPEG Blob URL.
+   *
+   * Avoid keeping every page preview as a large base64
+   * JavaScript string.
+   */
+  previewUrl: string;
 }
 
 export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) => {
+  const revokeThumbnailUrls = (
+    items: PageThumbnail[]
+  ) => {
+    for (const item of items) {
+      try {
+        URL.revokeObjectURL(
+          item.previewUrl
+        );
+      } catch (_) {}
+    }
+  };
+
   const [pages, setPages] = useState<PageThumbnail[]>([]);
   const movePage = (fromIdx: number, toIdx: number) => {
     if (toIdx < 0 || toIdx >= pages.length) return;
@@ -64,50 +83,192 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
     revokeDownloadUrl();
 
     (async () => {
-      try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
-        const total = pdf.numPages;
-        const thumbs: PageThumbnail[] = [];
+      let disposePdf:
+        | (() => Promise<void>)
+        | null = null;
 
-        const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
+      const thumbs:
+        PageThumbnail[] = [];
+
+      try {
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        disposePdf = loaded.dispose;
+
+        const pdf = loaded.pdf;
+        const total = pdf.numPages;
+
+        const dpr = Math.max(
+          window.devicePixelRatio || 1,
+          2.0
+        );
 
         for (let i = 1; i <= total; i++) {
-          const page = await pdf.getPage(i);
-          const unscaled = page.getViewport({ scale: 1.0 });
-          const scale = (320 / unscaled.width) * dpr;
-          const viewport = page.getViewport({ scale });
-
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          const ctx = canvas.getContext('2d');
-
-          if (ctx) {
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            await page.render({ canvasContext: ctx as any, viewport } as any).promise;
-            thumbs.push({
-              originalIndex: i - 1,
-              rotation: 0,
-              dataUrl: canvas.toDataURL('image/jpeg', 0.92),
-            });
+          if (!isMounted) {
+            break;
           }
-          canvas.width = 0;
-          canvas.height = 0;
+
+          const page =
+            await pdf.getPage(i);
+
+          try {
+            const unscaled =
+              page.getViewport({
+                scale: 1.0,
+              });
+
+            const scale =
+              (320 / unscaled.width) *
+              dpr;
+
+            const viewport =
+              page.getViewport({
+                scale,
+              });
+
+            const canvas =
+              document.createElement(
+                'canvas'
+              );
+
+            try {
+              canvas.width =
+                Math.floor(
+                  viewport.width
+                );
+
+              canvas.height =
+                Math.floor(
+                  viewport.height
+                );
+
+              const ctx =
+                canvas.getContext(
+                  '2d'
+                );
+
+              if (ctx) {
+                ctx.fillStyle =
+                  "#ffffff";
+
+                ctx.fillRect(
+                  0,
+                  0,
+                  canvas.width,
+                  canvas.height
+                );
+
+                await page.render({
+                  canvasContext:
+                    ctx as any,
+                  viewport,
+                } as any).promise;
+
+                const thumbnailBlob =
+                  await new Promise<Blob>(
+                    (resolve, reject) => {
+                      canvas.toBlob(
+                        (blob) => {
+                          if (blob) {
+                            resolve(blob);
+                          } else {
+                            reject(
+                              new Error(
+                                'Unable to create page thumbnail.'
+                              )
+                            );
+                          }
+                        },
+                        'image/jpeg',
+                        0.92
+                      );
+                    }
+                  );
+
+                const previewUrl =
+                  URL.createObjectURL(
+                    thumbnailBlob
+                  );
+
+                if (isMounted) {
+                  thumbs.push({
+                    originalIndex:
+                      i - 1,
+                    rotation: 0,
+                    previewUrl,
+                  });
+                } else {
+                  URL.revokeObjectURL(
+                    previewUrl
+                  );
+                }
+              }
+            } finally {
+              canvas.width = 1;
+              canvas.height = 1;
+            }
+          } finally {
+            try {
+              page.cleanup();
+            } catch (_) {}
+          }
         }
 
-        if (isMounted) setPages(thumbs);
+        if (isMounted) {
+          setPages(thumbs);
+        }
       } catch (err: any) {
-        console.error('Failed to load page thumbnails:', err);
-        if (isMounted) setErrorMessage(err?.message || String(err));
+        /*
+         * If generation failed before the thumbnails were
+         * committed to React state, release any Blob URLs
+         * already created during this run.
+         */
+        revokeThumbnailUrls(
+          thumbs
+        );
+
+        console.error(
+          'Failed to load page thumbnails:',
+          err
+        );
+
+        if (isMounted) {
+          setErrorMessage(
+            err?.message ||
+              String(err)
+          );
+        }
       } finally {
-        if (isMounted) setIsLoadingPages(false);
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+        }
+
+        if (isMounted) {
+          setIsLoadingPages(false);
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      /*
+       * The source file changed or this tool unmounted.
+       * All thumbnail Blob URLs created for this document
+       * can now be released.
+       */
+      setPages((current) => {
+        revokeThumbnailUrls(
+          current
+        );
+
+        return [];
+      });
     };
   }, [file]);
 
@@ -120,7 +281,22 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
   };
 
   const handleDeletePage = (index: number) => {
-    setPages((prev) => prev.filter((_, i) => i !== index));
+    const removed =
+      pages[index];
+
+    if (removed) {
+      try {
+        URL.revokeObjectURL(
+          removed.previewUrl
+        );
+      } catch (_) {}
+    }
+
+    setPages((prev) =>
+      prev.filter(
+        (_, i) => i !== index
+      )
+    );
   };
 
   const handleDragStart = (index: number) => {
@@ -256,7 +432,7 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
 
                     <div className="w-full aspect-[1/1.414] bg-zinc-900 rounded-lg overflow-hidden flex items-center justify-center p-1">
                       <img
-                        src={p.dataUrl}
+                        src={p.previewUrl}
                         alt={`Page ${idx + 1}`}
                         style={{ transform: `rotate(${p.rotation}deg)` }}
                         className="w-full h-full object-contain rounded transition-transform duration-200"

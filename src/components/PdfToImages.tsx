@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import JSZip from 'jszip';
+import React, { useEffect, useRef, useState } from 'react';
+import { Zip, ZipPassThrough } from 'fflate';
 import {
   Upload,
   FileText,
@@ -24,11 +24,14 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
   file,
   onFileChange,
 }) => {
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<Blob[]>([]);
+  const [imageUrls, setImageUrls] =
+    useState<string[]>([]);
   const [outputFormat, setOutputFormat] =
     useState<OutputFormat>('jpg');
   const [quality, setQuality] = useState(92);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isBuildingZip, setIsBuildingZip] = useState(false);
   const [progressText, setProgressText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +41,32 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
     createUrl,
     revoke: revokeZipUrl,
   } = useObjectUrl();
+
+  useEffect(() => {
+    const urls =
+      images.map(
+        (blob) =>
+          URL.createObjectURL(
+            blob
+          )
+      );
+
+    setImageUrls(
+      urls
+    );
+
+    return () => {
+      for (
+        const url of urls
+      ) {
+        try {
+          URL.revokeObjectURL(
+            url
+          );
+        } catch (_) {}
+      }
+    };
+  }, [images]);
 
   const resetOutput = () => {
     setImages([]);
@@ -63,34 +92,188 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
 
       setImages(extractedImages);
 
-      if (extractedImages.length > 0) {
-        setProgressText('Bundling pages into ZIP archive...');
+      /*
+       * Do not build the ZIP here.
+       *
+       * Keep conversion memory limited to the page-image
+       * Blobs. The archive is generated only if the user
+       * explicitly asks to download all pages.
+       */
 
-        const zip = new JSZip();
-        const base =
-          file.name.replace(/\.[^/.]+$/, '');
-
-        for (let i = 0; i < extractedImages.length; i++) {
-          const response = await fetch(extractedImages[i]);
-          const blob = await response.blob();
-
-          zip.file(
-            `${base}_page_${i + 1}.${outputFormat}`,
-            blob
-          );
-        }
-
-        const zipBlob = await zip.generateAsync({
-          type: 'blob',
-          compression: 'DEFLATE',
-        });
-
-        createUrl(zipBlob);
-      }
     } catch (err) {
       console.error('PDF to image conversion error:', err);
     } finally {
       setIsProcessing(false);
+      setProgressText('');
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    if (
+      !file ||
+      images.length === 0
+    ) {
+      return;
+    }
+
+    setIsBuildingZip(true);
+
+    try {
+      let downloadUrl =
+        zipUrl;
+
+      if (!downloadUrl) {
+        setProgressText(
+          'Bundling pages into ZIP archive...'
+        );
+
+        const base =
+          file.name.replace(
+            /\.[^/.]+$/,
+            ''
+          );
+
+        const chunks:
+          ArrayBuffer[] = [];
+
+        let resolveZip!:
+          (blob: Blob) => void;
+
+        let rejectZip!:
+          (error: unknown) => void;
+
+        const zipResult =
+          new Promise<Blob>(
+            (resolve, reject) => {
+              resolveZip =
+                resolve;
+
+              rejectZip =
+                reject;
+            }
+          );
+
+        const zip =
+          new Zip(
+            (
+              error,
+              data,
+              final
+            ) => {
+              if (error) {
+                rejectZip(
+                  error
+                );
+                return;
+              }
+
+              if (
+                data &&
+                data.length
+              ) {
+                const copy =
+                  new Uint8Array(
+                    data.length
+                  );
+
+                copy.set(
+                  data
+                );
+
+                chunks.push(
+                  copy.buffer
+                );
+              }
+
+              if (final) {
+                resolveZip(
+                  new Blob(
+                    chunks,
+                    {
+                      type:
+                        'application/zip',
+                    }
+                  )
+                );
+              }
+            }
+          );
+
+        for (
+          let i = 0;
+          i < images.length;
+          i++
+        ) {
+          const entry =
+            new ZipPassThrough(
+              `${base}_page_${i + 1}.${outputFormat}`
+            );
+
+          zip.add(
+            entry
+          );
+
+          /*
+           * Only one page image is materialized as an
+           * ArrayBuffer at a time.
+           */
+          const bytes =
+            new Uint8Array(
+              await images[i].arrayBuffer()
+            );
+
+          entry.push(
+            bytes,
+            true
+          );
+
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+        }
+
+        zip.end();
+
+        const zipBlob =
+          await zipResult;
+
+        downloadUrl =
+          createUrl(
+            zipBlob
+          );
+      }
+
+      const anchor =
+        document.createElement(
+          'a'
+        );
+
+      anchor.href =
+        downloadUrl;
+
+      anchor.download =
+        `${file.name.replace(
+          /\.[^/.]+$/,
+          ''
+        )}_pages_${outputFormat}.zip`;
+
+      document.body.appendChild(
+        anchor
+      );
+
+      anchor.click();
+      anchor.remove();
+    } catch (err) {
+      console.error(
+        'ZIP creation error:',
+        err
+      );
+    } finally {
+      setIsBuildingZip(false);
       setProgressText('');
     }
   };
@@ -270,23 +453,28 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
                   </span>
                 </div>
 
-                {zipUrl && (
-                  <a
-                    href={zipUrl}
-                    download={`${file.name.replace(
-                      /\.[^/.]+$/,
-                      ''
-                    )}_pages_${outputFormat}.zip`}
-                    className="w-full sm:w-auto px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5"
-                  >
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  disabled={isBuildingZip}
+                  className="w-full sm:w-auto px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5"
+                >
+                  {isBuildingZip ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
                     <Archive className="w-3.5 h-3.5" />
-                    <span>Download All as ZIP</span>
-                  </a>
-                )}
+                  )}
+
+                  <span>
+                    {isBuildingZip
+                      ? 'Creating ZIP...'
+                      : 'Download All as ZIP'}
+                  </span>
+                </button>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-80 overflow-y-auto pr-1">
-                {images.map((imgUrl, index) => (
+                {imageUrls.map((imgUrl, index) => (
                   <div
                     key={index}
                     className="relative border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950 p-2"

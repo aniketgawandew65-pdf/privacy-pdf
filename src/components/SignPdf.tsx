@@ -23,7 +23,10 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import {
+  loadPdfJsFromBlob,
+  pdfjsLib,
+} from '../utils/pdfjs';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -125,6 +128,9 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfDocRef = useRef<any>(null);
 
+  const pdfDisposeRef =
+    useRef<(() => Promise<void>) | null>(null);
+
   // Drawing state
   const isPadDrawing = useRef(false);
 
@@ -156,11 +162,32 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       setSuccessMessage(null);
       setZoomLevel(1.0);
       revokeDownloadUrl();
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
       pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
+
       return;
     }
 
     let isMounted = true;
+
+    const previousDispose =
+      pdfDisposeRef.current;
+
+    pdfDisposeRef.current = null;
+    pdfDocRef.current = null;
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     revokeDownloadUrl();
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -169,19 +196,30 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const uint8 = new Uint8Array(buffer);
-
         try {
-          const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: uint8.slice() });
-          const doc = await loadingTask.promise;
-          if (isMounted) {
-            pdfDocRef.current = doc;
-            setIsProtected(false);
-            setIsUnlocked(true);
-            setTotalPages(doc.numPages);
-            setCurrentPage(1);
+          const loaded =
+            await loadPdfJsFromBlob(
+              file
+            );
+
+          if (!isMounted) {
+            await loaded.dispose();
+            return;
           }
+
+          const doc =
+            loaded.pdf;
+
+          pdfDocRef.current =
+            doc;
+
+          pdfDisposeRef.current =
+            loaded.dispose;
+
+          setIsProtected(false);
+          setIsUnlocked(true);
+          setTotalPages(doc.numPages);
+          setCurrentPage(1);
         } catch (err: any) {
           if (
             err?.name === 'PasswordException' ||
@@ -212,6 +250,16 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
     return () => {
       isMounted = false;
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
     };
   }, [file, revokeDownloadUrl]);
 
@@ -227,16 +275,36 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     setSuccessMessage(null);
 
     try {
-      const buffer = await file.arrayBuffer();
-      const uint8 = new Uint8Array(buffer);
+      const previousDispose =
+        pdfDisposeRef.current;
 
-      const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false,
-        data: uint8.slice(),
-        password: password.trim(),
-      });
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
 
-      const doc = await loadingTask.promise;
-      pdfDocRef.current = doc;
+      if (previousDispose) {
+        try {
+          await previousDispose();
+        } catch (_) {}
+      }
+
+      const loaded =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            password:
+              password.trim(),
+          }
+        );
+
+      const doc =
+        loaded.pdf;
+
+      pdfDocRef.current =
+        doc;
+
+      pdfDisposeRef.current =
+        loaded.dispose;
+
       setIsUnlocked(true);
       setTotalPages(doc.numPages);
       setCurrentPage(1);
@@ -254,9 +322,18 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     if (!pdfDocRef.current || !pageCanvasRef.current || !isUnlocked) return;
     setIsLoadingPage(true);
 
+    let page: any = null;
+
     try {
-      const page = await pdfDocRef.current.getPage(currentPage);
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      page =
+        await pdfDocRef.current.getPage(
+          currentPage
+        );
+
+      const unscaledViewport =
+        page.getViewport({
+          scale: 1.0,
+        });
 
       const baseWidth = 540;
       const aspectRatio = unscaledViewport.height / unscaledViewport.width;
@@ -284,6 +361,14 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
     } catch (err) {
       console.error('Page render error:', err);
     } finally {
+      if (page) {
+        try {
+          page.cleanup();
+        } catch (_) {}
+
+        page = null;
+      }
+
       setIsLoadingPage(false);
     }
   }, [currentPage, zoomLevel, isUnlocked]);

@@ -13,7 +13,7 @@ import {
   ZoomOut,
   RotateCcw,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
   saveToolWorkspaceFiles,
@@ -21,10 +21,6 @@ import {
   clearToolWorkspace,
 } from '../utils/localWorkspace';
 
-
-if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  
-}
 
 type DiffViewMode = 'overlay' | 'split';
 
@@ -55,6 +51,12 @@ export const ComparePdf: React.FC = () => {
 
   const fileInputARef = useRef<HTMLInputElement>(null);
   const fileInputBRef = useRef<HTMLInputElement>(null);
+
+  const pdfDisposeARef =
+    useRef<(() => Promise<void>) | null>(null);
+
+  const pdfDisposeBRef =
+    useRef<(() => Promise<void>) | null>(null);
 
   /*
    * Restore Compare PDF inputs after Preview -> Back.
@@ -140,80 +142,210 @@ export const ComparePdf: React.FC = () => {
   // Load Document A
   useEffect(() => {
     if (!fileA) {
+      const dispose =
+        pdfDisposeARef.current;
+
+      pdfDisposeARef.current = null;
+
       setPdfDocA(null);
       setPageCountA(0);
+
+      if (dispose) {
+        void dispose();
+      }
+
       return;
     }
 
     let isMounted = true;
+
+    const previousDispose =
+      pdfDisposeARef.current;
+
+    pdfDisposeARef.current = null;
+    setPdfDocA(null);
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     (async () => {
       try {
         setErrorMessage(null);
-        const comparisonSizeCheck = validateTaskFiles(
-          [fileA, fileB].filter(
-            (candidate): candidate is File => Boolean(candidate)
-          ),
-          'Comparison files'
-        );
 
-        if (!comparisonSizeCheck.allowed) {
-          setErrorMessage(comparisonSizeCheck.errorMessage);
+        const comparisonSizeCheck =
+          validateTaskFiles(
+            [fileA, fileB].filter(
+              (
+                candidate
+              ): candidate is File =>
+                Boolean(candidate)
+            ),
+            'Comparison files'
+          );
+
+        if (
+          !comparisonSizeCheck.allowed
+        ) {
+          setErrorMessage(
+            comparisonSizeCheck.errorMessage
+          );
+
           return;
         }
 
-        const buffer = await fileA.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
-        if (!isMounted) return;
-        setPdfDocA(doc);
-        setPageCountA(doc.numPages);
+        const loaded =
+          await loadPdfJsFromBlob(
+            fileA
+          );
+
+        if (!isMounted) {
+          await loaded.dispose();
+          return;
+        }
+
+        pdfDisposeARef.current =
+          loaded.dispose;
+
+        setPdfDocA(
+          loaded.pdf
+        );
+
+        setPageCountA(
+          loaded.pdf.numPages
+        );
       } catch (err: any) {
-        console.error('Failed to load Document A:', err);
-        if (isMounted) setErrorMessage(err.message || 'Failed to open Document A.');
+        console.error(
+          'Failed to load Document A:',
+          err
+        );
+
+        if (isMounted) {
+          setErrorMessage(
+            err.message ||
+              'Failed to open Document A.'
+          );
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      const dispose =
+        pdfDisposeARef.current;
+
+      pdfDisposeARef.current = null;
+      setPdfDocA(null);
+
+      if (dispose) {
+        void dispose();
+      }
     };
   }, [fileA]);
 
   // Load Document B
   useEffect(() => {
     if (!fileB) {
+      const dispose =
+        pdfDisposeBRef.current;
+
+      pdfDisposeBRef.current = null;
+
       setPdfDocB(null);
       setPageCountB(0);
+
+      if (dispose) {
+        void dispose();
+      }
+
       return;
     }
 
     let isMounted = true;
+
+    const previousDispose =
+      pdfDisposeBRef.current;
+
+    pdfDisposeBRef.current = null;
+    setPdfDocB(null);
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     (async () => {
       try {
         setErrorMessage(null);
-        const comparisonSizeCheck = validateTaskFiles(
-          [fileA, fileB].filter(
-            (candidate): candidate is File => Boolean(candidate)
-          ),
-          'Comparison files'
-        );
 
-        if (!comparisonSizeCheck.allowed) {
-          setErrorMessage(comparisonSizeCheck.errorMessage);
+        const comparisonSizeCheck =
+          validateTaskFiles(
+            [fileA, fileB].filter(
+              (
+                candidate
+              ): candidate is File =>
+                Boolean(candidate)
+            ),
+            'Comparison files'
+          );
+
+        if (
+          !comparisonSizeCheck.allowed
+        ) {
+          setErrorMessage(
+            comparisonSizeCheck.errorMessage
+          );
+
           return;
         }
 
-        const buffer = await fileB.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
-        if (!isMounted) return;
-        setPdfDocB(doc);
-        setPageCountB(doc.numPages);
+        const loaded =
+          await loadPdfJsFromBlob(
+            fileB
+          );
+
+        if (!isMounted) {
+          await loaded.dispose();
+          return;
+        }
+
+        pdfDisposeBRef.current =
+          loaded.dispose;
+
+        setPdfDocB(
+          loaded.pdf
+        );
+
+        setPageCountB(
+          loaded.pdf.numPages
+        );
       } catch (err: any) {
-        console.error('Failed to load Document B:', err);
-        if (isMounted) setErrorMessage(err.message || 'Failed to open Document B.');
+        console.error(
+          'Failed to load Document B:',
+          err
+        );
+
+        if (isMounted) {
+          setErrorMessage(
+            err.message ||
+              'Failed to open Document B.'
+          );
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      const dispose =
+        pdfDisposeBRef.current;
+
+      pdfDisposeBRef.current = null;
+      setPdfDocB(null);
+
+      if (dispose) {
+        void dispose();
+      }
     };
   }, [fileB]);
 
@@ -225,9 +357,23 @@ export const ComparePdf: React.FC = () => {
     setIsRendering(true);
     setErrorMessage(null);
 
+    let pageA: any = null;
+    let pageB: any = null;
+
     try {
-      const pageA = currentPage <= pageCountA ? await pdfDocA.getPage(currentPage) : null;
-      const pageB = currentPage <= pageCountB ? await pdfDocB.getPage(currentPage) : null;
+      pageA =
+        currentPage <= pageCountA
+          ? await pdfDocA.getPage(
+              currentPage
+            )
+          : null;
+
+      pageB =
+        currentPage <= pageCountB
+          ? await pdfDocB.getPage(
+              currentPage
+            )
+          : null;
 
       const scale = 1.4;
       const viewportA = pageA ? pageA.getViewport({ scale }) : null;
@@ -302,9 +448,32 @@ export const ComparePdf: React.FC = () => {
         }
       }
     } catch (err: any) {
-      console.error('Diff render error:', err);
-      setErrorMessage(err.message || 'Error rendering document comparison.');
+      console.error(
+        'Diff render error:',
+        err
+      );
+
+      setErrorMessage(
+        err.message ||
+          'Error rendering document comparison.'
+      );
     } finally {
+      if (pageA) {
+        try {
+          pageA.cleanup();
+        } catch (_) {}
+
+        pageA = null;
+      }
+
+      if (pageB) {
+        try {
+          pageB.cleanup();
+        } catch (_) {}
+
+        pageB = null;
+      }
+
       setIsRendering(false);
     }
   }, [pdfDocA, pdfDocB, currentPage, pageCountA, pageCountB, viewMode, overlayOpacity]);

@@ -20,7 +20,7 @@ import {
   AlignCenter,
   AlignRight,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import {
   applyVisualOverlays,
   type VisualOverlayItem,
@@ -184,48 +184,154 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     }
 
     let isMounted = true;
+
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
+    let activePage: any = null;
+    let renderTask: any = null;
+
     (async () => {
       try {
-        const fileBytes = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(fileBytes).slice() });
-        const pdf = await loadingTask.promise;
-        if (!isMounted) return;
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
 
-        setTotalPages(pdf.numPages);
-        const page = await pdf.getPage(currentPage);
+        disposePdf =
+          loaded.dispose;
+
+        if (!isMounted) {
+          await disposePdf();
+          disposePdf = null;
+          return;
+        }
+
+        const pdf =
+          loaded.pdf;
+
+        setTotalPages(
+          pdf.numPages
+        );
+
+        const page =
+          await pdf.getPage(
+            currentPage
+          );
+
+        activePage = page;
+
         const retinaScale = 2.0;
-        const viewport = page.getViewport({ scale: retinaScale });
+
+        const viewport =
+          page.getViewport({
+            scale: retinaScale,
+          });
 
         // Canvas is displayed at a fixed base width of 500px.
         // Store the matching height so the zoom sizing wrapper
         // always has the exact same aspect ratio as the PDF.
         setPageDisplayHeight(
-          500 * (viewport.height / viewport.width)
+          500 *
+            (
+              viewport.height /
+              viewport.width
+            )
         );
 
-        const canvas = canvasRef.current;
+        const canvas =
+          canvasRef.current;
+
         if (canvas) {
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          const ctx = canvas.getContext('2d');
+          canvas.width =
+            Math.floor(
+              viewport.width
+            );
+
+          canvas.height =
+            Math.floor(
+              viewport.height
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d'
+            );
+
           if (ctx) {
-            await (
+            renderTask =
               page.render({
-                canvasContext: ctx as any,
+                canvasContext:
+                  ctx as any,
                 viewport,
-              } as any) as any
-            ).promise;
-            if (isMounted) setErrorMessage(null);
+              } as any);
+
+            await renderTask.promise;
+
+            if (isMounted) {
+              setErrorMessage(
+                null
+              );
+            }
           }
         }
       } catch (err: any) {
-        console.error('Render error:', err);
-        if (isMounted) setErrorMessage('Failed to render PDF page.');
+        if (
+          err?.name !==
+          'RenderingCancelledException'
+        ) {
+          console.error(
+            'Render error:',
+            err
+          );
+
+          if (isMounted) {
+            setErrorMessage(
+              'Failed to render PDF page.'
+            );
+          }
+        }
+      } finally {
+        if (activePage) {
+          try {
+            activePage.cleanup();
+          } catch (_) {}
+
+          activePage = null;
+        }
+
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+
+          disposePdf = null;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      if (renderTask) {
+        try {
+          renderTask.cancel();
+        } catch (_) {}
+      }
+
+      if (activePage) {
+        try {
+          activePage.cleanup();
+        } catch (_) {}
+
+        activePage = null;
+      }
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
     };
   }, [file, currentPage]);
 

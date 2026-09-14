@@ -134,6 +134,11 @@ export const HtmlToPdf: React.FC = () => {
             'html-to-pdf'
           );
 
+        const restoredContentFiles =
+          await restoreToolWorkspaceFiles(
+            'html-to-pdf-content'
+          );
+
         const savedState =
           restoreToolWorkspaceState<{
             activeTab?: 'paste' | 'upload';
@@ -155,12 +160,56 @@ export const HtmlToPdf: React.FC = () => {
           );
         }
 
+        let restoredHtml:
+          | string
+          | null =
+            null;
+
+        /*
+         * Uploaded HTML is already stored as the original OPFS
+         * source file. Do not keep a second 150 MB-class copy.
+         */
         if (
+          savedState?.activeTab ===
+            'upload' &&
+          restored[0]
+        ) {
+          try {
+            restoredHtml =
+              await restored[0].text();
+          } catch (_) {
+            restoredHtml = null;
+          }
+        } else if (
+          restoredContentFiles[0]
+        ) {
+          try {
+            restoredHtml =
+              await restoredContentFiles[0]
+                .text();
+          } catch (_) {
+            restoredHtml = null;
+          }
+        }
+
+        /*
+         * One-time migration from the old sessionStorage state.
+         */
+        if (
+          restoredHtml === null &&
           typeof savedState?.htmlContent ===
-          'string'
+            'string'
+        ) {
+          restoredHtml =
+            savedState.htmlContent;
+        }
+
+        if (
+          !cancelled &&
+          restoredHtml !== null
         ) {
           setHtmlContent(
-            savedState.htmlContent
+            restoredHtml
           );
         }
 
@@ -224,7 +273,7 @@ export const HtmlToPdf: React.FC = () => {
   ]);
 
   /*
-   * Save editable HTML and layout controls.
+   * Lightweight UI controls stay in sessionStorage.
    */
   useEffect(() => {
     if (!workspaceHydrated) return;
@@ -233,7 +282,6 @@ export const HtmlToPdf: React.FC = () => {
       'html-to-pdf',
       {
         activeTab,
-        htmlContent,
         fileName,
         pageSize,
         orientation,
@@ -241,10 +289,68 @@ export const HtmlToPdf: React.FC = () => {
     );
   }, [
     activeTab,
-    htmlContent,
     fileName,
     pageSize,
     orientation,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Paste-mode HTML belongs in OPFS.
+   *
+   * Upload mode already has the original source file in OPFS,
+   * so avoid duplicating that potentially very large document.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (
+      activeTab === 'upload' &&
+      file
+    ) {
+      void clearToolWorkspace(
+        'html-to-pdf-content'
+      );
+      return;
+    }
+
+    if (!htmlContent.trim()) {
+      void clearToolWorkspace(
+        'html-to-pdf-content'
+      );
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void saveToolWorkspaceFiles(
+            'html-to-pdf-content',
+            [
+              new File(
+                [htmlContent],
+                'editor.html',
+                {
+                  type: 'text/html',
+                  lastModified:
+                    Date.now(),
+                }
+              ),
+            ]
+          );
+        },
+        400
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    activeTab,
+    file,
+    htmlContent,
     workspaceHydrated,
   ]);
 
@@ -318,6 +424,10 @@ export const HtmlToPdf: React.FC = () => {
 
     void clearToolWorkspace(
       'html-to-pdf'
+    );
+
+    void clearToolWorkspace(
+      'html-to-pdf-content'
     );
   };
 

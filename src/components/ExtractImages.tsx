@@ -1,4 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+} from 'react';
 import {
   Download,
   Loader2,
@@ -29,8 +33,45 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
   const [hasScanned, setHasScanned] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [
+    imageUrls,
+    setImageUrls,
+  ] = useState<Record<string, string>>({});
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: zipUrl, createUrl, revoke: revokeZipUrl } = useObjectUrl();
+
+  useEffect(() => {
+    const nextUrls:
+      Record<string, string> = {};
+
+    for (
+      const image of
+      extractedImages
+    ) {
+      nextUrls[image.id] =
+        URL.createObjectURL(
+          image.blob
+        );
+    }
+
+    setImageUrls(
+      nextUrls
+    );
+
+    return () => {
+      for (
+        const url of
+        Object.values(
+          nextUrls
+        )
+      ) {
+        URL.revokeObjectURL(
+          url
+        );
+      }
+    };
+  }, [extractedImages]);
 
   const handleScanAndExtract = async () => {
     if (!file) return;
@@ -195,7 +236,7 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
                   >
                     <div className="w-full aspect-square bg-zinc-900 flex items-center justify-center p-2 overflow-hidden">
                       <img
-                        src={img.dataUrl}
+                        src={imageUrls[img.id]}
                         alt={img.name}
                         className="max-w-full max-h-full object-contain"
                       />
@@ -205,7 +246,7 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
                         {img.width}×{img.height}
                       </span>
                       <a
-                        href={img.dataUrl}
+                        href={imageUrls[img.id]}
                         download={img.name}
                         className="p-1 rounded text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition"
                         title="Download image"

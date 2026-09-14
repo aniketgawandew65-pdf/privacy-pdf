@@ -1,4 +1,7 @@
-import { safeStorage } from '../utils/safeStorage';
+import {
+  safeStorage,
+  safeSessionStorage,
+} from '../utils/safeStorage';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Loader2,
@@ -87,7 +90,21 @@ const PROVIDERS: ProviderOption[] = [
 ];
 
 export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }) => {
-  const [apiKey, setApiKey] = useState(() => safeStorage.getItem('1into1_user_ai_key') || '');
+  /*
+   * Older builds persisted the user's third-party API key in
+   * localStorage. Purge that legacy copy immediately.
+   */
+  try {
+    safeStorage.removeItem(
+      '1into1_user_ai_key'
+    );
+  } catch (_) {}
+  const [apiKey, setApiKey] = useState(
+    () =>
+      safeSessionStorage.getItem(
+        '1into1_user_ai_key'
+      ) || ''
+  );
   const [selectedProvider, setSelectedProvider] = useState<string>(() => {
     return safeStorage.getItem('1into1_user_ai_provider') || 'groq';
   });
@@ -117,7 +134,10 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
   const handleKeyChange = (key: string) => {
     const trimmed = key.trim();
     setApiKey(trimmed);
-    safeStorage.setItem('1into1_user_ai_key', trimmed);
+    safeSessionStorage.setItem(
+      '1into1_user_ai_key',
+      trimmed
+    );
     setErrorMessage(null);
 
     if (trimmed.startsWith('gsk_') && selectedProvider !== 'groq') {

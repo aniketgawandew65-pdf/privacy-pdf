@@ -19,7 +19,10 @@ import {
   Upload,
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
-import { pdfjsLib } from "../utils/pdfjs";
+import {
+  loadPdfJsFromBlob,
+  pdfjsLib,
+} from "../utils/pdfjs";
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -543,6 +546,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             'private-pii-redactor'
           );
 
+        const restoredSensitiveStateFiles =
+          await restoreToolWorkspaceFiles(
+            'private-pii-redactor-state'
+          );
+
+        /*
+         * findings/manualReviewFindings are kept here only as
+         * legacy migration fields. New builds never write raw
+         * PII values to sessionStorage.
+         */
         const savedState =
           restoreToolWorkspaceState<{
             findings?: Finding[];
@@ -550,6 +563,90 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             error?: string | null;
             status?: string | null;
           }>('private-pii-redactor');
+
+        let sensitiveState:
+          | {
+              findings?: Finding[];
+              manualReviewFindings?: Finding[];
+            }
+          | null =
+            null;
+
+        if (
+          restoredSensitiveStateFiles[0]
+        ) {
+          try {
+            sensitiveState =
+              JSON.parse(
+                await restoredSensitiveStateFiles[0]
+                  .text()
+              );
+          } catch (_) {
+            sensitiveState = null;
+          }
+        }
+
+        /*
+         * Migrate a workspace created by the previous build.
+         * The old sessionStorage entry is immediately replaced
+         * with a small, non-PII state object.
+         */
+        if (
+          sensitiveState === null &&
+          (
+            Array.isArray(
+              savedState?.findings
+            ) ||
+            Array.isArray(
+              savedState?.manualReviewFindings
+            )
+          )
+        ) {
+          sensitiveState = {
+            findings:
+              savedState?.findings || [],
+            manualReviewFindings:
+              savedState
+                ?.manualReviewFindings ||
+              [],
+          };
+
+          await saveToolWorkspaceFiles(
+            'private-pii-redactor-state',
+            [
+              new File(
+                [
+                  JSON.stringify(
+                    sensitiveState
+                  ),
+                ],
+                'pii-findings.json',
+                {
+                  type:
+                    'application/json',
+                  lastModified:
+                    Date.now(),
+                }
+              ),
+            ]
+          );
+        }
+
+        /*
+         * Purge any legacy raw findings from sessionStorage now,
+         * before the component continues.
+         */
+        saveToolWorkspaceState(
+          'private-pii-redactor',
+          {
+            error:
+              savedState?.error ??
+              null,
+            status:
+              savedState?.status ??
+              null,
+          }
+        );
 
         if (cancelled) return;
 
@@ -585,21 +682,23 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
         if (
           Array.isArray(
-            savedState?.findings
+            sensitiveState?.findings
           )
         ) {
           setFindings(
-            savedState!.findings!
+            sensitiveState!.findings!
           );
         }
 
         if (
           Array.isArray(
-            savedState?.manualReviewFindings
+            sensitiveState
+              ?.manualReviewFindings
           )
         ) {
           setManualReviewFindings(
-            savedState!.manualReviewFindings!
+            sensitiveState!
+              .manualReviewFindings!
           );
         }
 
@@ -668,14 +767,41 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return;
     }
 
+    /*
+     * Keep only non-sensitive UI/status information in
+     * sessionStorage.
+     */
     saveToolWorkspaceState(
       'private-pii-redactor',
       {
-        findings,
-        manualReviewFindings,
         error,
         status,
       }
+    );
+
+    /*
+     * Finding.value contains the actual detected PII.
+     * Keep that payload exclusively in browser-local OPFS.
+     */
+    void saveToolWorkspaceFiles(
+      'private-pii-redactor-state',
+      [
+        new File(
+          [
+            JSON.stringify({
+              findings,
+              manualReviewFindings,
+            }),
+          ],
+          'pii-findings.json',
+          {
+            type:
+              'application/json',
+            lastModified:
+              Date.now(),
+          }
+        ),
+      ]
     );
   }, [
     file,
@@ -888,6 +1014,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     );
 
     void clearToolWorkspace(
+      'private-pii-redactor-state'
+    );
+
+    void clearToolWorkspace(
       'private-pii-redactor-pending'
     );
 
@@ -914,14 +1044,13 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   };
 
   const scanPdfWithTextLayer = async (nextFile: File) => {
-    const bytes = new Uint8Array(await nextFile.arrayBuffer());
+    const {
+      pdf,
+      dispose: disposePdf,
+    } = await loadPdfJsFromBlob(
+      nextFile
+    );
 
-    const loadingTask = pdfjsLib.getDocument({
-      data: bytes,
-      isEvalSupported: false,
-    });
-
-    const pdf = await loadingTask.promise;
     const nextFindings: Finding[] = [];
 
     let ocrWorker: any = null;
@@ -1415,7 +1544,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       }
 
       try {
-        await pdf.destroy();
+        await disposePdf();
       } catch (_) {}
     }
   };
@@ -1761,22 +1890,23 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     requestedPages?: number[],
     appendToExisting = false
   ) => {
-    const bytes = new Uint8Array(
-      await nextFile.arrayBuffer()
-    );
-
     let pdf: any = null;
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
     let ocrWorker: any = null;
 
     const nextFindings: Finding[] = [];
 
     try {
-      const loadingTask = pdfjsLib.getDocument({
-        isEvalSupported: false,
-        data: bytes.slice(),
-      });
+      const loaded =
+        await loadPdfJsFromBlob(
+          nextFile
+        );
 
-      pdf = await loadingTask.promise;
+      pdf = loaded.pdf;
+      disposePdf = loaded.dispose;
 
       const pagesToScan =
         requestedPages && requestedPages.length
@@ -1932,9 +2062,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         } catch (_) {}
       }
 
-      if (pdf) {
+      if (disposePdf) {
         try {
-          await pdf.destroy();
+          await disposePdf();
         } catch (_) {}
       }
     }
@@ -1946,17 +2076,19 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     totalPages: number;
     scannedPages: number[];
   }> => {
-    const bytes = new Uint8Array(
-      await nextFile.arrayBuffer()
-    );
-
     let pdf: any = null;
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
 
     try {
-      pdf = await pdfjsLib.getDocument({
-        isEvalSupported: false,
-        data: bytes.slice(),
-      }).promise;
+      const loaded =
+        await loadPdfJsFromBlob(
+          nextFile
+        );
+
+      pdf = loaded.pdf;
+      disposePdf = loaded.dispose;
 
       const scannedPages: number[] = [];
 
@@ -2011,9 +2143,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       throw err;
     } finally {
-      if (pdf) {
+      if (disposePdf) {
         try {
-          await pdf.destroy();
+          await disposePdf();
         } catch (_) {}
       }
     }
@@ -2258,13 +2390,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const redactPdf = async (): Promise<boolean> => {
     if (!file) return false;
 
-    const originalBytes = new Uint8Array(
-      await file.arrayBuffer()
+    const {
+      pdf,
+      dispose: disposePdf,
+    } = await loadPdfJsFromBlob(
+      file
     );
-
-    const pdf = await pdfjsLib.getDocument({
-      data: originalBytes.slice(),
-    }).promise;
 
     const selected = findings.filter(
       (finding) =>
@@ -2289,180 +2420,256 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
         );
 
-        const page = await pdf.getPage(pageNumber);
-
-        const baseViewport = page.getViewport({
-          scale: 1,
-        });
-
-        const renderViewport = page.getViewport({
-          scale: renderScale,
-        });
-
-        const canvas =
-          document.createElement("canvas");
-
-        canvas.width = Math.ceil(
-          renderViewport.width
-        );
-
-        canvas.height = Math.ceil(
-          renderViewport.height
-        );
-
-        const ctx = canvas.getContext(
-          "2d",
-          { alpha: false }
-        );
-
-        if (!ctx) {
-          throw new Error(
-            "Unable to create secure PDF renderer."
-          );
-        }
-
-        ctx.fillStyle = "#ffffff";
-
-        ctx.fillRect(
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
-
-        await page.render({
-          canvasContext: ctx,
-          viewport: renderViewport,
-          canvas,
-        } as any).promise;
-
-        const pageFindings = selected.filter(
-          (finding) =>
-            finding.page === pageNumber
-        );
-
-        ctx.fillStyle = "#000000";
-
-        for (const finding of pageFindings) {
-          const box = finding.box!;
-
-          const normalizedValue =
-            normalizeForSafetyCheck(
-              finding.value
-            );
-
-          const strengthen =
-            strengthenValues.has(
-              normalizedValue
-            );
-
-          /*
-           * First pass uses the exact detected box.
-           *
-           * If verification says this specific value
-           * remains readable, the second pass adds
-           * generous privacy padding around ONLY that
-           * failed box.
-           */
-          const padX = strengthen
-            ? Math.max(
-                6,
-                box.height * 0.45
-              )
-            : 0;
-
-          const padY = strengthen
-            ? Math.max(
-                4,
-                box.height * 0.30
-              )
-            : 0;
-
-          const left = Math.max(
-            0,
-            (box.x - padX) * renderScale
+        const page =
+          await pdf.getPage(
+            pageNumber
           );
 
-          const top = Math.max(
-            0,
-            (box.y - padY) * renderScale
-          );
-
-          const right = Math.min(
-            canvas.width,
-            (
-              box.x +
-              box.width +
-              padX
-            ) * renderScale
-          );
-
-          const bottom = Math.min(
-            canvas.height,
-            (
-              box.y +
-              box.height +
-              padY
-            ) * renderScale
-          );
-
-          ctx.fillRect(
-            left,
-            top,
-            Math.max(2, right - left),
-            Math.max(2, bottom - top)
-          );
-        }
-
-        const imageBlob =
-          await new Promise<Blob>(
-            (resolve, reject) => {
-              canvas.toBlob(
-                (blob) => {
-                  if (blob) resolve(blob);
-                  else {
-                    reject(
-                      new Error(
-                        "Unable to render PDF page."
-                      )
-                    );
-                  }
-                },
-                "image/jpeg",
-                0.94
-              );
-            }
-          );
-
-        const imageBytes =
-          new Uint8Array(
-            await imageBlob.arrayBuffer()
-          );
-
-        const image =
-          await outputPdf.embedJpg(
-            imageBytes
-          );
-
-        const outputPage =
-          outputPdf.addPage([
-            baseViewport.width,
-            baseViewport.height,
-          ]);
-
-        outputPage.drawImage(image, {
-          x: 0,
-          y: 0,
-          width: baseViewport.width,
-          height: baseViewport.height,
-        });
-
-        canvas.width = 1;
-        canvas.height = 1;
+        let canvas:
+          HTMLCanvasElement | null =
+            null;
 
         try {
-          page.cleanup();
-        } catch (_) {}
+          const baseViewport =
+            page.getViewport({
+              scale: 1,
+            });
+
+          const renderViewport =
+            page.getViewport({
+              scale: renderScale,
+            });
+
+          canvas =
+            document.createElement(
+              "canvas"
+            );
+
+          canvas.width =
+            Math.ceil(
+              renderViewport.width
+            );
+
+          canvas.height =
+            Math.ceil(
+              renderViewport.height
+            );
+
+          const ctx =
+            canvas.getContext(
+              "2d",
+              {
+                alpha: false,
+              }
+            );
+
+          if (!ctx) {
+            throw new Error(
+              "Unable to create secure PDF renderer."
+            );
+          }
+
+          ctx.fillStyle =
+            "#ffffff";
+
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          await page.render({
+            canvasContext: ctx,
+            viewport:
+              renderViewport,
+            canvas,
+          } as any).promise;
+
+          const pageFindings =
+            selected.filter(
+              (finding) =>
+                finding.page ===
+                pageNumber
+            );
+
+          ctx.fillStyle =
+            "#000000";
+
+          for (
+            const finding of
+              pageFindings
+          ) {
+            const box =
+              finding.box!;
+
+            const normalizedValue =
+              normalizeForSafetyCheck(
+                finding.value
+              );
+
+            const strengthen =
+              strengthenValues.has(
+                normalizedValue
+              );
+
+            /*
+             * First pass uses the exact detected box.
+             *
+             * If verification says this specific value
+             * remains readable, the second pass adds
+             * generous privacy padding around ONLY that
+             * failed box.
+             */
+            const padX =
+              strengthen
+                ? Math.max(
+                    6,
+                    box.height *
+                      0.45
+                  )
+                : 0;
+
+            const padY =
+              strengthen
+                ? Math.max(
+                    4,
+                    box.height *
+                      0.30
+                  )
+                : 0;
+
+            const left =
+              Math.max(
+                0,
+                (
+                  box.x -
+                  padX
+                ) *
+                  renderScale
+              );
+
+            const top =
+              Math.max(
+                0,
+                (
+                  box.y -
+                  padY
+                ) *
+                  renderScale
+              );
+
+            const right =
+              Math.min(
+                canvas.width,
+                (
+                  box.x +
+                  box.width +
+                  padX
+                ) *
+                  renderScale
+              );
+
+            const bottom =
+              Math.min(
+                canvas.height,
+                (
+                  box.y +
+                  box.height +
+                  padY
+                ) *
+                  renderScale
+              );
+
+            ctx.fillRect(
+              left,
+              top,
+              Math.max(
+                2,
+                right - left
+              ),
+              Math.max(
+                2,
+                bottom - top
+              )
+            );
+          }
+
+          const imageBlob =
+            await new Promise<Blob>(
+              (
+                resolve,
+                reject
+              ) => {
+                canvas!.toBlob(
+                  (blob) => {
+                    if (blob) {
+                      resolve(
+                        blob
+                      );
+                    } else {
+                      reject(
+                        new Error(
+                          "Unable to render PDF page."
+                        )
+                      );
+                    }
+                  },
+                  "image/jpeg",
+                  0.94
+                );
+              }
+            );
+
+          const imageBytes =
+            new Uint8Array(
+              await imageBlob.arrayBuffer()
+            );
+
+          const image =
+            await outputPdf.embedJpg(
+              imageBytes
+            );
+
+          const outputPage =
+            outputPdf.addPage([
+              baseViewport.width,
+              baseViewport.height,
+            ]);
+
+          outputPage.drawImage(
+            image,
+            {
+              x: 0,
+              y: 0,
+              width:
+                baseViewport.width,
+              height:
+                baseViewport.height,
+            }
+          );
+        } finally {
+          if (canvas) {
+            canvas.width = 1;
+            canvas.height = 1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
+          }
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
       }
 
       outputPdf.setTitle("");
@@ -2525,6 +2732,25 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           } automatically…`
         );
 
+        /*
+         * PASS 1 is no longer needed once verification has
+         * identified the values that require strengthening.
+         *
+         * Drop our reference before generating PASS 2 so a
+         * large first output does not intentionally overlap
+         * with another complete output in JavaScript memory.
+         */
+        bytes = new Uint8Array(0);
+
+        /*
+         * Yield once so the browser has an opportunity to
+         * reclaim released PDF/OCR memory before regeneration.
+         */
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(resolve, 0)
+        );
+
         bytes = await buildSecurePdf(
           failedValues
         );
@@ -2572,8 +2798,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
          * Download Anyway reuses these bytes directly —
          * no second OCR or redaction run.
          */
+        /*
+         * bytes is already a Uint8Array.
+         *
+         * Do not clone the complete finished PDF here.
+         * The pending reference treats these finished bytes
+         * as immutable.
+         */
         pendingRedactedPdfRef.current =
-          new Uint8Array(bytes);
+          bytes;
 
         redactorSessionCache.pendingRedactedPdf =
           pendingRedactedPdfRef.current;
@@ -2679,7 +2912,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return true;
     } finally {
       try {
-        await pdf.destroy();
+        await disposePdf();
       } catch (_) {}
     }
   };

@@ -10,7 +10,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { rotatePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -22,17 +22,35 @@ interface RotatePdfProps {
 export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
   const [rotationAngle, setRotationAngle] = useState<number>(90);
   const [zoom, setZoom] = useState<number>(1.0);
-  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef =
+    useRef<string | null>(null);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   useEffect(() => {
+    const previousPreviewUrl =
+      previewUrlRef.current;
+
+    if (previousPreviewUrl) {
+      try {
+        URL.revokeObjectURL(
+          previousPreviewUrl
+        );
+      } catch (_) {}
+
+      previewUrlRef.current =
+        null;
+    }
+
+    setPreviewUrl(null);
+
     if (!file) {
-      setPreviewDataUrl(null);
       setZoom(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
@@ -44,10 +62,26 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
     setErrorMessage(null);
     revokeDownloadUrl();
 
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        disposePdf = loaded.dispose;
+
+        if (!isMounted) {
+          await disposePdf();
+          disposePdf = null;
+          return;
+        }
+
+        const pdf = loaded.pdf;
         const page = await pdf.getPage(1);
 
         const dpr = Math.max(window.devicePixelRatio || 1, 2.0);
@@ -64,20 +98,79 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           await page.render({ canvasContext: ctx as any, viewport } as any).promise;
-          if (isMounted) setPreviewDataUrl(canvas.toDataURL('image/jpeg', 0.95));
+          const previewBlob =
+            await new Promise<Blob | null>(
+              (resolve) => {
+                canvas.toBlob(
+                  resolve,
+                  'image/jpeg',
+                  0.95
+                );
+              }
+            );
+
+          if (
+            previewBlob &&
+            isMounted
+          ) {
+            const nextPreviewUrl =
+              URL.createObjectURL(
+                previewBlob
+              );
+
+            previewUrlRef.current =
+              nextPreviewUrl;
+
+            setPreviewUrl(
+              nextPreviewUrl
+            );
+          }
         }
         canvas.width = 0;
         canvas.height = 0;
+
+        try {
+          page.cleanup();
+        } catch (_) {}
       } catch (err) {
         console.error('Rotate preview error:', err);
         if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
-        if (isMounted) setIsLoadingPreview(false);
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+
+          disposePdf = null;
+        }
+
+        if (isMounted) {
+          setIsLoadingPreview(false);
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
+
+      const currentPreviewUrl =
+        previewUrlRef.current;
+
+      if (currentPreviewUrl) {
+        try {
+          URL.revokeObjectURL(
+            currentPreviewUrl
+          );
+        } catch (_) {}
+
+        previewUrlRef.current =
+          null;
+      }
     };
   }, [file]);
 
@@ -162,10 +255,10 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
           <div className="relative w-full h-[360px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-auto p-4 select-none">
             {isLoadingPreview ? (
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
-            ) : previewDataUrl ? (
+            ) : previewUrl ? (
               <div className="relative flex items-center justify-center min-w-full min-h-full p-8">
                 <img
-                  src={previewDataUrl}
+                  src={previewUrl}
                   alt="Rotation Preview"
                   style={{
                     transform: `rotate(${rotationAngle}deg) scale(${zoom})`,

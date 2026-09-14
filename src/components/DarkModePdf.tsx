@@ -12,7 +12,7 @@ import {
   ZoomOut,
   RotateCcw,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { invertPDF, type DarkModeFilter } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
@@ -34,11 +34,24 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const previewObjectUrlRef =
+    useRef<string | null>(null);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   // Generate real-time live preview of page 1
   useEffect(() => {
     if (!file) {
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(
+          previewObjectUrlRef.current
+        );
+
+        previewObjectUrlRef.current =
+          null;
+      }
+
       setPreviewUrl(null);
       setTotalPages(0);
       setZoomLevel(1);
@@ -48,85 +61,295 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
     }
 
     let isMounted = true;
+
+    let disposePdf:
+      | (() => Promise<void>)
+      | null = null;
+
+    let generatedPreviewUrl:
+      | string
+      | null = null;
+
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(
+        previewObjectUrlRef.current
+      );
+
+      previewObjectUrlRef.current =
+        null;
+    }
+
+    setPreviewUrl(null);
     setIsLoadingPreview(true);
     setErrorMessage(null);
     revokeDownloadUrl();
 
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer) }).promise;
-        if (!isMounted) return;
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
 
-        setTotalPages(pdf.numPages);
-        const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 1.2 });
+        disposePdf =
+          loaded.dispose;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
-
-        if (ctx) {
-          await page.render({
-            canvasContext: ctx as any,
-            viewport,
-          } as any).promise;
-
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imgData.data;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-
-            if (filter === 'invert') {
-              data[i] = 255 - r;
-              data[i + 1] = 255 - g;
-              data[i + 2] = 255 - b;
-            } else if (filter === 'oled') {
-              const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-              if (lum > 210) {
-                data[i] = 12;
-                data[i + 1] = 12;
-                data[i + 2] = 12;
-              } else if (lum < 80) {
-                data[i] = 230;
-                data[i + 1] = 230;
-                data[i + 2] = 230;
-              } else {
-                data[i] = 255 - r;
-                data[i + 1] = 255 - g;
-                data[i + 2] = 255 - b;
-              }
-            } else if (filter === 'sepia') {
-              const tr = 0.393 * r + 0.769 * g + 0.189 * b;
-              const tg = 0.349 * r + 0.686 * g + 0.168 * b;
-              const tb = 0.272 * r + 0.534 * g + 0.131 * b;
-              data[i] = Math.min(255, tr);
-              data[i + 1] = Math.min(255, tg);
-              data[i + 2] = Math.min(255, tb);
-            }
-          }
-
-          ctx.putImageData(imgData, 0, 0);
-          if (isMounted) {
-            setPreviewUrl(canvas.toDataURL('image/jpeg', 0.9));
-          }
+        if (!isMounted) {
+          await disposePdf();
+          disposePdf = null;
+          return;
         }
-        canvas.width = 0;
-        canvas.height = 0;
+
+        const pdf =
+          loaded.pdf;
+
+        setTotalPages(
+          pdf.numPages
+        );
+
+        const page =
+          await pdf.getPage(1);
+
+        try {
+          const viewport =
+            page.getViewport({
+              scale: 1.2,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+          try {
+            canvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            canvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+            const ctx =
+              canvas.getContext(
+                '2d'
+              );
+
+            if (ctx) {
+              await page.render({
+                canvasContext:
+                  ctx as any,
+                viewport,
+              } as any).promise;
+
+              const imgData =
+                ctx.getImageData(
+                  0,
+                  0,
+                  canvas.width,
+                  canvas.height
+                );
+
+              const data =
+                imgData.data;
+
+              for (
+                let i = 0;
+                i < data.length;
+                i += 4
+              ) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                if (
+                  filter === 'invert'
+                ) {
+                  data[i] = 255 - r;
+                  data[i + 1] =
+                    255 - g;
+                  data[i + 2] =
+                    255 - b;
+                } else if (
+                  filter === 'oled'
+                ) {
+                  const lum =
+                    0.299 * r +
+                    0.587 * g +
+                    0.114 * b;
+
+                  if (lum > 210) {
+                    data[i] = 12;
+                    data[i + 1] = 12;
+                    data[i + 2] = 12;
+                  } else if (
+                    lum < 80
+                  ) {
+                    data[i] = 230;
+                    data[i + 1] = 230;
+                    data[i + 2] = 230;
+                  } else {
+                    data[i] =
+                      255 - r;
+                    data[i + 1] =
+                      255 - g;
+                    data[i + 2] =
+                      255 - b;
+                  }
+                } else if (
+                  filter === 'sepia'
+                ) {
+                  const tr =
+                    0.393 * r +
+                    0.769 * g +
+                    0.189 * b;
+
+                  const tg =
+                    0.349 * r +
+                    0.686 * g +
+                    0.168 * b;
+
+                  const tb =
+                    0.272 * r +
+                    0.534 * g +
+                    0.131 * b;
+
+                  data[i] =
+                    Math.min(
+                      255,
+                      tr
+                    );
+
+                  data[i + 1] =
+                    Math.min(
+                      255,
+                      tg
+                    );
+
+                  data[i + 2] =
+                    Math.min(
+                      255,
+                      tb
+                    );
+                }
+              }
+
+              ctx.putImageData(
+                imgData,
+                0,
+                0
+              );
+
+              const previewBlob =
+                await new Promise<Blob>(
+                  (
+                    resolve,
+                    reject
+                  ) => {
+                    canvas.toBlob(
+                      (blob) => {
+                        if (blob) {
+                          resolve(
+                            blob
+                          );
+                        } else {
+                          reject(
+                            new Error(
+                              'Unable to create preview.'
+                            )
+                          );
+                        }
+                      },
+                      'image/jpeg',
+                      0.9
+                    );
+                  }
+                );
+
+              generatedPreviewUrl =
+                URL.createObjectURL(
+                  previewBlob
+                );
+
+              if (isMounted) {
+                previewObjectUrlRef.current =
+                  generatedPreviewUrl;
+
+                setPreviewUrl(
+                  generatedPreviewUrl
+                );
+              } else {
+                URL.revokeObjectURL(
+                  generatedPreviewUrl
+                );
+
+                generatedPreviewUrl =
+                  null;
+              }
+            }
+          } finally {
+            canvas.width = 1;
+            canvas.height = 1;
+          }
+        } finally {
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
       } catch (err) {
-        console.error('Preview error:', err);
-        if (isMounted) setErrorMessage('Could not render document preview.');
+        console.error(
+          'Preview error:',
+          err
+        );
+
+        if (isMounted) {
+          setErrorMessage(
+            'Could not render document preview.'
+          );
+        }
       } finally {
-        if (isMounted) setIsLoadingPreview(false);
+        if (disposePdf) {
+          try {
+            await disposePdf();
+          } catch (_) {}
+
+          disposePdf = null;
+        }
+
+        if (isMounted) {
+          setIsLoadingPreview(
+            false
+          );
+        }
       }
     })();
 
     return () => {
       isMounted = false;
+
+      if (disposePdf) {
+        void disposePdf();
+        disposePdf = null;
+      }
+
+      if (generatedPreviewUrl) {
+        URL.revokeObjectURL(
+          generatedPreviewUrl
+        );
+
+        if (
+          previewObjectUrlRef.current ===
+          generatedPreviewUrl
+        ) {
+          previewObjectUrlRef.current =
+            null;
+        }
+
+        generatedPreviewUrl =
+          null;
+      }
     };
   }, [file, filter]);
 

@@ -15,7 +15,10 @@ import {
   ZoomOut,
   Trash2,
 } from 'lucide-react';
-import { pdfjsLib } from '../utils/pdfjs';
+import {
+  loadPdfJsFromBlob,
+  pdfjsLib,
+} from '../utils/pdfjs';
 import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { verifyFinishedPdf } from '../utils/pdfSafetyVerifier';
@@ -107,6 +110,8 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const viewportContainerRef = useRef<HTMLDivElement>(null);
   const pdfDocRef = useRef<any>(null);
+  const pdfDisposeRef =
+    useRef<(() => Promise<void>) | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
@@ -145,21 +150,59 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       setZoomLevel(1.0);
       revokeDownloadUrl();
       setErrorMessage(null);
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
       pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
+
       return;
     }
 
     let isMounted = true;
+
+    /*
+     * Release the previous PDF preview before opening another.
+     * This prevents two large PDF.js documents overlapping
+     * when the selected file changes.
+     */
+    const previousDispose =
+      pdfDisposeRef.current;
+
+    pdfDisposeRef.current = null;
+    pdfDocRef.current = null;
+
+    if (previousDispose) {
+      void previousDispose();
+    }
+
     setIsLoadingPage(true);
     setErrorMessage(null);
     revokeDownloadUrl();
 
     (async () => {
       try {
-        const buffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ isEvalSupported: false, data: new Uint8Array(buffer).slice() }).promise;
-        if (!isMounted) return;
+        const loaded =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        if (!isMounted) {
+          await loaded.dispose();
+          return;
+        }
+
+        const pdf = loaded.pdf;
+
         pdfDocRef.current = pdf;
+        pdfDisposeRef.current =
+          loaded.dispose;
+
         setTotalPages(pdf.numPages);
         setCurrentPage(1);
 
@@ -190,6 +233,16 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
     return () => {
       isMounted = false;
+
+      const dispose =
+        pdfDisposeRef.current;
+
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
+
+      if (dispose) {
+        void dispose();
+      }
     };
   }, [file]);
 
@@ -225,6 +278,10 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           annotationMode: (pdfjsLib as any).AnnotationMode?.ENABLE ?? 2,
         } as any).promise;
       }
+
+      try {
+        page.cleanup();
+      } catch (_) {}
     } catch (err) {
       console.error('Page render error:', err);
     } finally {

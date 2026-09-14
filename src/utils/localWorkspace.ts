@@ -99,6 +99,50 @@ const writeManifest = (
   );
 };
 
+const manifestMatchesFiles = (
+  manifest: WorkspaceManifest | null,
+  files: File[]
+) => {
+  if (
+    !manifest ||
+    manifest.files.length !==
+      files.length
+  ) {
+    return false;
+  }
+
+  return manifest.files.every(
+    (
+      meta,
+      index
+    ) => {
+      const file =
+        files[index];
+
+      if (!file) {
+        return false;
+      }
+
+      return (
+        meta.originalName ===
+          file.name &&
+        meta.size ===
+          file.size &&
+        meta.type ===
+          (
+            file.type ||
+            "application/octet-stream"
+          ) &&
+        meta.lastModified ===
+          (
+            file.lastModified ||
+            meta.lastModified
+          )
+      );
+    }
+  );
+};
+
 const getWorkspaceDirectory = async (
   create = true
 ) => {
@@ -120,11 +164,46 @@ const getWorkspaceDirectory = async (
   }
 };
 
-export const saveWorkspaceFiles = async (
+let workspaceSaveQueue:
+  Promise<void> =
+    Promise.resolve();
+
+/*
+ * Refresh/reset must not race an OPFS save or clear.
+ *
+ * Normal workspace operations wait for this barrier whenever
+ * a complete session reset is already in progress.
+ */
+let workspaceResetPromise:
+  Promise<void> | null =
+    null;
+
+const saveWorkspaceFilesUnserialized = async (
   files: File[]
 ): Promise<boolean> => {
   if (files.length === 0) {
-    await clearWorkspaceFiles();
+    await clearWorkspaceFilesUnserialized();
+    return true;
+  }
+
+  const existingManifest =
+    readManifest();
+
+  const existingSessionId =
+    sessionStorage.getItem(
+      SESSION_KEY
+    );
+
+  if (
+    existingManifest &&
+    existingSessionId &&
+    existingManifest.sessionId ===
+      existingSessionId &&
+    manifestMatchesFiles(
+      existingManifest,
+      files
+    )
+  ) {
     return true;
   }
 
@@ -139,22 +218,40 @@ export const saveWorkspaceFiles = async (
     getOrCreateSessionId();
 
   /*
-   * Remove old files for this workspace before saving
-   * the new current selection.
+   * Snapshot existing entries, but DO NOT delete them yet.
+   *
+   * The previous workspace must remain recoverable until
+   * every replacement file has finished writing.
    */
+  const previousStoredNames:
+    string[] = [];
+
   try {
     for await (
       const name of directory.keys()
     ) {
-      await directory.removeEntry(name);
+      previousStoredNames.push(
+        name
+      );
     }
   } catch {
-    // Some browsers may not expose async directory iteration.
-    // The newly written manifest below still controls restoration.
+    /*
+     * Directory iteration is optional in some browsers.
+     * Saving can still continue; stale-entry cleanup will
+     * simply be skipped for this pass.
+     */
   }
 
   const manifestFiles:
     WorkspaceFileMeta[] = [];
+
+  /*
+   * Track names before writing begins so even a file that
+   * fails halfway through its first OPFS write can be
+   * removed safely.
+   */
+  const createdStoredNames:
+    string[] = [];
 
   try {
     for (
@@ -166,6 +263,10 @@ export const saveWorkspaceFiles = async (
 
       const storedName =
         `file-${index}-${Date.now()}`;
+
+      createdStoredNames.push(
+        storedName
+      );
 
       const handle =
         await directory.getFileHandle(
@@ -199,13 +300,68 @@ export const saveWorkspaceFiles = async (
       });
     }
 
+    /*
+     * Switch restoration to the new files only after every
+     * write has completed successfully.
+     */
     writeManifest({
       sessionId,
       files: manifestFiles,
     });
 
+    /*
+     * The new manifest is now authoritative.
+     * Old/stale OPFS entries can be removed safely.
+     */
+    const keepNames =
+      new Set(
+        manifestFiles.map(
+          (meta) =>
+            meta.storedName
+        )
+      );
+
+    for (
+      const name of
+      previousStoredNames
+    ) {
+      if (
+        keepNames.has(
+          name
+        )
+      ) {
+        continue;
+      }
+
+      try {
+        await directory.removeEntry(
+          name
+        );
+      } catch {
+        // A stale entry is harmless; manifest controls restore.
+      }
+    }
+
     return true;
   } catch (error) {
+    /*
+     * A replacement failed before the manifest switched.
+     * Remove only files created by this failed attempt.
+     * The previous manifest and previous OPFS files remain.
+     */
+    for (
+      const name of
+      createdStoredNames
+    ) {
+      try {
+        await directory.removeEntry(
+          name
+        );
+      } catch {
+        // Partial file may not exist or may already be gone.
+      }
+    }
+
     console.warn(
       "Local workspace persistence unavailable:",
       error
@@ -214,6 +370,49 @@ export const saveWorkspaceFiles = async (
     return false;
   }
 };
+
+export const saveWorkspaceFiles = async (
+  files: File[]
+): Promise<boolean> => {
+  /*
+   * A full refresh/reset owns all workspace storage while it
+   * is running. Do not start a new save until it has finished.
+   */
+  while (workspaceResetPromise) {
+    await workspaceResetPromise;
+  }
+
+  /*
+   * Serialize OPFS writes.
+   *
+   * React state can change several times quickly,
+   * especially during restore, reorder and multi-file
+   * selection. Never allow two workspace rewrites to
+   * delete/write the same directory simultaneously.
+   */
+  const run =
+    workspaceSaveQueue.then(
+      () =>
+        saveWorkspaceFilesUnserialized(
+          files
+        )
+    );
+
+  /*
+   * Keep the queue alive even when one save fails.
+   * The caller still receives the original rejection/result,
+   * but future saves are not permanently blocked.
+   */
+  workspaceSaveQueue =
+    run.then(
+      () => undefined,
+      () => undefined
+    );
+
+  return await run;
+};
+
+
 
 export const restoreWorkspaceFiles =
   async (): Promise<File[]> => {
@@ -290,7 +489,7 @@ export const restoreWorkspaceFiles =
     }
   };
 
-export const clearWorkspaceFiles =
+const clearWorkspaceFilesUnserialized =
   async (): Promise<void> => {
     const sessionId =
       sessionStorage.getItem(
@@ -320,84 +519,181 @@ export const clearWorkspaceFiles =
     }
   };
 
+export const clearWorkspaceFiles =
+  async (): Promise<void> => {
+    /*
+     * An explicit Clear is itself a workspace mutation.
+     * Queue it behind any pending save so a half-written
+     * workspace cannot be deleted underneath the writer.
+     */
+    while (workspaceResetPromise) {
+      await workspaceResetPromise;
+    }
+
+    const run =
+      workspaceSaveQueue.then(
+        () =>
+          clearWorkspaceFilesUnserialized()
+      );
+
+    workspaceSaveQueue =
+      run.then(
+        () => undefined,
+        () => undefined
+      );
+
+    await run;
+  };
+
+
 export const resetWorkspaceSession =
   async (): Promise<void> => {
+    /*
+     * A second caller joins the reset already in progress.
+     */
+    if (workspaceResetPromise) {
+      await workspaceResetPromise;
+      return;
+    }
+
     const sessionId =
       sessionStorage.getItem(
         SESSION_KEY
       );
 
-    await clearWorkspaceFiles();
+    const run =
+      (async () => {
+        /*
+         * First allow every mutation that started before the
+         * reset to finish.
+         *
+         * Once workspaceResetPromise is installed below,
+         * newly-started saves/clears will wait for us instead.
+         */
+        await workspaceSaveQueue;
 
-    /*
-     * Clear tool-scoped manifests/state as well.
-     */
-    const keysToRemove: string[] = [];
+        const pendingToolMutations =
+          Array.from(
+            toolSaveQueues.values()
+          );
 
-    for (
-      let index = 0;
-      index < sessionStorage.length;
-      index++
-    ) {
-      const key =
-        sessionStorage.key(index);
-
-      if (
-        key &&
-        (
-          key.startsWith(
-            "oneinto1_tool_manifest:"
-          ) ||
-          key.startsWith(
-            "oneinto1_tool_state:"
-          )
-        )
-      ) {
-        keysToRemove.push(key);
-      }
-    }
-
-    for (const key of keysToRemove) {
-      sessionStorage.removeItem(key);
-    }
-
-    /*
-     * Remove tool-scoped OPFS directories belonging
-     * to the current workspace session.
-     */
-    if (
-      sessionId &&
-      hasOpfs()
-    ) {
-      try {
-        const root =
-          await navigator.storage.getDirectory();
-
-        for await (
-          const name of root.keys()
+        if (
+          pendingToolMutations.length >
+          0
         ) {
+          await Promise.allSettled(
+            pendingToolMutations
+          );
+        }
+
+        /*
+         * Use the raw clear primitive here. Calling the public
+         * queued clear would make reset wait on itself.
+         */
+        await clearWorkspaceFilesUnserialized();
+
+        /*
+         * Clear tool-scoped manifests/state as well.
+         */
+        const keysToRemove:
+          string[] = [];
+
+        for (
+          let index = 0;
+          index < sessionStorage.length;
+          index++
+        ) {
+          const key =
+            sessionStorage.key(
+              index
+            );
+
           if (
-            name.startsWith(
-              `tool-workspace-${sessionId}-`
+            key &&
+            (
+              key.startsWith(
+                "oneinto1_tool_manifest:"
+              ) ||
+              key.startsWith(
+                "oneinto1_tool_state:"
+              )
             )
           ) {
-            await root.removeEntry(
-              name,
-              {
-                recursive: true,
-              }
+            keysToRemove.push(
+              key
             );
           }
         }
-      } catch {
-        // Already removed / unsupported.
+
+        for (
+          const key of
+          keysToRemove
+        ) {
+          sessionStorage.removeItem(
+            key
+          );
+        }
+
+        /*
+         * All per-tool saves that existed before reset have
+         * settled. Their OPFS directories can now be removed
+         * without racing their writers.
+         */
+        if (
+          sessionId &&
+          hasOpfs()
+        ) {
+          try {
+            const root =
+              await navigator.storage.getDirectory();
+
+            for await (
+              const name of
+              root.keys()
+            ) {
+              if (
+                name.startsWith(
+                  `tool-workspace-${sessionId}-`
+                )
+              ) {
+                await root.removeEntry(
+                  name,
+                  {
+                    recursive: true,
+                  }
+                );
+              }
+            }
+          } catch {
+            // Already removed / unsupported.
+          }
+        }
+
+        sessionStorage.removeItem(
+          SESSION_KEY
+        );
+      })();
+
+    /*
+     * Install the barrier before the async reset continues.
+     * New saves/clears now wait for this exact operation.
+     */
+    workspaceResetPromise =
+      run;
+
+    try {
+      await run;
+    } finally {
+      if (
+        workspaceResetPromise ===
+        run
+      ) {
+        workspaceResetPromise =
+          null;
       }
     }
-
-    sessionStorage.removeItem(
-      SESSION_KEY
-    );
   };
+
 
 export const isPageReload = () => {
   try {
@@ -469,14 +765,59 @@ const getToolDirectory = async (
   }
 };
 
-export const saveToolWorkspaceFiles =
+const toolSaveQueues =
+  new Map<
+    string,
+    Promise<void>
+  >();
+
+const saveToolWorkspaceFilesUnserialized =
   async (
     scope: string,
     files: File[]
   ): Promise<boolean> => {
     if (files.length === 0) {
-      await clearToolWorkspace(scope);
+      await clearToolWorkspaceUnserialized(
+        scope
+      );
       return true;
+    }
+
+    const manifestKey =
+      TOOL_MANIFEST_PREFIX +
+      safeToolScope(scope);
+
+    try {
+      const rawManifest =
+        sessionStorage.getItem(
+          manifestKey
+        );
+
+      if (rawManifest) {
+        const existingManifest =
+          JSON.parse(
+            rawManifest
+          ) as WorkspaceManifest;
+
+        const existingSessionId =
+          sessionStorage.getItem(
+            SESSION_KEY
+          );
+
+        if (
+          existingSessionId &&
+          existingManifest.sessionId ===
+            existingSessionId &&
+          manifestMatchesFiles(
+            existingManifest,
+            files
+          )
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      // Invalid/stale manifest falls through to a normal save.
     }
 
     const directory =
@@ -489,17 +830,26 @@ export const saveToolWorkspaceFiles =
       return false;
     }
 
+    /*
+     * Keep the previous tool workspace intact until every
+     * replacement file has been written successfully.
+     */
+    const previousStoredNames:
+      string[] = [];
+
     try {
       for await (
         const name of directory.keys()
       ) {
-        await directory.removeEntry(
-          name,
-          { recursive: true }
+        previousStoredNames.push(
+          name
         );
       }
     } catch {
-      // Manifest controls which files are restored.
+      /*
+       * Directory iteration is optional in some browsers.
+       * Manifest-based restoration still works.
+       */
     }
 
     const sessionId =
@@ -507,6 +857,14 @@ export const saveToolWorkspaceFiles =
 
     const manifestFiles:
       WorkspaceFileMeta[] = [];
+
+    /*
+     * Track names immediately, not only after a successful
+     * write, so a partially-created OPFS file can also be
+     * removed if the save fails midway.
+     */
+    const createdStoredNames:
+      string[] = [];
 
     try {
       for (
@@ -519,6 +877,10 @@ export const saveToolWorkspaceFiles =
 
         const storedName =
           `file-${index}-${Date.now()}`;
+
+        createdStoredNames.push(
+          storedName
+        );
 
         const handle =
           await directory.getFileHandle(
@@ -550,14 +912,73 @@ export const saveToolWorkspaceFiles =
         files: manifestFiles,
       };
 
+      /*
+       * Only switch restoration to the new workspace after
+       * all replacement files are safely stored.
+       */
       sessionStorage.setItem(
-        TOOL_MANIFEST_PREFIX +
-          safeToolScope(scope),
+        manifestKey,
         JSON.stringify(manifest)
       );
 
+      /*
+       * The new manifest is authoritative now.
+       * Old files can be removed without risking restore.
+       */
+      const keepNames =
+        new Set(
+          manifestFiles.map(
+            (meta) =>
+              meta.storedName
+          )
+        );
+
+      for (
+        const name of
+        previousStoredNames
+      ) {
+        if (
+          keepNames.has(
+            name
+          )
+        ) {
+          continue;
+        }
+
+        try {
+          await directory.removeEntry(
+            name,
+            {
+              recursive: true,
+            }
+          );
+        } catch {
+          // Stale OPFS entry is harmless; manifest controls restore.
+        }
+      }
+
       return true;
     } catch (error) {
+      /*
+       * The old manifest has not been replaced.
+       * Delete only files created by this failed attempt.
+       */
+      for (
+        const name of
+        createdStoredNames
+      ) {
+        try {
+          await directory.removeEntry(
+            name,
+            {
+              recursive: true,
+            }
+          );
+        } catch {
+          // Partial entry may already be absent.
+        }
+      }
+
       console.warn(
         `Unable to persist ${scope} workspace:`,
         error
@@ -566,6 +987,78 @@ export const saveToolWorkspaceFiles =
       return false;
     }
   };
+
+export const saveToolWorkspaceFiles =
+  async (
+    scope: string,
+    files: File[]
+  ): Promise<boolean> => {
+    /*
+     * Do not recreate a tool workspace while a refresh/reset
+     * is deleting the current session.
+     */
+    while (workspaceResetPromise) {
+      await workspaceResetPromise;
+    }
+
+    const queueKey =
+      safeToolScope(
+        scope
+      );
+
+    const previous =
+      toolSaveQueues.get(
+        queueKey
+      ) ??
+      Promise.resolve();
+
+    /*
+     * One write at a time for this tool workspace.
+     *
+     * Different tool scopes do not block each other,
+     * while repeated saves inside the same tool cannot
+     * race against its delete/write cycle.
+     */
+    const run =
+      previous.then(
+        () =>
+          saveToolWorkspaceFilesUnserialized(
+            scope,
+            files
+          )
+      );
+
+    const settled =
+      run.then(
+        () => undefined,
+        () => undefined
+      );
+
+    toolSaveQueues.set(
+      queueKey,
+      settled
+    );
+
+    try {
+      return await run;
+    } finally {
+      /*
+       * Only remove this queue entry if a newer save
+       * has not already chained itself behind us.
+       */
+      if (
+        toolSaveQueues.get(
+          queueKey
+        ) === settled
+      ) {
+        toolSaveQueues.delete(
+          queueKey
+        );
+      }
+    }
+  };
+
+
 
 export const restoreToolWorkspaceFiles =
   async (
@@ -695,7 +1188,7 @@ export const restoreToolWorkspaceState =
     }
   };
 
-export const clearToolWorkspace =
+const clearToolWorkspaceUnserialized =
   async (
     scope: string
   ): Promise<void> => {
@@ -736,5 +1229,65 @@ export const clearToolWorkspace =
       );
     } catch {
       // Already cleared / unavailable.
+    }
+  };
+
+export const clearToolWorkspace =
+  async (
+    scope: string
+  ): Promise<void> => {
+    /*
+     * Clear must participate in the exact same per-tool queue
+     * as Save. This gives call order deterministic semantics:
+     *
+     * save -> clear  = cleared
+     * clear -> save  = saved
+     */
+    while (workspaceResetPromise) {
+      await workspaceResetPromise;
+    }
+
+    const queueKey =
+      safeToolScope(
+        scope
+      );
+
+    const previous =
+      toolSaveQueues.get(
+        queueKey
+      ) ??
+      Promise.resolve();
+
+    const run =
+      previous.then(
+        () =>
+          clearToolWorkspaceUnserialized(
+            scope
+          )
+      );
+
+    const settled =
+      run.then(
+        () => undefined,
+        () => undefined
+      );
+
+    toolSaveQueues.set(
+      queueKey,
+      settled
+    );
+
+    try {
+      await run;
+    } finally {
+      if (
+        toolSaveQueues.get(
+          queueKey
+        ) === settled
+      ) {
+        toolSaveQueues.delete(
+          queueKey
+        );
+      }
     }
   };

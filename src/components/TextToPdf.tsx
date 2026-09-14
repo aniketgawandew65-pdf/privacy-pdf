@@ -1,5 +1,7 @@
 import { sanitizeRichHtml } from '../utils/sanitizeHtml';
 import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
   saveToolWorkspaceState,
   restoreToolWorkspaceState,
   clearToolWorkspace,
@@ -90,37 +92,80 @@ export const TextToPdf: React.FC<any> = () => {
    * intentionally cleared on a real browser refresh.
    */
   useEffect(() => {
-    try {
-      /*
-       * Remove any legacy permanent draft left by an older build.
-       */
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
       try {
-        window.localStorage.removeItem(
-          'privacy_pdf_text_editor_draft'
-        );
-      } catch (_) {}
+        /*
+         * Remove any legacy permanent draft left by an older build.
+         */
+        try {
+          window.localStorage.removeItem(
+            'privacy_pdf_text_editor_draft'
+          );
+        } catch (_) {}
 
-      const saved =
-        restoreToolWorkspaceState<{
-          content?: string;
-          selectedFont?: string;
-          fontSize?: number;
-          toolbarFontSize?: number;
-          zoom?: number;
-        }>('text-to-pdf');
+        const saved =
+          restoreToolWorkspaceState<{
+            /*
+             * content is legacy-only. New builds keep the actual
+             * document in browser-local OPFS.
+             */
+            content?: string;
+            selectedFont?: string;
+            fontSize?: number;
+            toolbarFontSize?: number;
+            zoom?: number;
+          }>('text-to-pdf');
 
-      if (saved) {
+        const restoredContentFiles =
+          await restoreToolWorkspaceFiles(
+            'text-to-pdf-content'
+          );
+
+        if (cancelled) return;
+
+        let rawContent:
+          | string
+          | null =
+            null;
+
+        if (restoredContentFiles[0]) {
+          try {
+            rawContent =
+              await restoredContentFiles[0]
+                .text();
+          } catch (_) {
+            rawContent = null;
+          }
+        }
+
+        /*
+         * One-time migration from the previous sessionStorage
+         * representation.
+         */
+        if (
+          rawContent === null &&
+          typeof saved?.content ===
+            'string'
+        ) {
+          rawContent =
+            saved.content;
+        }
+
         const restoredContent =
           sanitizeRichHtml(
-            saved.content || ''
+            rawContent || ''
           );
+
+        if (cancelled) return;
 
         setContent(
           restoredContent
         );
 
         if (
-          typeof saved.selectedFont ===
+          typeof saved?.selectedFont ===
           'string'
         ) {
           setSelectedFont(
@@ -129,7 +174,7 @@ export const TextToPdf: React.FC<any> = () => {
         }
 
         if (
-          typeof saved.fontSize ===
+          typeof saved?.fontSize ===
           'number'
         ) {
           setFontSize(
@@ -138,7 +183,7 @@ export const TextToPdf: React.FC<any> = () => {
         }
 
         if (
-          typeof saved.toolbarFontSize ===
+          typeof saved?.toolbarFontSize ===
           'number'
         ) {
           setToolbarFontSize(
@@ -147,7 +192,7 @@ export const TextToPdf: React.FC<any> = () => {
         }
 
         if (
-          typeof saved.zoom ===
+          typeof saved?.zoom ===
           'number'
         ) {
           setZoom(
@@ -166,15 +211,23 @@ export const TextToPdf: React.FC<any> = () => {
               .length
           );
         }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Text to PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
       }
-    } catch (error) {
-      console.warn(
-        'Unable to restore Text to PDF workspace:',
-        error
-      );
-    } finally {
-      setWorkspaceHydrated(true);
-    }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 2. Track mobile selection range so toolbar taps never lose highlighted words
@@ -360,23 +413,15 @@ export const TextToPdf: React.FC<any> = () => {
   };
 
   /*
-   * Preserve the editable document and its main formatting
-   * controls during this browser session.
+   * Lightweight formatting controls can stay in sessionStorage.
+   * The actual document body lives in OPFS.
    */
   useEffect(() => {
     if (!workspaceHydrated) return;
 
-    if (!content.trim()) {
-      void clearToolWorkspace(
-        'text-to-pdf'
-      );
-      return;
-    }
-
     saveToolWorkspaceState(
       'text-to-pdf',
       {
-        content,
         selectedFont,
         fontSize,
         toolbarFontSize,
@@ -384,11 +429,57 @@ export const TextToPdf: React.FC<any> = () => {
       }
     );
   }, [
-    content,
     selectedFont,
     fontSize,
     toolbarFontSize,
     zoom,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Avoid synchronously serializing the complete editor body
+   * into sessionStorage on every keystroke.
+   *
+   * A short idle debounce keeps one browser-local OPFS copy.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (!content.trim()) {
+      void clearToolWorkspace(
+        'text-to-pdf-content'
+      );
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void saveToolWorkspaceFiles(
+            'text-to-pdf-content',
+            [
+              new File(
+                [content],
+                'document.html',
+                {
+                  type: 'text/html',
+                  lastModified:
+                    Date.now(),
+                }
+              ),
+            ]
+          );
+        },
+        400
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    content,
     workspaceHydrated,
   ]);
 
@@ -489,6 +580,10 @@ export const TextToPdf: React.FC<any> = () => {
       void clearToolWorkspace(
         'text-to-pdf'
       );
+
+      void clearToolWorkspace(
+        'text-to-pdf-content'
+      );
     }
   };
 
@@ -583,22 +678,65 @@ export const TextToPdf: React.FC<any> = () => {
           logging: false,
         });
 
-        const imgDataUrl = canvas.toDataURL("image/jpeg", 0.95);
-        const base64Str = imgDataUrl.split(",")[1];
-        const binaryStr = window.atob(base64Str);
-        const imgBytes = new Uint8Array(binaryStr.length);
-        for (let b = 0; b < binaryStr.length; b++) {
-          imgBytes[b] = binaryStr.charCodeAt(b);
-        }
+        try {
+          /*
+           * Keep the rendered page binary.
+           *
+           * Avoid:
+           * canvas -> base64 -> atob -> binary string ->
+           * Uint8Array, which creates several copies of
+           * every page in JavaScript memory.
+           */
+          const imageBlob =
+            await new Promise<Blob | null>(
+              (resolve) => {
+                canvas.toBlob(
+                  resolve,
+                  "image/jpeg",
+                  0.95
+                );
+              }
+            );
 
-        const embeddedImg = await pdfDoc.embedJpg(imgBytes);
-        const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-        pdfPage.drawImage(embeddedImg, {
-          x: 0,
-          y: 0,
-          width: pageWidthPt,
-          height: pageHeightPt,
-        });
+          if (!imageBlob) {
+            throw new Error(
+              `Failed to encode page ${i + 1} as JPEG.`
+            );
+          }
+
+          const imgBytes =
+            new Uint8Array(
+              await imageBlob.arrayBuffer()
+            );
+
+          const embeddedImg =
+            await pdfDoc.embedJpg(
+              imgBytes
+            );
+
+          const pdfPage =
+            pdfDoc.addPage([
+              pageWidthPt,
+              pageHeightPt,
+            ]);
+
+          pdfPage.drawImage(
+            embeddedImg,
+            {
+              x: 0,
+              y: 0,
+              width: pageWidthPt,
+              height: pageHeightPt,
+            }
+          );
+        } finally {
+          /*
+           * Release decoded RGBA pixels before rendering
+           * the next Text-to-PDF page.
+           */
+          canvas.width = 1;
+          canvas.height = 1;
+        }
       }
 
       document.body.removeChild(iframe);
