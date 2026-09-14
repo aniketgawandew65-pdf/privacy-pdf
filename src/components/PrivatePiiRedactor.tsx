@@ -77,6 +77,7 @@ type RedactorSessionCache = {
   sourceText: string;
   error: string | null;
   status: string | null;
+  manualReviewFindings: Finding[];
 };
 
 const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
@@ -85,6 +86,7 @@ const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
   sourceText: "",
   error: null,
   status: null,
+  manualReviewFindings: [],
 };
 
 let redactorSessionCache: RedactorSessionCache = {
@@ -494,7 +496,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   );
 
   const [manualReviewFindings, setManualReviewFindings] =
-    useState<Finding[]>([]);
+    useState<Finding[]>(
+      () => redactorSessionCache.manualReviewFindings
+    );
 
   useEffect(() => {
     redactorSessionCache = {
@@ -503,8 +507,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       sourceText,
       error,
       status,
+      manualReviewFindings,
     };
-  }, [file, findings, sourceText, error, status]);
+  }, [
+    file,
+    findings,
+    sourceText,
+    error,
+    status,
+    manualReviewFindings,
+  ]);
 
 
   useEffect(() => {
@@ -547,6 +559,22 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     reviewOnly?: Finding[]
   ) => {
     if (!file || !onContinueManual || !isPdfFile) return;
+
+    /*
+     * If final verification already produced unresolved items,
+     * EVERY path into Manual Redaction must carry that same
+     * review list.
+     *
+     * This prevents the lower general manual button from opening
+     * a second manual session with no review checklist.
+     */
+    const effectiveReviewFindings =
+      reviewOnly ??
+      (
+        manualReviewFindings.length > 0
+          ? manualReviewFindings
+          : []
+      );
 
     const initialRedactions: ManualRedactionMap = {};
 
@@ -622,7 +650,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
      * final verification, without exposing raw PII.
      */
     const manualReviewItems: ManualReviewItem[] =
-      (reviewOnly || [])
+      effectiveReviewFindings
         .map((finding) => {
           const target = normalizeBox(finding);
 
@@ -2703,16 +2731,28 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             >
               <div>
                 <strong className="block text-sm" style={{ color: "#ffffff" }}>
-                  Something sensitive was missed?
+                  {manualReviewFindings.length > 0
+                    ? "Manual review still needed"
+                    : "Something sensitive was missed?"}
                 </strong>
 
                 <span
                   className="block mt-1 text-xs leading-5"
                   style={{ color: "#d4d4d8" }}
                 >
-                  Open the same PDF with all selected automatic redaction boxes
-                  already placed. Resize, move or delete them, then add anything
-                  the scanner missed. No second upload required.
+                  {manualReviewFindings.length > 0 ? (
+                    <>
+                      Continue reviewing the same PDF with the flagged items and
+                      existing automatic redaction boxes preserved. No second
+                      upload or new scan required.
+                    </>
+                  ) : (
+                    <>
+                      Open the same PDF with all selected automatic redaction boxes
+                      already placed. Resize, move or delete them, then add anything
+                      the scanner missed. No second upload required.
+                    </>
+                  )}
                 </span>
               </div>
 
@@ -2721,7 +2761,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 onClick={() => continueToManualRedaction()}
                 className="pii-manual-handoff mt-4 sm:mt-0 w-full sm:w-auto shrink-0 min-h-12 px-5 rounded-xl border-2 inline-flex items-center justify-center gap-2 text-xs font-semibold transition"
               >
-                Auto-Redact & Continue Manually
+                {manualReviewFindings.length > 0
+                  ? `Continue Manual Review (${manualReviewFindings.length})`
+                  : "Auto-Redact & Continue Manually"}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
