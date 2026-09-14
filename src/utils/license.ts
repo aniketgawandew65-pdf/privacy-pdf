@@ -15,9 +15,17 @@ const proRequested =
 
 const isAdminHost = window.location.hostname === 'pro.1into1.com';
 
+const isCloudflarePreviewHost =
+  window.location.hostname.endsWith(
+    '.privacy-pdf.pages.dev'
+  ) &&
+  window.location.hostname !==
+    'privacy-pdf.pages.dev';
+
 let devEnabled =
   isAdminHost ||
-  (import.meta.env.DEV && proRequested);
+  (import.meta.env.DEV && proRequested) ||
+  (isCloudflarePreviewHost && proRequested);
 function emit() { window.dispatchEvent(new Event('storage')); }
 function readStored(): StoredLicense | null { try { return JSON.parse(safeStorage.getItem(LICENSE_STORAGE_KEY) || 'null'); } catch { return null; } }
 function unexpired(record: StoredLicense) {
