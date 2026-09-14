@@ -756,8 +756,24 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   ]);
 
   /*
-   * Preserve detection selections and the fixed manual-review
-   * checklist without rerunning OCR after Back navigation.
+   * ==========================================================
+   * PRIVATE PII WORKSPACE PERSISTENCE
+   * ==========================================================
+   *
+   * Progress/status messages can change once per page.
+   *
+   * They must NOT trigger a rewrite of the sensitive findings
+   * payload in OPFS every time the progress text changes.
+   *
+   * Keep lightweight UI state and sensitive finding state on
+   * separate lifecycles.
+   */
+
+  /*
+   * Lightweight UI state.
+   *
+   * sessionStorage writes are tiny and contain no raw detected
+   * PII values.
    */
   useEffect(() => {
     if (
@@ -767,10 +783,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return;
     }
 
-    /*
-     * Keep only non-sensitive UI/status information in
-     * sessionStorage.
-     */
     saveToolWorkspaceState(
       'private-pii-redactor',
       {
@@ -778,11 +790,34 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         status,
       }
     );
+  }, [
+    file,
+    error,
+    status,
+    workspaceHydrated,
+  ]);
 
-    /*
-     * Finding.value contains the actual detected PII.
-     * Keep that payload exclusively in browser-local OPFS.
-     */
+  /*
+   * Sensitive detection state.
+   *
+   * Finding.value contains real detected private information,
+   * therefore this payload stays exclusively inside the local
+   * browser workspace.
+   *
+   * IMPORTANT:
+   * This now runs ONLY when the findings themselves change.
+   *
+   * A page-by-page progress/status update no longer causes a
+   * JSON serialization + local-file write.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !file
+    ) {
+      return;
+    }
+
     void saveToolWorkspaceFiles(
       'private-pii-redactor-state',
       [
@@ -807,8 +842,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     file,
     findings,
     manualReviewFindings,
-    error,
-    status,
     workspaceHydrated,
   ]);
 
@@ -1044,9 +1077,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   };
 
   const scanPdfWithTextLayer = async (
-    nextFile: File,
-    deferOcrPages: ReadonlySet<number> = new Set<number>()
-  ) => {
+    nextFile: File
+  ): Promise<{
+    totalPages: number;
+    dedicatedOcrPages: number[];
+  }> => {
     const {
       pdf,
       dispose: disposePdf,
@@ -1055,6 +1090,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     );
 
     const nextFindings: Finding[] = [];
+
+    /*
+     * Pages classified as genuinely scanned/image-only during
+     * THIS SAME traversal are sent to the existing dedicated
+     * OCR scanner afterwards.
+     *
+     * This removes the separate full-document inspection pass.
+     */
+    const dedicatedOcrPages: number[] = [];
 
     let ocrWorker: any = null;
 
@@ -1280,28 +1324,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         pageNumber <= pdf.numPages;
         pageNumber++
       ) {
-        /*
-         * inspectPdfForScannedPages() already identified
-         * these pages as image/scanned pages.
-         *
-         * Do not parse/render/OCR them here and then OCR
-         * them a second time in scanPdfWithOcr().
-         *
-         * The dedicated OCR path below is the authoritative
-         * scanner for these pages.
-         */
-        if (
-          deferOcrPages.has(
-            pageNumber
-          )
-        ) {
-          setStatus(
-            `Preparing scanned page ${pageNumber} of ${pdf.numPages} for private OCR…`
-          );
-
-          continue;
-        }
-
         setStatus(
           `Scanning page ${pageNumber} of ${pdf.numPages}…`
         );
@@ -1309,7 +1331,74 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         const page = await pdf.getPage(pageNumber);
         const viewport = page.getViewport({ scale: 1 });
 
-        const textContent = await page.getTextContent();
+        let textContent: any;
+
+        try {
+          textContent =
+            await page.getTextContent();
+        } catch (_) {
+          /*
+           * Preserve the old inspection behaviour:
+           * an unusual page whose text layer cannot be read is
+           * treated as an OCR page rather than rejecting the PDF.
+           */
+          dedicatedOcrPages.push(
+            pageNumber
+          );
+
+          setStatus(
+            `Preparing page ${pageNumber} of ${pdf.numPages} for private OCR…`
+          );
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+
+          continue;
+        }
+
+        /*
+         * Same scanned-page rule previously used by the
+         * separate inspection pass.
+         *
+         * We now calculate it from the textContent object that
+         * is already required for PII detection.
+         */
+        const meaningfulTextLength =
+          textContent.items
+            .map(
+              (item: any) =>
+                typeof item?.str ===
+                "string"
+                  ? item.str
+                  : ""
+            )
+            .join(" ")
+            .replace(
+              /\s+/g,
+              ""
+            )
+            .trim()
+            .length;
+
+        if (
+          meaningfulTextLength <
+          8
+        ) {
+          dedicatedOcrPages.push(
+            pageNumber
+          );
+
+          setStatus(
+            `Preparing scanned page ${pageNumber} of ${pdf.numPages} for private OCR…`
+          );
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+
+          continue;
+        }
 
         const digitalSpans: PositionedSpan[] = [];
 
@@ -1561,6 +1650,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       }
 
       setFindings(nextFindings);
+
+      return {
+        totalPages:
+          pdf.numPages,
+        dedicatedOcrPages,
+      };
     } finally {
       if (ocrWorker) {
         try {
@@ -2095,87 +2190,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     }
   };
 
-  const inspectPdfForScannedPages = async (
-    nextFile: File
-  ): Promise<{
-    totalPages: number;
-    scannedPages: number[];
-  }> => {
-    let pdf: any = null;
-    let disposePdf:
-      | (() => Promise<void>)
-      | null = null;
-
-    try {
-      const loaded =
-        await loadPdfJsFromBlob(
-          nextFile
-        );
-
-      pdf = loaded.pdf;
-      disposePdf = loaded.dispose;
-
-      const scannedPages: number[] = [];
-
-      for (
-        let pageNumber = 1;
-        pageNumber <= pdf.numPages;
-        pageNumber++
-      ) {
-        try {
-          const page = await pdf.getPage(
-            pageNumber
-          );
-
-          const content =
-            await page.getTextContent();
-
-          const text = content.items
-            .map((item: any) =>
-              typeof item?.str === "string"
-                ? item.str
-                : ""
-            )
-            .join(" ")
-            .replace(/\s+/g, "")
-            .trim();
-
-          // Tiny/empty hidden text layers should not prevent OCR.
-          if (text.length < 8) {
-            scannedPages.push(pageNumber);
-          }
-
-          try {
-            page.cleanup();
-          } catch (_) {}
-        } catch (_) {
-          // One unusual page should not kill the document.
-          // OCR that page instead.
-          scannedPages.push(pageNumber);
-        }
-      }
-
-      return {
-        totalPages: pdf.numPages,
-        scannedPages,
-      };
-    } catch (err: any) {
-      if (isPdfPasswordError(err)) {
-        throw new Error(
-          "This PDF is password-protected. Please unlock it first."
-        );
-      }
-
-      throw err;
-    } finally {
-      if (disposePdf) {
-        try {
-          await disposePdf();
-        } catch (_) {}
-      }
-    }
-  };
-
   // ==========================================================
   // UNIVERSAL PDF SCANNER
   //
@@ -2186,74 +2200,43 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   // Password PDF -> explicit password message
   // ==========================================================
   const scanPdf = async (nextFile: File) => {
-    let inspection: {
+    let classification: {
       totalPages: number;
-      scannedPages: number[];
+      dedicatedOcrPages: number[];
     };
 
+    /*
+     * One traversal now performs BOTH:
+     *
+     * 1. digital PII detection
+     * 2. scanned-page classification
+     *
+     * Previously we traversed the PDF once for classification
+     * and again for actual text-layer detection.
+     */
     try {
-      inspection =
-        await inspectPdfForScannedPages(
+      classification =
+        await scanPdfWithTextLayer(
           nextFile
         );
     } catch (err: any) {
-      if (isPdfPasswordError(err)) {
-        throw err;
-      }
-
-      // If normal inspection fails but PDF.js can still
-      // render the document through the safer OCR path,
-      // attempt the entire PDF through OCR.
-      await scanPdfWithOcr(
-        nextFile,
-        undefined,
-        false
-      );
-
-      return;
-    }
-
-    const allPagesAreScanned =
-      inspection.totalPages > 0 &&
-      inspection.scannedPages.length ===
-        inspection.totalPages;
-
-    // Image-only / scanned PDF.
-    if (allPagesAreScanned) {
-      await scanPdfWithOcr(
-        nextFile,
-        inspection.scannedPages,
-        false
-      );
-
-      return;
-    }
-
-    // Normal PDF or mixed PDF.
-    // Preserve the existing high-quality digital scanner.
-    try {
-      /*
-       * Pages already classified as scanned are handled once,
-       * by the dedicated high-quality OCR path immediately
-       * below. This prevents duplicate OCR/rendering on mixed
-       * documents while preserving the existing detection
-       * behaviour for normal digital pages.
-       */
-      await scanPdfWithTextLayer(
-        nextFile,
-        new Set(
-          inspection.scannedPages
+      if (
+        isPdfPasswordError(
+          err
         )
-      );
-    } catch (err: any) {
-      if (isPdfPasswordError(err)) {
+      ) {
         throw new Error(
           "This PDF is password-protected. Please unlock it first."
         );
       }
 
-      // Valid but unusual PDF: don't reject it.
-      // Fall back to full-document OCR.
+      /*
+       * Preserve the existing universal fallback.
+       *
+       * If an unusual but renderable PDF cannot use the normal
+       * text-layer scanner, process the complete document using
+       * the dedicated OCR route rather than rejecting it.
+       */
       await scanPdfWithOcr(
         nextFile,
         undefined,
@@ -2263,15 +2246,45 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return;
     }
 
-    // Mixed document:
-    // OCR only pages that have no meaningful text layer.
-    if (inspection.scannedPages.length > 0) {
-      await scanPdfWithOcr(
-        nextFile,
-        inspection.scannedPages,
-        true
-      );
+    if (
+      classification
+        .dedicatedOcrPages
+        .length === 0
+    ) {
+      /*
+       * Fully digital document.
+       *
+       * Detection is already complete.
+       * No second PDF traversal and no dedicated OCR pass.
+       */
+      return;
     }
+
+    const allPagesNeedDedicatedOcr =
+      classification.totalPages >
+        0 &&
+      classification
+        .dedicatedOcrPages
+        .length ===
+        classification.totalPages;
+
+    /*
+     * Scanned/mixed pages still use the SAME dedicated OCR
+     * implementation as before.
+     *
+     * Fully scanned PDF:
+     *   replace findings with OCR findings.
+     *
+     * Mixed PDF:
+     *   keep digital findings and replace only scanned pages
+     *   with dedicated OCR findings.
+     */
+    await scanPdfWithOcr(
+      nextFile,
+      classification
+        .dedicatedOcrPages,
+      !allPagesNeedDedicatedOcr
+    );
   };
 
   const scanFile = async (nextFile: File) => {
@@ -2427,12 +2440,53 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const redactPdf = async (): Promise<boolean> => {
     if (!file) return false;
 
-    const {
-      pdf,
-      dispose: disposePdf,
-    } = await loadPdfJsFromBlob(
-      file
-    );
+    /*
+     * Keep the source PDF open ONLY while a secure output pass
+     * is actively rendering pages.
+     *
+     * The previous implementation kept the original PDF.js
+     * document alive during final OCR verification, causing the
+     * large input PDF and the large finished PDF to overlap in
+     * mobile memory.
+     */
+    let loadedSourcePdf:
+      | Awaited<
+          ReturnType<
+            typeof loadPdfJsFromBlob
+          >
+        >
+      | null = null;
+
+    const getSourcePdf =
+      async () => {
+        if (
+          !loadedSourcePdf
+        ) {
+          loadedSourcePdf =
+            await loadPdfJsFromBlob(
+              file
+            );
+        }
+
+        return loadedSourcePdf.pdf;
+      };
+
+    const releaseSourcePdf =
+      async () => {
+        const loaded =
+          loadedSourcePdf;
+
+        loadedSourcePdf =
+          null;
+
+        if (!loaded) {
+          return;
+        }
+
+        try {
+          await loaded.dispose();
+        } catch (_) {}
+      };
 
     const selected = findings.filter(
       (finding) =>
@@ -2444,17 +2498,105 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     const renderScale = 1.7;
 
     const buildSecurePdf = async (
-      strengthenValues = new Set<string>()
+      strengthenValues = new Set<string>(),
+      repairBase: PDFDocument | null = null,
+      repairPages: ReadonlySet<number> | null = null
     ): Promise<Uint8Array> => {
-      const outputPdf = await PDFDocument.create();
+      /*
+       * Open/reopen the original PDF only for the rendering
+       * stage. After this build finishes it can be completely
+       * released before OCR verification starts.
+       */
+      const pdf =
+        await getSourcePdf();
+
+      /*
+       * PASS 1:
+       *   Every page is rendered + flattened securely.
+       *
+       * REPAIR PASS:
+       *   Pages that already passed verification are copied
+       *   directly from PASS 1.
+       *
+       *   ONLY pages containing a failed sensitive value are
+       *   rendered again from the original source with stronger
+       *   destructive redaction.
+       *
+       * This keeps the security model unchanged while avoiding
+       * a second full-document raster pass.
+       */
+      const outputPdf =
+        await PDFDocument.create();
 
       for (
         let pageNumber = 1;
         pageNumber <= pdf.numPages;
         pageNumber++
       ) {
+        const needsRepair =
+          Boolean(
+            repairBase &&
+            repairPages?.has(
+              pageNumber
+            )
+          );
+
+        /*
+         * The page already passed the safety check.
+         *
+         * Copy the already-flattened PASS 1 page instead of
+         * rendering the original PDF again.
+         *
+         * We intentionally copy it into a NEW PDFDocument rather
+         * than modifying PASS 1 in place. That prevents an old
+         * failed page/image from surviving as an unreferenced PDF
+         * object in the final repaired file.
+         */
+        if (
+          repairBase &&
+          !needsRepair
+        ) {
+          setStatus(
+            `Keeping verified secure page ${pageNumber} of ${pdf.numPages}…`
+          );
+
+          const [
+            copiedPage
+          ] =
+            await outputPdf.copyPages(
+              repairBase,
+              [
+                pageNumber - 1,
+              ]
+            );
+
+          outputPdf.addPage(
+            copiedPage
+          );
+
+          /*
+           * Give Safari / Chrome regular opportunities to paint,
+           * process input and reclaim temporary allocations.
+           */
+          if (
+            pageNumber % 12 === 0
+          ) {
+            await new Promise<void>(
+              (resolve) =>
+                setTimeout(
+                  resolve,
+                  0
+                )
+            );
+          }
+
+          continue;
+        }
+
         setStatus(
-          `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
+          repairBase
+            ? `Strengthening redacted page ${pageNumber} of ${pdf.numPages}…`
+            : `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
         );
 
         const page =
@@ -2726,6 +2868,30 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       let bytes = await buildSecurePdf();
 
+      /*
+       * PASS 1 no longer needs the original document.
+       *
+       * Destroy PDF.js + revoke its Blob URL BEFORE opening the
+       * finished PDF for final OCR verification.
+       *
+       * This prevents:
+       *
+       *   original PDF
+       *   + finished PDF
+       *   + verification render/OCR
+       *
+       * from intentionally overlapping in mobile memory.
+       */
+      await releaseSourcePdf();
+
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
       setStatus(
         "Checking the finished PDF for anything still readable…"
       );
@@ -2761,48 +2927,146 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               .filter(Boolean)
           );
 
-        setStatus(
-          `Strengthening ${verification.leakedValues.length} redaction${
-            verification.leakedValues.length === 1
-              ? ""
-              : "s"
-          } automatically…`
-        );
-
         /*
-         * PASS 1 is no longer needed once verification has
-         * identified the values that require strengthening.
+         * Translate failed sensitive values back to the exact
+         * source pages that contain them.
          *
-         * Drop our reference before generating PASS 2 so a
-         * large first output does not intentionally overlap
-         * with another complete output in JavaScript memory.
+         * If the same failed value occurs on several pages,
+         * every occurrence is strengthened.
          */
-        bytes = new Uint8Array(0);
+        const failedPages =
+          new Set<number>(
+            selected
+              .filter(
+                (finding) =>
+                  Boolean(
+                    finding.page &&
+                    failedValues.has(
+                      normalizeForSafetyCheck(
+                        finding.value
+                      )
+                    )
+                  )
+              )
+              .map(
+                (finding) =>
+                  finding.page!
+              )
+          );
 
         /*
-         * Yield once so the browser has an opportunity to
-         * reclaim released PDF/OCR memory before regeneration.
+         * Only run the automatic repair when the verifier's
+         * leaked value can be mapped safely back to a page.
+         *
+         * If it cannot be mapped, the existing manual-review
+         * protection below remains authoritative.
          */
-        await new Promise<void>(
-          (resolve) =>
-            setTimeout(resolve, 0)
-        );
-
-        bytes = await buildSecurePdf(
-          failedValues
-        );
-
-        setStatus(
-          "Re-checking the strengthened redactions…"
-        );
-
-        verification =
-          await verifyFinishedPdf(
-            bytes,
-            selected,
-            (message) =>
-              setStatus(message)
+        if (
+          failedPages.size > 0
+        ) {
+          setStatus(
+            `Strengthening ${verification.leakedValues.length} redaction${
+              verification.leakedValues.length === 1
+                ? ""
+                : "s"
+            } across ${failedPages.size} page${
+              failedPages.size === 1
+                ? ""
+                : "s"
+            } automatically…`
           );
+
+          /*
+           * PASS 1 is already a fully flattened secure PDF.
+           *
+           * Load it only as the source for pages which already
+           * passed verification. Those pages will be copied into
+           * a NEW output document without rasterizing them again.
+           */
+          let repairBase:
+            | PDFDocument
+            | null =
+            await PDFDocument.load(
+              bytes,
+              {
+                updateMetadata:
+                  false,
+              }
+            );
+
+          /*
+           * PDFDocument now owns the parsed PASS 1 document.
+           * Drop our standalone Uint8Array reference before
+           * rebuilding the repaired result.
+           */
+          bytes =
+            new Uint8Array(
+              0
+            );
+
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+
+          /*
+           * buildSecurePdf now:
+           *
+           * - directly copies pages that passed verification
+           * - rerenders ONLY failed pages
+           * - reapplies ALL selected redactions on failed pages
+           * - gives failed values the existing stronger padding
+           *
+           * No OCR/detection rules are changed.
+           */
+          bytes =
+            await buildSecurePdf(
+              failedValues,
+              repairBase,
+              failedPages
+            );
+
+          /*
+           * Repair rendering is complete.
+           *
+           * The original PDF was reopened only for failed-page
+           * rerendering. Release it again BEFORE verification.
+           */
+          await releaseSourcePdf();
+
+          /*
+           * copyPages() already copied every verified PASS 1 page
+           * into a fresh output PDF. The parsed PASS 1 document is
+           * no longer required after serialization.
+           */
+          repairBase =
+            null;
+
+          await new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                0
+              )
+          );
+
+          setStatus(
+            "Re-checking the strengthened redactions…"
+          );
+
+          verification =
+            await verifyFinishedPdf(
+              bytes,
+              selected,
+              (message) =>
+                setStatus(
+                  message
+                )
+            );
+        }
       }
 
       // ======================================================
@@ -2948,9 +3212,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       return true;
     } finally {
-      try {
-        await disposePdf();
-      } catch (_) {}
+      /*
+       * Covers every error path, including a failure midway
+       * through PASS 1 or the targeted repair pass.
+       */
+      await releaseSourcePdf();
     }
   };
 
