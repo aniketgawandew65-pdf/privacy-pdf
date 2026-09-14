@@ -10963,11 +10963,352 @@ export async function deskewPDF(
     onProgress,
   } = options;
 
+  /*
+   * Deskew is limited by the UI to ±10 degrees.
+   * Normalize here as well so malformed callers cannot
+   * accidentally create extreme transformation matrices.
+   */
+  const safeAngle =
+    Number.isFinite(angle)
+      ? Math.max(
+          -10,
+          Math.min(
+            10,
+            angle
+          )
+        )
+      : 0;
+
+  /*
+   * Nothing to transform.
+   *
+   * Return the exact original bytes. This is both lossless
+   * and substantially cheaper than parsing/rebuilding a
+   * potentially 150 MB document.
+   */
+  if (
+    Math.abs(
+      safeAngle
+    ) < 0.001
+  ) {
+    onProgress?.(
+      1,
+      1
+    );
+
+    return new Uint8Array(
+      await file.arrayBuffer()
+    );
+  }
+
+  const yieldToBrowser =
+    () =>
+      new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+  /*
+   * =========================================================
+   * PATH A — LOSSLESS VECTOR DESKEW
+   * =========================================================
+   *
+   * Do NOT rasterize ordinary PDFs.
+   *
+   * Instead, wrap each page's existing content streams with
+   * one PDF transformation matrix. Images, vectors and text
+   * remain exactly as they exist in the original document.
+   *
+   * Advantages:
+   * - no 2x render canvas
+   * - no second rotation canvas
+   * - no JPEG re-encoding
+   * - no OCR
+   * - dramatically less CPU/GPU work
+   * - original image/text quality is preserved
+   */
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  if (!looksProtected) {
+    let sourceBuffer:
+      | ArrayBuffer
+      | null = null;
+
+    let vectorDoc:
+      | PDFDocument
+      | null = null;
+
+    try {
+      sourceBuffer =
+        await file.arrayBuffer();
+
+      vectorDoc =
+        await PDFDocument.load(
+          sourceBuffer,
+          {
+            ignoreEncryption:
+              true,
+            updateMetadata:
+              false,
+          }
+        );
+
+      /*
+       * pdf-lib cannot safely rewrite encrypted source
+       * streams. Send those documents to the PDF.js
+       * compatibility path below.
+       */
+      if (
+        vectorDoc.isEncrypted
+      ) {
+        throw new Error(
+          'Encrypted document requires compatibility deskew.'
+        );
+      }
+
+      /*
+       * The parsed PDF now owns everything required.
+       * Release our separate complete ArrayBuffer reference.
+       */
+      sourceBuffer = null;
+
+      await yieldToBrowser();
+
+      /*
+       * Canvas/CSS positive rotation is visually clockwise
+       * because screen Y coordinates point downward.
+       *
+       * PDF coordinates point upward, therefore use the
+       * opposite sign to match the existing preview and the
+       * old canvas implementation exactly.
+       */
+      const theta =
+        (
+          -safeAngle *
+          Math.PI
+        ) /
+        180;
+
+      const cos =
+        Math.cos(
+          theta
+        );
+
+      const sin =
+        Math.sin(
+          theta
+        );
+
+      const a = cos;
+      const b = sin;
+      const c = -sin;
+      const d = cos;
+
+      const pages =
+        vectorDoc.getPages();
+
+      const totalPages =
+        pages.length;
+
+      for (
+        let index = 0;
+        index < totalPages;
+        index++
+      ) {
+        onProgress?.(
+          index + 1,
+          totalPages
+        );
+
+        const page =
+          pages[index];
+
+        /*
+         * Rotate around the visible page centre rather than
+         * the PDF origin. Keeping the page box unchanged
+         * preserves the existing Deskew behaviour: the page
+         * dimensions do not grow after straightening.
+         */
+        const box =
+          page.getCropBox();
+
+        const centerX =
+          box.x +
+          box.width / 2;
+
+        const centerY =
+          box.y +
+          box.height / 2;
+
+        const e =
+          centerX -
+          a * centerX -
+          c * centerY;
+
+        const f =
+          centerY -
+          b * centerX -
+          d * centerY;
+
+        /*
+         * normalize() converts a single Contents stream into
+         * an array where necessary. wrapContentStreams()
+         * then places:
+         *
+         *   q
+         *   a b c d e f cm
+         *   ... ORIGINAL PAGE CONTENT ...
+         *   Q
+         *
+         * Nothing in the original content is decoded or
+         * recompressed.
+         */
+        const node: any =
+          page.node;
+
+        node.normalize();
+
+        const contents =
+          node.Contents();
+
+        if (contents) {
+          const number =
+            (value: number) => {
+              const fixed =
+                value.toFixed(
+                  8
+                );
+
+              return fixed
+                .replace(
+                  /0+$/,
+                  ''
+                )
+                .replace(
+                  /\.$/,
+                  ''
+                ) || '0';
+            };
+
+          const startStream =
+            vectorDoc.context
+              .flateStream(
+                [
+                  'q',
+                  `${number(a)} ${number(b)} ${number(c)} ${number(d)} ${number(e)} ${number(f)} cm`,
+                  '',
+                ].join(
+                  '\n'
+                )
+              );
+
+          const endStream =
+            vectorDoc.context
+              .flateStream(
+                'Q\n'
+              );
+
+          const startRef =
+            vectorDoc.context
+              .register(
+                startStream
+              );
+
+          const endRef =
+            vectorDoc.context
+              .register(
+                endStream
+              );
+
+          const wrapped =
+            node.wrapContentStreams(
+              startRef,
+              endRef
+            );
+
+          if (!wrapped) {
+            throw new Error(
+              `Could not transform page ${index + 1}.`
+            );
+          }
+        }
+
+        /*
+         * Long documents should periodically hand control
+         * back to Safari/Chrome instead of monopolising the
+         * main thread for hundreds of pages.
+         */
+        if (
+          (
+            index + 1
+          ) %
+            20 ===
+          0
+        ) {
+          await yieldToBrowser();
+        }
+      }
+
+      await yieldToBrowser();
+
+      /*
+       * This is now only serialization. Source images,
+       * vector graphics and text were never rasterized.
+       */
+      return await vectorDoc.save(
+        {
+          useObjectStreams:
+            false,
+        }
+      );
+    } catch (
+      vectorError
+    ) {
+      console.warn(
+        'Lossless Deskew path unavailable; using compatibility renderer:',
+        vectorError
+      );
+    } finally {
+      /*
+       * No explicit destroy API exists for pdf-lib.
+       * Remove our JavaScript references before opening
+       * PDF.js so the previous parsed document can become
+       * collectible.
+       */
+      sourceBuffer = null;
+      vectorDoc = null;
+    }
+
+    await yieldToBrowser();
+  }
+
+  /*
+   * =========================================================
+   * PATH B — UNIVERSAL COMPATIBILITY FALLBACK
+   * =========================================================
+   *
+   * Used for encrypted/unusual PDFs that cannot safely be
+   * rewritten by pdf-lib.
+   *
+   * Important difference from the old implementation:
+   * there is only ONE full-page canvas.
+   *
+   * PDF.js applies the rotation transformation while it
+   * paints the page. We no longer render one canvas and copy
+   * it into a second equally-large rotated canvas.
+   */
   const loadedPdf =
     await loadPdfJsFromBlob(
       file,
       {
-        stopAtErrors: false,
+        stopAtErrors:
+          false,
       }
     );
 
@@ -10983,9 +11324,20 @@ export async function deskewPDF(
 
     const rad =
       (
-        angle *
+        safeAngle *
         Math.PI
-      ) / 180;
+      ) /
+      180;
+
+    const cos =
+      Math.cos(
+        rad
+      );
+
+    const sin =
+      Math.sin(
+        rad
+      );
 
     for (
       let pageNum = 1;
@@ -11007,11 +11359,6 @@ export async function deskewPDF(
           'canvas'
         );
 
-      const rotatedCanvas =
-        document.createElement(
-          'canvas'
-        );
-
       try {
         const viewport =
           page.getViewport({
@@ -11019,13 +11366,19 @@ export async function deskewPDF(
           });
 
         canvas.width =
-          Math.floor(
-            viewport.width
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
           );
 
         canvas.height =
-          Math.floor(
-            viewport.height
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
           );
 
         const ctx =
@@ -11042,80 +11395,53 @@ export async function deskewPDF(
           );
         }
 
+        ctx.fillStyle =
+          '#FFFFFF';
+
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+        /*
+         * Rotate the PDF.js render around the canvas centre.
+         * This replaces the old second rotatedCanvas.
+         */
+        const centerX =
+          canvas.width / 2;
+
+        const centerY =
+          canvas.height / 2;
+
+        const e =
+          centerX -
+          cos * centerX +
+          sin * centerY;
+
+        const f =
+          centerY -
+          sin * centerX -
+          cos * centerY;
+
         await (
           page.render({
             canvasContext:
               ctx as any,
+
             viewport,
+
+            transform: [
+              cos,
+              sin,
+              -sin,
+              cos,
+              e,
+              f,
+            ],
           } as any) as any
         ).promise;
-
-        rotatedCanvas.width =
-          canvas.width;
-
-        rotatedCanvas.height =
-          canvas.height;
-
-        const rCtx =
-          rotatedCanvas.getContext(
-            '2d'
-          );
-
-        if (!rCtx) {
-          throw new Error(
-            'Rotated canvas context unavailable'
-          );
-        }
-
-        rCtx.fillStyle =
-          '#FFFFFF';
-
-        rCtx.fillRect(
-          0,
-          0,
-          rotatedCanvas.width,
-          rotatedCanvas.height
-        );
-
-        rCtx.save();
-
-        rCtx.translate(
-          rotatedCanvas.width / 2,
-          rotatedCanvas.height / 2
-        );
-
-        rCtx.rotate(
-          rad
-        );
-
-        rCtx.drawImage(
-          canvas,
-          -canvas.width / 2,
-          -canvas.height / 2
-        );
-
-        rCtx.restore();
-
-        /*
-         * The rendered source page has already been copied
-         * into rotatedCanvas. Release its full-size pixel
-         * backing store before JPEG encoding begins so two
-         * large canvases do not remain live unnecessarily.
-         */
-        canvas.width = 1;
-        canvas.height = 1;
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-
-        await new Promise<void>(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              0
-            )
-        );
 
         const jpegBlob =
           await new Promise<Blob>(
@@ -11123,7 +11449,7 @@ export async function deskewPDF(
               resolve,
               reject
             ) => {
-              rotatedCanvas.toBlob(
+              canvas.toBlob(
                 (blob) => {
                   if (blob) {
                     resolve(
@@ -11132,7 +11458,7 @@ export async function deskewPDF(
                   } else {
                     reject(
                       new Error(
-                        'Failed to encode deskewed page'
+                        'This page exceeds the browser canvas encoding limit.'
                       )
                     );
                   }
@@ -11144,12 +11470,14 @@ export async function deskewPDF(
           );
 
         const jpegBytes =
-          await jpegBlob.arrayBuffer();
+          await jpegBlob
+            .arrayBuffer();
 
         const embeddedImg =
-          await outputDoc.embedJpg(
-            jpegBytes
-          );
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
 
         const unscaled =
           page.getViewport({
@@ -11174,18 +11502,15 @@ export async function deskewPDF(
           }
         );
       } finally {
+        /*
+         * Release this page's pixel backing store
+         * immediately before opening the next page.
+         */
         canvas.width = 1;
         canvas.height = 1;
 
-        rotatedCanvas.width = 1;
-        rotatedCanvas.height = 1;
-
         try {
           canvas.remove();
-        } catch (_) {}
-
-        try {
-          rotatedCanvas.remove();
         } catch (_) {}
 
         try {
@@ -11193,39 +11518,28 @@ export async function deskewPDF(
         } catch (_) {}
       }
 
-      /*
-       * Give the browser an opportunity to reclaim the
-       * completed page's canvas/JPEG temporaries before
-       * processing the next page.
-       */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      await yieldToBrowser();
     }
 
     /*
-     * Every deskewed page is already embedded in outputDoc.
-     * Release the original PDF.js document before allocating
-     * the complete serialized output.
+     * PDF.js is no longer needed. Release the input before
+     * pdf-lib allocates the final serialized output.
      */
     await loadedPdf.dispose();
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
+    await yieldToBrowser();
 
-    return await outputDoc.save({
-      useObjectStreams: true,
-    });
+    return await outputDoc.save(
+      {
+        useObjectStreams:
+          true,
+      }
+    );
   } finally {
+    /*
+     * dispose() is idempotent and protects every earlier
+     * error path as well.
+     */
     await loadedPdf.dispose();
   }
 }
