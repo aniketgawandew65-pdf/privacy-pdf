@@ -1043,7 +1043,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     );
   };
 
-  const scanPdfWithTextLayer = async (nextFile: File) => {
+  const scanPdfWithTextLayer = async (
+    nextFile: File,
+    deferOcrPages: ReadonlySet<number> = new Set<number>()
+  ) => {
     const {
       pdf,
       dispose: disposePdf,
@@ -1277,6 +1280,28 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         pageNumber <= pdf.numPages;
         pageNumber++
       ) {
+        /*
+         * inspectPdfForScannedPages() already identified
+         * these pages as image/scanned pages.
+         *
+         * Do not parse/render/OCR them here and then OCR
+         * them a second time in scanPdfWithOcr().
+         *
+         * The dedicated OCR path below is the authoritative
+         * scanner for these pages.
+         */
+        if (
+          deferOcrPages.has(
+            pageNumber
+          )
+        ) {
+          setStatus(
+            `Preparing scanned page ${pageNumber} of ${pdf.numPages} for private OCR…`
+          );
+
+          continue;
+        }
+
         setStatus(
           `Scanning page ${pageNumber} of ${pdf.numPages}…`
         );
@@ -2207,7 +2232,19 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     // Normal PDF or mixed PDF.
     // Preserve the existing high-quality digital scanner.
     try {
-      await scanPdfWithTextLayer(nextFile);
+      /*
+       * Pages already classified as scanned are handled once,
+       * by the dedicated high-quality OCR path immediately
+       * below. This prevents duplicate OCR/rendering on mixed
+       * documents while preserving the existing detection
+       * behaviour for normal digital pages.
+       */
+      await scanPdfWithTextLayer(
+        nextFile,
+        new Set(
+          inspection.scannedPages
+        )
+      );
     } catch (err: any) {
       if (isPdfPasswordError(err)) {
         throw new Error(
