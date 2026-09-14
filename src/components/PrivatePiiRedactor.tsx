@@ -2361,13 +2361,50 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           );
 
         const reviewItems =
-          selected.filter((finding) =>
-            failedValueSet.has(
+          selected.filter((finding) => {
+            const normalizedValue =
               normalizeForSafetyCheck(
                 finding.value
+              );
+
+            if (
+              !failedValueSet.has(
+                normalizedValue
               )
-            )
-          );
+            ) {
+              return false;
+            }
+
+            /*
+             * Review-page attribution only.
+             *
+             * The global verifier has already decided that this
+             * value is still readable somewhere in the finished
+             * PDF.
+             *
+             * If page-level OCR confirmed the exact page, show
+             * only that occurrence in the review list.
+             *
+             * If page attribution is unavailable for any reason,
+             * keep the old conservative behavior and show the
+             * matching finding rather than falsely clearing it.
+             */
+            const confirmedPages =
+              verification.leakedPagesByValue?.[
+                normalizedValue
+              ] || [];
+
+            if (
+              confirmedPages.length === 0 ||
+              !finding.page
+            ) {
+              return true;
+            }
+
+            return confirmedPages.includes(
+              finding.page
+            );
+          });
 
         setManualReviewFindings(
           reviewItems

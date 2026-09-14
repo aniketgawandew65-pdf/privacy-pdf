@@ -13,6 +13,18 @@ export type FinalVerificationResult = {
   passed: boolean;
   leakedValues: string[];
   selectableTextFound: boolean;
+
+  /*
+   * Supplementary review metadata only.
+   *
+   * Key   = normalized sensitive value
+   * Value = pages where final OCR could still read it
+   *
+   * IMPORTANT:
+   * This does NOT control pass/fail.
+   * Existing whole-document safety logic remains authoritative.
+   */
+  leakedPagesByValue: Record<string, number[]>;
 };
 
 export const verifyFinishedPdf = async (
@@ -36,6 +48,9 @@ export const verifyFinishedPdf = async (
 
     let selectableTextFound = false;
     let visibleText = "";
+
+    // Page-specific OCR evidence for the review UI only.
+    const leakedPagesByValue: Record<string, number[]> = {};
 
     const { createWorker } = await import("tesseract.js");
 
@@ -121,6 +136,33 @@ export const verifyFinishedPdf = async (
           } as any
         );
 
+      const pageVisibleText =
+        normalizeForSafetyCheck(
+          data?.text || ""
+        );
+
+      for (const item of selectedValues) {
+        if (
+          pageVisibleText.includes(
+            item.normalized
+          )
+        ) {
+          const pages =
+            leakedPagesByValue[item.normalized] || [];
+
+          if (!pages.includes(pageNumber)) {
+            pages.push(pageNumber);
+          }
+
+          leakedPagesByValue[item.normalized] =
+            pages;
+        }
+      }
+
+      /*
+       * Keep the original whole-document verification
+       * completely unchanged.
+       */
       visibleText +=
         ` ${data?.text || ""}`;
 
@@ -148,6 +190,7 @@ export const verifyFinishedPdf = async (
         leakedValues.length === 0,
       leakedValues,
       selectableTextFound,
+      leakedPagesByValue,
     };
   } finally {
     if (worker) {
