@@ -1,5 +1,12 @@
 import { validateTaskFiles } from '../utils/fileSizeGuard';
-import React, { useState, useRef } from 'react';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Download,
   Code2,
@@ -31,6 +38,8 @@ export const CodeToPdf: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'paste' | 'upload'>('paste');
   const [file, setFile] = useState<File | null>(null);
   const [codeContent, setCodeContent] = useState<string>(SAMPLE_CODE);
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
   const [title, setTitle] = useState<string>('engine.js');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [showLineNumbers, setShowLineNumbers] = useState<boolean>(true);
@@ -43,6 +52,156 @@ export const CodeToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  /*
+   * Restore Code to PDF input after Preview/Download -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'code-to-pdf'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            activeTab?: 'paste' | 'upload';
+            codeContent?: string;
+            title?: string;
+            theme?: 'dark' | 'light';
+            showLineNumbers?: boolean;
+            fontSize?: number;
+            pageSize?: 'a4' | 'letter';
+            orientation?: 'portrait' | 'landscape';
+          }>('code-to-pdf');
+
+        if (cancelled) return;
+
+        if (restored[0]) {
+          setFile(restored[0]);
+        }
+
+        if (savedState?.activeTab) {
+          setActiveTab(savedState.activeTab);
+        }
+
+        if (
+          typeof savedState?.codeContent ===
+          'string'
+        ) {
+          setCodeContent(
+            savedState.codeContent
+          );
+        }
+
+        if (
+          typeof savedState?.title ===
+          'string'
+        ) {
+          setTitle(savedState.title);
+        }
+
+        if (savedState?.theme) {
+          setTheme(savedState.theme);
+        }
+
+        if (
+          typeof savedState?.showLineNumbers ===
+          'boolean'
+        ) {
+          setShowLineNumbers(
+            savedState.showLineNumbers
+          );
+        }
+
+        if (
+          typeof savedState?.fontSize ===
+          'number'
+        ) {
+          setFontSize(savedState.fontSize);
+        }
+
+        if (savedState?.pageSize) {
+          setPageSize(savedState.pageSize);
+        }
+
+        if (savedState?.orientation) {
+          setOrientation(
+            savedState.orientation
+          );
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Code to PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Save uploaded source file separately.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !file
+    ) {
+      return;
+    }
+
+    void saveToolWorkspaceFiles(
+      'code-to-pdf',
+      [file]
+    );
+  }, [
+    file,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Preserve editor content and formatting controls.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    saveToolWorkspaceState(
+      'code-to-pdf',
+      {
+        activeTab,
+        codeContent,
+        title,
+        theme,
+        showLineNumbers,
+        fontSize,
+        pageSize,
+        orientation,
+      }
+    );
+  }, [
+    activeTab,
+    codeContent,
+    title,
+    theme,
+    showLineNumbers,
+    fontSize,
+    pageSize,
+    orientation,
+    workspaceHydrated,
+  ]);
 
   const handleFileDrop = async (selectedFile: File) => {
     // Source file size limit
@@ -114,6 +273,10 @@ export const CodeToPdf: React.FC = () => {
     setTitle('');
     revokeUrl();
     setErrorMessage(null);
+
+    void clearToolWorkspace(
+      'code-to-pdf'
+    );
   };
 
   const lineCount = codeContent.split('\n').length;

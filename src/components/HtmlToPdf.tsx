@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Download,
   Upload,
@@ -13,6 +13,13 @@ import {
 import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
 
 const SAMPLE_RECEIPT = `<div style="text-align: center; margin-bottom: 12px;">
   <h2 style="margin: 0; font-size: 16px;">COFFEE &amp; BAKERY</h2>
@@ -101,6 +108,8 @@ export const HtmlToPdf: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'paste' | 'upload'>('paste');
   const [htmlContent, setHtmlContent] = useState<string>(SAMPLE_RECEIPT);
   const [file, setFile] = useState<File | null>(null);
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
   const [fileName, setFileName] = useState<string>('receipt_document');
   const [pageSize, setPageSize] = useState<'receipt' | 'a4' | 'letter'>('receipt');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
@@ -110,6 +119,134 @@ export const HtmlToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  /*
+   * Restore HTML / Receipt input after
+   * Preview/Download -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'html-to-pdf'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            activeTab?: 'paste' | 'upload';
+            htmlContent?: string;
+            fileName?: string;
+            pageSize?: 'receipt' | 'a4' | 'letter';
+            orientation?: 'portrait' | 'landscape';
+          }>('html-to-pdf');
+
+        if (cancelled) return;
+
+        if (restored[0]) {
+          setFile(restored[0]);
+        }
+
+        if (savedState?.activeTab) {
+          setActiveTab(
+            savedState.activeTab
+          );
+        }
+
+        if (
+          typeof savedState?.htmlContent ===
+          'string'
+        ) {
+          setHtmlContent(
+            savedState.htmlContent
+          );
+        }
+
+        if (
+          typeof savedState?.fileName ===
+          'string'
+        ) {
+          setFileName(
+            savedState.fileName
+          );
+        }
+
+        if (savedState?.pageSize) {
+          setPageSize(
+            savedState.pageSize
+          );
+        }
+
+        if (savedState?.orientation) {
+          setOrientation(
+            savedState.orientation
+          );
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore HTML to PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Save uploaded HTML file separately.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !file
+    ) {
+      return;
+    }
+
+    void saveToolWorkspaceFiles(
+      'html-to-pdf',
+      [file]
+    );
+  }, [
+    file,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Save editable HTML and layout controls.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    saveToolWorkspaceState(
+      'html-to-pdf',
+      {
+        activeTab,
+        htmlContent,
+        fileName,
+        pageSize,
+        orientation,
+      }
+    );
+  }, [
+    activeTab,
+    htmlContent,
+    fileName,
+    pageSize,
+    orientation,
+    workspaceHydrated,
+  ]);
 
   const handleFileDrop = async (selectedFile: File) => {
     // Source file size limit
@@ -178,6 +315,10 @@ export const HtmlToPdf: React.FC = () => {
     setFileName('document');
     revokeUrl();
     setErrorMessage(null);
+
+    void clearToolWorkspace(
+      'html-to-pdf'
+    );
   };
 
   return (

@@ -15,6 +15,11 @@ import {
 } from 'lucide-react';
 import { pdfjsLib } from '../utils/pdfjs';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+} from '../utils/localWorkspace';
 
 
 if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -26,6 +31,7 @@ type DiffViewMode = 'overlay' | 'split';
 export const ComparePdf: React.FC = () => {
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
 
   const [pdfDocA, setPdfDocA] = useState<any>(null);
   const [pdfDocB, setPdfDocB] = useState<any>(null);
@@ -49,6 +55,82 @@ export const ComparePdf: React.FC = () => {
 
   const fileInputARef = useRef<HTMLInputElement>(null);
   const fileInputBRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Restore Compare PDF inputs after Preview -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreCompareWorkspace = async () => {
+      try {
+        const [storedA, storedB] =
+          await Promise.all([
+            restoreToolWorkspaceFiles(
+              'compare-pdf-a'
+            ),
+            restoreToolWorkspaceFiles(
+              'compare-pdf-b'
+            ),
+          ]);
+
+        if (cancelled) return;
+
+        if (storedA[0]) {
+          setFileA(storedA[0]);
+        }
+
+        if (storedB[0]) {
+          setFileB(storedB[0]);
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Compare PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreCompareWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (fileA) {
+      void saveToolWorkspaceFiles(
+        'compare-pdf-a',
+        [fileA]
+      );
+    } else {
+      void clearToolWorkspace(
+        'compare-pdf-a'
+      );
+    }
+  }, [fileA, workspaceHydrated]);
+
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (fileB) {
+      void saveToolWorkspaceFiles(
+        'compare-pdf-b',
+        [fileB]
+      );
+    } else {
+      void clearToolWorkspace(
+        'compare-pdf-b'
+      );
+    }
+  }, [fileB, workspaceHydrated]);
 
   // Fine 5% step increments
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 5, 250));
@@ -243,7 +325,10 @@ export const ComparePdf: React.FC = () => {
             <span className="text-xs font-bold uppercase tracking-wider text-rose-400">Document A (Original)</span>
             {fileA && (
               <button
-                onClick={() => setFileA(null)}
+                onClick={() => {
+                  setFileA(null);
+                  void clearToolWorkspace('compare-pdf-a');
+                }}
                 className="p-1 rounded text-zinc-400 hover:text-red-400 transition"
               >
                 <X className="w-3.5 h-3.5" />
@@ -284,7 +369,10 @@ export const ComparePdf: React.FC = () => {
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">Document B (Modified)</span>
             {fileB && (
               <button
-                onClick={() => setFileB(null)}
+                onClick={() => {
+                  setFileB(null);
+                  void clearToolWorkspace('compare-pdf-b');
+                }}
                 className="p-1 rounded text-zinc-400 hover:text-red-400 transition"
               >
                 <X className="w-3.5 h-3.5" />

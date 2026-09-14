@@ -1,5 +1,9 @@
 import { sanitizeRichHtml } from '../utils/sanitizeHtml';
-import { safeStorage } from '../utils/safeStorage';
+import {
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+  clearToolWorkspace,
+} from '../utils/localWorkspace';
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Download,
@@ -33,8 +37,6 @@ import { PDFDocument } from "pdf-lib";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
-const STORAGE_KEY = "privacy_pdf_text_editor_draft";
-
 // Exact standard A4 dimensions at 96 DPI: 794px width x 1123px height
 const A4_WIDTH_PX = 794;
 const A4_PAGE_HEIGHT_PX = 1123;
@@ -62,6 +64,8 @@ const TEXT_COLORS = [
 export const TextToPdf: React.FC<any> = () => {
   const [content, setContent] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
   const [zoom, setZoom] = useState<number>(1.0);
   const [fontSize, setFontSize] = useState<number>(14);
   const [toolbarFontSize, setToolbarFontSize] = useState<number>(14);
@@ -78,18 +82,99 @@ export const TextToPdf: React.FC<any> = () => {
   const previewOuterRef = useRef<HTMLDivElement | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
 
-  // 1. Auto-restore draft from localStorage
+  /*
+   * Restore the current editor session after Preview/Download
+   * -> Back.
+   *
+   * Unlike the old localStorage draft, this workspace is
+   * intentionally cleared on a real browser refresh.
+   */
   useEffect(() => {
     try {
-      const saved = safeStorage.getItem(STORAGE_KEY);
-      if (saved && saved.trim()) {
-        setContent(sanitizeRichHtml(saved));
+      /*
+       * Remove any legacy permanent draft left by an older build.
+       */
+      try {
+        window.localStorage.removeItem(
+          'privacy_pdf_text_editor_draft'
+        );
+      } catch (_) {}
+
+      const saved =
+        restoreToolWorkspaceState<{
+          content?: string;
+          selectedFont?: string;
+          fontSize?: number;
+          toolbarFontSize?: number;
+          zoom?: number;
+        }>('text-to-pdf');
+
+      if (saved) {
+        const restoredContent =
+          sanitizeRichHtml(
+            saved.content || ''
+          );
+
+        setContent(
+          restoredContent
+        );
+
+        if (
+          typeof saved.selectedFont ===
+          'string'
+        ) {
+          setSelectedFont(
+            saved.selectedFont
+          );
+        }
+
+        if (
+          typeof saved.fontSize ===
+          'number'
+        ) {
+          setFontSize(
+            saved.fontSize
+          );
+        }
+
+        if (
+          typeof saved.toolbarFontSize ===
+          'number'
+        ) {
+          setToolbarFontSize(
+            saved.toolbarFontSize
+          );
+        }
+
+        if (
+          typeof saved.zoom ===
+          'number'
+        ) {
+          setZoom(
+            saved.zoom
+          );
+        }
+
         if (editorRef.current) {
-          editorRef.current.innerHTML = sanitizeRichHtml(saved);
-          setCharCount(editorRef.current.innerText.trim().length);
+          editorRef.current.innerHTML =
+            restoredContent;
+
+          setCharCount(
+            editorRef.current
+              .innerText
+              .trim()
+              .length
+          );
         }
       }
-    } catch (_) {}
+    } catch (error) {
+      console.warn(
+        'Unable to restore Text to PDF workspace:',
+        error
+      );
+    } finally {
+      setWorkspaceHydrated(true);
+    }
   }, []);
 
   // 2. Track mobile selection range so toolbar taps never lose highlighted words
@@ -271,11 +356,41 @@ export const TextToPdf: React.FC<any> = () => {
     setContent(html);
     setCharCount(editorRef.current.innerText.trim().length);
     setDownloadUrl(null);
-    try {
-      safeStorage.setItem(STORAGE_KEY, html);
-    } catch (_) {}
     paginateDocument(html, selectedFont, fontSize);
   };
+
+  /*
+   * Preserve the editable document and its main formatting
+   * controls during this browser session.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (!content.trim()) {
+      void clearToolWorkspace(
+        'text-to-pdf'
+      );
+      return;
+    }
+
+    saveToolWorkspaceState(
+      'text-to-pdf',
+      {
+        content,
+        selectedFont,
+        fontSize,
+        toolbarFontSize,
+        zoom,
+      }
+    );
+  }, [
+    content,
+    selectedFont,
+    fontSize,
+    toolbarFontSize,
+    zoom,
+    workspaceHydrated,
+  ]);
 
   useEffect(() => {
     const el = editorRef.current;
@@ -370,9 +485,10 @@ export const TextToPdf: React.FC<any> = () => {
       setCharCount(0);
       setDownloadUrl(null);
       setPagesHtml([""]);
-      try {
-        safeStorage.removeItem(STORAGE_KEY);
-      } catch (_) {}
+
+      void clearToolWorkspace(
+        'text-to-pdf'
+      );
     }
   };
 

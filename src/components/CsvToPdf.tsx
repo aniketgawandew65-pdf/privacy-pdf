@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Download,
   Table,
@@ -12,11 +12,20 @@ import {
 import { generateCsvPDF, type CsvToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
 
 export const CsvToPdf: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState<string>('');
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
   const [documentTitle, setDocumentTitle] = useState<string>('');
   const [orientation, setOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
   const [theme, setTheme] = useState<'striped' | 'clean' | 'emerald'>('striped');
@@ -28,6 +37,156 @@ export const CsvToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  /*
+   * Restore CSV / pasted spreadsheet input after
+   * Download/Preview -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'csv-to-pdf'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            activeTab?: 'upload' | 'paste';
+            pastedText?: string;
+            documentTitle?: string;
+            orientation?: 'auto' | 'portrait' | 'landscape';
+            theme?: 'striped' | 'clean' | 'emerald';
+            pageSize?: 'a4' | 'letter';
+          }>('csv-to-pdf');
+
+        if (cancelled) return;
+
+        if (restored[0]) {
+          setFile(restored[0]);
+
+          try {
+            const raw =
+              await restored[0].text();
+
+            const parsed =
+              parseDelimitedData(raw);
+
+            if (!cancelled) {
+              setRowCount(
+                parsed.length
+              );
+            }
+          } catch {
+            // File remains available even if row counting fails.
+          }
+        }
+
+        if (savedState?.activeTab) {
+          setActiveTab(
+            savedState.activeTab
+          );
+        }
+
+        if (
+          typeof savedState?.pastedText ===
+          'string'
+        ) {
+          setPastedText(
+            savedState.pastedText
+          );
+        }
+
+        if (
+          typeof savedState?.documentTitle ===
+          'string'
+        ) {
+          setDocumentTitle(
+            savedState.documentTitle
+          );
+        }
+
+        if (savedState?.orientation) {
+          setOrientation(
+            savedState.orientation
+          );
+        }
+
+        if (savedState?.theme) {
+          setTheme(
+            savedState.theme
+          );
+        }
+
+        if (savedState?.pageSize) {
+          setPageSize(
+            savedState.pageSize
+          );
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore CSV to PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Persist uploaded CSV separately from lightweight controls.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (file) {
+      void saveToolWorkspaceFiles(
+        'csv-to-pdf',
+        [file]
+      );
+    }
+  }, [
+    file,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Persist paste-mode data and tool settings.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    saveToolWorkspaceState(
+      'csv-to-pdf',
+      {
+        activeTab,
+        pastedText,
+        documentTitle,
+        orientation,
+        theme,
+        pageSize,
+      }
+    );
+  }, [
+    activeTab,
+    pastedText,
+    documentTitle,
+    orientation,
+    theme,
+    pageSize,
+    workspaceHydrated,
+  ]);
 
   const parseDelimitedData = (raw: string): string[][] => {
     const lines = raw.trim().split(/\r?\n/);
@@ -139,6 +298,10 @@ export const CsvToPdf: React.FC = () => {
     setRowCount(0);
     revokeUrl();
     setErrorMessage(null);
+
+    void clearToolWorkspace(
+      'csv-to-pdf'
+    );
   };
 
   return (

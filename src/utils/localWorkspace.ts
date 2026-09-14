@@ -322,7 +322,77 @@ export const clearWorkspaceFiles =
 
 export const resetWorkspaceSession =
   async (): Promise<void> => {
+    const sessionId =
+      sessionStorage.getItem(
+        SESSION_KEY
+      );
+
     await clearWorkspaceFiles();
+
+    /*
+     * Clear tool-scoped manifests/state as well.
+     */
+    const keysToRemove: string[] = [];
+
+    for (
+      let index = 0;
+      index < sessionStorage.length;
+      index++
+    ) {
+      const key =
+        sessionStorage.key(index);
+
+      if (
+        key &&
+        (
+          key.startsWith(
+            "oneinto1_tool_manifest:"
+          ) ||
+          key.startsWith(
+            "oneinto1_tool_state:"
+          )
+        )
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+
+    for (const key of keysToRemove) {
+      sessionStorage.removeItem(key);
+    }
+
+    /*
+     * Remove tool-scoped OPFS directories belonging
+     * to the current workspace session.
+     */
+    if (
+      sessionId &&
+      hasOpfs()
+    ) {
+      try {
+        const root =
+          await navigator.storage.getDirectory();
+
+        for await (
+          const name of root.keys()
+        ) {
+          if (
+            name.startsWith(
+              `tool-workspace-${sessionId}-`
+            )
+          ) {
+            await root.removeEntry(
+              name,
+              {
+                recursive: true,
+              }
+            );
+          }
+        }
+      } catch {
+        // Already removed / unsupported.
+      }
+    }
 
     sessionStorage.removeItem(
       SESSION_KEY
@@ -341,3 +411,330 @@ export const isPageReload = () => {
     return false;
   }
 };
+
+/*
+ * ============================================================
+ * TOOL-SCOPED WORKSPACES
+ * ============================================================
+ *
+ * Some 1into1 tools own their input internally instead of using
+ * App.tsx sharedFiles (Compare, Scan, Image Converter, etc.).
+ *
+ * These helpers give those tools isolated browser-local storage
+ * while keeping the same session lifetime:
+ *
+ * - survives preview -> Back
+ * - survives normal in-app navigation
+ * - cleared by explicit tool Clear/Delete
+ * - cleared by browser refresh through resetWorkspaceSession()
+ */
+
+const TOOL_MANIFEST_PREFIX =
+  "oneinto1_tool_manifest:";
+
+const TOOL_STATE_PREFIX =
+  "oneinto1_tool_state:";
+
+const safeToolScope = (
+  scope: string
+) =>
+  scope
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") ||
+  "tool";
+
+const getToolDirectory = async (
+  scope: string,
+  create = true
+) => {
+  if (!hasOpfs()) return null;
+
+  const root =
+    await navigator.storage.getDirectory();
+
+  const sessionId =
+    getOrCreateSessionId();
+
+  const safeScope =
+    safeToolScope(scope);
+
+  try {
+    return await root.getDirectoryHandle(
+      `tool-workspace-${sessionId}-${safeScope}`,
+      { create }
+    );
+  } catch {
+    return null;
+  }
+};
+
+export const saveToolWorkspaceFiles =
+  async (
+    scope: string,
+    files: File[]
+  ): Promise<boolean> => {
+    if (files.length === 0) {
+      await clearToolWorkspace(scope);
+      return true;
+    }
+
+    const directory =
+      await getToolDirectory(
+        scope,
+        true
+      );
+
+    if (!directory) {
+      return false;
+    }
+
+    try {
+      for await (
+        const name of directory.keys()
+      ) {
+        await directory.removeEntry(
+          name,
+          { recursive: true }
+        );
+      }
+    } catch {
+      // Manifest controls which files are restored.
+    }
+
+    const sessionId =
+      getOrCreateSessionId();
+
+    const manifestFiles:
+      WorkspaceFileMeta[] = [];
+
+    try {
+      for (
+        let index = 0;
+        index < files.length;
+        index++
+      ) {
+        const file =
+          files[index];
+
+        const storedName =
+          `file-${index}-${Date.now()}`;
+
+        const handle =
+          await directory.getFileHandle(
+            storedName,
+            { create: true }
+          );
+
+        const writable =
+          await handle.createWritable();
+
+        await writable.write(file);
+        await writable.close();
+
+        manifestFiles.push({
+          storedName,
+          originalName: file.name,
+          type:
+            file.type ||
+            "application/octet-stream",
+          lastModified:
+            file.lastModified ||
+            Date.now(),
+          size: file.size,
+        });
+      }
+
+      const manifest: WorkspaceManifest = {
+        sessionId,
+        files: manifestFiles,
+      };
+
+      sessionStorage.setItem(
+        TOOL_MANIFEST_PREFIX +
+          safeToolScope(scope),
+        JSON.stringify(manifest)
+      );
+
+      return true;
+    } catch (error) {
+      console.warn(
+        `Unable to persist ${scope} workspace:`,
+        error
+      );
+
+      return false;
+    }
+  };
+
+export const restoreToolWorkspaceFiles =
+  async (
+    scope: string
+  ): Promise<File[]> => {
+    if (isPageReload()) {
+      return [];
+    }
+    const key =
+      TOOL_MANIFEST_PREFIX +
+      safeToolScope(scope);
+
+    try {
+      const raw =
+        sessionStorage.getItem(key);
+
+      if (!raw) return [];
+
+      const manifest =
+        JSON.parse(
+          raw
+        ) as WorkspaceManifest;
+
+      const currentSessionId =
+        sessionStorage.getItem(
+          SESSION_KEY
+        );
+
+      if (
+        !currentSessionId ||
+        manifest.sessionId !==
+          currentSessionId ||
+        !Array.isArray(
+          manifest.files
+        )
+      ) {
+        return [];
+      }
+
+      const directory =
+        await getToolDirectory(
+          scope,
+          false
+        );
+
+      if (!directory) {
+        return [];
+      }
+
+      const restored: File[] = [];
+
+      for (
+        const meta of
+        manifest.files
+      ) {
+        const handle =
+          await directory.getFileHandle(
+            meta.storedName
+          );
+
+        const storedFile =
+          await handle.getFile();
+
+        restored.push(
+          new File(
+            [storedFile],
+            meta.originalName,
+            {
+              type: meta.type,
+              lastModified:
+                meta.lastModified,
+            }
+          )
+        );
+      }
+
+      return restored;
+    } catch (error) {
+      console.warn(
+        `Unable to restore ${scope} workspace:`,
+        error
+      );
+
+      return [];
+    }
+  };
+
+export const saveToolWorkspaceState =
+  <T>(
+    scope: string,
+    state: T
+  ) => {
+    try {
+      sessionStorage.setItem(
+        TOOL_STATE_PREFIX +
+          safeToolScope(scope),
+        JSON.stringify(state)
+      );
+    } catch (error) {
+      console.warn(
+        `Unable to save ${scope} state:`,
+        error
+      );
+    }
+  };
+
+export const restoreToolWorkspaceState =
+  <T>(
+    scope: string
+  ): T | null => {
+    if (isPageReload()) {
+      return null;
+    }
+
+    try {
+      const raw =
+        sessionStorage.getItem(
+          TOOL_STATE_PREFIX +
+            safeToolScope(scope)
+        );
+
+      if (!raw) return null;
+
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  };
+
+export const clearToolWorkspace =
+  async (
+    scope: string
+  ): Promise<void> => {
+    const safeScope =
+      safeToolScope(scope);
+
+    sessionStorage.removeItem(
+      TOOL_MANIFEST_PREFIX +
+        safeScope
+    );
+
+    sessionStorage.removeItem(
+      TOOL_STATE_PREFIX +
+        safeScope
+    );
+
+    const sessionId =
+      sessionStorage.getItem(
+        SESSION_KEY
+      );
+
+    if (
+      !sessionId ||
+      !hasOpfs()
+    ) {
+      return;
+    }
+
+    try {
+      const root =
+        await navigator.storage.getDirectory();
+
+      await root.removeEntry(
+        `tool-workspace-${sessionId}-${safeScope}`,
+        {
+          recursive: true,
+        }
+      );
+    } catch {
+      // Already cleared / unavailable.
+    }
+  };

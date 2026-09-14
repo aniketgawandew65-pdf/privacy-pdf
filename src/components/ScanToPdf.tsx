@@ -15,6 +15,13 @@ import {
 import { imagesToPDF } from '../utils/pdfEngine';
 import heic2any from 'heic2any';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
 
 type ScanMode = 'original' | 'grayscale' | 'bw';
 
@@ -243,6 +250,9 @@ export const ScanToPdf = () => {
   const [pages, setPages] =
     useState<ScanPage[]>([]);
 
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
+
   const [appearancePageId, setAppearancePageId] =
     useState<string | null>(null);
 
@@ -254,6 +264,119 @@ export const ScanToPdf = () => {
 
   const [error, setError] =
     useState<string | null>(null);
+
+  /*
+   * Restore selected scan images and their editing state
+   * after Preview/Download -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreScanWorkspace = async () => {
+      try {
+        const restoredFiles =
+          await restoreToolWorkspaceFiles(
+            'scan-to-pdf'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            pages?: Array<{
+              id: string;
+              rotation: number;
+              flipped: boolean;
+              mode: ScanMode;
+            }>;
+          }>('scan-to-pdf');
+
+        if (cancelled) return;
+
+        if (restoredFiles.length > 0) {
+          const restoredPages: ScanPage[] =
+            restoredFiles.map(
+              (file, index) => {
+                const saved =
+                  savedState?.pages?.[index];
+
+                return {
+                  id:
+                    saved?.id ||
+                    createId(),
+                  file,
+                  preview:
+                    URL.createObjectURL(file),
+                  rotation:
+                    saved?.rotation ?? 0,
+                  flipped:
+                    saved?.flipped ?? false,
+                  mode:
+                    saved?.mode ||
+                    'original',
+                };
+              }
+            );
+
+          setPages(restoredPages);
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Scan to PDF workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreScanWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Persist source images plus the scan edits needed
+   * to continue where the user left off.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (pages.length > 0) {
+      void saveToolWorkspaceFiles(
+        'scan-to-pdf',
+        pages.map(
+          (page) => page.file
+        )
+      );
+
+      saveToolWorkspaceState(
+        'scan-to-pdf',
+        {
+          pages: pages.map(
+            (page) => ({
+              id: page.id,
+              rotation:
+                page.rotation,
+              flipped:
+                page.flipped,
+              mode:
+                page.mode,
+            })
+          ),
+        }
+      );
+    } else {
+      void clearToolWorkspace(
+        'scan-to-pdf'
+      );
+    }
+  }, [
+    pages,
+    workspaceHydrated,
+  ]);
 
   const totalSize = useMemo(
     () =>
@@ -437,6 +560,10 @@ export const ScanToPdf = () => {
     clearDownload();
     setPages([]);
     setError(null);
+
+    void clearToolWorkspace(
+      'scan-to-pdf'
+    );
 
     if (cameraInputRef.current) {
       cameraInputRef.current.value = '';

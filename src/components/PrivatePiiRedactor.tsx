@@ -20,6 +20,13 @@ import {
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
 import { pdfjsLib } from "../utils/pdfjs";
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from "../utils/localWorkspace";
 
 type FindingCategory =
   | "Name"
@@ -478,6 +485,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     () => redactorSessionCache.file
   );
 
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
+
   const [findings, setFindings] = useState<Finding[]>(
     () => redactorSessionCache.findings
   );
@@ -512,6 +522,169 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     useRef<Uint8Array | null>(
       redactorSessionCache.pendingRedactedPdf
     );
+
+  /*
+   * Restore the current PII session if a mobile/native PDF
+   * preview recreated the web app.
+   *
+   * The original source file is kept in OPFS.
+   * Findings/checklist state is browser-session only and is
+   * removed on real refresh by the shared workspace reset.
+   *
+   * OCR/scanner logic is NOT rerun automatically here.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restorePiiWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'private-pii-redactor'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            findings?: Finding[];
+            manualReviewFindings?: Finding[];
+            error?: string | null;
+            status?: string | null;
+          }>('private-pii-redactor');
+
+        if (cancelled) return;
+
+        const restoredFile =
+          restored[0] || null;
+
+        if (restoredFile) {
+          setFile(restoredFile);
+
+          const extension =
+            restoredFile.name
+              .split('.')
+              .pop()
+              ?.toLowerCase() || '';
+
+          if (
+            extension === 'txt' ||
+            extension === 'csv' ||
+            restoredFile.type.startsWith('text/')
+          ) {
+            try {
+              const text =
+                await restoredFile.text();
+
+              if (!cancelled) {
+                setSourceText(text);
+              }
+            } catch {
+              // File itself remains available.
+            }
+          }
+        }
+
+        if (
+          Array.isArray(
+            savedState?.findings
+          )
+        ) {
+          setFindings(
+            savedState!.findings!
+          );
+        }
+
+        if (
+          Array.isArray(
+            savedState?.manualReviewFindings
+          )
+        ) {
+          setManualReviewFindings(
+            savedState!.manualReviewFindings!
+          );
+        }
+
+        if (
+          savedState &&
+          'error' in savedState
+        ) {
+          setError(
+            savedState.error ?? null
+          );
+        }
+
+        if (
+          savedState &&
+          'status' in savedState
+        ) {
+          setStatus(
+            savedState.status ?? null
+          );
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore PII workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restorePiiWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Persist the original source file.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (file) {
+      void saveToolWorkspaceFiles(
+        'private-pii-redactor',
+        [file]
+      );
+    }
+  }, [
+    file,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Preserve detection selections and the fixed manual-review
+   * checklist without rerunning OCR after Back navigation.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !file
+    ) {
+      return;
+    }
+
+    saveToolWorkspaceState(
+      'private-pii-redactor',
+      {
+        findings,
+        manualReviewFindings,
+        error,
+        status,
+      }
+    );
+  }, [
+    file,
+    findings,
+    manualReviewFindings,
+    error,
+    status,
+    workspaceHydrated,
+  ]);
 
   useEffect(() => {
     redactorSessionCache = {
@@ -709,6 +882,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     setManualReviewFindings([]);
     pendingRedactedPdfRef.current = null;
     redactorSessionCache.pendingRedactedPdf = null;
+
+    void clearToolWorkspace(
+      'private-pii-redactor'
+    );
+
+    void clearToolWorkspace(
+      'private-pii-redactor-pending'
+    );
 
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -2397,6 +2578,27 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         redactorSessionCache.pendingRedactedPdf =
           pendingRedactedPdfRef.current;
 
+        /*
+         * Preserve this exact already-redacted copy so
+         * Download Anyway still works after mobile Preview -> Back.
+         * It stays local in the browser workspace.
+         */
+        void saveToolWorkspaceFiles(
+          'private-pii-redactor-pending',
+          [
+            new File(
+              [
+                pendingRedactedPdfRef.current as unknown as BlobPart,
+              ],
+              'pending-redacted.pdf',
+              {
+                type: 'application/pdf',
+                lastModified: Date.now(),
+              }
+            ),
+          ]
+        );
+
         setManualReviewFindings(
           reviewItems
         );
@@ -2450,6 +2652,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       pendingRedactedPdfRef.current = null;
       redactorSessionCache.pendingRedactedPdf = null;
+
+      void clearToolWorkspace(
+        'private-pii-redactor-pending'
+      );
+
       setManualReviewFindings([]);
 
       setStatus(
@@ -2477,8 +2684,51 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     }
   };
 
-  const downloadCurrentRedactedPdf = () => {
-    if (!file || !pendingRedactedPdfRef.current) {
+  const downloadCurrentRedactedPdf = async () => {
+    if (!file) {
+      return;
+    }
+
+    let pendingBytes =
+      pendingRedactedPdfRef.current;
+
+    /*
+     * After mobile Preview -> Back the JS heap may have been
+     * recreated. Load the exact pending PDF only when needed,
+     * instead of putting a potentially large PDF back into
+     * memory during page startup.
+     */
+    if (!pendingBytes) {
+      try {
+        const restoredPending =
+          await restoreToolWorkspaceFiles(
+            'private-pii-redactor-pending'
+          );
+
+        if (restoredPending[0]) {
+          pendingBytes =
+            new Uint8Array(
+              await restoredPending[0].arrayBuffer()
+            );
+
+          pendingRedactedPdfRef.current =
+            pendingBytes;
+
+          redactorSessionCache.pendingRedactedPdf =
+            pendingBytes;
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore pending redacted PDF:',
+          error
+        );
+      }
+    }
+
+    if (!pendingBytes) {
+      setError(
+        'The pending redacted copy is no longer available. Run Auto-Redact again before downloading.'
+      );
       return;
     }
 
@@ -2496,7 +2746,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     downloadBlob(
       new Blob(
-        [pendingRedactedPdfRef.current as any],
+        [pendingBytes as any],
         { type: "application/pdf" }
       ),
       `${base}-redacted-review-needed.pdf`
@@ -2508,6 +2758,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     pendingRedactedPdfRef.current = null;
     redactorSessionCache.pendingRedactedPdf = null;
+
+    void clearToolWorkspace(
+      'private-pii-redactor-pending'
+    );
+
     setError(null);
     setManualReviewFindings([]);
     setIsRedacting(true);

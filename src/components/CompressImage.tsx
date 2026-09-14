@@ -12,6 +12,13 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
 
 interface CompressedResult {
   name: string;
@@ -71,6 +78,8 @@ export function CompressImage() {
 
   const [files, setFiles] = useState<File[]>([]);
   const [results, setResults] = useState<CompressedResult[]>([]);
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
 
   const [targetKb, setTargetKb] = useState(200);
   const [removeMetadata, setRemoveMetadata] = useState(true);
@@ -79,6 +88,115 @@ export function CompressImage() {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Restore selected source images and compression settings
+   * after Download/Preview -> Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'compress-image'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            targetKb?: number;
+            removeMetadata?: boolean;
+          }>('compress-image');
+
+        if (cancelled) return;
+
+        if (restored.length > 0) {
+          setFiles(restored);
+        }
+
+        if (
+          typeof savedState?.targetKb ===
+          'number'
+        ) {
+          setTargetKb(
+            savedState.targetKb
+          );
+        }
+
+        if (
+          typeof savedState?.removeMetadata ===
+          'boolean'
+        ) {
+          setRemoveMetadata(
+            savedState.removeMetadata
+          );
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Compress Image workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Persist files only when the selected file list changes.
+   * Slider/toggle changes do not rewrite the source images.
+   */
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (files.length > 0) {
+      void saveToolWorkspaceFiles(
+        'compress-image',
+        files
+      );
+    } else {
+      void clearToolWorkspace(
+        'compress-image'
+      );
+    }
+  }, [
+    files,
+    workspaceHydrated,
+  ]);
+
+  /*
+   * Persist lightweight compression controls separately.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      files.length === 0
+    ) {
+      return;
+    }
+
+    saveToolWorkspaceState(
+      'compress-image',
+      {
+        targetKb,
+        removeMetadata,
+      }
+    );
+  }, [
+    targetKb,
+    removeMetadata,
+    files.length,
+    workspaceHydrated,
+  ]);
 
   const clearResults = () => {
     results.forEach((result) => URL.revokeObjectURL(result.url));
@@ -257,6 +375,10 @@ export function CompressImage() {
     setError(null);
     setProgress(0);
     setStatus('');
+
+    void clearToolWorkspace(
+      'compress-image'
+    );
 
     if (inputRef.current) {
       inputRef.current.value = '';

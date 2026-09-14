@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import heic2any from 'heic2any';
 import JSZip from 'jszip';
@@ -17,6 +17,13 @@ import {
 } from 'lucide-react';
 import { imagesToPDF } from '../utils/pdfEngine';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  clearToolWorkspace,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+} from '../utils/localWorkspace';
 
 type OutputFormat = 'pdf' | 'jpg' | 'png' | 'webp';
 
@@ -151,6 +158,8 @@ export const ImageToPdf: React.FC = () => {
       : 'pdf';
 
   const [images, setImages] = useState<File[]>([]);
+  const [workspaceHydrated, setWorkspaceHydrated] =
+    useState(false);
   const [outputFormat, setOutputFormat] =
     useState<OutputFormat>(defaultOutput);
   const [quality, setQuality] = useState(92);
@@ -161,6 +170,91 @@ export const ImageToPdf: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Keep selected source images available when the user
+   * opens/downloads the result and then returns with Back.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreWorkspace = async () => {
+      try {
+        const restored =
+          await restoreToolWorkspaceFiles(
+            'image-converter'
+          );
+
+        const savedState =
+          restoreToolWorkspaceState<{
+            outputFormat?: OutputFormat;
+            quality?: number;
+          }>('image-converter');
+
+        if (cancelled) return;
+
+        if (restored.length > 0) {
+          setImages(restored);
+        }
+
+        if (savedState?.outputFormat) {
+          setOutputFormat(
+            savedState.outputFormat
+          );
+        }
+
+        if (
+          typeof savedState?.quality ===
+          'number'
+        ) {
+          setQuality(savedState.quality);
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to restore Image Converter workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceHydrated(true);
+        }
+      }
+    };
+
+    void restoreWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+
+    if (images.length > 0) {
+      void saveToolWorkspaceFiles(
+        'image-converter',
+        images
+      );
+
+      saveToolWorkspaceState(
+        'image-converter',
+        {
+          outputFormat,
+          quality,
+        }
+      );
+    } else {
+      void clearToolWorkspace(
+        'image-converter'
+      );
+    }
+  }, [
+    images,
+    outputFormat,
+    quality,
+    workspaceHydrated,
+  ]);
 
   const clearGenerated = () => {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
