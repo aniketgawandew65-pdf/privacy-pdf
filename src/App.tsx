@@ -58,6 +58,12 @@ import {
   Receipt,
 } from 'lucide-react';
 import { validateTaskFiles } from './utils/fileSizeGuard';
+import {
+  saveWorkspaceFiles,
+  restoreWorkspaceFiles,
+  resetWorkspaceSession,
+  isPageReload,
+} from './utils/localWorkspace';
 
 declare const __BUILD_TIME__: string;
 
@@ -192,6 +198,79 @@ export default function App() {
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [globalFileError, setGlobalFileError] = useState<string | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const prepareWorkspace = async () => {
+      try {
+        /*
+         * A true browser refresh/hard refresh starts a fresh
+         * workspace, exactly as intended.
+         *
+         * Normal in-app navigation and PDF Preview -> Back do not.
+         */
+        if (isPageReload()) {
+          await resetWorkspaceSession();
+
+          if (!cancelled) {
+            setSharedFiles([]);
+          }
+
+          return;
+        }
+
+        const restored =
+          await restoreWorkspaceFiles();
+
+        if (
+          !cancelled &&
+          restored.length > 0
+        ) {
+          setSharedFiles(restored);
+        }
+      } catch (error) {
+        console.warn(
+          'Unable to prepare local workspace:',
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setWorkspaceReady(true);
+        }
+      }
+    };
+
+    void prepareWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
+   * Keep the current workspace mirrored to local browser-only
+   * storage.
+   *
+   * This covers single-file tools and multi-file tools because
+   * both ultimately use sharedFiles.
+   */
+  useEffect(() => {
+    if (!workspaceReady) return;
+
+    void saveWorkspaceFiles(
+      sharedFiles
+    ).catch((error) => {
+      console.warn(
+        'Unable to persist local workspace:',
+        error
+      );
+    });
+  }, [
+    sharedFiles,
+    workspaceReady,
+  ]);
 
   useEffect(() => {
     setGlobalFileError(null);
