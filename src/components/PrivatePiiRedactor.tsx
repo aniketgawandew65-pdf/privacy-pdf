@@ -2014,29 +2014,45 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     /*
      * ==========================================================
-     * HARD-BOUNDED MOBILE OCR
+     * HARD-BATCHED + TILED MOBILE OCR
      * ==========================================================
      *
-     * A large scanned PDF is NEVER kept open for the whole OCR
-     * job anymore.
+     * Two separate memory boundaries protect mobile Safari:
      *
-     * Process only a few pages, then fully destroy:
+     * 1. The PDF.js document and Tesseract WASM worker live for
+     *    only a few pages.
      *
-     * - Tesseract worker / WASM heap
-     * - PDF.js document
-     * - Blob URL
-     * - rendered canvases
+     * 2. Each page is rendered/OCR'd as overlapping horizontal
+     *    strips instead of one giant full-page bitmap.
      *
-     * Then reopen the browser-backed File for the next batch.
-     *
-     * This is slower than keeping everything alive forever, but
-     * dramatically safer on iPhone/iPad memory limits.
+     * OCR resolution remains EXACTLY 1.6x.
      */
-    const OCR_BATCH_SIZE = 4;
+
+    const OCR_BATCH_SIZE =
+      4;
+
+    const renderScale =
+      1.6;
+
+    /*
+     * Keep each OCR bitmap around ~1.4 million pixels.
+     *
+     * RGBA browser memory for that bitmap is roughly 5.6 MB,
+     * before Tesseract's internal representation.
+     */
+    const MAX_TILE_PIXELS =
+      1_400_000;
+
+    /*
+     * Vertical overlap ensures words / text lines close to a
+     * strip boundary are present fully in at least one tile.
+     */
+    const TILE_OVERLAP =
+      96;
 
     const yieldToMobile =
       (
-        delay = 180
+        delay = 35
       ) =>
         new Promise<void>(
           (resolve) =>
@@ -2047,11 +2063,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         );
 
     /*
-     * We only need one short PDF.js open here to discover the
-     * total page count when the caller did not provide a page
-     * list.
+     * Short probe only to obtain page count.
      */
-    let totalPages = 0;
+    let totalPages =
+      0;
 
     try {
       const probe =
@@ -2095,15 +2110,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               index + 1
           );
 
-    /*
-     * Use exactly the same OCR resolution as before.
-     */
-    const renderScale = 1.6;
-
     for (
       let batchStart = 0;
       batchStart <
-      pagesToScan.length;
+        pagesToScan.length;
       batchStart +=
         OCR_BATCH_SIZE
     ) {
@@ -2120,14 +2130,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               typeof loadPdfJsFromBlob
             >
           >
-        | null = null;
+        | null =
+        null;
 
       let worker: any =
         null;
 
       try {
         /*
-         * Open a fresh PDF.js document for ONLY this batch.
+         * Fresh PDF.js document for this short batch.
          */
         loaded =
           await loadPdfJsFromBlob(
@@ -2138,9 +2149,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           loaded.pdf;
 
         /*
-         * Fresh Tesseract worker per batch.
-         *
-         * Same local SIMD model/assets and same language.
+         * Same local OCR engine/model as before.
          */
         worker =
           await createWorker(
@@ -2160,7 +2169,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         for (
           let localIndex = 0;
           localIndex <
-          batchPages.length;
+            batchPages.length;
           localIndex++
         ) {
           const pageNumber =
@@ -2168,12 +2177,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               localIndex
             ];
 
-          const completedBefore =
-            batchStart +
-            localIndex;
-
           setStatus(
-            `Scanning page ${pageNumber} of ${totalPages} with local OCR…`
+            `Scanning page ${pageNumber} of ${totalPages} with memory-safe local OCR…`
           );
 
           const page =
@@ -2181,175 +2186,371 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               pageNumber
             );
 
-          const baseViewport =
-            page.getViewport({
-              scale: 1,
-            });
-
-          const viewport =
-            page.getViewport({
-              scale:
-                renderScale,
-            });
-
-          const canvas =
-            document.createElement(
-              "canvas"
-            );
-
-          canvas.width =
-            Math.max(
-              1,
-              Math.ceil(
-                viewport.width
-              )
-            );
-
-          canvas.height =
-            Math.max(
-              1,
-              Math.ceil(
-                viewport.height
-              )
-            );
-
           try {
-            const ctx =
-              canvas.getContext(
-                "2d",
-                {
-                  alpha: false,
-                }
-              );
-
-            if (!ctx) {
-              throw new Error(
-                "Unable to create local OCR renderer."
-              );
-            }
-
-            ctx.fillStyle =
-              "#ffffff";
-
-            ctx.fillRect(
-              0,
-              0,
-              canvas.width,
-              canvas.height
-            );
-
-            await page.render({
-              canvasContext:
-                ctx as any,
-              viewport,
-              canvas,
-            } as any).promise;
+            const baseViewport =
+              page.getViewport({
+                scale: 1,
+              });
 
             /*
-             * Primary positional OCR path.
+             * This viewport determines the EXACT same 1.6x
+             * page pixels used before.
              *
-             * Same recognition engine and same source pixels.
+             * We simply never allocate all of them together.
              */
-            let result: any =
-              await (
-                worker as any
-              ).recognize(
-                canvas,
-                {},
-                {
-                  text: true,
-                  blocks: true,
-                }
+            const fullViewport =
+              page.getViewport({
+                scale:
+                  renderScale,
+              });
+
+            const fullWidth =
+              Math.max(
+                1,
+                Math.ceil(
+                  fullViewport.width
+                )
               );
 
-            let lines =
-              extractOcrLines(
-                result?.data ||
-                  {}
+            const fullHeight =
+              Math.max(
+                1,
+                Math.ceil(
+                  fullViewport.height
+                )
               );
 
             /*
-             * Preserve existing hOCR compatibility fallback.
+             * Dynamically choose strip height according to page
+             * width so unusually wide pages also remain bounded.
              */
-            if (
-              lines.length ===
-              0
+            const calculatedHeight =
+              Math.floor(
+                MAX_TILE_PIXELS /
+                  fullWidth
+              );
+
+            const tileHeight =
+              Math.max(
+                320,
+                Math.min(
+                  1100,
+                  calculatedHeight
+                )
+              );
+
+            let tileTop =
+              0;
+
+            let tileIndex =
+              0;
+
+            while (
+              tileTop <
+              fullHeight
             ) {
-              result =
-                await (
-                  worker as any
-                ).recognize(
+              const tileBottom =
+                Math.min(
+                  fullHeight,
+                  tileTop +
+                    tileHeight
+                );
+
+              const currentHeight =
+                Math.max(
+                  1,
+                  tileBottom -
+                    tileTop
+                );
+
+              const canvas =
+                document.createElement(
+                  "canvas"
+                );
+
+              canvas.width =
+                fullWidth;
+
+              canvas.height =
+                currentHeight;
+
+              try {
+                const ctx =
+                  canvas.getContext(
+                    "2d",
+                    {
+                      alpha:
+                        false,
+                    }
+                  );
+
+                if (!ctx) {
+                  throw new Error(
+                    "Unable to create local OCR tile renderer."
+                  );
+                }
+
+                ctx.fillStyle =
+                  "#ffffff";
+
+                ctx.fillRect(
+                  0,
+                  0,
+                  canvas.width,
+                  canvas.height
+                );
+
+                /*
+                 * Render the full-resolution page translated
+                 * upward so this canvas receives ONLY the
+                 * requested strip.
+                 *
+                 * Pixel scale remains 1.6x.
+                 */
+                await page.render({
+                  canvasContext:
+                    ctx as any,
+                  viewport:
+                    fullViewport,
                   canvas,
-                  {},
-                  {
-                    text: true,
-                    hocr: true,
-                    blocks: true,
+                  transform: [
+                    1,
+                    0,
+                    0,
+                    1,
+                    0,
+                    -tileTop,
+                  ],
+                } as any).promise;
+
+                setStatus(
+                  `OCR page ${pageNumber} of ${totalPages} · section ${tileIndex + 1}…`
+                );
+
+                /*
+                 * Normal structured-coordinate OCR.
+                 */
+                let result: any =
+                  await (
+                    worker as any
+                  ).recognize(
+                    canvas,
+                    {},
+                    {
+                      text:
+                        true,
+                      blocks:
+                        true,
+                    }
+                  );
+
+                let lines =
+                  extractOcrLines(
+                    result?.data ||
+                      {}
+                  );
+
+                /*
+                 * Preserve the existing hOCR compatibility path
+                 * when structured coordinates are unavailable.
+                 */
+                if (
+                  lines.length ===
+                  0
+                ) {
+                  result =
+                    await (
+                      worker as any
+                    ).recognize(
+                      canvas,
+                      {},
+                      {
+                        text:
+                          true,
+                        hocr:
+                          true,
+                        blocks:
+                          true,
+                      }
+                    );
+
+                  lines =
+                    extractOcrLines(
+                      result?.data ||
+                        {}
+                    );
+                }
+
+                /*
+                 * Each adjacent tile overlaps.
+                 *
+                 * Give every text line to exactly ONE tile using
+                 * the vertical centre of the line. This prevents
+                 * duplicate findings while preserving overlap.
+                 */
+                const halfOverlap =
+                  Math.floor(
+                    TILE_OVERLAP /
+                      2
+                  );
+
+                const ownedTop =
+                  tileTop === 0
+                    ? tileTop
+                    : tileTop +
+                      halfOverlap;
+
+                const ownedBottom =
+                  tileBottom ===
+                  fullHeight
+                    ? tileBottom
+                    : tileBottom -
+                      halfOverlap;
+
+                lines.forEach(
+                  (
+                    words,
+                    lineIndex
+                  ) => {
+                    if (
+                      !words.length
+                    ) {
+                      return;
+                    }
+
+                    const minLocalY =
+                      Math.min(
+                        ...words.map(
+                          (
+                            word
+                          ) =>
+                            word.y0
+                        )
+                      );
+
+                    const maxLocalY =
+                      Math.max(
+                        ...words.map(
+                          (
+                            word
+                          ) =>
+                            word.y1
+                        )
+                      );
+
+                    const globalCenterY =
+                      tileTop +
+                      (
+                        minLocalY +
+                        maxLocalY
+                      ) /
+                        2;
+
+                    /*
+                     * The overlapping neighbour owns this line.
+                     */
+                    if (
+                      globalCenterY <
+                        ownedTop ||
+                      globalCenterY >=
+                        ownedBottom
+                    ) {
+                      return;
+                    }
+
+                    /*
+                     * Tesseract coordinates are local to the tile.
+                     * Convert them back into full 1.6x page-space.
+                     */
+                    const pageWords =
+                      words.map(
+                        (
+                          word
+                        ) => ({
+                          ...word,
+                          y0:
+                            word.y0 +
+                            tileTop,
+                          y1:
+                            word.y1 +
+                            tileTop,
+                        })
+                      );
+
+                    nextFindings.push(
+                      ...detectOcrLine(
+                        pageWords,
+                        pageNumber,
+                        baseViewport
+                          .width,
+                        baseViewport
+                          .height,
+                        renderScale,
+                        `tile-${tileIndex}-${lineIndex}`
+                      )
+                    );
                   }
                 );
 
-              lines =
-                extractOcrLines(
-                  result?.data ||
-                    {}
-                );
-            }
+                /*
+                 * Drop large Tesseract result trees immediately.
+                 */
+                result =
+                  null;
 
-            lines.forEach(
-              (
-                words,
-                lineIndex
-              ) => {
-                nextFindings.push(
-                  ...detectOcrLine(
-                    words,
-                    pageNumber,
-                    baseViewport
-                      .width,
-                    baseViewport
-                      .height,
-                    renderScale,
-                    String(
-                      lineIndex
-                    )
-                  )
-                );
+                lines.length =
+                  0;
+              } finally {
+                /*
+                 * Immediately destroy this strip's pixel buffer.
+                 */
+                canvas.width =
+                  1;
+
+                canvas.height =
+                  1;
               }
-            );
 
-            /*
-             * Drop page-specific OCR structures immediately.
-             */
-            result = null;
-            lines.length = 0;
+              tileIndex++;
+
+              if (
+                tileBottom >=
+                fullHeight
+              ) {
+                break;
+              }
+
+              /*
+               * Advance with overlap.
+               */
+              tileTop =
+                Math.max(
+                  tileTop + 1,
+                  tileBottom -
+                    TILE_OVERLAP
+                );
+
+              /*
+               * Let iOS process canvas destruction between strips.
+               */
+              await yieldToMobile(
+                25
+              );
+            }
           } finally {
-            /*
-             * Destroy pixel backing store immediately.
-             */
-            canvas.width = 1;
-            canvas.height = 1;
-
             try {
               page.cleanup();
             } catch (_) {}
           }
 
           /*
-           * Small browser recovery window after every page.
+           * Recovery between complete pages.
            */
-          if (
-            completedBefore +
-              1 <
-            pagesToScan.length
-          ) {
-            await yieldToMobile(
-              35
-            );
-          }
+          await yieldToMobile(
+            50
+          );
         }
-      } catch (
-        err: any
-      ) {
+      } catch (err: any) {
         if (
           isPdfPasswordError(
             err
@@ -2363,10 +2564,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         throw err;
       } finally {
         /*
-         * TRUE HARD RESET.
-         *
-         * Terminating only Tesseract was not enough in the
-         * 147 MB iPhone test, so BOTH heavy engines die here.
+         * Hard reset BOTH engines after every short batch.
          */
         if (worker) {
           try {
@@ -2374,7 +2572,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               .terminate();
           } catch (_) {}
 
-          worker = null;
+          worker =
+            null;
         }
 
         if (loaded) {
@@ -2383,40 +2582,42 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               .dispose();
           } catch (_) {}
 
-          loaded = null;
+          loaded =
+            null;
         }
       }
 
       /*
-       * Let Safari fully process worker termination / canvas
-       * destruction before reopening the 147 MB PDF.
+       * Give Safari time to release worker/canvas/PDF native
+       * allocations before the next batch starts.
        */
       if (
         batchStart +
           OCR_BATCH_SIZE <
         pagesToScan.length
       ) {
+        const nextPage =
+          pagesToScan[
+            Math.min(
+              batchStart +
+                OCR_BATCH_SIZE,
+              pagesToScan.length -
+                1
+            )
+          ];
+
         setStatus(
-          `OCR memory cleared — continuing with page ${
-            pagesToScan[
-              Math.min(
-                batchStart +
-                  OCR_BATCH_SIZE,
-                pagesToScan.length -
-                  1
-              )
-            ]
-          }…`
+          `OCR memory cleared — continuing with page ${nextPage}…`
         );
 
         await yieldToMobile(
-          300
+          350
         );
       }
     }
 
     /*
-     * Commit React state only after the bounded OCR job finishes.
+     * Commit React state only when OCR has finished.
      */
     if (
       appendToExisting
