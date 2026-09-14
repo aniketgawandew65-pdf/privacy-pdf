@@ -3308,232 +3308,79 @@ export async function encryptPDF(
   userPassword: string,
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array> {
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
+  if (!userPassword) {
+    throw new Error(
+      'Please enter a password.'
     );
+  }
 
-  const pdf =
-    loadedPdf.pdf;
+  /*
+   * =========================================================
+   * LOSSLESS / VECTOR-PRESERVING PDF PROTECTION
+   * =========================================================
+   *
+   * The old implementation rendered every source page at
+   * 2x resolution, JPEG-encoded it, and rebuilt the PDF with
+   * jsPDF just to add encryption.
+   *
+   * That was extremely expensive for large mobile files:
+   * - full-page canvas rasterization
+   * - JPEG encoding on every page
+   * - sustained CPU/GPU load
+   * - phone heating
+   * - possible quality loss
+   *
+   * Encryption does not require rasterization.
+   *
+   * Use an encryption-capable pdf-lib fork only for this
+   * operation. It preserves the existing PDF page content,
+   * text, images and vectors while applying AES encryption.
+   *
+   * Dynamic import keeps this additional library out of the
+   * initial/shared PDF tool bundle until Protect PDF is used.
+   */
+
+  onProgress?.(
+    5
+  );
+
+  let sourceBuffer:
+    | ArrayBuffer
+    | null =
+      await file.arrayBuffer();
+
+  onProgress?.(
+    20
+  );
 
   try {
-    const numPages =
-      pdf.numPages;
-
-    let doc:
-      | jsPDF
-      | null = null;
-
-    for (
-      let i = 1;
-      i <= numPages;
-      i++
-    ) {
-      const page =
-        await pdf.getPage(i);
-
-      const canvas =
-        document.createElement(
-          'canvas'
-        );
-
-      try {
-        const unscaledViewport =
-          page.getViewport({
-            scale: 1.0,
-          });
-
-        const renderViewport =
-          page.getViewport({
-            scale: 2.0,
-          });
-
-        canvas.width =
-          Math.floor(
-            renderViewport.width
-          );
-
-        canvas.height =
-          Math.floor(
-            renderViewport.height
-          );
-
-        const ctx =
-          canvas.getContext(
-            '2d',
-            {
-              alpha: false,
-            }
-          );
-
-        if (!ctx) {
-          throw new Error(
-            'Canvas context unavailable'
-          );
-        }
-
-        await (
-          page.render({
-            canvasContext:
-              ctx as any,
-            viewport:
-              renderViewport,
-            canvas,
-          } as any) as any
-        ).promise;
-
-
-        /*
-         * Avoid a large base64 data URL.
-         * Encode directly to a JPEG Blob and pass its bytes
-         * to jsPDF.
-         */
-        const imageBlob =
-          await new Promise<Blob>(
-            (
-              resolve,
-              reject
-            ) => {
-              canvas.toBlob(
-                (blob) => {
-                  if (blob) {
-                    resolve(blob);
-                  } else {
-                    reject(
-                      new Error(
-                        'Failed to encode PDF page.'
-                      )
-                    );
-                  }
-                },
-                'image/jpeg',
-                0.92
-              );
-            }
-          );
-
-        const imageBytes =
-          new Uint8Array(
-            await imageBlob.arrayBuffer()
-          );
-
-        const pageWidth =
-          unscaledViewport.width;
-
-        const pageHeight =
-          unscaledViewport.height;
-
-        const orientation =
-          pageWidth >
-          pageHeight
-            ? 'landscape'
-            : 'portrait';
-
-
-        if (i === 1) {
-          doc =
-            new jsPDF({
-              orientation,
-              unit: 'pt',
-              format: [
-                pageWidth,
-                pageHeight,
-              ],
-              encryption: {
-                userPassword,
-                ownerPassword:
-                  userPassword,
-                userPermissions: [
-                  'print',
-                  'copy',
-                ],
-              },
-            });
-
-          doc.addImage(
-            imageBytes,
-            'JPEG',
-            0,
-            0,
-            pageWidth,
-            pageHeight
-          );
-        } else if (doc) {
-          doc.addPage(
-            [
-              pageWidth,
-              pageHeight,
-            ],
-            orientation
-          );
-
-          doc.addImage(
-            imageBytes,
-            'JPEG',
-            0,
-            0,
-            pageWidth,
-            pageHeight
-          );
-        }
-
-
-        onProgress?.(
-          Math.round(
-            (
-              i /
-              numPages
-            ) *
-              100
-          )
-        );
-      } finally {
-        canvas.width = 1;
-        canvas.height = 1;
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-
-        try {
-          page.cleanup();
-        } catch (_) {}
-      }
-
-      /*
-       * Give the browser a chance to reclaim the
-       * completed page's render/JPEG temporaries
-       * before starting the next page.
-       */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
+    const {
+      PDFDocument:
+        EncryptingPDFDocument,
+    } =
+      await import(
+        '@cantoo/pdf-lib'
       );
-    }
 
+    onProgress?.(
+      30
+    );
 
-    if (!doc) {
-      throw new Error(
-        'Failed to generate encrypted PDF'
+    const pdfDoc =
+      await EncryptingPDFDocument.load(
+        sourceBuffer,
+        {
+          updateMetadata:
+            false,
+        }
       );
-    }
-
 
     /*
-     * The source PDF is no longer needed once every page
-     * has been rendered into jsPDF.
-     *
-     * Release PDF.js before allocating the complete
-     * encrypted output buffer so both large documents
-     * do not remain live during final serialization.
+     * The parser now owns the document structures.
+     * Release our separate 150 MB ArrayBuffer reference
+     * before encryption/final serialization.
      */
-    await loadedPdf.dispose();
+    sourceBuffer = null;
 
     await new Promise<void>(
       (resolve) =>
@@ -3543,20 +3390,74 @@ export async function encryptPDF(
         )
     );
 
-    const outputBuffer =
-      doc.output(
-        'arraybuffer'
+    onProgress?.(
+      55
+    );
+
+    /*
+     * Keep AES-128 to match the product's existing
+     * "128-bit password protection" behaviour/UI.
+     *
+     * No page rasterization occurs here.
+     */
+    pdfDoc.encrypt({
+      userPassword,
+      ownerPassword:
+        userPassword,
+      algorithm:
+        'AES-128',
+    });
+
+    onProgress?.(
+      70
+    );
+
+    /*
+     * Preserve all original PDF content streams.
+     * Object streams affect PDF structure/compression,
+     * not visual quality.
+     */
+    const protectedBytes =
+      await pdfDoc.save({
+        useObjectStreams:
+          true,
+        addDefaultPage:
+          false,
+      });
+
+    onProgress?.(
+      100
+    );
+
+    return protectedBytes;
+  } catch (error: any) {
+    /*
+     * An already-encrypted input cannot be protected again
+     * without its current password.
+     */
+    const message =
+      String(
+        error?.message ||
+          error ||
+          ''
       );
 
-    return new Uint8Array(
-      outputBuffer
+    if (
+      /password|encrypted|encryption/i.test(
+        message
+      )
+    ) {
+      throw new Error(
+        'This PDF is already protected. Unlock it first, then apply the new password.'
+      );
+    }
+
+    throw new Error(
+      message ||
+        'Failed to protect PDF.'
     );
   } finally {
-    /*
-     * loadPdfJsFromBlob.dispose() is idempotent, so this
-     * also safely covers errors before final serialization.
-     */
-    await loadedPdf.dispose();
+    sourceBuffer = null;
   }
 }
 
