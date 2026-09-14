@@ -14,7 +14,7 @@ const origin = 'https://www.1into1.com';
 const dist = new URL('../dist/',import.meta.url);
 const template = await readFile(new URL('index.html',dist),'utf8');
 const app = await readFile(new URL('../src/App.tsx',import.meta.url),'utf8');
-const paths = [...app.matchAll(/<Route path="([^"]+)"/g)].map(m=>m[1]).filter(p=>!p.includes('*')&&!p.includes(':'));
+const paths = [...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g)].map(m=>m[1]).filter(p=>!p.includes('*')&&!p.includes(':'));
 const articlePaths = ARTICLES.map(a=>'/blog/'+a.slug);
 const allPaths = [...new Set([...paths,...articlePaths])];
 const aliases = {'/visual-editor':'/edit-pdf'};
