@@ -4496,11 +4496,628 @@ export async function redactPDF(
     total: number
   ) => void
 ): Promise<Uint8Array> {
+  const yieldToBrowser =
+    () =>
+      new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+  /*
+   * Normalize and validate all requested redaction boxes.
+   *
+   * Only pages that contain real boxes belong in this map.
+   */
+  const redactionMap =
+    new Map<
+      number,
+      RedactionRect[]
+    >();
+
+  for (
+    const redaction of
+    redactions
+  ) {
+    const validRects =
+      redaction.rects
+        .map((rect) => {
+          const x =
+            Math.max(
+              0,
+              Math.min(
+                1,
+                rect.x
+              )
+            );
+
+          const y =
+            Math.max(
+              0,
+              Math.min(
+                1,
+                rect.y
+              )
+            );
+
+          const width =
+            Math.max(
+              0,
+              Math.min(
+                1 - x,
+                rect.width
+              )
+            );
+
+          const height =
+            Math.max(
+              0,
+              Math.min(
+                1 - y,
+                rect.height
+              )
+            );
+
+          return {
+            x,
+            y,
+            width,
+            height,
+          };
+        })
+        .filter(
+          (rect) =>
+            rect.width >
+              0 &&
+            rect.height >
+              0
+        );
+
+    if (
+      validRects.length >
+      0
+    ) {
+      redactionMap.set(
+        redaction.pageIndex,
+        validRects
+      );
+    }
+  }
+
+  /*
+   * No redactions means no PDF reconstruction is needed.
+   * Return the exact original document.
+   */
+  if (
+    redactionMap.size ===
+    0
+  ) {
+    onProgress?.(
+      1,
+      1
+    );
+
+    return new Uint8Array(
+      await file.arrayBuffer()
+    );
+  }
+
+  const looksProtected =
+    await isComplexOrProtectedFile(
+      file
+    );
+
+  /*
+   * =========================================================
+   * PATH A — HYBRID SECURE REDACTION
+   * =========================================================
+   *
+   * Ordinary PDFs no longer rasterize every page.
+   *
+   * ONLY pages containing redactions are rendered,
+   * permanently burned, and converted to images.
+   *
+   * Every untouched page is copied directly from the
+   * source PDF as vector content with no quality loss.
+   *
+   * Important security property:
+   * the ORIGINAL content streams of redacted pages are
+   * NEVER copied into the output PDF.
+   */
+  if (!looksProtected) {
+    type RasterizedPage = {
+      blob: Blob;
+      width: number;
+      height: number;
+    };
+
+    const rasterizedPages =
+      new Map<
+        number,
+        RasterizedPage
+      >();
+
+    let loadedPdf:
+      | {
+          pdf: any;
+          dispose:
+            () => Promise<void>;
+        }
+      | null = null;
+
+    try {
+      /*
+       * PHASE 1:
+       * Render ONLY pages that contain redactions.
+       *
+       * PDF.js reads from the browser-backed File so there
+       * is no additional 150 MB ArrayBuffer source copy.
+       */
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      const sourcePdf =
+        loadedPdf.pdf;
+
+      const totalPages =
+        sourcePdf.numPages;
+
+      const redactedPageIndices =
+        Array.from(
+          redactionMap.keys()
+        )
+          .filter(
+            (index) =>
+              index >= 0 &&
+              index <
+                totalPages
+          )
+          .sort(
+            (a, b) =>
+              a - b
+          );
+
+      for (
+        let r = 0;
+        r <
+        redactedPageIndices.length;
+        r++
+      ) {
+        const pageIndex =
+          redactedPageIndices[
+            r
+          ];
+
+        const pageNum =
+          pageIndex + 1;
+
+        onProgress?.(
+          pageNum,
+          totalPages
+        );
+
+        const page =
+          await sourcePdf
+            .getPage(
+              pageNum
+            );
+
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
+
+        try {
+          /*
+           * Preserve the exact existing Redact quality:
+           * 2x rendering + JPEG 0.92.
+           *
+           * We are reducing the NUMBER of rendered pages,
+           * not reducing the quality of those pages.
+           */
+          const viewport =
+            page.getViewport({
+              scale: 2.0,
+            });
+
+          canvas.width =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.width
+              )
+            );
+
+          canvas.height =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.height
+              )
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                alpha: false,
+              }
+            );
+
+          if (!ctx) {
+            throw new Error(
+              'Canvas rendering context unavailable'
+            );
+          }
+
+          ctx.fillStyle =
+            '#ffffff';
+
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          await (
+            page.render({
+              canvasContext:
+                ctx as any,
+              viewport,
+            } as any) as any
+          ).promise;
+
+          /*
+           * Permanently burn the redaction pixels.
+           *
+           * This is deliberately NOT a PDF rectangle overlay.
+           * The original text/images underneath the box are
+           * destroyed on this output page.
+           */
+          ctx.fillStyle =
+            '#000000';
+
+          const pageRects =
+            redactionMap.get(
+              pageIndex
+            ) || [];
+
+          for (
+            const rect of
+            pageRects
+          ) {
+            ctx.fillRect(
+              rect.x *
+                canvas.width,
+              rect.y *
+                canvas.height,
+              rect.width *
+                canvas.width,
+              rect.height *
+                canvas.height
+            );
+          }
+
+          const jpegBlob =
+            await new Promise<
+              Blob
+            >(
+              (
+                resolve,
+                reject
+              ) => {
+                canvas.toBlob(
+                  (blob) => {
+                    if (blob) {
+                      resolve(
+                        blob
+                      );
+                    } else {
+                      reject(
+                        new Error(
+                          `Failed to encode redacted page ${pageNum}.`
+                        )
+                      );
+                    }
+                  },
+                  'image/jpeg',
+                  0.92
+                );
+              }
+            );
+
+          const originalViewport =
+            page.getViewport({
+              scale: 1.0,
+            });
+
+          rasterizedPages.set(
+            pageIndex,
+            {
+              blob:
+                jpegBlob,
+              width:
+                originalViewport.width,
+              height:
+                originalViewport.height,
+            }
+          );
+        } finally {
+          /*
+           * Release the page's full-resolution pixel backing
+           * store immediately.
+           */
+          canvas.width = 1;
+          canvas.height = 1;
+
+          try {
+            canvas.remove();
+          } catch (_) {}
+
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+
+        await yieldToBrowser();
+      }
+
+      /*
+       * PDF.js is finished before pdf-lib opens the same
+       * potentially 150 MB source document.
+       *
+       * This is important on mobile: we avoid two complete
+       * PDF engines holding the source simultaneously.
+       */
+      await loadedPdf.dispose();
+      loadedPdf = null;
+
+      await yieldToBrowser();
+
+      /*
+       * PHASE 2:
+       * Copy ONLY untouched pages losslessly.
+       */
+      let sourceBuffer:
+        | ArrayBuffer
+        | null =
+          await file.arrayBuffer();
+
+      let sourceDoc:
+        | PDFDocument
+        | null =
+          await PDFDocument.load(
+            sourceBuffer
+          );
+
+      if (
+        sourceDoc.isEncrypted
+      ) {
+        throw new Error(
+          'Encrypted source requires compatibility redaction.'
+        );
+      }
+
+      sourceBuffer = null;
+
+      const sourcePageCount =
+        sourceDoc.getPageCount();
+
+      if (
+        sourcePageCount !==
+        totalPages
+      ) {
+        throw new Error(
+          'PDF page count changed during redaction.'
+        );
+      }
+
+      const untouchedIndices:
+        number[] = [];
+
+      for (
+        let index = 0;
+        index <
+        totalPages;
+        index++
+      ) {
+        if (
+          !redactionMap.has(
+            index
+          )
+        ) {
+          untouchedIndices.push(
+            index
+          );
+        }
+      }
+
+      const outputDoc =
+        await PDFDocument.create();
+
+      const copiedPages =
+        untouchedIndices.length >
+        0
+          ? await outputDoc
+              .copyPages(
+                sourceDoc,
+                untouchedIndices
+              )
+          : [];
+
+      const copiedByIndex =
+        new Map<
+          number,
+          any
+        >();
+
+      untouchedIndices.forEach(
+        (
+          sourceIndex,
+          copiedIndex
+        ) => {
+          copiedByIndex.set(
+            sourceIndex,
+            copiedPages[
+              copiedIndex
+            ]
+          );
+        }
+      );
+
+      /*
+       * copyPages() has already imported every resource the
+       * untouched pages need into outputDoc.
+       *
+       * Drop the parsed source before assembling/finalizing
+       * the result.
+       */
+      sourceDoc = null;
+      sourceBuffer = null;
+
+      await yieldToBrowser();
+
+      /*
+       * Rebuild the document in its original page order.
+       *
+       * Redacted pages:
+       *   only flattened/burned pixels are inserted.
+       *
+       * Untouched pages:
+       *   original vector page is inserted.
+       */
+      for (
+        let pageIndex = 0;
+        pageIndex <
+        totalPages;
+        pageIndex++
+      ) {
+        const rasterized =
+          rasterizedPages.get(
+            pageIndex
+          );
+
+        if (rasterized) {
+          const jpegBytes =
+            await rasterized
+              .blob
+              .arrayBuffer();
+
+          const embeddedImage =
+            await outputDoc
+              .embedJpg(
+                jpegBytes
+              );
+
+          const newPage =
+            outputDoc.addPage([
+              rasterized.width,
+              rasterized.height,
+            ]);
+
+          newPage.drawImage(
+            embeddedImage,
+            {
+              x: 0,
+              y: 0,
+              width:
+                rasterized.width,
+              height:
+                rasterized.height,
+            }
+          );
+
+          /*
+           * Blob is no longer required after embedding.
+           */
+          rasterizedPages.delete(
+            pageIndex
+          );
+        } else {
+          const copiedPage =
+            copiedByIndex.get(
+              pageIndex
+            );
+
+          if (!copiedPage) {
+            throw new Error(
+              `Failed to preserve page ${pageIndex + 1}.`
+            );
+          }
+
+          outputDoc.addPage(
+            copiedPage
+          );
+        }
+
+        if (
+          (
+            pageIndex + 1
+          ) %
+            20 ===
+          0
+        ) {
+          await yieldToBrowser();
+        }
+      }
+
+      rasterizedPages.clear();
+      copiedByIndex.clear();
+
+      await yieldToBrowser();
+
+      return await outputDoc.save(
+        {
+          useObjectStreams:
+            true,
+        }
+      );
+    } catch (
+      hybridError
+    ) {
+      console.warn(
+        'Hybrid secure redaction unavailable; using universal secure renderer:',
+        hybridError
+      );
+
+      rasterizedPages.clear();
+    } finally {
+      if (loadedPdf) {
+        await loadedPdf.dispose();
+        loadedPdf = null;
+      }
+    }
+
+    await yieldToBrowser();
+  }
+
+  /*
+   * =========================================================
+   * PATH B — UNIVERSAL SECURE FALLBACK
+   * =========================================================
+   *
+   * Protected/unusual PDFs retain the proven full
+   * reconstruction path.
+   *
+   * Security takes priority here: every page is flattened,
+   * which guarantees the blacked-out source content is not
+   * left behind in an accessible PDF content stream.
+   */
   const loadedPdf =
     await loadPdfJsFromBlob(
       file,
       {
-        stopAtErrors: false,
+        stopAtErrors:
+          false,
       }
     );
 
@@ -4514,24 +5131,10 @@ export async function redactPDF(
     const outputDoc =
       await PDFDocument.create();
 
-    const redactionMap =
-      new Map<
-        number,
-        RedactionRect[]
-      >();
-
-    redactions.forEach(
-      (redaction) =>
-        redactionMap.set(
-          redaction.pageIndex,
-          redaction.rects
-        )
-    );
-
-
     for (
       let pageNum = 1;
-      pageNum <= totalPages;
+      pageNum <=
+      totalPages;
       pageNum++
     ) {
       onProgress?.(
@@ -4543,9 +5146,10 @@ export async function redactPDF(
         pageNum - 1;
 
       const page =
-        await sourcePdf.getPage(
-          pageNum
-        );
+        await sourcePdf
+          .getPage(
+            pageNum
+          );
 
       const canvas =
         document.createElement(
@@ -4559,13 +5163,19 @@ export async function redactPDF(
           });
 
         canvas.width =
-          Math.floor(
-            viewport.width
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
           );
 
         canvas.height =
-          Math.floor(
-            viewport.height
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
           );
 
         const ctx =
@@ -4582,6 +5192,15 @@ export async function redactPDF(
           );
         }
 
+        ctx.fillStyle =
+          '#ffffff';
+
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
 
         await (
           page.render({
@@ -4591,12 +5210,10 @@ export async function redactPDF(
           } as any) as any
         ).promise;
 
-
         const pageRects =
           redactionMap.get(
             pageIndex
           ) || [];
-
 
         if (
           pageRects.length >
@@ -4609,34 +5226,23 @@ export async function redactPDF(
             const rect of
             pageRects
           ) {
-            const rx =
-              rect.x *
-              canvas.width;
-
-            const ry =
-              rect.y *
-              canvas.height;
-
-            const rw =
-              rect.width *
-              canvas.width;
-
-            const rh =
-              rect.height *
-              canvas.height;
-
             ctx.fillRect(
-              rx,
-              ry,
-              rw,
-              rh
+              rect.x *
+                canvas.width,
+              rect.y *
+                canvas.height,
+              rect.width *
+                canvas.width,
+              rect.height *
+                canvas.height
             );
           }
         }
 
-
         const jpegBlob =
-          await new Promise<Blob>(
+          await new Promise<
+            Blob
+          >(
             (
               resolve,
               reject
@@ -4644,11 +5250,13 @@ export async function redactPDF(
               canvas.toBlob(
                 (blob) => {
                   if (blob) {
-                    resolve(blob);
+                    resolve(
+                      blob
+                    );
                   } else {
                     reject(
                       new Error(
-                        'Failed to encode redaction canvas'
+                        `Failed to encode redacted page ${pageNum}.`
                       )
                     );
                   }
@@ -4659,28 +5267,26 @@ export async function redactPDF(
             }
           );
 
-
         const jpegBytes =
-          await jpegBlob.arrayBuffer();
+          await jpegBlob
+            .arrayBuffer();
 
         const embeddedImage =
-          await outputDoc.embedJpg(
-            jpegBytes
-          );
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
 
-
-        const unscaledViewport =
+        const unscaled =
           page.getViewport({
             scale: 1.0,
           });
 
-
         const newPage =
           outputDoc.addPage([
-            unscaledViewport.width,
-            unscaledViewport.height,
+            unscaled.width,
+            unscaled.height,
           ]);
-
 
         newPage.drawImage(
           embeddedImage,
@@ -4688,9 +5294,9 @@ export async function redactPDF(
             x: 0,
             y: 0,
             width:
-              unscaledViewport.width,
+              unscaled.width,
             height:
-              unscaledViewport.height,
+              unscaled.height,
           }
         );
       } finally {
@@ -4706,44 +5312,20 @@ export async function redactPDF(
         } catch (_) {}
       }
 
-      /*
-       * Give the browser an opportunity to reclaim
-       * the completed page's temporary canvas/JPEG
-       * memory before rendering the next page.
-       */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      await yieldToBrowser();
     }
 
-
-    /*
-     * Every redacted page is now embedded in outputDoc.
-     * Release the original PDF.js source before allocating
-     * the complete serialized redacted PDF.
-     */
     await loadedPdf.dispose();
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
+    await yieldToBrowser();
 
-    return await outputDoc.save({
-      useObjectStreams: true,
-    });
+    return await outputDoc.save(
+      {
+        useObjectStreams:
+          true,
+      }
+    );
   } finally {
-    /*
-     * dispose() is idempotent and still covers errors
-     * that happen before final serialization.
-     */
     await loadedPdf.dispose();
   }
 }
