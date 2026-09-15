@@ -23,9 +23,11 @@ import {
   pdfjsLib,
 } from "../utils/pdfjs";
 import {
-  redactPDF,
   type PageRedaction,
 } from "../utils/pdfEngine";
+import {
+  redactPDFToFile,
+} from "../utils/streamingRedact";
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -3303,84 +3305,18 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
      */
     /*
      * ========================================================
-     * FINAL-PDF DISK SPILL
+     * STREAMING BROWSER-BACKED OUTPUT
      * ========================================================
      *
-     * redactPDF() must temporarily return bytes because it is a
-     * shared engine API.
-     *
-     * Immediately move those bytes into browser-local OPFS and
-     * then release the huge Uint8Array BEFORE final verification.
+     * Heavy PDFs never become one giant completed Uint8Array.
+     * The output is written directly to OPFS page-by-page.
      */
-    const spillFinishedPdf =
-      async (
-        outputBytes: Uint8Array,
-        name: string
-      ): Promise<File> => {
-        const inMemoryFile =
-          new File(
-            [
-              outputBytes as unknown as BlobPart,
-            ],
-            name,
-            {
-              type:
-                "application/pdf",
-              lastModified:
-                Date.now(),
-            }
-          );
-
-        try {
-          await saveToolWorkspaceFiles(
-            "private-pii-redactor-output",
-            [
-              inMemoryFile,
-            ]
-          );
-
-          const restored =
-            await restoreToolWorkspaceFiles(
-              "private-pii-redactor-output"
-            );
-
-          if (
-            restored[0]
-          ) {
-            return restored[0];
-          }
-        } catch (
-          error
-        ) {
-          console.warn(
-            "Unable to stage redacted output in OPFS:",
-            error
-          );
-        }
-
-        /*
-         * Compatibility fallback. Modern Safari/Chrome should
-         * normally use the OPFS-backed path above.
-         */
-        return inMemoryFile;
-      };
-
-    const settleRedactionMemory =
-      () =>
-        new Promise<void>(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              400
-            )
-        );
-
     setStatus(
       "Creating secure redacted pages…"
     );
 
-    let bytes =
-      await redactPDF(
+    const workingPdf =
+      await redactPDFToFile(
         file,
         buildPayload(),
         (
@@ -3393,22 +3329,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         }
       );
 
-    let workingPdf =
-      await spillFinishedPdf(
-        bytes,
-        "private-pii-pass-1.pdf"
-      );
-
-    /*
-     * Drop the complete in-memory output before PDF.js verifier
-     * starts.
-     */
-    bytes =
-      new Uint8Array(
-        0
-      );
-
-    await settleRedactionMemory();
+    await new Promise<void>(
+      (
+        resolve
+      ) =>
+        setTimeout(
+          resolve,
+          250
+        )
+    );
 
     /*
      * ========================================================

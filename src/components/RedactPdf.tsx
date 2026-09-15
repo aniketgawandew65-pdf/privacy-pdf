@@ -19,7 +19,13 @@ import {
   loadPdfJsFromBlob,
   pdfjsLib,
 } from '../utils/pdfjs';
-import { redactPDF, type RedactionRect, type PageRedaction } from '../utils/pdfEngine';
+import {
+  type RedactionRect,
+  type PageRedaction,
+} from '../utils/pdfEngine';
+import {
+  redactPDFToFile,
+} from '../utils/streamingRedact';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { verifyFinishedPdf } from '../utils/pdfSafetyVerifier';
 
@@ -525,8 +531,19 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
        * These same bytes are verified and then used
        * for the final download.
        */
-      const bytes =
-        await redactPDF(file, payload);
+      const redactedFile =
+        await redactPDFToFile(
+          file,
+          payload,
+          (
+            current,
+            total
+          ) => {
+            setManualCheckStatus(
+              `Burning secure page ${current} of ${total}…`
+            );
+          }
+        );
 
       /*
        * AUTO REDACTOR -> MANUAL REDACTION
@@ -544,12 +561,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
        * another page.
        */
       if (routeState?.fromAutoRedactor) {
-        const blob = new Blob(
-          [bytes as unknown as BlobPart],
-          {
-            type: "application/pdf",
-          }
-        );
+        const blob = redactedFile;
 
         createUrl(blob);
         return;
@@ -564,12 +576,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
        * Preserve the existing standalone workflow.
        */
       if (verificationTargets.length === 0) {
-        const blob = new Blob(
-          [bytes as unknown as BlobPart],
-          {
-            type: "application/pdf",
-          }
-        );
+        const blob = redactedFile;
 
         createUrl(blob);
         return;
@@ -581,7 +588,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
       const verification =
         await verifyFinishedPdf(
-          bytes,
+          redactedFile,
           verificationTargets.map((item) => ({
             value: item.value,
           })),
@@ -632,12 +639,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           } still readable after final verification.`
         );
 
-        const blob = new Blob(
-          [bytes as unknown as BlobPart],
-          {
-            type: "application/pdf",
-          }
-        );
+        const blob = redactedFile;
 
         createUrl(blob);
         return;
@@ -652,12 +654,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         "Final safety verification passed ✓"
       );
 
-      const blob = new Blob(
-        [bytes as unknown as BlobPart],
-        {
-          type: "application/pdf",
-        }
-      );
+      const blob = redactedFile;
 
       createUrl(blob);
     } catch (err: any) {
@@ -743,7 +740,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           </div>
 
           {/* Page Switcher & Reset Controls */}
-          <div className="flex items-center justify-between text-xs text-zinc-300 px-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3 text-xs text-zinc-300 px-1 min-w-0">
             <div className="flex items-center gap-2">
               <button
                 disabled={currentPage <= 1}
@@ -789,7 +786,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           </div>
 
 
-            <div className="flex items-center gap-3">
+            <div className="flex w-full sm:w-auto min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:justify-start">
               {selectedIndex !== null && currentRects[selectedIndex] && (
                 <button
                   type="button"
