@@ -86,6 +86,10 @@ export default defineConfig({
       },
     }),
   ],
+  optimizeDeps: {
+    exclude: ['tailwindcss-in-browser'],
+  },
+
   build: {
     chunkSizeWarningLimit: 2500,
     rollupOptions: {

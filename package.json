@@ -12,6 +12,7 @@
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@zumer/snapdom": "2.24.18",
     "browser-image-compression": "^2.0.2",
     "exceljs": "^4.4.0",
     "fflate": "^0.8.3",
@@ -26,6 +27,7 @@
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
     "tailwindcss": "^4.3.3",
+    "tailwindcss-in-browser": "0.6.0",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
