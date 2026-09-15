@@ -149,7 +149,12 @@ async function testScanner() {
   const mixed = await readScanRecord<any>(id,'native',3);
   const ocr = await readScanRecord<any>(id,'ocr',3);
   assert(sparse.needsOcr && sparse.scale === 2, 'Former full-page fallback now uses tiled 2x route');
-  assert(mixed.needsOcr, 'Readable header does not suppress image-body OCR');
+  assert(
+    mixed.needsOcr &&
+      Array.isArray(mixed.ocrRegions) &&
+      mixed.ocrRegions.length > 0,
+    'Readable header does not suppress image-body OCR'
+  );
   assert(ocr.words.length > 0 && ocr.findings.some((f:any) => f.value.includes('scanned@')), 'Real local Tesseract produces cached geometry and email findings');
   assert(ocr.findings.some((f:any) => f.value.includes('boundary@')), 'PII near overlapping tile boundary survives');
   const elapsed = ocr.elapsedMs;

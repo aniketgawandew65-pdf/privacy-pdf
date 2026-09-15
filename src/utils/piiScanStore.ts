@@ -1,9 +1,26 @@
 /** Atomic, per-page IndexedDB records. The original PDF remains in OPFS.
  * Bump version whenever recognition settings, geometry or detector rules change. */
-const VERSION = 'pii-tiles-v2';
+const VERSION = 'pii-regions-v3';
 const DATABASE = 'oneinto1-pii-scan';
 const STORE = 'pages';
-export type ScanPage<T> = { findings: T[]; needsOcr?: boolean; scale?: number; words?: Array<[string, number, number, number, number]>; elapsedMs?: number; renderMs?: number; recognizeMs?: number; detectMs?: number };
+export type OcrRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ScanPage<T> = {
+  findings: T[];
+  needsOcr?: boolean;
+  scale?: number;
+  ocrRegions?: OcrRegion[];
+  words?: Array<[string, number, number, number, number]>;
+  elapsedMs?: number;
+  renderMs?: number;
+  recognizeMs?: number;
+  detectMs?: number;
+};
 async function openStore() {
   return await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1);
@@ -52,9 +69,21 @@ export async function scanDiagnostics(id: string) {
     const native = await readScanRecord<ScanPage<unknown>>(id, 'native', page);
     const ocr = await readScanRecord<ScanPage<unknown>>(id, 'ocr', page);
     const batch = await readScanRecord(id, 'batch', page);
-    pages.push({ page, nativeMs: native?.elapsedMs, needsOcr: native?.needsOcr,
-      ocrMs: ocr?.elapsedMs, renderMs: ocr?.renderMs, recognizeMs: ocr?.recognizeMs,
-      detectMs: ocr?.detectMs, scale: ocr?.scale, completed: !!ocr, batch });
+    pages.push({
+      page,
+      nativeMs: native?.elapsedMs,
+      needsOcr: native?.needsOcr,
+      nativeFindings: native?.findings?.length || 0,
+      ocrRegions: native?.ocrRegions?.length || 0,
+      ocrMs: ocr?.elapsedMs,
+      ocrFindings: ocr?.findings?.length || 0,
+      renderMs: ocr?.renderMs,
+      recognizeMs: ocr?.recognizeMs,
+      detectMs: ocr?.detectMs,
+      scale: ocr?.scale,
+      completed: !!ocr,
+      batch,
+    });
   }
   return { version: VERSION, totalPages, lastStage: await readScanRecord(id, 'progress'), pages };
 }

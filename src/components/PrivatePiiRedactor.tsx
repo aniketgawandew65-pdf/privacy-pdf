@@ -1,5 +1,12 @@
 import { exclusivelyProcess, localContentId, clearProcessingRecovery } from '../utils/localProcessing';
-import { readScanRecord, writeScanRecord, clearScanRecords, scanDiagnostics, type ScanPage } from '../utils/piiScanStore';
+import {
+  readScanRecord,
+  writeScanRecord,
+  clearScanRecords,
+  scanDiagnostics,
+  type ScanPage,
+  type OcrRegion,
+} from '../utils/piiScanStore';
 import {
   normalizeForSafetyCheck,
   verifyFinishedPdf,
@@ -1111,36 +1118,63 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       const box = finding.box;
 
-      const normalized = {
-        x: Math.max(
+      const left =
+        Math.max(
           0,
-          Math.min(1, box.x / finding.pageWidth)
-        ),
-        y: Math.max(
+          Math.min(
+            finding.pageWidth,
+            box.x
+          )
+        );
+
+      const top =
+        Math.max(
           0,
-          Math.min(1, box.y / finding.pageHeight)
-        ),
-        width: Math.max(
-          0.002,
-          Math.min(1, box.width / finding.pageWidth)
-        ),
-        height: Math.max(
-          0.002,
-          Math.min(1, box.height / finding.pageHeight)
-        ),
+          Math.min(
+            finding.pageHeight,
+            box.y
+          )
+        );
+
+      const right =
+        Math.max(
+          0,
+          Math.min(
+            finding.pageWidth,
+            box.x + box.width
+          )
+        );
+
+      const bottom =
+        Math.max(
+          0,
+          Math.min(
+            finding.pageHeight,
+            box.y + box.height
+          )
+        );
+
+      if (
+        right <= left ||
+        bottom <= top
+      ) {
+        return null;
+      }
+
+      return {
+        x:
+          left /
+          finding.pageWidth,
+        y:
+          top /
+          finding.pageHeight,
+        width:
+          (right - left) /
+          finding.pageWidth,
+        height:
+          (bottom - top) /
+          finding.pageHeight,
       };
-
-      normalized.width = Math.min(
-        normalized.width,
-        1 - normalized.x
-      );
-
-      normalized.height = Math.min(
-        normalized.height,
-        1 - normalized.y
-      );
-
-      return normalized;
     };
 
     /*
@@ -1431,24 +1465,62 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           maxHeight * 0.4
         );
 
-        const x = Math.max(0, minX - horizontalGuard);
-        const y = Math.max(0, minY - 3);
-
-        const width = Math.min(
-          pageWidth - x,
+        /*
+         * PDF.js text transforms can occasionally place a text
+         * span fractionally outside the physical CropBox.
+         * Clamp the final sensitive region to the real page.
+         */
+        const left =
           Math.max(
-            8,
-            maxX - minX + horizontalGuard * 2
-          )
-        );
+            0,
+            Math.min(
+              pageWidth,
+              minX - horizontalGuard
+            )
+          );
 
-        const height = Math.min(
-          pageHeight - y,
+        const top =
           Math.max(
-            10,
-            maxY - minY + 6
-          )
-        );
+            0,
+            Math.min(
+              pageHeight,
+              minY - 3
+            )
+          );
+
+        const right =
+          Math.max(
+            0,
+            Math.min(
+              pageWidth,
+              maxX + horizontalGuard
+            )
+          );
+
+        const bottom =
+          Math.max(
+            0,
+            Math.min(
+              pageHeight,
+              maxY + 3
+            )
+          );
+
+        /*
+         * Never create a redaction target that has collapsed
+         * completely outside the actual page.
+         */
+        if (
+          right <= left ||
+          bottom <= top
+        ) {
+          continue;
+        }
+
+        const x = left;
+        const y = top;
+        const width = right - left;
+        const height = bottom - top;
 
         nextFindings.push({
           id: `${idPrefix}-${pageNumber}-${nextFindings.length}-${match.start}-${match.category}`,
@@ -1471,6 +1543,397 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       }
 
       return added;
+    };
+
+    /*
+     * Extract the actual painted image rectangles from the
+     * PDF operator list instead of treating ANY image as a
+     * reason to OCR the entire page.
+     *
+     * Coordinates are returned in the same scale-1 viewport
+     * space used by digitalSpans.
+     */
+    const mergeOcrRegions = (
+      input: OcrRegion[],
+      pageWidth: number,
+      pageHeight: number
+    ): OcrRegion[] => {
+      const regions = input
+        .filter(
+          (region) =>
+            Number.isFinite(region.x) &&
+            Number.isFinite(region.y) &&
+            Number.isFinite(region.width) &&
+            Number.isFinite(region.height) &&
+            region.width > 1 &&
+            region.height > 1
+        )
+        .map((region) => ({
+          x: Math.max(0, region.x),
+          y: Math.max(0, region.y),
+          width: Math.min(
+            pageWidth - Math.max(0, region.x),
+            region.width
+          ),
+          height: Math.min(
+            pageHeight - Math.max(0, region.y),
+            region.height
+          ),
+        }))
+        .filter(
+          (region) =>
+            region.width > 1 &&
+            region.height > 1
+        );
+
+      let changed = true;
+
+      while (changed) {
+        changed = false;
+
+        outer:
+        for (let i = 0; i < regions.length; i++) {
+          for (let j = i + 1; j < regions.length; j++) {
+            const a = regions[i];
+            const b = regions[j];
+
+            const gap = 8;
+
+            const separated =
+              a.x + a.width + gap < b.x ||
+              b.x + b.width + gap < a.x ||
+              a.y + a.height + gap < b.y ||
+              b.y + b.height + gap < a.y;
+
+            if (separated) {
+              continue;
+            }
+
+            const left =
+              Math.min(a.x, b.x);
+
+            const top =
+              Math.min(a.y, b.y);
+
+            const right =
+              Math.max(
+                a.x + a.width,
+                b.x + b.width
+              );
+
+            const bottom =
+              Math.max(
+                a.y + a.height,
+                b.y + b.height
+              );
+
+            regions[i] = {
+              x: left,
+              y: top,
+              width: right - left,
+              height: bottom - top,
+            };
+
+            regions.splice(j, 1);
+            changed = true;
+            break outer;
+          }
+        }
+      }
+
+      return regions;
+    };
+
+    const extractImageRegions = (
+      ops: any,
+      viewport: any
+    ): OcrRegion[] => {
+      const fullPage: OcrRegion = {
+        x: 0,
+        y: 0,
+        width: viewport.width,
+        height: viewport.height,
+      };
+
+      const simpleImageOps =
+        new Set<number>([
+          pdfjsLib.OPS.paintImageXObject,
+          pdfjsLib.OPS.paintInlineImageXObject,
+          pdfjsLib.OPS.paintImageMaskXObject,
+        ]);
+
+      /*
+       * Repeated/group image operators have more complex
+       * placement data. For those rare cases retain the safe
+       * old behaviour: OCR the whole page.
+       */
+      const complexImageOps =
+        new Set<number>([
+          pdfjsLib.OPS.paintImageXObjectRepeat,
+          pdfjsLib.OPS.paintImageMaskXObjectRepeat,
+          pdfjsLib.OPS.paintInlineImageXObjectGroup,
+          pdfjsLib.OPS.paintImageMaskXObjectGroup,
+        ]);
+
+      let ctm =
+        [1, 0, 0, 1, 0, 0];
+
+      const stack: number[][] = [];
+      const regions: OcrRegion[] = [];
+
+      for (
+        let index = 0;
+        index < ops.fnArray.length;
+        index++
+      ) {
+        const op =
+          ops.fnArray[index];
+
+        const args =
+          ops.argsArray[index];
+
+        if (op === pdfjsLib.OPS.save) {
+          stack.push([...ctm]);
+          continue;
+        }
+
+        if (op === pdfjsLib.OPS.restore) {
+          const restored =
+            stack.pop();
+
+          if (restored) {
+            ctm = restored;
+          }
+
+          continue;
+        }
+
+        if (op === pdfjsLib.OPS.transform) {
+          if (
+            Array.isArray(args) &&
+            args.length >= 6 &&
+            args
+              .slice(0, 6)
+              .every(Number.isFinite)
+          ) {
+            ctm =
+              pdfjsLib.Util.transform(
+                ctm,
+                args.slice(0, 6)
+              );
+          }
+
+          continue;
+        }
+
+        if (complexImageOps.has(op)) {
+          return [fullPage];
+        }
+
+        if (!simpleImageOps.has(op)) {
+          continue;
+        }
+
+        const matrix =
+          pdfjsLib.Util.transform(
+            viewport.transform,
+            ctm
+          );
+
+        const corners = [
+          [0, 0],
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ].map(([x, y]) =>
+          pdfjsLib.Util.applyTransform(
+            [x, y],
+            matrix
+          )
+        );
+
+        const xs =
+          corners.map(
+            (point: number[]) =>
+              point[0]
+          );
+
+        const ys =
+          corners.map(
+            (point: number[]) =>
+              point[1]
+          );
+
+        /*
+         * Small margin protects characters touching the
+         * edge of an embedded scan/image.
+         */
+        const margin = 8;
+
+        const left =
+          Math.max(
+            0,
+            Math.min(...xs) -
+              margin
+          );
+
+        const top =
+          Math.max(
+            0,
+            Math.min(...ys) -
+              margin
+          );
+
+        const right =
+          Math.min(
+            viewport.width,
+            Math.max(...xs) +
+              margin
+          );
+
+        const bottom =
+          Math.min(
+            viewport.height,
+            Math.max(...ys) +
+              margin
+          );
+
+        if (
+          right > left + 1 &&
+          bottom > top + 1
+        ) {
+          regions.push({
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+          });
+        }
+      }
+
+      return mergeOcrRegions(
+        regions,
+        viewport.width,
+        viewport.height
+      );
+    };
+
+    /*
+     * A full-page scan frequently already contains a complete
+     * hidden/searchable OCR text layer.
+     *
+     * We only trust that layer when it is genuinely rich and
+     * spread through a LARGE image region. A digital header
+     * alone will not satisfy this test, so mixed scanned bodies
+     * continue to OCR.
+     */
+    const largeImageHasRichTextCoverage = (
+      region: OcrRegion,
+      spans: PositionedSpan[],
+      pageWidth: number,
+      pageHeight: number
+    ) => {
+      const pageArea =
+        Math.max(
+          1,
+          pageWidth *
+            pageHeight
+        );
+
+      const regionArea =
+        region.width *
+        region.height;
+
+      if (
+        regionArea /
+          pageArea <
+        0.65
+      ) {
+        return false;
+      }
+
+      const inside =
+        spans.filter((span) => {
+          const centerX =
+            span.x +
+            span.width / 2;
+
+          const centerY =
+            span.y +
+            span.height / 2;
+
+          return (
+            centerX >= region.x &&
+            centerX <=
+              region.x +
+                region.width &&
+            centerY >= region.y &&
+            centerY <=
+              region.y +
+                region.height
+          );
+        });
+
+      const characters =
+        inside.reduce(
+          (sum, span) =>
+            sum +
+            span.text
+              .replace(/\s/g, "")
+              .length,
+          0
+        );
+
+      if (
+        characters < 220 ||
+        inside.length < 12
+      ) {
+        return false;
+      }
+
+      /*
+       * Require text to be vertically distributed through at
+       * least four of six bands. This prevents a long digital
+       * header/footer from hiding a scanned image body.
+       */
+      const occupiedBands =
+        new Set<number>();
+
+      for (const span of inside) {
+        const centerY =
+          span.y +
+          span.height / 2;
+
+        const relative =
+          (
+            centerY -
+            region.y
+          ) /
+          Math.max(
+            1,
+            region.height
+          );
+
+        const band =
+          Math.max(
+            0,
+            Math.min(
+              5,
+              Math.floor(
+                relative * 6
+              )
+            )
+          );
+
+        occupiedBands.add(
+          band
+        );
+      }
+
+      return (
+        occupiedBands.size >=
+        4
+      );
     };
 
     try {
@@ -1500,9 +1963,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         pagesInBatch++;
         const startedAt = performance.now();
         const findingStart = nextFindings.length;
-        const savePage = async (needsOcr: boolean, scale = 1.6) => {
+        const savePage = async (
+          needsOcr: boolean,
+          scale = 1.6,
+          ocrRegions: OcrRegion[] = []
+        ) => {
           await writeScanRecord(identity, 'native', pageNumber, {
-            findings: nextFindings.slice(findingStart), needsOcr, scale,
+            findings: nextFindings.slice(findingStart),
+            needsOcr,
+            scale,
+            ocrRegions,
             elapsedMs: performance.now() - startedAt,
           });
         };
@@ -1649,19 +2119,63 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           digitalSpans.length >= 8 ||
           digitalFindings > 0;
 
-        // A readable header does not prove that an embedded scanned body is readable.
-        // Conservatively OCR image-bearing pages, retaining all native findings.
-        await writeScanRecord(identity, 'progress', 0, { page: pageNumber, stage: 'classify-images' });
-        const ops = await page.getOperatorList();
-        const imageOps = new Set<number>([
-          pdfjsLib.OPS.paintImageXObject, pdfjsLib.OPS.paintInlineImageXObject,
-          pdfjsLib.OPS.paintImageXObjectRepeat, pdfjsLib.OPS.paintImageMaskXObject,
-          pdfjsLib.OPS.paintImageMaskXObjectRepeat, pdfjsLib.OPS.paintInlineImageXObjectGroup,
-          pdfjsLib.OPS.paintImageMaskXObjectGroup,
-        ]);
-        const needsOcr = !hasUsableDigitalText || ops.fnArray.some((op: number) => imageOps.has(op));
-        if (needsOcr) dedicatedOcrPages.push(pageNumber);
-        await savePage(needsOcr, hasUsableDigitalText ? 1.6 : 2);
+        await writeScanRecord(
+          identity,
+          'progress',
+          0,
+          {
+            page: pageNumber,
+            stage: 'classify-images',
+          }
+        );
+
+        let ocrRegions: OcrRegion[] = [];
+
+        if (hasUsableDigitalText) {
+          const ops =
+            await page.getOperatorList();
+
+          const imageRegions =
+            extractImageRegions(
+              ops,
+              viewport
+            );
+
+          /*
+           * Smaller embedded scans/images are kept for regional
+           * OCR. A near-full-page image is skipped only when the
+           * PDF already has a rich distributed searchable text
+           * layer over it.
+           */
+          ocrRegions =
+            imageRegions.filter(
+              (region) =>
+                !largeImageHasRichTextCoverage(
+                  region,
+                  digitalSpans,
+                  viewport.width,
+                  viewport.height
+                )
+            );
+        }
+
+        const needsOcr =
+          !hasUsableDigitalText ||
+          ocrRegions.length > 0;
+
+        if (needsOcr) {
+          dedicatedOcrPages.push(
+            pageNumber
+          );
+        }
+
+        await savePage(
+          needsOcr,
+          hasUsableDigitalText
+            ? 1.6
+            : 2,
+          ocrRegions
+        );
 
         try {
           page.cleanup();
@@ -1794,29 +2308,77 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       const padX = Math.max(3, (maxY - minY) * 0.18);
       const padY = Math.max(2, (maxY - minY) * 0.10);
 
+      /*
+       * Clamp OCR geometry to the real page before creating a
+       * finding. Tesseract can occasionally report coordinates
+       * slightly outside a tile/page boundary.
+       */
+      const pagePixelWidth =
+        pageWidth * renderScale;
+
+      const pagePixelHeight =
+        pageHeight * renderScale;
+
+      const left =
+        Math.max(
+          0,
+          Math.min(
+            pagePixelWidth,
+            minX - padX
+          )
+        );
+
+      const top =
+        Math.max(
+          0,
+          Math.min(
+            pagePixelHeight,
+            minY - padY
+          )
+        );
+
+      const right =
+        Math.max(
+          0,
+          Math.min(
+            pagePixelWidth,
+            maxX + padX
+          )
+        );
+
+      const bottom =
+        Math.max(
+          0,
+          Math.min(
+            pagePixelHeight,
+            maxY + padY
+          )
+        );
+
+      /*
+       * A finding completely outside the physical page has no
+       * safe redaction target and must not enter the result set.
+       */
+      if (
+        right <= left ||
+        bottom <= top
+      ) {
+        return;
+      }
+
       const x =
-        Math.max(0, minX - padX) /
-        renderScale;
+        left / renderScale;
 
       const y =
-        Math.max(0, minY - padY) /
-        renderScale;
+        top / renderScale;
 
       const width =
-        Math.min(
-          pageWidth * renderScale,
-          maxX + padX
-        ) /
-          renderScale -
-        x;
+        (right - left) /
+        renderScale;
 
       const height =
-        Math.min(
-          pageHeight * renderScale,
-          maxY + padY
-        ) /
-          renderScale -
-        y;
+        (bottom - top) /
+        renderScale;
 
       results.push({
         id:
@@ -1829,8 +2391,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         box: {
           x,
           y,
-          width: Math.max(2, width),
-          height: Math.max(2, height),
+          width,
+          height,
         },
         pageWidth,
         pageHeight,
@@ -2249,231 +2811,464 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               );
 
             /*
-             * Dynamically choose strip height according to page
-             * width so unusually wide pages also remain bounded.
+             * ==================================================
+             * REGIONAL OCR
+             * ==================================================
+             *
+             * Native classification stores image rectangles in
+             * scale-1 PDF.js viewport coordinates.
+             *
+             * - Mixed/searchable PDF:
+             *     OCR only those image regions.
+             *
+             * - Truly scanned/sparse PDF:
+             *     no regions are stored, so OCR the whole page.
+             *
+             * OCR resolution/model are unchanged.
              */
-            const calculatedHeight =
-              Math.floor(
-                MAX_TILE_PIXELS /
-                  fullWidth
-              );
+            const savedRegions =
+              Array.isArray(
+                native?.ocrRegions
+              ) &&
+              native!.ocrRegions!.length > 0
+                ? native!.ocrRegions!
+                : [
+                    {
+                      x: 0,
+                      y: 0,
+                      width:
+                        baseViewport.width,
+                      height:
+                        baseViewport.height,
+                    },
+                  ];
 
-            const tileHeight = Math.min(1100, calculatedHeight);
-            if (tileHeight <= TILE_OVERLAP * 2) {
-              throw new Error(`Page ${pageNumber} is too wide for safe OCR at its original resolution.`);
+            const pixelRegions =
+              savedRegions
+                .map(
+                  (
+                    region
+                  ) => {
+                    const left =
+                      Math.max(
+                        0,
+                        Math.min(
+                          fullWidth,
+                          Math.floor(
+                            region.x *
+                              renderScale
+                          )
+                        )
+                      );
+
+                    const top =
+                      Math.max(
+                        0,
+                        Math.min(
+                          fullHeight,
+                          Math.floor(
+                            region.y *
+                              renderScale
+                          )
+                        )
+                      );
+
+                    const right =
+                      Math.max(
+                        0,
+                        Math.min(
+                          fullWidth,
+                          Math.ceil(
+                            (
+                              region.x +
+                              region.width
+                            ) *
+                              renderScale
+                          )
+                        )
+                      );
+
+                    const bottom =
+                      Math.max(
+                        0,
+                        Math.min(
+                          fullHeight,
+                          Math.ceil(
+                            (
+                              region.y +
+                              region.height
+                            ) *
+                              renderScale
+                          )
+                        )
+                      );
+
+                    return {
+                      left,
+                      top,
+                      right,
+                      bottom,
+                    };
+                  }
+                )
+                .filter(
+                  (
+                    region
+                  ) =>
+                    region.right >
+                      region.left &&
+                    region.bottom >
+                      region.top
+                );
+
+            /*
+             * Defensive fallback:
+             * malformed region metadata must never silently
+             * suppress OCR on a page that was classified for it.
+             */
+            if (
+              pixelRegions.length ===
+              0
+            ) {
+              pixelRegions.push({
+                left: 0,
+                top: 0,
+                right:
+                  fullWidth,
+                bottom:
+                  fullHeight,
+              });
             }
-
-            let tileTop =
-              0;
 
             let tileIndex =
               0;
 
-            while (
-              tileTop <
-              fullHeight
+            for (
+              let regionIndex = 0;
+              regionIndex <
+              pixelRegions.length;
+              regionIndex++
             ) {
-              assertScanning();
-              const tileBottom =
-                Math.min(
-                  fullHeight,
-                  tileTop +
-                    tileHeight
-                );
+              const region =
+                pixelRegions[
+                  regionIndex
+                ];
 
-              const currentHeight =
+              const regionWidth =
                 Math.max(
                   1,
-                  tileBottom -
-                    tileTop
+                  region.right -
+                    region.left
                 );
 
-              const canvas =
-                document.createElement(
-                  "canvas"
+              /*
+               * Use the COMPLETE safe pixel budget.
+               *
+               * Previously an extra 1100px height cap caused a
+               * normal A4 page to be split into multiple
+               * Tesseract calls even when its total bitmap was
+               * already below MAX_TILE_PIXELS.
+               *
+               * Memory remains bounded by MAX_TILE_PIXELS.
+               */
+              const calculatedHeight =
+                Math.floor(
+                  MAX_TILE_PIXELS /
+                    regionWidth
                 );
 
-              canvas.width =
-                fullWidth;
-
-              canvas.height =
-                currentHeight;
-
-              try {
-                const ctx =
-                  canvas.getContext(
-                    "2d",
-                    {
-                      alpha:
-                        false,
-                    }
-                  );
-
-                if (!ctx) {
-                  throw new Error(
-                    "Unable to create local OCR tile renderer."
-                  );
-                }
-
-                ctx.fillStyle =
-                  "#ffffff";
-
-                ctx.fillRect(
-                  0,
-                  0,
-                  canvas.width,
-                  canvas.height
+              const tileHeight =
+                Math.min(
+                  region.bottom -
+                    region.top,
+                  calculatedHeight
                 );
-
-                /*
-                 * Render the full-resolution page translated
-                 * upward so this canvas receives ONLY the
-                 * requested strip.
-                 *
-                 * Pixel scale remains 1.6x.
-                 */
-                await writeScanRecord(identity, 'progress', 0, { page: pageNumber, tile: tileIndex, stage: 'render', width: fullWidth, height: currentHeight });
-                const renderStart = performance.now();
-                await page.render({
-                  canvasContext:
-                    ctx as any,
-                  viewport:
-                    fullViewport,
-                  canvas,
-                  transform: [
-                    1,
-                    0,
-                    0,
-                    1,
-                    0,
-                    -tileTop,
-                  ],
-                } as any).promise;
-
-                renderMs += performance.now() - renderStart;
-                await writeScanRecord(identity, 'progress', 0, { page: pageNumber, tile: tileIndex, stage: 'recognize' });
-                const recognizeStart = performance.now();
-                setStatus(
-                  `OCR page ${pageNumber} of ${totalPages} · section ${tileIndex + 1}…`
-                );
-
-                /*
-                 * Normal structured-coordinate OCR.
-                 */
-                let result: any =
-                  await (
-                    worker as any
-                  ).recognize(
-                    canvas,
-                    {},
-                    {
-                      text:
-                        true,
-                      blocks:
-                        true,
-                      hocr: true,
-                    }
-                  );
-
-                recognizeMs += performance.now() - recognizeStart;
-                const detectStart = performance.now();
-                let lines =
-                  extractOcrLines(
-                    result?.data ||
-                      {}
-                  );
-
-                lines.forEach(
-                  (
-                    words,
-                    lineIndex
-                  ) => {
-                    if (
-                      !words.length
-                    ) {
-                      return;
-                    }
-
-                    /*
-                     * Tesseract coordinates are local to the tile.
-                     * Convert them back into full 1.6x page-space.
-                     */
-                    const pageWords =
-                      words.map(
-                        (
-                          word
-                        ) => ({
-                          ...word,
-                          y0:
-                            word.y0 +
-                            tileTop,
-                          y1:
-                            word.y1 +
-                            tileTop,
-                        })
-                      );
-
-                    pageWordsForCache.push(...pageWords.map(word => [word.text, word.x0, word.y0, word.x1, word.y1] as [string, number, number, number, number]));
-                    nextFindings.push(
-                      ...detectOcrLine(
-                        pageWords,
-                        pageNumber,
-                        baseViewport
-                          .width,
-                        baseViewport
-                          .height,
-                        renderScale,
-                        `tile-${tileIndex}-${lineIndex}`
-                      )
-                    );
-                  }
-                );
-
-                /*
-                 * Drop large Tesseract result trees immediately.
-                 */
-                detectMs += performance.now() - detectStart;
-                result =
-                  null;
-
-                lines.length =
-                  0;
-              } finally {
-                /*
-                 * Immediately destroy this strip's pixel buffer.
-                 */
-                canvas.width =
-                  1;
-
-                canvas.height =
-                  1;
-              }
-
-              tileIndex++;
 
               if (
-                tileBottom >=
-                fullHeight
+                tileHeight <=
+                TILE_OVERLAP * 2
               ) {
-                break;
+                throw new Error(
+                  `Page ${pageNumber} is too wide for safe OCR at its original resolution.`
+                );
               }
 
-              /*
-               * Advance with overlap.
-               */
-              tileTop =
-                Math.max(
-                  tileTop + 1,
-                  tileBottom -
-                    TILE_OVERLAP
-                );
+              let tileTop =
+                region.top;
 
-              /*
-               * Let iOS process canvas destruction between strips.
-               */
-              await yieldToMobile(
-                25
-              );
+              while (
+                tileTop <
+                region.bottom
+              ) {
+                assertScanning();
+
+                const tileBottom =
+                  Math.min(
+                    region.bottom,
+                    tileTop +
+                      tileHeight
+                  );
+
+                const currentHeight =
+                  Math.max(
+                    1,
+                    tileBottom -
+                      tileTop
+                  );
+
+                const canvas =
+                  document.createElement(
+                    "canvas"
+                  );
+
+                canvas.width =
+                  regionWidth;
+
+                canvas.height =
+                  currentHeight;
+
+                try {
+                  const ctx =
+                    canvas.getContext(
+                      "2d",
+                      {
+                        alpha:
+                          false,
+                      }
+                    );
+
+                  if (!ctx) {
+                    throw new Error(
+                      "Unable to create local OCR tile renderer."
+                    );
+                  }
+
+                  ctx.fillStyle =
+                    "#ffffff";
+
+                  ctx.fillRect(
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
+                  );
+
+                  /*
+                   * Render ONLY this image region/tile.
+                   *
+                   * The original fullViewport remains in use,
+                   * therefore pixel scale and OCR quality are
+                   * identical to the previous implementation.
+                   */
+                  await writeScanRecord(
+                    identity,
+                    'progress',
+                    0,
+                    {
+                      page:
+                        pageNumber,
+                      region:
+                        regionIndex,
+                      tile:
+                        tileIndex,
+                      stage:
+                        'render',
+                      width:
+                        regionWidth,
+                      height:
+                        currentHeight,
+                    }
+                  );
+
+                  const renderStart =
+                    performance.now();
+
+                  await page.render({
+                    canvasContext:
+                      ctx as any,
+                    viewport:
+                      fullViewport,
+                    canvas,
+                    transform: [
+                      1,
+                      0,
+                      0,
+                      1,
+                      -region.left,
+                      -tileTop,
+                    ],
+                  } as any).promise;
+
+                  renderMs +=
+                    performance.now() -
+                    renderStart;
+
+                  await writeScanRecord(
+                    identity,
+                    'progress',
+                    0,
+                    {
+                      page:
+                        pageNumber,
+                      region:
+                        regionIndex,
+                      tile:
+                        tileIndex,
+                      stage:
+                        'recognize',
+                    }
+                  );
+
+                  const recognizeStart =
+                    performance.now();
+
+                  setStatus(
+                    pixelRegions.length > 1
+                      ? `OCR page ${pageNumber} of ${totalPages} · image ${regionIndex + 1} of ${pixelRegions.length}…`
+                      : `OCR page ${pageNumber} of ${totalPages} · section ${tileIndex + 1}…`
+                  );
+
+                  let result: any =
+                    await (
+                      worker as any
+                    ).recognize(
+                      canvas,
+                      {},
+                      {
+                        text:
+                          true,
+                        blocks:
+                          true,
+                        hocr:
+                          true,
+                      }
+                    );
+
+                  recognizeMs +=
+                    performance.now() -
+                    recognizeStart;
+
+                  const detectStart =
+                    performance.now();
+
+                  let lines =
+                    extractOcrLines(
+                      result?.data ||
+                        {}
+                    );
+
+                  lines.forEach(
+                    (
+                      words,
+                      lineIndex
+                    ) => {
+                      if (
+                        !words.length
+                      ) {
+                        return;
+                      }
+
+                      /*
+                       * Tesseract coordinates are local to this
+                       * regional tile. Restore BOTH X and Y to
+                       * full-page render-space before converting
+                       * them back to PDF coordinates.
+                       */
+                      const pageWords =
+                        words.map(
+                          (
+                            word
+                          ) => ({
+                            ...word,
+                            x0:
+                              word.x0 +
+                              region.left,
+                            x1:
+                              word.x1 +
+                              region.left,
+                            y0:
+                              word.y0 +
+                              tileTop,
+                            y1:
+                              word.y1 +
+                              tileTop,
+                          })
+                        );
+
+                      pageWordsForCache.push(
+                        ...pageWords.map(
+                          word =>
+                            [
+                              word.text,
+                              word.x0,
+                              word.y0,
+                              word.x1,
+                              word.y1,
+                            ] as [
+                              string,
+                              number,
+                              number,
+                              number,
+                              number
+                            ]
+                        )
+                      );
+
+                      nextFindings.push(
+                        ...detectOcrLine(
+                          pageWords,
+                          pageNumber,
+                          baseViewport
+                            .width,
+                          baseViewport
+                            .height,
+                          renderScale,
+                          `region-${regionIndex}-tile-${tileIndex}-${lineIndex}`
+                        )
+                      );
+                    }
+                  );
+
+                  detectMs +=
+                    performance.now() -
+                    detectStart;
+
+                  result =
+                    null;
+
+                  lines.length =
+                    0;
+                } finally {
+                  /*
+                   * Immediately destroy the tile bitmap.
+                   */
+                  canvas.width =
+                    1;
+
+                  canvas.height =
+                    1;
+                }
+
+                tileIndex++;
+
+                if (
+                  tileBottom >=
+                  region.bottom
+                ) {
+                  break;
+                }
+
+                tileTop =
+                  Math.max(
+                    tileTop + 1,
+                    tileBottom -
+                      TILE_OVERLAP
+                  );
+
+                await yieldToMobile(
+                  25
+                );
+              }
             }
           } finally {
             try {
@@ -2818,6 +3613,103 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             finding.pageHeight
           )
       );
+
+    /*
+     * Refuse malformed geometry before starting an expensive
+     * large-PDF reconstruction.
+     *
+     * This also makes a geometry problem immediately visible
+     * instead of making the Auto-Redact button appear inactive.
+     */
+    const invalidGeometry =
+      selected.filter(
+        (finding) => {
+          const box = finding.box!;
+          const pageWidth =
+            finding.pageWidth!;
+          const pageHeight =
+            finding.pageHeight!;
+
+          if (
+            ![
+              box.x,
+              box.y,
+              box.width,
+              box.height,
+              pageWidth,
+              pageHeight,
+            ].every(Number.isFinite)
+          ) {
+            return true;
+          }
+
+          if (
+            pageWidth <= 0 ||
+            pageHeight <= 0 ||
+            box.width <= 0 ||
+            box.height <= 0
+          ) {
+            return true;
+          }
+
+          const left =
+            Math.max(
+              0,
+              Math.min(
+                pageWidth,
+                box.x
+              )
+            );
+
+          const top =
+            Math.max(
+              0,
+              Math.min(
+                pageHeight,
+                box.y
+              )
+            );
+
+          const right =
+            Math.max(
+              0,
+              Math.min(
+                pageWidth,
+                box.x + box.width
+              )
+            );
+
+          const bottom =
+            Math.max(
+              0,
+              Math.min(
+                pageHeight,
+                box.y + box.height
+              )
+            );
+
+          return (
+            right <= left ||
+            bottom <= top
+          );
+        }
+      );
+
+    if (
+      invalidGeometry.length >
+      0
+    ) {
+      setError(
+        `${invalidGeometry.length} selected sensitive item${
+          invalidGeometry.length === 1
+            ? ""
+            : "s"
+        } had invalid page coordinates. Please run a fresh scan before redacting.`
+      );
+
+      setStatus(null);
+      return false;
+    }
 
     if (
       selected.length ===
