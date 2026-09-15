@@ -39,6 +39,50 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
   const extractionInFlightRef =
     useRef(false);
 
+  /*
+   * IMPORTANT:
+   *
+   * React/parent workspace code may occasionally provide a new
+   * File object representing the SAME physical PDF.
+   *
+   * A useEffect that depends directly on `file` sees that as a
+   * different value and can start extraction again from page 1.
+   *
+   * Track the logical job instead:
+   *   filename + size + lastModified + Markdown settings
+   *
+   * The exact same logical job is allowed to auto-start ONCE.
+   */
+  const lastAutoStartedJobRef =
+    useRef<string | null>(
+      null
+    );
+
+  const fileIdentity =
+    file
+      ? [
+          file.name,
+          file.size,
+          file.lastModified,
+        ].join('|')
+      : '';
+
+  const extractionJobKey =
+    file
+      ? [
+          fileIdentity,
+          detectHeadings
+            ? 'headings:1'
+            : 'headings:0',
+          detectLists
+            ? 'lists:1'
+            : 'lists:0',
+          joinHyphenatedWords
+            ? 'hyphen:1'
+            : 'hyphen:0',
+        ].join('|')
+      : '';
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   const handleExtraction = async () => {
@@ -48,6 +92,28 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
     ) {
       return;
     }
+
+    /*
+     * Never silently start the exact same job again.
+     *
+     * This is intentionally set BEFORE async work begins.
+     * Even if the job later fails, React is not allowed to
+     * enter an automatic restart loop.
+     */
+    if (
+      lastAutoStartedJobRef.current ===
+      extractionJobKey
+    ) {
+      console.warn(
+        'Blocked duplicate PDF → Markdown extraction:',
+        extractionJobKey
+      );
+
+      return;
+    }
+
+    lastAutoStartedJobRef.current =
+      extractionJobKey;
 
     extractionInFlightRef.current =
       true;
@@ -87,13 +153,34 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
 
   useEffect(() => {
     if (!file) {
+      /*
+       * Explicitly returning to an empty workspace means a
+       * future file selection is a genuinely new job.
+       */
+      lastAutoStartedJobRef.current =
+        null;
+
       setMdResult(null);
       revokeDownloadUrl();
       setErrorMessage(null);
       return;
     }
-    handleExtraction();
-  }, [file, detectHeadings, detectLists, joinHyphenatedWords]);
+
+    void handleExtraction();
+
+    /*
+     * Deliberately use the stable logical identity rather than
+     * the File object reference.
+     *
+     * eslint/react-hooks dependency expansion must NOT add
+     * `file` here or the original restart bug returns.
+     */
+  }, [
+    fileIdentity,
+    detectHeadings,
+    detectLists,
+    joinHyphenatedWords,
+  ]);
 
   const handleCopy = () => {
     if (!mdResult) return;
@@ -103,6 +190,9 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
   };
 
   const handleClear = () => {
+    lastAutoStartedJobRef.current =
+      null;
+
     onFileChange(null);
     setMdResult(null);
     revokeDownloadUrl();
