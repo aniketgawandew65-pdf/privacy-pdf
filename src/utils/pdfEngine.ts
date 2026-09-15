@@ -16,6 +16,9 @@ import {
   loadPdfJsFromBlob,
   pdfjsLib,
 } from './pdfjs';
+import {
+  writeOpfsFile,
+} from './opfsCompat';
 if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
 
 }
@@ -4743,24 +4746,11 @@ export async function redactPDF(
         const storedName =
           `page-${pageIndex}.jpg`;
 
-        const handle =
-          await stageDirectory
-            .getFileHandle(
-              storedName,
-              {
-                create: true,
-              }
-            );
-
-        const writable =
-          await handle
-            .createWritable();
-
-        await writable.write(
+        await writeOpfsFile(
+          stageDirectoryName,
+          storedName,
           blob
         );
-
-        await writable.close();
 
         stagedPages.set(
           pageIndex,

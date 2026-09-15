@@ -1,3 +1,7 @@
+import {
+  writeOpfsFile,
+} from "./opfsCompat";
+
 /*
  * 1into1 local workspace
  *
@@ -268,24 +272,17 @@ const saveWorkspaceFilesUnserialized = async (
         storedName
       );
 
-      const handle =
-        await directory.getFileHandle(
-          storedName,
-          { create: true }
-        );
-
-      const writable =
-        await handle.createWritable();
-
       /*
-       * File/Blob is written directly to the browser's
-       * private origin storage.
+       * Cross-browser OPFS writer:
        *
-       * We deliberately do not call arrayBuffer(),
-       * base64 encode it, or duplicate it in JavaScript.
+       * Chrome/new Safari -> createWritable()
+       * Older Safari      -> Worker + createSyncAccessHandle()
        */
-      await writable.write(file);
-      await writable.close();
+      await writeOpfsFile(
+        `workspace-${sessionId}`,
+        storedName,
+        file
+      );
 
       manifestFiles.push({
         storedName,
@@ -960,17 +957,11 @@ const saveToolWorkspaceFilesUnserialized =
           storedName
         );
 
-        const handle =
-          await directory.getFileHandle(
-            storedName,
-            { create: true }
-          );
-
-        const writable =
-          await handle.createWritable();
-
-        await writable.write(file);
-        await writable.close();
+        await writeOpfsFile(
+          `tool-workspace-${sessionId}-${safeToolScope(scope)}`,
+          storedName,
+          file
+        );
 
         manifestFiles.push({
           storedName,
