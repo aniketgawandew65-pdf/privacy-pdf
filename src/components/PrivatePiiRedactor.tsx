@@ -92,7 +92,7 @@ type RedactorSessionCache = {
   error: string | null;
   status: string | null;
   manualReviewFindings: Finding[];
-  pendingRedactedPdf: Uint8Array | null;
+  pendingRedactedPdf: Blob | null;
 };
 
 const EMPTY_REDACTOR_SESSION: RedactorSessionCache = {
@@ -679,7 +679,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
    * In-memory only — never localStorage/sessionStorage.
    */
   const pendingRedactedPdfRef =
-    useRef<Uint8Array | null>(
+    useRef<Blob | null>(
       redactorSessionCache.pendingRedactedPdf
     );
 
@@ -1209,6 +1209,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     void clearToolWorkspace(
       'private-pii-redactor-pending'
+    );
+
+    void clearToolWorkspace(
+      'private-pii-redactor-output'
     );
 
     if (inputRef.current) inputRef.current.value = "";
@@ -3297,6 +3301,80 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
      * Run the same hardened Redact engine already proven on the
      * large mobile-PDF workflow.
      */
+    /*
+     * ========================================================
+     * FINAL-PDF DISK SPILL
+     * ========================================================
+     *
+     * redactPDF() must temporarily return bytes because it is a
+     * shared engine API.
+     *
+     * Immediately move those bytes into browser-local OPFS and
+     * then release the huge Uint8Array BEFORE final verification.
+     */
+    const spillFinishedPdf =
+      async (
+        outputBytes: Uint8Array,
+        name: string
+      ): Promise<File> => {
+        const inMemoryFile =
+          new File(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            name,
+            {
+              type:
+                "application/pdf",
+              lastModified:
+                Date.now(),
+            }
+          );
+
+        try {
+          await saveToolWorkspaceFiles(
+            "private-pii-redactor-output",
+            [
+              inMemoryFile,
+            ]
+          );
+
+          const restored =
+            await restoreToolWorkspaceFiles(
+              "private-pii-redactor-output"
+            );
+
+          if (
+            restored[0]
+          ) {
+            return restored[0];
+          }
+        } catch (
+          error
+        ) {
+          console.warn(
+            "Unable to stage redacted output in OPFS:",
+            error
+          );
+        }
+
+        /*
+         * Compatibility fallback. Modern Safari/Chrome should
+         * normally use the OPFS-backed path above.
+         */
+        return inMemoryFile;
+      };
+
+    const settleRedactionMemory =
+      () =>
+        new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              400
+            )
+        );
+
     setStatus(
       "Creating secure redacted pages…"
     );
@@ -3315,6 +3393,23 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         }
       );
 
+    let workingPdf =
+      await spillFinishedPdf(
+        bytes,
+        "private-pii-pass-1.pdf"
+      );
+
+    /*
+     * Drop the complete in-memory output before PDF.js verifier
+     * starts.
+     */
+    bytes =
+      new Uint8Array(
+        0
+      );
+
+    await settleRedactionMemory();
+
     /*
      * ========================================================
      * FINAL SAFETY CHECK
@@ -3331,7 +3426,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     let verification =
       await verifyFinishedPdf(
-        bytes,
+        workingPdf,
         verificationTargets,
         (
           message
@@ -3378,22 +3473,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       );
 
       /*
-       * Release our reference to PASS 1 before producing PASS 2.
+       * PASS 1 already lives in browser-backed storage and the
+       * large byte array has already been released.
        */
-      bytes =
-        new Uint8Array(
-          0
-        );
-
-      await new Promise<void>(
-        (
-          resolve
-        ) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      await settleRedactionMemory();
 
       bytes =
         await redactPDF(
@@ -3411,13 +3494,26 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           }
         );
 
+      workingPdf =
+        await spillFinishedPdf(
+          bytes,
+          "private-pii-pass-2.pdf"
+        );
+
+      bytes =
+        new Uint8Array(
+          0
+        );
+
+      await settleRedactionMemory();
+
       setStatus(
         "Re-checking strengthened redactions…"
       );
 
       verification =
         await verifyFinishedPdf(
-          bytes,
+          workingPdf,
           verificationTargets,
           (
             message
@@ -3461,17 +3557,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
        * existing explicit Download Anyway workflow.
        */
       pendingRedactedPdfRef.current =
-        bytes;
+        workingPdf;
 
       redactorSessionCache.pendingRedactedPdf =
-        bytes;
+        workingPdf;
 
-      void saveToolWorkspaceFiles(
+      await saveToolWorkspaceFiles(
         'private-pii-redactor-pending',
         [
           new File(
             [
-              bytes as unknown as BlobPart,
+              workingPdf,
             ],
             'pending-redacted.pdf',
             {
@@ -3546,6 +3642,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       'private-pii-redactor-pending'
     );
 
+    void clearToolWorkspace(
+      'private-pii-redactor-output'
+    );
+
     setManualReviewFindings(
       []
     );
@@ -3561,15 +3661,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       );
 
     downloadBlob(
-      new Blob(
-        [
-          bytes as unknown as BlobPart,
-        ],
-        {
-          type:
-            "application/pdf",
-        }
-      ),
+      workingPdf,
       `${base}-redacted.pdf`
     );
 
@@ -3581,45 +3673,46 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return;
     }
 
-    let pendingBytes =
+    let pendingPdf:
+      Blob | null =
       pendingRedactedPdfRef.current;
 
     /*
-     * After mobile Preview -> Back the JS heap may have been
-     * recreated. Load the exact pending PDF only when needed,
-     * instead of putting a potentially large PDF back into
-     * memory during page startup.
+     * After Preview -> Back, restore the browser-backed File
+     * directly. Do NOT turn it into a giant Uint8Array.
      */
-    if (!pendingBytes) {
+    if (!pendingPdf) {
       try {
         const restoredPending =
           await restoreToolWorkspaceFiles(
-            'private-pii-redactor-pending'
+            "private-pii-redactor-pending"
           );
 
-        if (restoredPending[0]) {
-          pendingBytes =
-            new Uint8Array(
-              await restoredPending[0].arrayBuffer()
-            );
+        if (
+          restoredPending[0]
+        ) {
+          pendingPdf =
+            restoredPending[0];
 
           pendingRedactedPdfRef.current =
-            pendingBytes;
+            pendingPdf;
 
           redactorSessionCache.pendingRedactedPdf =
-            pendingBytes;
+            pendingPdf;
         }
-      } catch (error) {
+      } catch (
+        error
+      ) {
         console.warn(
-          'Unable to restore pending redacted PDF:',
+          "Unable to restore pending redacted PDF:",
           error
         );
       }
     }
 
-    if (!pendingBytes) {
+    if (!pendingPdf) {
       setError(
-        'The pending redacted copy is no longer available. Run Auto-Redact again before downloading.'
+        "The pending redacted copy is no longer available. Run Auto-Redact again before downloading."
       );
       return;
     }
@@ -3627,20 +3720,23 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     const itemCount =
       manualReviewFindings.length;
 
-    const confirmed = window.confirm(
-      `The final safety check found ${itemCount} item${itemCount === 1 ? "" : "s"} that may still be readable. Downloading now will skip manual review. Download anyway?`
-    );
+    const confirmed =
+      window.confirm(
+        `The final safety check found ${itemCount} item${itemCount === 1 ? "" : "s"} that may still be readable. Downloading now will skip manual review. Download anyway?`
+      );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     const base =
-      file.name.replace(/\.pdf$/i, "");
+      file.name.replace(
+        /\.pdf$/i,
+        ""
+      );
 
     downloadBlob(
-      new Blob(
-        [pendingBytes as any],
-        { type: "application/pdf" }
-      ),
+      pendingPdf,
       `${base}-redacted-review-needed.pdf`
     );
   };
@@ -3653,6 +3749,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     void clearToolWorkspace(
       'private-pii-redactor-pending'
+    );
+
+    void clearToolWorkspace(
+      'private-pii-redactor-output'
     );
 
     setError(null);

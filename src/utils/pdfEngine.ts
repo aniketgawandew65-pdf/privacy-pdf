@@ -4497,19 +4497,21 @@ export async function redactPDF(
   ) => void
 ): Promise<Uint8Array> {
   const yieldToBrowser =
-    () =>
+    (
+      delay = 0
+    ) =>
       new Promise<void>(
         (resolve) =>
           setTimeout(
             resolve,
-            0
+            delay
           )
       );
 
   /*
-   * Normalize and validate all requested redaction boxes.
-   *
-   * Only pages that contain real boxes belong in this map.
+   * =========================================================
+   * NORMALIZE REQUESTED BLACKOUTS
+   * =========================================================
    */
   const redactionMap =
     new Map<
@@ -4586,10 +4588,6 @@ export async function redactPDF(
     }
   }
 
-  /*
-   * No redactions means no PDF reconstruction is needed.
-   * Return the exact original document.
-   */
   if (
     redactionMap.size ===
     0
@@ -4604,6 +4602,620 @@ export async function redactPDF(
     );
   }
 
+  /*
+   * =========================================================
+   * DISK-BACKED RASTER STAGING
+   * =========================================================
+   *
+   * Previous implementation retained a Blob for EVERY
+   * redacted page in a JavaScript Map.
+   *
+   * Large mobile jobs could therefore grow continually until
+   * Safari killed the entire tab.
+   *
+   * Completed JPEG pages now live in OPFS whenever available.
+   * JavaScript keeps only tiny metadata.
+   */
+  type StagedRasterPage = {
+    width: number;
+    height: number;
+    storedName?: string;
+    blob?: Blob;
+  };
+
+  const stagedPages =
+    new Map<
+      number,
+      StagedRasterPage
+    >();
+
+  const stageDirectoryName =
+    `redact-stage-${Date.now()}-` +
+    Math.random()
+      .toString(36)
+      .slice(2);
+
+  let stageRoot:
+    any =
+      null;
+
+  let stageDirectory:
+    any =
+      null;
+
+  let stageAttempted =
+    false;
+
+  const initializeStage =
+    async () => {
+      if (stageDirectory) {
+        return true;
+      }
+
+      if (stageAttempted) {
+        return false;
+      }
+
+      stageAttempted =
+        true;
+
+      if (
+        typeof navigator ===
+          "undefined" ||
+        !navigator.storage ||
+        typeof navigator.storage
+          .getDirectory !==
+          "function"
+      ) {
+        return false;
+      }
+
+      try {
+        stageRoot =
+          await navigator.storage
+            .getDirectory();
+
+        /*
+         * Remove an abandoned temporary redaction stage left by
+         * a previous Safari process kill.
+         */
+        try {
+          for await (
+            const name of
+            stageRoot.keys()
+          ) {
+            if (
+              typeof name ===
+                "string" &&
+              name.startsWith(
+                "redact-stage-"
+              )
+            ) {
+              try {
+                await stageRoot
+                  .removeEntry(
+                    name,
+                    {
+                      recursive:
+                        true,
+                    }
+                  );
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+
+        stageDirectory =
+          await stageRoot
+            .getDirectoryHandle(
+              stageDirectoryName,
+              {
+                create: true,
+              }
+            );
+
+        return true;
+      } catch (_) {
+        stageRoot =
+          null;
+
+        stageDirectory =
+          null;
+
+        return false;
+      }
+    };
+
+  const stageRasterPage =
+    async (
+      pageIndex: number,
+      blob: Blob,
+      width: number,
+      height: number
+    ) => {
+      const useDisk =
+        await initializeStage();
+
+      if (
+        useDisk &&
+        stageDirectory
+      ) {
+        const storedName =
+          `page-${pageIndex}.jpg`;
+
+        const handle =
+          await stageDirectory
+            .getFileHandle(
+              storedName,
+              {
+                create: true,
+              }
+            );
+
+        const writable =
+          await handle
+            .createWritable();
+
+        await writable.write(
+          blob
+        );
+
+        await writable.close();
+
+        stagedPages.set(
+          pageIndex,
+          {
+            width,
+            height,
+            storedName,
+          }
+        );
+
+        return;
+      }
+
+      /*
+       * Compatibility fallback for browsers without OPFS.
+       *
+       * Modern iOS Safari / Android Chrome use the disk-backed
+       * path above.
+       */
+      stagedPages.set(
+        pageIndex,
+        {
+          width,
+          height,
+          blob,
+        }
+      );
+    };
+
+  const readRasterPage =
+    async (
+      pageIndex: number
+    ) => {
+      const staged =
+        stagedPages.get(
+          pageIndex
+        );
+
+      if (!staged) {
+        throw new Error(
+          `Missing staged redacted page ${pageIndex + 1}.`
+        );
+      }
+
+      if (
+        staged.storedName &&
+        stageDirectory
+      ) {
+        const handle =
+          await stageDirectory
+            .getFileHandle(
+              staged.storedName
+            );
+
+        const storedFile =
+          await handle
+            .getFile();
+
+        return {
+          bytes:
+            await storedFile
+              .arrayBuffer(),
+          width:
+            staged.width,
+          height:
+            staged.height,
+        };
+      }
+
+      if (staged.blob) {
+        return {
+          bytes:
+            await staged.blob
+              .arrayBuffer(),
+          width:
+            staged.width,
+          height:
+            staged.height,
+        };
+      }
+
+      throw new Error(
+        `Unable to read staged page ${pageIndex + 1}.`
+      );
+    };
+
+  const removeRasterPage =
+    async (
+      pageIndex: number
+    ) => {
+      const staged =
+        stagedPages.get(
+          pageIndex
+        );
+
+      if (
+        staged?.storedName &&
+        stageDirectory
+      ) {
+        try {
+          await stageDirectory
+            .removeEntry(
+              staged.storedName
+            );
+        } catch (_) {}
+      }
+
+      stagedPages.delete(
+        pageIndex
+      );
+    };
+
+  const cleanupStage =
+    async () => {
+      stagedPages.clear();
+
+      if (
+        stageRoot
+      ) {
+        try {
+          await stageRoot
+            .removeEntry(
+              stageDirectoryName,
+              {
+                recursive:
+                  true,
+              }
+            );
+        } catch (_) {}
+      }
+
+      stageRoot =
+        null;
+
+      stageDirectory =
+        null;
+
+      /*
+       * Allows fallback rendering after a failed hybrid attempt
+       * to create a fresh stage.
+       */
+      stageAttempted =
+        false;
+    };
+
+  /*
+   * =========================================================
+   * PAGE COUNT PROBE
+   * =========================================================
+   */
+  let totalPages =
+    0;
+
+  {
+    const probe =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+    try {
+      totalPages =
+        probe.pdf.numPages;
+    } finally {
+      await probe.dispose();
+    }
+  }
+
+  const redactedPageIndices =
+    Array.from(
+      redactionMap.keys()
+    )
+      .filter(
+        (index) =>
+          index >= 0 &&
+          index <
+            totalPages
+      )
+      .sort(
+        (a, b) =>
+          a - b
+      );
+
+  /*
+   * =========================================================
+   * HARD-BATCHED SECURE RENDERER
+   * =========================================================
+   *
+   * Fresh PDF.js document every 4 pages.
+   *
+   * Same idea which stabilized the large Private PII OCR path.
+   */
+  const RENDER_BATCH_SIZE =
+    4;
+
+  const renderPagesToStage =
+    async (
+      pageIndices:
+        number[]
+    ) => {
+      for (
+        let batchStart = 0;
+        batchStart <
+          pageIndices.length;
+        batchStart +=
+          RENDER_BATCH_SIZE
+      ) {
+        const batch =
+          pageIndices.slice(
+            batchStart,
+            batchStart +
+              RENDER_BATCH_SIZE
+          );
+
+        let loaded:
+          | Awaited<
+              ReturnType<
+                typeof loadPdfJsFromBlob
+              >
+            >
+          | null =
+          null;
+
+        try {
+          loaded =
+            await loadPdfJsFromBlob(
+              file,
+              {
+                stopAtErrors:
+                  false,
+              }
+            );
+
+          if (
+            loaded.pdf.numPages !==
+            totalPages
+          ) {
+            throw new Error(
+              "PDF page count changed during redaction."
+            );
+          }
+
+          for (
+            const pageIndex of
+            batch
+          ) {
+            const pageNum =
+              pageIndex +
+              1;
+
+            onProgress?.(
+              pageNum,
+              totalPages
+            );
+
+            const page =
+              await loaded.pdf
+                .getPage(
+                  pageNum
+                );
+
+            const canvas =
+              document
+                .createElement(
+                  "canvas"
+                );
+
+            try {
+              /*
+               * IMPORTANT:
+               * Output quality remains exactly 2.0x / JPEG .92.
+               */
+              const viewport =
+                page.getViewport({
+                  scale: 2.0,
+                });
+
+              canvas.width =
+                Math.max(
+                  1,
+                  Math.floor(
+                    viewport.width
+                  )
+                );
+
+              canvas.height =
+                Math.max(
+                  1,
+                  Math.floor(
+                    viewport.height
+                  )
+                );
+
+              const ctx =
+                canvas
+                  .getContext(
+                    "2d",
+                    {
+                      alpha:
+                        false,
+                    }
+                  );
+
+              if (!ctx) {
+                throw new Error(
+                  "Canvas rendering context unavailable"
+                );
+              }
+
+              ctx.fillStyle =
+                "#ffffff";
+
+              ctx.fillRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+
+              await (
+                page.render({
+                  canvasContext:
+                    ctx as any,
+                  viewport,
+                } as any) as any
+              ).promise;
+
+              const pageRects =
+                redactionMap.get(
+                  pageIndex
+                ) || [];
+
+              if (
+                pageRects.length >
+                0
+              ) {
+                ctx.fillStyle =
+                  "#000000";
+
+                for (
+                  const rect of
+                  pageRects
+                ) {
+                  ctx.fillRect(
+                    rect.x *
+                      canvas.width,
+                    rect.y *
+                      canvas.height,
+                    rect.width *
+                      canvas.width,
+                    rect.height *
+                      canvas.height
+                  );
+                }
+              }
+
+              const jpegBlob =
+                await new Promise<
+                  Blob
+                >(
+                  (
+                    resolve,
+                    reject
+                  ) => {
+                    canvas.toBlob(
+                      (
+                        result
+                      ) => {
+                        if (
+                          result
+                        ) {
+                          resolve(
+                            result
+                          );
+                        } else {
+                          reject(
+                            new Error(
+                              `Failed to encode redacted page ${pageNum}.`
+                            )
+                          );
+                        }
+                      },
+                      "image/jpeg",
+                      0.92
+                    );
+                  }
+                );
+
+              const unscaled =
+                page.getViewport({
+                  scale: 1.0,
+                });
+
+              /*
+               * Persist before moving to the next page.
+               *
+               * Once this resolves the page JPEG does not need
+               * to remain in the JS heap.
+               */
+              await stageRasterPage(
+                pageIndex,
+                jpegBlob,
+                unscaled.width,
+                unscaled.height
+              );
+            } finally {
+              canvas.width =
+                1;
+
+              canvas.height =
+                1;
+
+              try {
+                canvas.remove();
+              } catch (_) {}
+
+              try {
+                page.cleanup();
+              } catch (_) {}
+            }
+
+            await yieldToBrowser(
+              50
+            );
+          }
+        } finally {
+          if (loaded) {
+            try {
+              await loaded.dispose();
+            } catch (_) {}
+
+            loaded =
+              null;
+          }
+        }
+
+        /*
+         * Give Safari time to release PDF.js + canvas native
+         * allocations before opening the next short batch.
+         */
+        if (
+          batchStart +
+            RENDER_BATCH_SIZE <
+          pageIndices.length
+        ) {
+          await yieldToBrowser(
+            300
+          );
+        }
+      }
+    };
+
   const looksProtected =
     await isComplexOrProtectedFile(
       file
@@ -4613,330 +5225,87 @@ export async function redactPDF(
    * =========================================================
    * PATH A — HYBRID SECURE REDACTION
    * =========================================================
-   *
-   * Ordinary PDFs no longer rasterize every page.
-   *
-   * ONLY pages containing redactions are rendered,
-   * permanently burned, and converted to images.
-   *
-   * Every untouched page is copied directly from the
-   * source PDF as vector content with no quality loss.
-   *
-   * Important security property:
-   * the ORIGINAL content streams of redacted pages are
-   * NEVER copied into the output PDF.
    */
   if (!looksProtected) {
-    type RasterizedPage = {
-      blob: Blob;
-      width: number;
-      height: number;
-    };
-
-    const rasterizedPages =
-      new Map<
-        number,
-        RasterizedPage
-      >();
-
-    let loadedPdf:
-      | {
-          pdf: any;
-          dispose:
-            () => Promise<void>;
-        }
-      | null = null;
-
     try {
       /*
-       * PHASE 1:
-       * Render ONLY pages that contain redactions.
-       *
-       * PDF.js reads from the browser-backed File so there
-       * is no additional 150 MB ArrayBuffer source copy.
+       * Render ONLY redacted pages, but stage each one outside
+       * the JavaScript heap.
        */
-      loadedPdf =
-        await loadPdfJsFromBlob(
-          file,
-          {
-            stopAtErrors:
-              false,
-          }
-        );
+      await renderPagesToStage(
+        redactedPageIndices
+      );
 
-      const sourcePdf =
-        loadedPdf.pdf;
+      await yieldToBrowser(
+        300
+      );
 
-      const totalPages =
-        sourcePdf.numPages;
-
-      const redactedPageIndices =
-        Array.from(
-          redactionMap.keys()
-        )
-          .filter(
-            (index) =>
-              index >= 0 &&
-              index <
-                totalPages
-          )
-          .sort(
-            (a, b) =>
-              a - b
-          );
+      const untouchedIndices:
+        number[] =
+        [];
 
       for (
-        let r = 0;
-        r <
-        redactedPageIndices.length;
-        r++
+        let pageIndex = 0;
+        pageIndex <
+          totalPages;
+        pageIndex++
       ) {
-        const pageIndex =
-          redactedPageIndices[
-            r
-          ];
-
-        const pageNum =
-          pageIndex + 1;
-
-        onProgress?.(
-          pageNum,
-          totalPages
-        );
-
-        const page =
-          await sourcePdf
-            .getPage(
-              pageNum
-            );
-
-        const canvas =
-          document.createElement(
-            'canvas'
+        if (
+          !redactionMap.has(
+            pageIndex
+          )
+        ) {
+          untouchedIndices.push(
+            pageIndex
           );
-
-        try {
-          /*
-           * Preserve the exact existing Redact quality:
-           * 2x rendering + JPEG 0.92.
-           *
-           * We are reducing the NUMBER of rendered pages,
-           * not reducing the quality of those pages.
-           */
-          const viewport =
-            page.getViewport({
-              scale: 2.0,
-            });
-
-          canvas.width =
-            Math.max(
-              1,
-              Math.floor(
-                viewport.width
-              )
-            );
-
-          canvas.height =
-            Math.max(
-              1,
-              Math.floor(
-                viewport.height
-              )
-            );
-
-          const ctx =
-            canvas.getContext(
-              '2d',
-              {
-                alpha: false,
-              }
-            );
-
-          if (!ctx) {
-            throw new Error(
-              'Canvas rendering context unavailable'
-            );
-          }
-
-          ctx.fillStyle =
-            '#ffffff';
-
-          ctx.fillRect(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-          await (
-            page.render({
-              canvasContext:
-                ctx as any,
-              viewport,
-            } as any) as any
-          ).promise;
-
-          /*
-           * Permanently burn the redaction pixels.
-           *
-           * This is deliberately NOT a PDF rectangle overlay.
-           * The original text/images underneath the box are
-           * destroyed on this output page.
-           */
-          ctx.fillStyle =
-            '#000000';
-
-          const pageRects =
-            redactionMap.get(
-              pageIndex
-            ) || [];
-
-          for (
-            const rect of
-            pageRects
-          ) {
-            ctx.fillRect(
-              rect.x *
-                canvas.width,
-              rect.y *
-                canvas.height,
-              rect.width *
-                canvas.width,
-              rect.height *
-                canvas.height
-            );
-          }
-
-          const jpegBlob =
-            await new Promise<
-              Blob
-            >(
-              (
-                resolve,
-                reject
-              ) => {
-                canvas.toBlob(
-                  (blob) => {
-                    if (blob) {
-                      resolve(
-                        blob
-                      );
-                    } else {
-                      reject(
-                        new Error(
-                          `Failed to encode redacted page ${pageNum}.`
-                        )
-                      );
-                    }
-                  },
-                  'image/jpeg',
-                  0.92
-                );
-              }
-            );
-
-          const originalViewport =
-            page.getViewport({
-              scale: 1.0,
-            });
-
-          rasterizedPages.set(
-            pageIndex,
-            {
-              blob:
-                jpegBlob,
-              width:
-                originalViewport.width,
-              height:
-                originalViewport.height,
-            }
-          );
-        } finally {
-          /*
-           * Release the page's full-resolution pixel backing
-           * store immediately.
-           */
-          canvas.width = 1;
-          canvas.height = 1;
-
-          try {
-            canvas.remove();
-          } catch (_) {}
-
-          try {
-            page.cleanup();
-          } catch (_) {}
         }
-
-        await yieldToBrowser();
       }
 
-      /*
-       * PDF.js is finished before pdf-lib opens the same
-       * potentially 150 MB source document.
-       *
-       * This is important on mobile: we avoid two complete
-       * PDF engines holding the source simultaneously.
-       */
-      await loadedPdf.dispose();
-      loadedPdf = null;
-
-      await yieldToBrowser();
-
-      /*
-       * PHASE 2:
-       * Copy ONLY untouched pages losslessly.
-       */
       let sourceBuffer:
         | ArrayBuffer
         | null =
-          await file.arrayBuffer();
+        null;
 
       let sourceDoc:
         | PDFDocument
         | null =
+        null;
+
+      /*
+       * Critical optimization:
+       *
+       * If every page has a redaction, there is ZERO reason to
+       * allocate the complete original PDF inside pdf-lib.
+       */
+      if (
+        untouchedIndices.length >
+        0
+      ) {
+        sourceBuffer =
+          await file.arrayBuffer();
+
+        sourceDoc =
           await PDFDocument.load(
             sourceBuffer
           );
 
-      if (
-        sourceDoc.isEncrypted
-      ) {
-        throw new Error(
-          'Encrypted source requires compatibility redaction.'
-        );
-      }
-
-      sourceBuffer = null;
-
-      const sourcePageCount =
-        sourceDoc.getPageCount();
-
-      if (
-        sourcePageCount !==
-        totalPages
-      ) {
-        throw new Error(
-          'PDF page count changed during redaction.'
-        );
-      }
-
-      const untouchedIndices:
-        number[] = [];
-
-      for (
-        let index = 0;
-        index <
-        totalPages;
-        index++
-      ) {
         if (
-          !redactionMap.has(
-            index
-          )
+          sourceDoc.isEncrypted
         ) {
-          untouchedIndices.push(
-            index
+          throw new Error(
+            "Encrypted source requires compatibility redaction."
+          );
+        }
+
+        sourceBuffer =
+          null;
+
+        if (
+          sourceDoc.getPageCount() !==
+          totalPages
+        ) {
+          throw new Error(
+            "PDF page count changed during redaction."
           );
         }
       }
@@ -4944,15 +5313,9 @@ export async function redactPDF(
       const outputDoc =
         await PDFDocument.create();
 
-      const copiedPages =
-        untouchedIndices.length >
-        0
-          ? await outputDoc
-              .copyPages(
-                sourceDoc,
-                untouchedIndices
-              )
-          : [];
+      let copiedPages:
+        any[] =
+        [];
 
       const copiedByIndex =
         new Map<
@@ -4960,68 +5323,78 @@ export async function redactPDF(
           any
         >();
 
-      untouchedIndices.forEach(
-        (
-          sourceIndex,
-          copiedIndex
-        ) => {
-          copiedByIndex.set(
-            sourceIndex,
-            copiedPages[
+      if (
+        sourceDoc &&
+        untouchedIndices.length >
+          0
+      ) {
+        copiedPages =
+          await outputDoc
+            .copyPages(
+              sourceDoc,
+              untouchedIndices
+            );
+
+        untouchedIndices
+          .forEach(
+            (
+              sourceIndex,
               copiedIndex
-            ]
+            ) => {
+              copiedByIndex.set(
+                sourceIndex,
+                copiedPages[
+                  copiedIndex
+                ]
+              );
+            }
           );
-        }
+      }
+
+      /*
+       * copyPages has imported the resources needed by untouched
+       * vector pages. Release original PDF references before
+       * final assembly/save.
+       */
+      sourceDoc =
+        null;
+
+      sourceBuffer =
+        null;
+
+      copiedPages =
+        [];
+
+      await yieldToBrowser(
+        300
       );
 
-      /*
-       * copyPages() has already imported every resource the
-       * untouched pages need into outputDoc.
-       *
-       * Drop the parsed source before assembling/finalizing
-       * the result.
-       */
-      sourceDoc = null;
-      sourceBuffer = null;
-
-      await yieldToBrowser();
-
-      /*
-       * Rebuild the document in its original page order.
-       *
-       * Redacted pages:
-       *   only flattened/burned pixels are inserted.
-       *
-       * Untouched pages:
-       *   original vector page is inserted.
-       */
       for (
         let pageIndex = 0;
         pageIndex <
-        totalPages;
+          totalPages;
         pageIndex++
       ) {
-        const rasterized =
-          rasterizedPages.get(
+        if (
+          redactionMap.has(
             pageIndex
-          );
-
-        if (rasterized) {
-          const jpegBytes =
-            await rasterized
-              .blob
-              .arrayBuffer();
+          )
+        ) {
+          const staged =
+            await readRasterPage(
+              pageIndex
+            );
 
           const embeddedImage =
             await outputDoc
               .embedJpg(
-                jpegBytes
+                staged.bytes
               );
 
           const newPage =
             outputDoc.addPage([
-              rasterized.width,
-              rasterized.height,
+              staged.width,
+              staged.height,
             ]);
 
           newPage.drawImage(
@@ -5030,16 +5403,17 @@ export async function redactPDF(
               x: 0,
               y: 0,
               width:
-                rasterized.width,
+                staged.width,
               height:
-                rasterized.height,
+                staged.height,
             }
           );
 
           /*
-           * Blob is no longer required after embedding.
+           * Delete this temporary JPEG immediately after it has
+           * been embedded. It is never needed again.
            */
-          rasterizedPages.delete(
+          await removeRasterPage(
             pageIndex
           );
         } else {
@@ -5061,43 +5435,44 @@ export async function redactPDF(
 
         if (
           (
-            pageIndex + 1
+            pageIndex +
+            1
           ) %
-            20 ===
+            4 ===
           0
         ) {
-          await yieldToBrowser();
+          await yieldToBrowser(
+            25
+          );
         }
       }
 
-      rasterizedPages.clear();
       copiedByIndex.clear();
 
-      await yieldToBrowser();
+      await cleanupStage();
 
-      return await outputDoc.save(
-        {
-          useObjectStreams:
-            true,
-        }
+      await yieldToBrowser(
+        300
       );
+
+      return await outputDoc.save({
+        useObjectStreams:
+          true,
+      });
     } catch (
       hybridError
     ) {
       console.warn(
-        'Hybrid secure redaction unavailable; using universal secure renderer:',
+        "Hybrid secure redaction unavailable; using universal secure renderer:",
         hybridError
       );
 
-      rasterizedPages.clear();
-    } finally {
-      if (loadedPdf) {
-        await loadedPdf.dispose();
-        loadedPdf = null;
-      }
-    }
+      await cleanupStage();
 
-    await yieldToBrowser();
+      await yieldToBrowser(
+        300
+      );
+    }
   }
 
   /*
@@ -5105,228 +5480,101 @@ export async function redactPDF(
    * PATH B — UNIVERSAL SECURE FALLBACK
    * =========================================================
    *
-   * Protected/unusual PDFs retain the proven full
-   * reconstruction path.
+   * Every page is flattened securely.
    *
-   * Security takes priority here: every page is flattened,
-   * which guarantees the blacked-out source content is not
-   * left behind in an accessible PDF content stream.
+   * Unlike the old fallback, PDF.js finishes and is destroyed
+   * BEFORE pdf-lib starts constructing the output.
    */
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors:
-          false,
-      }
+  try {
+    const everyPage =
+      Array.from(
+        {
+          length:
+            totalPages,
+        },
+        (
+          _,
+          index
+        ) =>
+          index
+      );
+
+    await renderPagesToStage(
+      everyPage
     );
 
-  const sourcePdf =
-    loadedPdf.pdf;
-
-  try {
-    const totalPages =
-      sourcePdf.numPages;
+    await yieldToBrowser(
+      300
+    );
 
     const outputDoc =
       await PDFDocument.create();
 
     for (
-      let pageNum = 1;
-      pageNum <=
-      totalPages;
-      pageNum++
+      let pageIndex = 0;
+      pageIndex <
+        totalPages;
+      pageIndex++
     ) {
-      onProgress?.(
-        pageNum,
-        totalPages
+      const staged =
+        await readRasterPage(
+          pageIndex
+        );
+
+      const embeddedImage =
+        await outputDoc
+          .embedJpg(
+            staged.bytes
+          );
+
+      const newPage =
+        outputDoc.addPage([
+          staged.width,
+          staged.height,
+        ]);
+
+      newPage.drawImage(
+        embeddedImage,
+        {
+          x: 0,
+          y: 0,
+          width:
+            staged.width,
+          height:
+            staged.height,
+        }
       );
 
-      const pageIndex =
-        pageNum - 1;
+      await removeRasterPage(
+        pageIndex
+      );
 
-      const page =
-        await sourcePdf
-          .getPage(
-            pageNum
-          );
-
-      const canvas =
-        document.createElement(
-          'canvas'
+      if (
+        (
+          pageIndex +
+          1
+        ) %
+          4 ===
+        0
+      ) {
+        await yieldToBrowser(
+          25
         );
-
-      try {
-        const viewport =
-          page.getViewport({
-            scale: 2.0,
-          });
-
-        canvas.width =
-          Math.max(
-            1,
-            Math.floor(
-              viewport.width
-            )
-          );
-
-        canvas.height =
-          Math.max(
-            1,
-            Math.floor(
-              viewport.height
-            )
-          );
-
-        const ctx =
-          canvas.getContext(
-            '2d',
-            {
-              alpha: false,
-            }
-          );
-
-        if (!ctx) {
-          throw new Error(
-            'Canvas rendering context unavailable'
-          );
-        }
-
-        ctx.fillStyle =
-          '#ffffff';
-
-        ctx.fillRect(
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
-
-        await (
-          page.render({
-            canvasContext:
-              ctx as any,
-            viewport,
-          } as any) as any
-        ).promise;
-
-        const pageRects =
-          redactionMap.get(
-            pageIndex
-          ) || [];
-
-        if (
-          pageRects.length >
-          0
-        ) {
-          ctx.fillStyle =
-            '#000000';
-
-          for (
-            const rect of
-            pageRects
-          ) {
-            ctx.fillRect(
-              rect.x *
-                canvas.width,
-              rect.y *
-                canvas.height,
-              rect.width *
-                canvas.width,
-              rect.height *
-                canvas.height
-            );
-          }
-        }
-
-        const jpegBlob =
-          await new Promise<
-            Blob
-          >(
-            (
-              resolve,
-              reject
-            ) => {
-              canvas.toBlob(
-                (blob) => {
-                  if (blob) {
-                    resolve(
-                      blob
-                    );
-                  } else {
-                    reject(
-                      new Error(
-                        `Failed to encode redacted page ${pageNum}.`
-                      )
-                    );
-                  }
-                },
-                'image/jpeg',
-                0.92
-              );
-            }
-          );
-
-        const jpegBytes =
-          await jpegBlob
-            .arrayBuffer();
-
-        const embeddedImage =
-          await outputDoc
-            .embedJpg(
-              jpegBytes
-            );
-
-        const unscaled =
-          page.getViewport({
-            scale: 1.0,
-          });
-
-        const newPage =
-          outputDoc.addPage([
-            unscaled.width,
-            unscaled.height,
-          ]);
-
-        newPage.drawImage(
-          embeddedImage,
-          {
-            x: 0,
-            y: 0,
-            width:
-              unscaled.width,
-            height:
-              unscaled.height,
-          }
-        );
-      } finally {
-        canvas.width = 1;
-        canvas.height = 1;
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-
-        try {
-          page.cleanup();
-        } catch (_) {}
       }
-
-      await yieldToBrowser();
     }
 
-    await loadedPdf.dispose();
+    await cleanupStage();
 
-    await yieldToBrowser();
-
-    return await outputDoc.save(
-      {
-        useObjectStreams:
-          true,
-      }
+    await yieldToBrowser(
+      300
     );
+
+    return await outputDoc.save({
+      useObjectStreams:
+        true,
+    });
   } finally {
-    await loadedPdf.dispose();
+    await cleanupStage();
   }
 }
 

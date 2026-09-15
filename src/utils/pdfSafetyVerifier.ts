@@ -152,7 +152,7 @@ export const verifyFinishedPdf = async (
    * There is no Tesseract worker anymore.
    */
   const PAGE_BATCH_SIZE =
-    6;
+    4;
 
   const yieldToMobile =
     (
