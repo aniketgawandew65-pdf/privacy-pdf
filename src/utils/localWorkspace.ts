@@ -710,6 +710,84 @@ export const isPageReload = () => {
 
 /*
  * ============================================================
+ * PDF PREVIEW -> BACK PROTECTION
+ * ============================================================
+ *
+ * iOS Safari can open a generated PDF in native/browser preview
+ * and recreate this page when the user presses Back.
+ *
+ * That recreation can be reported as "reload".
+ */
+
+const PDF_PREVIEW_RETURN_KEY =
+  "oneinto1_pdf_preview_return";
+
+const PDF_PREVIEW_MAX_AGE_MS =
+  30 * 60 * 1000;
+
+export const markPdfPreviewNavigation =
+  () => {
+    try {
+      sessionStorage.setItem(
+        PDF_PREVIEW_RETURN_KEY,
+        String(Date.now())
+      );
+    } catch {
+      // Download must continue even if storage is unavailable.
+    }
+  };
+
+export const clearPdfPreviewNavigation =
+  () => {
+    try {
+      sessionStorage.removeItem(
+        PDF_PREVIEW_RETURN_KEY
+      );
+    } catch {
+      // Ignore unavailable sessionStorage.
+    }
+  };
+
+export const consumePdfPreviewNavigation =
+  () => {
+    try {
+      const raw =
+        sessionStorage.getItem(
+          PDF_PREVIEW_RETURN_KEY
+        );
+
+      if (!raw) {
+        return false;
+      }
+
+      sessionStorage.removeItem(
+        PDF_PREVIEW_RETURN_KEY
+      );
+
+      const timestamp =
+        Number(raw);
+
+      if (
+        !Number.isFinite(timestamp)
+      ) {
+        return false;
+      }
+
+      const age =
+        Date.now() -
+        timestamp;
+
+      return (
+        age >= 0 &&
+        age <= PDF_PREVIEW_MAX_AGE_MS
+      );
+    } catch {
+      return false;
+    }
+  };
+
+/*
+ * ============================================================
  * TOOL-SCOPED WORKSPACES
  * ============================================================
  *

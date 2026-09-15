@@ -63,6 +63,9 @@ import {
   restoreWorkspaceFiles,
   resetWorkspaceSession,
   isPageReload,
+  markPdfPreviewNavigation,
+  clearPdfPreviewNavigation,
+  consumePdfPreviewNavigation,
 } from './utils/localWorkspace';
 
 declare const __BUILD_TIME__: string;
@@ -200,6 +203,187 @@ export default function App() {
   const [globalFileError, setGlobalFileError] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
 
+  /*
+   * ==========================================================
+   * GLOBAL GENERATED-PDF PREVIEW DETECTION
+   * ==========================================================
+   *
+   * Applies to generated PDF downloads across all tools.
+   */
+  useEffect(() => {
+    let clearTimer:
+      number | null =
+      null;
+
+    let leftForPreview =
+      false;
+
+    const cancelTimer = () => {
+      if (
+        clearTimer !== null
+      ) {
+        window.clearTimeout(
+          clearTimer
+        );
+
+        clearTimer =
+          null;
+      }
+    };
+
+    const handlePdfClick =
+      (
+        event: MouseEvent
+      ) => {
+        const target =
+          event.target;
+
+        if (
+          !(target instanceof Element)
+        ) {
+          return;
+        }
+
+        const anchor =
+          target.closest(
+            "a"
+          ) as HTMLAnchorElement | null;
+
+        if (!anchor) {
+          return;
+        }
+
+        const downloadName =
+          (
+            anchor.getAttribute(
+              "download"
+            ) || ""
+          ).toLowerCase();
+
+        const declaredType =
+          (
+            anchor.getAttribute(
+              "type"
+            ) || ""
+          ).toLowerCase();
+
+        const isPdfDownload =
+          downloadName.endsWith(
+            ".pdf"
+          ) ||
+          declaredType.includes(
+            "application/pdf"
+          );
+
+        if (!isPdfDownload) {
+          return;
+        }
+
+        markPdfPreviewNavigation();
+
+        leftForPreview =
+          false;
+
+        cancelTimer();
+
+        /*
+         * Normal direct download:
+         * browser stays visible, so remove the temporary marker.
+         */
+        clearTimer =
+          window.setTimeout(
+            () => {
+              if (
+                document.visibilityState ===
+                "visible"
+              ) {
+                clearPdfPreviewNavigation();
+              }
+
+              clearTimer =
+                null;
+            },
+            4000
+          );
+      };
+
+    const handleVisibility =
+      () => {
+        if (
+          document.visibilityState ===
+          "hidden"
+        ) {
+          leftForPreview =
+            true;
+
+          cancelTimer();
+          return;
+        }
+
+        /*
+         * Same JS page survived preview -> state already exists.
+         */
+        if (
+          document.visibilityState ===
+            "visible" &&
+          leftForPreview
+        ) {
+          clearPdfPreviewNavigation();
+
+          leftForPreview =
+            false;
+        }
+      };
+
+    const handlePageShow =
+      (
+        event:
+          PageTransitionEvent
+      ) => {
+        if (
+          event.persisted
+        ) {
+          clearPdfPreviewNavigation();
+        }
+      };
+
+    document.addEventListener(
+      "click",
+      handlePdfClick,
+      true
+    );
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibility
+    );
+
+    window.addEventListener(
+      "pageshow",
+      handlePageShow
+    );
+
+    return () => {
+      cancelTimer();
+
+      document.removeEventListener(
+        "click",
+        handlePdfClick,
+        true
+      );
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibility
+      );
+
+      window.removeEventListener(
+        "pageshow",
+        handlePageShow
+      );
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -211,7 +395,19 @@ export default function App() {
          *
          * Normal in-app navigation and PDF Preview -> Back do not.
          */
-        if (isPageReload()) {
+        const returnedFromPdfPreview =
+          consumePdfPreviewNavigation();
+
+        /*
+         * Genuine browser refresh starts a fresh workspace.
+         *
+         * Safari Preview -> Back is the exception because Safari
+         * can recreate the page and report it as "reload".
+         */
+        if (
+          isPageReload() &&
+          !returnedFromPdfPreview
+        ) {
           await resetWorkspaceSession();
 
           if (!cancelled) {

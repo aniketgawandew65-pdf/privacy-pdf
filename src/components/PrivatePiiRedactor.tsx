@@ -42,6 +42,7 @@ type FindingCategory =
   | "Credit Card"
   | "US SSN"
   | "India Aadhaar"
+  | "India UIDAI Reference"
   | "India PAN"
   | "UK National Insurance"
   | "UK NHS Number"
@@ -144,6 +145,83 @@ const validPhone = (value: string) => {
   return digits.length >= 7 && digits.length <= 15;
 };
 
+/*
+ * Aadhaar Verhoeff checksum validation allows detection of a
+ * valid Aadhaar even if OCR loses the word "Aadhaar".
+ */
+const VERHOEFF_D = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+  [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+  [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+  [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+  [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+  [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+  [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+  [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+  [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+];
+
+const VERHOEFF_P = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+  [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+  [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+  [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+  [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+  [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+  [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
+];
+
+const validAadhaar = (
+  value: string
+) => {
+  const digits =
+    value.replace(
+      /\D/g,
+      ""
+    );
+
+  if (
+    !/^[2-9]\d{11}$/.test(
+      digits
+    )
+  ) {
+    return false;
+  }
+
+  let checksum =
+    0;
+
+  for (
+    let index = 0;
+    index < digits.length;
+    index++
+  ) {
+    const digit =
+      Number(
+        digits[
+          digits.length -
+            1 -
+            index
+        ]
+      );
+
+    checksum =
+      VERHOEFF_D[
+        checksum
+      ][
+        VERHOEFF_P[
+          index % 8
+        ][
+          digit
+        ]
+      ];
+  }
+
+  return checksum === 0;
+};
+
 const validUkNhs = (value: string) => {
   const digits = value.replace(/\D/g, "");
   if (digits.length !== 10) return false;
@@ -207,12 +285,37 @@ const validAustraliaTfn = (value: string) => {
 const DETECTORS: Detector[] = [
   {
     category: "Name",
-    regex: /\b(?:full\s+name|customer\s+name|client\s+name|employee\s+name|name)\s*[:=-]\s*([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,4})/gi,
+    regex:
+      /\b(?:(?:full|customer|client|employee|owner|tenant|licensor|licensee|presenter|applicant|witness|party|person)\s+)?name(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]\s*((?:(?:mr|mrs|ms|miss|dr)\.?\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,5})/gi,
     captureGroup: 1,
   },
   {
+    /*
+     * Identity-table rows such as:
+     *   Person Name, Female, UIDAI-reference
+     */
+    category: "Name",
+    regex:
+      /\b((?:(?:mr|mrs|ms|miss|dr)\.?\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,5})\s*,\s*(?:male|female|other)\b/gi,
+    captureGroup: 1,
+  },
+  {
+    /*
+     * Legal-document rows such as:
+     *   Mrs Person Name, Age : About 56 Years
+     */
+    category: "Name",
+    regex:
+      /\b((?:(?:mr|mrs|ms|miss|dr)\.?\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,5})\s*,\s*age\b/gi,
+    captureGroup: 1,
+  },
+  {
+    /*
+     * Broader structured/bilingual address labels.
+     */
     category: "Address",
-    regex: /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|address)\s*[:=-]\s*([^\r\n]{5,120})/gi,
+    regex:
+      /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|permanent\s+address|present\s+address|residential\s+address|rented\s+property\s+address|owner\s+address|tenant(?:'s)?\s+address|licensor\s+address|licensee\s+address|residing\s+at|residence|address)(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]?\s*([^\r\n]{5,180}?)(?=\s+(?:(?:owner|tenant|licensor|licensee)\s+)?(?:mobile|phone|email|e-mail|pan|occupation|city|state|pin(?:code)?|age|gender)\b|$)/gi,
     captureGroup: 1,
   },
   {
@@ -229,12 +332,51 @@ const DETECTORS: Detector[] = [
     regex:
       /\b(?:aadhaar|aadhar)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4})\b/gi,
     captureGroup: 1,
+    validate: validAadhaar,
+  },
+  {
+    /*
+     * Checksum-valid Aadhaar even when its OCR label is missing.
+     */
+    category: "India Aadhaar",
+    regex:
+      /(?<!\d)([2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4})(?!\d)/g,
+    captureGroup: 1,
+    validate: validAadhaar,
+  },
+  {
+    /*
+     * UIDAI / Aadhaar reference IDs can be longer than Aadhaar.
+     */
+    category: "India UIDAI Reference",
+    regex:
+      /\b(?:uidai|uid|aadhaar(?:\s*\/\s*|\s+)ref(?:erence)?|aadhar(?:\s*\/\s*|\s+)ref(?:erence)?)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{12,24})\b/gi,
+    captureGroup: 1,
+  },
+  {
+    /*
+     * UIDAI identity-table row:
+     *   Female, 123456789012345678
+     */
+    category: "India UIDAI Reference",
+    regex:
+      /\b(?:male|female|other)\s*[,;|]\s*(\d{12,24})\b/gi,
+    captureGroup: 1,
   },
   {
     category: "India PAN",
     regex:
-      /\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([A-Z]{5}\d{4}[A-Z])\b/gi,
+      /\b(?:pan|permanent\s+account\s+number)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*([A-Z]{5}\s*\d{4}\s*[A-Z])\b/gi,
     captureGroup: 1,
+  },
+  {
+    /*
+     * PAN format itself is distinctive enough to detect without
+     * relying on a surviving "PAN" OCR label.
+     */
+    category: "India PAN",
+    regex:
+      /\b[A-Z]{5}\s*\d{4}\s*[A-Z]\b/gi,
   },
   {
     category: "UK National Insurance",
@@ -276,6 +418,17 @@ const DETECTORS: Detector[] = [
     category: "Phone",
     regex:
       /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]\d{3,4}(?!\w)/g,
+    validate: validPhone,
+  },
+  {
+    /*
+     * Indian form fields often store mobile numbers as one
+     * continuous 10-digit value.
+     */
+    category: "Phone",
+    regex:
+      /\b(?:mobile|mob(?:ile)?\s+no\.?|phone|contact(?:\s+no\.?)?)\s*[:=-]?\s*((?:\+?91[\s.-]?)?[6-9]\d{9})\b/gi,
+    captureGroup: 1,
     validate: validPhone,
   },
   {
@@ -390,7 +543,8 @@ const detectText = (text: string) => {
   const priority: Record<FindingCategory, number> = {
     "Credit Card": 100,
     "US SSN": 95,
-    "India Aadhaar": 96,
+    "India Aadhaar": 98,
+    "India UIDAI Reference": 97,
     "India PAN": 96,
     "UK National Insurance": 96,
     "UK NHS Number": 96,
