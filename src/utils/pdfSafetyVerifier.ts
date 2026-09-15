@@ -44,435 +44,597 @@ export const verifyFinishedPdf = async (
   onProgress?: (message: string) => void,
   options: FinalVerificationOptions = {}
 ): Promise<FinalVerificationResult> => {
+  /*
+   * ==========================================================
+   * MOBILE-SAFE FINAL PII VERIFIER
+   * ==========================================================
+   *
+   * Security behaviour remains the same:
+   *
+   * 1. expected flattened pages must contain NO selectable text
+   * 2. selected sensitive values must NOT remain visually
+   *    readable through OCR
+   *
+   * Memory architecture changes:
+   *
+   * - same OCR resolution: 1.7x
+   * - pages OCR'd in overlapping strips
+   * - no giant full-page OCR bitmap
+   * - Tesseract worker hard-reset every short page batch
+   * - PDF.js document hard-reset every short page batch
+   */
+
   const verificationBlob =
     new Blob(
       [
-        bytes as unknown as BlobPart,
+        bytes as unknown as
+          BlobPart,
       ],
       {
-        type: "application/pdf",
+        type:
+          "application/pdf",
       }
     );
 
-  const {
-    pdf: verificationPdf,
-    dispose: disposeVerificationPdf,
-  } = await loadPdfJsFromBlob(
-    verificationBlob
-  );
+  const VERIFY_SCALE =
+    1.7;
 
-  let worker: any = null;
+  const VERIFY_BATCH_SIZE =
+    4;
 
-  const yieldToBrowser =
-    () =>
+  /*
+   * Keep an individual verification canvas around
+   * ~1.25 million pixels.
+   *
+   * OCR resolution itself remains 1.7x.
+   */
+  const MAX_TILE_PIXELS =
+    1_250_000;
+
+  /*
+   * Enough overlap for text lines / sensitive strings around a
+   * strip boundary to appear completely in at least one tile.
+   */
+  const TILE_OVERLAP =
+    128;
+
+  const yieldToMobile =
+    (
+      delay = 35
+    ) =>
       new Promise<void>(
-        (resolve) =>
+        (
+          resolve
+        ) =>
           setTimeout(
             resolve,
-            0
+            delay
           )
+      );
+
+  const selectedValues =
+    selectedFindings
+      .map(
+        (
+          finding
+        ) => {
+          const page =
+            Number.isInteger(
+              finding.page
+            ) &&
+            Number(
+              finding.page
+            ) >
+              0
+              ? Number(
+                  finding.page
+                )
+              : null;
+
+          return {
+            original:
+              finding.value,
+            normalized:
+              normalizeForSafetyCheck(
+                finding.value
+              ),
+            page,
+          };
+        }
+      )
+      .filter(
+        (
+          item
+        ) =>
+          item.normalized
+            .length >=
+          4
       );
 
   /*
-   * Create Tesseract lazily.
+   * Targeted OCR is safe only when every selected finding has
+   * an exact page number.
    *
-   * A document with no selected visual targets no longer pays
-   * the cost of starting the OCR engine merely to confirm that
-   * the flattened PDF contains no selectable text.
+   * Legacy callers without page metadata automatically retain
+   * document-wide checking.
    */
-  const getWorker =
-    async () => {
-      if (worker) {
-        return worker;
-      }
+  const useTargetedOcr =
+    selectedValues.length >
+      0 &&
+    selectedValues.every(
+      (
+        item
+      ) =>
+        item.page !==
+        null
+    );
 
-      const {
-        createWorker,
-      } =
-        await import(
-          "tesseract.js"
-        );
-
-      worker =
-        await createWorker(
-          "eng",
-          1,
-          {
-            workerPath:
-              "/tessdata/worker.min.js",
-            corePath:
-              "/tessdata/tesseract-core-simd-lstm.wasm.js",
-            langPath:
-              "/tessdata",
-            gzip: true,
-          } as any
-        );
-
-      return worker;
-    };
-
-  try {
-    const selectedValues =
-      selectedFindings
-        .map(
-          (finding) => {
-            const page =
-              Number.isInteger(
-                finding.page
-              ) &&
-              Number(
-                finding.page
-              ) > 0
-                ? Number(
-                    finding.page
-                  )
-                : null;
-
-            return {
-              original:
-                finding.value,
-              normalized:
-                normalizeForSafetyCheck(
-                  finding.value
-                ),
-              page,
-            };
-          }
-        )
-        .filter(
-          (item) =>
-            item.normalized.length >=
-            4
-        );
-
-    /*
-     * We may use targeted OCR only when EVERY selected finding
-     * tells us which page it belongs to.
-     *
-     * If page metadata is missing for even one target, preserve
-     * the original document-global OCR behaviour automatically.
-     */
-    const useTargetedOcr =
-      selectedValues.length > 0 &&
-      selectedValues.every(
-        (item) =>
-          item.page !== null
-      );
-
-    const targetsByPage =
-      new Map<
-        number,
-        Array<
-          (
-            typeof selectedValues
-          )[number]
-        >
-      >();
-
-    if (useTargetedOcr) {
-      for (
-        const item of
-          selectedValues
-      ) {
-        const pageNumber =
-          item.page!;
-
-        const current =
-          targetsByPage.get(
-            pageNumber
-          ) || [];
-
-        current.push(
-          item
-        );
-
-        targetsByPage.set(
-          pageNumber,
-          current
-        );
-      }
-    }
-
-    let selectableTextFound =
-      false;
-
-    /*
-     * Leaked values remain document-global.
-     *
-     * If one occurrence of a selected sensitive value is still
-     * readable, that value fails verification exactly as before.
-     */
-    const leakedNormalized =
-      new Set<string>();
-
-    /*
-     * Rolling-tail logic remains available for the compatibility
-     * full-document OCR path.
-     */
-    const maxTargetLength =
-      selectedValues.reduce(
+  const targetsByPage =
+    new Map<
+      number,
+      Array<
         (
-          max,
-          item
-        ) =>
-          Math.max(
-            max,
-            item.normalized.length
-          ),
-        0
-      );
+          typeof selectedValues
+        )[number]
+      >
+    >();
 
-    let rollingTail = "";
-
-    /*
-     * Hybrid secure-redaction mode only needs to inspect pages
-     * which were destructively rebuilt.
-     *
-     * Legacy callers omit flattenedPages and retain the original
-     * full-document verification behaviour.
-     */
-    const requestedVerificationPages =
-      options.flattenedPages &&
-      options.flattenedPages.size >
-        0
-        ? Array.from(
-            options.flattenedPages
-          )
-            .filter(
-              (pageNumber) =>
-                Number.isInteger(
-                  pageNumber
-                ) &&
-                pageNumber >=
-                  1 &&
-                pageNumber <=
-                  verificationPdf.numPages
-            )
-            .sort(
-              (
-                a,
-                b
-              ) =>
-                a - b
-            )
-        : Array.from(
-            {
-              length:
-                verificationPdf.numPages,
-            },
-            (
-              _,
-              index
-            ) =>
-              index + 1
-          );
-
+  if (
+    useTargetedOcr
+  ) {
     for (
-      let verificationIndex = 0;
-      verificationIndex <
-        requestedVerificationPages.length;
-      verificationIndex++
+      const item of
+        selectedValues
     ) {
       const pageNumber =
-        requestedVerificationPages[
-          verificationIndex
-        ];
+        item.page!;
 
-      const page =
-        await verificationPdf
-          .getPage(
+      const current =
+        targetsByPage.get(
+          pageNumber
+        ) || [];
+
+      current.push(
+        item
+      );
+
+      targetsByPage.set(
+        pageNumber,
+        current
+      );
+    }
+  }
+
+  let totalPages =
+    0;
+
+  /*
+   * Very short probe to obtain page count.
+   *
+   * Destroy it immediately before real verification begins.
+   */
+  {
+    const probe =
+      await loadPdfJsFromBlob(
+        verificationBlob
+      );
+
+    try {
+      totalPages =
+        probe.pdf.numPages;
+    } finally {
+      await probe.dispose();
+    }
+  }
+
+  const requestedVerificationPages =
+    options.flattenedPages &&
+    options.flattenedPages
+      .size >
+      0
+      ? Array.from(
+          options
+            .flattenedPages
+        )
+          .filter(
+            (
+              pageNumber
+            ) =>
+              Number.isInteger(
+                pageNumber
+              ) &&
+              pageNumber >=
+                1 &&
+              pageNumber <=
+                totalPages
+          )
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              a - b
+          )
+      : Array.from(
+          {
+            length:
+              totalPages,
+          },
+          (
+            _,
+            index
+          ) =>
+            index + 1
+        );
+
+  let selectableTextFound =
+    false;
+
+  const leakedNormalized =
+    new Set<string>();
+
+  /*
+   * Compatibility rolling tail for callers which do not provide
+   * page-aware targets.
+   */
+  const maxTargetLength =
+    selectedValues.reduce(
+      (
+        max,
+        item
+      ) =>
+        Math.max(
+          max,
+          item.normalized
+            .length
+        ),
+      0
+    );
+
+  let documentRollingTail =
+    "";
+
+  for (
+    let batchStart = 0;
+    batchStart <
+      requestedVerificationPages.length;
+    batchStart +=
+      VERIFY_BATCH_SIZE
+  ) {
+    const batchPages =
+      requestedVerificationPages.slice(
+        batchStart,
+        batchStart +
+          VERIFY_BATCH_SIZE
+      );
+
+    let loaded:
+      | Awaited<
+          ReturnType<
+            typeof loadPdfJsFromBlob
+          >
+        >
+      | null =
+      null;
+
+    let worker: any =
+      null;
+
+    const getWorker =
+      async () => {
+        if (worker) {
+          return worker;
+        }
+
+        const {
+          createWorker,
+        } =
+          await import(
+            "tesseract.js"
+          );
+
+        worker =
+          await createWorker(
+            "eng",
+            1,
+            {
+              workerPath:
+                "/tessdata/worker.min.js",
+              corePath:
+                "/tessdata/tesseract-core-simd-lstm.wasm.js",
+              langPath:
+                "/tessdata",
+              gzip:
+                true,
+            } as any
+          );
+
+        return worker;
+      };
+
+    try {
+      /*
+       * Fresh PDF.js session for only this short batch.
+       */
+      loaded =
+        await loadPdfJsFromBlob(
+          verificationBlob
+        );
+
+      const pdf =
+        loaded.pdf;
+
+      for (
+        let localIndex = 0;
+        localIndex <
+          batchPages.length;
+        localIndex++
+      ) {
+        const pageNumber =
+          batchPages[
+            localIndex
+          ];
+
+        const page =
+          await pdf.getPage(
             pageNumber
           );
 
-      try {
-        /*
-         * =====================================================
-         * CHECK 1 — SELECTABLE TEXT
-         * =====================================================
-         *
-         * In legacy/full-flatten mode this runs on every page.
-         *
-         * In hybrid mode it runs only on pages explicitly marked
-         * as flattened by the secure redaction engine.
-         *
-         * Untouched pages are intentionally allowed to preserve
-         * their original selectable/vector content.
-         */
-        onProgress?.(
-          `Final safety verification ${pageNumber} of ${verificationPdf.numPages}…`
-        );
-
-        const textContent =
-          await page
-            .getTextContent();
-
-        const selectableText =
-          textContent.items
-            .map(
-              (item: any) =>
-                item?.str || ""
-            )
-            .join(" ")
-            .trim();
-
-        if (
-          selectableText.length >
-          0
-        ) {
-          selectableTextFound =
-            true;
-        }
-
-        /*
-         * =====================================================
-         * CHECK 2 — VISUAL OCR
-         * =====================================================
-         *
-         * When page locations are known, OCR only pages that
-         * actually contain selected sensitive information.
-         *
-         * Pages without selected findings have nothing for the
-         * value-leak OCR check to search for, but they STILL went
-         * through the selectable-text check above.
-         */
-        const pageTargets =
-          useTargetedOcr
-            ? (
-                targetsByPage.get(
-                  pageNumber
-                ) || []
-              )
-            : selectedValues;
-
-        if (
-          pageTargets.length >
-          0
-        ) {
+        try {
+          /*
+           * ===================================================
+           * CHECK 1 — SELECTABLE TEXT
+           * ===================================================
+           *
+           * Every page requested for flatten verification must
+           * contain no selectable text.
+           */
           onProgress?.(
-            useTargetedOcr
-              ? `Safety-checking sensitive page ${pageNumber} of ${verificationPdf.numPages}…`
-              : `Final OCR safety verification ${pageNumber} of ${verificationPdf.numPages}…`
+            `Final safety verification ${pageNumber} of ${totalPages}…`
           );
 
-          const viewport =
+          const textContent =
+            await page
+              .getTextContent();
+
+          const selectableText =
+            textContent.items
+              .map(
+                (
+                  item: any
+                ) =>
+                  item?.str ||
+                  ""
+              )
+              .join(
+                " "
+              )
+              .trim();
+
+          if (
+            selectableText.length >
+            0
+          ) {
+            selectableTextFound =
+              true;
+          }
+
+          /*
+           * ===================================================
+           * CHECK 2 — VISUAL OCR
+           * ===================================================
+           */
+          const pageTargets =
+            useTargetedOcr
+              ? (
+                  targetsByPage.get(
+                    pageNumber
+                  ) || []
+                )
+              : selectedValues;
+
+          if (
+            pageTargets.length ===
+            0
+          ) {
+            continue;
+          }
+
+          onProgress?.(
+            useTargetedOcr
+              ? `Safety-checking sensitive page ${pageNumber} of ${totalPages}…`
+              : `Final OCR safety verification ${pageNumber} of ${totalPages}…`
+          );
+
+          /*
+           * Same 1.7x page resolution as the old verifier.
+           *
+           * We never allocate the whole bitmap at once.
+           */
+          const fullViewport =
             page.getViewport({
-              scale: 1.7,
+              scale:
+                VERIFY_SCALE,
             });
 
-          const canvas =
-            document.createElement(
-              "canvas"
+          const fullWidth =
+            Math.max(
+              1,
+              Math.ceil(
+                fullViewport.width
+              )
             );
 
-          canvas.width =
-            Math.ceil(
-              viewport.width
+          const fullHeight =
+            Math.max(
+              1,
+              Math.ceil(
+                fullViewport.height
+              )
             );
 
-          canvas.height =
-            Math.ceil(
-              viewport.height
+          const calculatedHeight =
+            Math.floor(
+              MAX_TILE_PIXELS /
+                fullWidth
             );
 
-          try {
-            const ctx =
-              canvas.getContext(
-                "2d",
-                {
-                  alpha: false,
-                }
+          const tileHeight =
+            Math.max(
+              300,
+              Math.min(
+                1000,
+                calculatedHeight
+              )
+            );
+
+          /*
+           * Rolling text tail catches a sensitive value which OCR
+           * happens to divide between adjacent strips.
+           */
+          let pageRollingTail =
+            useTargetedOcr
+              ? ""
+              : documentRollingTail;
+
+          let tileTop =
+            0;
+
+          let tileIndex =
+            0;
+
+          while (
+            tileTop <
+            fullHeight
+          ) {
+            const tileBottom =
+              Math.min(
+                fullHeight,
+                tileTop +
+                  tileHeight
               );
 
-            if (!ctx) {
-              throw new Error(
-                "Unable to create final safety verification renderer."
+            const currentHeight =
+              Math.max(
+                1,
+                tileBottom -
+                  tileTop
               );
-            }
 
-            ctx.fillStyle =
-              "#ffffff";
+            const canvas =
+              document.createElement(
+                "canvas"
+              );
 
-            ctx.fillRect(
-              0,
-              0,
-              canvas.width,
-              canvas.height
-            );
+            canvas.width =
+              fullWidth;
 
-            await page.render({
-              canvasContext:
-                ctx,
-              viewport,
-              canvas,
-            } as any).promise;
+            canvas.height =
+              currentHeight;
 
-            const activeWorker =
-              await getWorker();
-
-            const {
-              data,
-            } =
-              await activeWorker
-                .recognize(
-                  canvas,
-                  {},
+            try {
+              const ctx =
+                canvas.getContext(
+                  "2d",
                   {
-                    text: true,
-                  } as any
+                    alpha:
+                      false,
+                  }
                 );
 
-            const normalizedPageText =
-              normalizeForSafetyCheck(
-                data?.text ||
-                  ""
+              if (!ctx) {
+                throw new Error(
+                  "Unable to create final safety verification tile."
+                );
+              }
+
+              ctx.fillStyle =
+                "#ffffff";
+
+              ctx.fillRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
               );
 
-            /*
-             * Targeted mode searches only this page's selected
-             * values.
-             *
-             * Compatibility mode preserves the previous rolling
-             * document-global search behaviour.
-             */
-            const searchableText =
-              useTargetedOcr
-                ? normalizedPageText
-                : (
-                    rollingTail +
-                    normalizedPageText
+              /*
+               * Render this strip from the SAME 1.7x viewport.
+               */
+              await page.render({
+                canvasContext:
+                  ctx,
+                viewport:
+                  fullViewport,
+                canvas,
+                transform: [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  -tileTop,
+                ],
+              } as any).promise;
+
+              const activeWorker =
+                await getWorker();
+
+              const {
+                data,
+              } =
+                await activeWorker
+                  .recognize(
+                    canvas,
+                    {},
+                    {
+                      text:
+                        true,
+                    } as any
                   );
 
-            for (
-              const item of
-                pageTargets
-            ) {
-              if (
-                leakedNormalized.has(
-                  item.normalized
-                )
-              ) {
-                continue;
-              }
-
-              if (
-                searchableText.includes(
-                  item.normalized
-                )
-              ) {
-                leakedNormalized.add(
-                  item.normalized
+              const normalizedTileText =
+                normalizeForSafetyCheck(
+                  data?.text ||
+                    ""
                 );
-              }
-            }
 
-            if (
-              !useTargetedOcr
-            ) {
+              const searchableText =
+                pageRollingTail +
+                normalizedTileText;
+
+              for (
+                const item of
+                  pageTargets
+              ) {
+                if (
+                  leakedNormalized.has(
+                    item.normalized
+                  )
+                ) {
+                  continue;
+                }
+
+                if (
+                  searchableText.includes(
+                    item.normalized
+                  )
+                ) {
+                  leakedNormalized.add(
+                    item.normalized
+                  );
+                }
+              }
+
+              /*
+               * Preserve enough characters to detect a target
+               * crossing from this tile into the next tile.
+               */
               if (
                 maxTargetLength >
                 1
               ) {
-                rollingTail =
+                pageRollingTail =
                   searchableText.slice(
                     -(
                       maxTargetLength -
@@ -480,79 +642,124 @@ export const verifyFinishedPdf = async (
                     )
                   );
               } else {
-                rollingTail =
+                pageRollingTail =
                   "";
               }
+            } finally {
+              /*
+               * Critical iOS memory release.
+               */
+              canvas.width =
+                1;
+
+              canvas.height =
+                1;
+
+              try {
+                canvas.remove();
+              } catch (_) {}
             }
-          } finally {
+
+            tileIndex++;
+
+            if (
+              tileBottom >=
+              fullHeight
+            ) {
+              break;
+            }
+
+            tileTop =
+              Math.max(
+                tileTop + 1,
+                tileBottom -
+                  TILE_OVERLAP
+              );
+
             /*
-             * Drop the pixel backing store immediately.
-             * This is especially important on iOS where several
-             * large canvas allocations can trigger a tab reload.
+             * Give Safari a chance to release this tile before
+             * another render/OCR allocation begins.
              */
-            canvas.width = 1;
-            canvas.height = 1;
-
-            try {
-              canvas.remove();
-            } catch (_) {}
+            await yieldToMobile(
+              30
+            );
           }
-        }
 
-        /*
-         * Pages skipped by OCR are now extremely cheap, but a
-         * very large PDF can still contain hundreds/thousands of
-         * text-layer checks. Yield periodically so mobile Safari
-         * and Chrome stay responsive.
-         */
-        if (
-          (
-            verificationIndex +
-            1
-          ) %
-            10 ===
-          0
-        ) {
-          await yieldToBrowser();
+          if (
+            !useTargetedOcr
+          ) {
+            documentRollingTail =
+              pageRollingTail;
+          }
+
+          await yieldToMobile(
+            50
+          );
+        } finally {
+          try {
+            page.cleanup();
+          } catch (_) {}
         }
-      } finally {
+      }
+    } finally {
+      /*
+       * TRUE HARD RESET after a few verified pages.
+       */
+      if (worker) {
         try {
-          page.cleanup();
+          await worker
+            .terminate();
         } catch (_) {}
+
+        worker =
+          null;
+      }
+
+      if (loaded) {
+        try {
+          await loaded
+            .dispose();
+        } catch (_) {}
+
+        loaded =
+          null;
       }
     }
 
-    const leakedValues =
-      selectedValues
-        .filter(
-          (item) =>
-            leakedNormalized.has(
-              item.normalized
-            )
-        )
-        .map(
-          (item) =>
-            item.original
-        );
-
-    return {
-      passed:
-        !selectableTextFound &&
-        leakedValues.length ===
-          0,
-      leakedValues,
-      selectableTextFound,
-    };
-  } finally {
-    if (worker) {
-      try {
-        await worker
-          .terminate();
-      } catch (_) {}
+    if (
+      batchStart +
+        VERIFY_BATCH_SIZE <
+      requestedVerificationPages.length
+    ) {
+      await yieldToMobile(
+        300
+      );
     }
-
-    try {
-      await disposeVerificationPdf();
-    } catch (_) {}
   }
+
+  const leakedValues =
+    selectedValues
+      .filter(
+        (
+          item
+        ) =>
+          leakedNormalized.has(
+            item.normalized
+          )
+      )
+      .map(
+        (
+          item
+        ) =>
+          item.original
+      );
+
+  return {
+    passed:
+      !selectableTextFound &&
+      leakedValues.length ===
+        0,
+    leakedValues,
+    selectableTextFound,
+  };
 };
