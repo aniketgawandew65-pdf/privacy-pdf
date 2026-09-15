@@ -16997,7 +16997,7 @@ export async function generateHtmlPDF(
    */
   parsed
     .querySelectorAll(
-      'script,style,iframe,object,embed,canvas,video,audio,noscript,template,link,meta,base'
+      'script,style,iframe,object,embed,canvas,video,audio,noscript,template,link,meta,base,nav,#type-cursor'
     )
     .forEach(
       (node) =>
@@ -17068,6 +17068,53 @@ export async function generateHtmlPDF(
   const blocks:
     HtmlPdfBlock[] = [];
 
+  /*
+   * jsPDF's built-in Helvetica is excellent for normal document
+   * text but does not contain emoji/dingbat glyphs.
+   *
+   * Those icons are decorative in semantic document mode:
+   *   ✈ Travel & Flight Comparison
+   * becomes:
+   *   Travel & Flight Comparison
+   *
+   * The meaningful text is preserved instead of producing
+   * corrupted byte-looking characters in the PDF.
+   */
+  const stripDecorativeGlyphs =
+    (
+      value:
+        string
+    ): string =>
+      value
+        /*
+         * Supplementary emoji / pictographs.
+         */
+        .replace(
+          /[\u{1F000}-\u{1FAFF}]/gu,
+          ' '
+        )
+        /*
+         * Misc symbols, dingbats, arrows and ornamental marks.
+         */
+        .replace(
+          /[\u2190-\u21FF\u2600-\u27BF]/g,
+          ' '
+        )
+        /*
+         * Emoji presentation/joiner characters.
+         */
+        .replace(
+          /[\uFE0E\uFE0F\u200D]/g,
+          ''
+        )
+        /*
+         * Invisible/control bytes that have no document value.
+         */
+        .replace(
+          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+          ''
+        );
+
   const normalize =
     (
       value:
@@ -17075,8 +17122,10 @@ export async function generateHtmlPDF(
         null |
         undefined
     ) =>
-      String(
-        value || ''
+      stripDecorativeGlyphs(
+        String(
+          value || ''
+        )
       )
         .replace(
           /\u00a0/g,
@@ -17705,12 +17754,18 @@ export async function generateHtmlPDF(
   const ensureSpace =
     (
       height:
-        number
+        number,
+      bottomAllowance:
+        number = 0
     ) => {
       if (
         cursorY +
           height <=
-        bottom
+        bottom +
+          Math.max(
+            0,
+            bottomAllowance
+          )
       ) {
         return;
       }
@@ -17804,9 +17859,33 @@ export async function generateHtmlPDF(
         lines.length;
         lineIndex++
       ) {
+        const isFinalDocumentLine =
+          index ===
+            blocks.length -
+              1 &&
+          lineIndex ===
+            lines.length -
+              1;
+
+        /*
+         * A copyright/footer line may safely use most of the
+         * reserved bottom margin rather than creating a whole
+         * new PDF page containing only that one line.
+         */
+        const finalLineAllowance =
+          isFinalDocumentLine &&
+          !isReceipt
+            ? Math.max(
+                0,
+                margin -
+                  12
+              )
+            : 0;
+
         ensureSpace(
           lineHeight +
-            2
+            2,
+          finalLineAllowance
         );
 
         if (
@@ -17814,11 +17893,30 @@ export async function generateHtmlPDF(
           lineIndex ===
             0
         ) {
-          pdf.text(
-            block.bullet,
-            margin,
+          /*
+           * Native vector bullet avoids Unicode font issues.
+           */
+          const bulletColor =
+            block.color || [
+              24,
+              24,
+              27,
+            ];
+
+          pdf.setFillColor(
+            bulletColor[0],
+            bulletColor[1],
+            bulletColor[2]
+          );
+
+          pdf.circle(
+            margin +
+              3,
             cursorY +
-              block.fontSize
+              block.fontSize *
+                0.58,
+            1.5,
+            'F'
           );
         }
 
