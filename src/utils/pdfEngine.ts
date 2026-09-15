@@ -15393,6 +15393,24 @@ export interface MarkdownExtractOptions {
     totalPages: number,
     markdown: string
   ) => void | Promise<void>;
+
+  /*
+   * Atomic page recovery.
+   *
+   * A cached page means that page completed successfully in a
+   * previous browser process and must never be OCRed again.
+   */
+  readCachedPage?: (
+    pageNumber: number
+  ) => Promise<
+    string |
+    undefined
+  >;
+
+  writeCachedPage?: (
+    pageNumber: number,
+    markdown: string
+  ) => Promise<void>;
 }
 
 export interface ExtractedMarkdownResult {
@@ -15414,6 +15432,8 @@ export async function extractMarkdownFromPDF(
     startPage = 1,
     initialMarkdown = '',
     onCheckpoint,
+    readCachedPage,
+    writeCachedPage,
   } = options;
 
   /*
@@ -16077,10 +16097,75 @@ export async function extractMarkdownFromPDF(
       totalPages;
       pageNum++
     ) {
+      /*
+       * =====================================================
+       * PRIVATE-PII STYLE PER-PAGE RECOVERY
+       * =====================================================
+       *
+       * Check IndexedDB before touching PDF.js or Tesseract.
+       *
+       * Completed pages survive a Safari/WebKit restart.
+       * Cached pages are rebuilt instantly and the visible
+       * progress jumps to the first unfinished page.
+       */
+      if (readCachedPage) {
+        try {
+          const cachedPage =
+            await readCachedPage(
+              pageNum
+            );
+
+          if (
+            cachedPage !==
+            undefined
+          ) {
+            if (
+              cachedPage.trim()
+            ) {
+              markdownBlocks.push(
+                cachedPage
+              );
+            }
+
+            if (
+              pageNum <
+              totalPages
+            ) {
+              markdownBlocks.push(
+                '\n---\n'
+              );
+            }
+
+            await yieldToBrowser();
+
+            continue;
+          }
+        } catch (
+          cacheReadError
+        ) {
+          /*
+           * IndexedDB recovery failure must not stop normal
+           * extraction of the source PDF.
+           */
+          console.warn(
+            `Unable to read Markdown page ${pageNum} recovery record:`,
+            cacheReadError
+          );
+        }
+      }
+
       onProgress?.(
         pageNum,
         totalPages
       );
+
+      /*
+       * Remember where this page begins in markdownBlocks.
+       * After the complete page succeeds, only these blocks
+       * are written to its atomic IndexedDB record.
+       */
+      const pageBlockStart =
+        markdownBlocks.length;
 
       const page =
         await pdfDoc.getPage(
@@ -16434,7 +16519,36 @@ export async function extractMarkdownFromPDF(
 
 
         /*
-         * Keep explicit page boundaries for LLM/RAG use.
+         * ===================================================
+         * ATOMIC PAGE COMMIT
+         * ===================================================
+         *
+         * Save ONLY after the complete page has successfully
+         * finished digital extraction/OCR/Markdown structuring.
+         *
+         * If Safari dies during this write or during the page,
+         * only this one page can ever need repeating.
+         */
+        if (writeCachedPage) {
+          const pageMarkdown =
+            markdownBlocks
+              .slice(
+                pageBlockStart
+              )
+              .join(
+                '\n'
+              )
+              .trim();
+
+          await writeCachedPage(
+            pageNum,
+            pageMarkdown
+          );
+        }
+
+        /*
+         * Page separators are assembled outside the cached page
+         * record so recovery cannot duplicate separators.
          */
         if (
           pageNum <
