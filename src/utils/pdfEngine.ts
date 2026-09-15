@@ -15384,6 +15384,15 @@ export interface MarkdownExtractOptions {
   detectLists?: boolean;
   joinHyphenatedWords?: boolean;
   onProgress?: (current: number, total: number) => void;
+
+  startPage?: number;
+  initialMarkdown?: string;
+
+  onCheckpoint?: (
+    nextPage: number,
+    totalPages: number,
+    markdown: string
+  ) => void | Promise<void>;
 }
 
 export interface ExtractedMarkdownResult {
@@ -15402,6 +15411,9 @@ export async function extractMarkdownFromPDF(
     detectLists = true,
     joinHyphenatedWords = true,
     onProgress,
+    startPage = 1,
+    initialMarkdown = '',
+    onCheckpoint,
   } = options;
 
   /*
@@ -15417,7 +15429,7 @@ export async function extractMarkdownFromPDF(
    * - Canvas memory is released immediately after OCR.
    */
 
-  const loadedPdf =
+  let loadedPdf =
     await loadPdfJsFromBlob(
       file,
       {
@@ -15425,14 +15437,40 @@ export async function extractMarkdownFromPDF(
       }
     );
 
-  const pdfDoc =
+  let pdfDoc =
     loadedPdf.pdf;
 
   const totalPages =
     pdfDoc.numPages;
 
+  const firstPage =
+    Math.max(
+      1,
+      Math.min(
+        totalPages,
+        Math.floor(startPage) || 1
+      )
+    );
+
+  /*
+   * iPhone Safari:
+   *
+   * Never allow one PDF.js document/worker to survive through
+   * an entire huge scanned document.
+   */
+  const PDF_CHUNK_PAGES =
+    4;
+
   const markdownBlocks:
     string[] = [];
+
+  if (
+    initialMarkdown.trim()
+  ) {
+    markdownBlocks.push(
+      initialMarkdown.trim()
+    );
+  }
 
   let ocrWorker:
     any =
@@ -15447,7 +15485,7 @@ export async function extractMarkdownFromPDF(
     0;
 
   const OCR_WORKER_PAGE_LIMIT =
-    8;
+    4;
 
   const yieldToBrowser =
     () =>
@@ -16033,7 +16071,8 @@ export async function extractMarkdownFromPDF(
 
   try {
     for (
-      let pageNum = 1;
+      let pageNum =
+        firstPage;
       pageNum <=
       totalPages;
       pageNum++
@@ -16413,24 +16452,97 @@ export async function extractMarkdownFromPDF(
 
 
       /*
-       * Long scanned documents can leave decoded fonts/images
-       * in PDF.js document caches even after page.cleanup().
-       * Release those caches periodically.
+       * =====================================================
+       * HARD MEMORY BOUNDARY
+       * =====================================================
+       *
+       * Every four completed pages:
+       *
+       * 1. Save generated Markdown.
+       * 2. Terminate Tesseract/WASM.
+       * 3. Destroy the complete PDF.js document + worker.
+       * 4. Give Safari time to reclaim memory.
+       * 5. Re-open the same browser-backed File.
+       *
+       * OCR scale and text-quality logic are unchanged.
        */
-      if (
-        pageNum %
-          8 ===
-        0
-      ) {
+      const chunkFinished =
+        (
+          (
+            pageNum -
+            firstPage +
+            1
+          ) %
+            PDF_CHUNK_PAGES ===
+          0
+        ) &&
+        pageNum <
+          totalPages;
+
+      if (chunkFinished) {
+        if (onCheckpoint) {
+          try {
+            await onCheckpoint(
+              pageNum + 1,
+              totalPages,
+              markdownBlocks.join(
+                '\n'
+              )
+            );
+          } catch (
+            checkpointError
+          ) {
+            console.warn(
+              'Unable to save Markdown checkpoint:',
+              checkpointError
+            );
+          }
+        }
+
+        if (ocrWorker) {
+          try {
+            await ocrWorker
+              .terminate();
+          } catch (_) {}
+
+          ocrWorker =
+            null;
+
+          ocrPagesSinceRecycle =
+            0;
+        }
+
         try {
-          await pdfDoc.cleanup();
+          await loadedPdf
+            .dispose();
         } catch (_) {}
+
+        /*
+         * More than a zero-ms yield is intentional here.
+         * WebKit gets a real opportunity to release the old
+         * PDF.js worker, canvases and WASM heap.
+         */
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              100
+            )
+        );
+
+        loadedPdf =
+          await loadPdfJsFromBlob(
+            file,
+            {
+              stopAtErrors:
+                false,
+            }
+          );
+
+        pdfDoc =
+          loadedPdf.pdf;
       }
 
-      /*
-       * Safari gets a collection/main-thread opportunity after
-       * every completed page.
-       */
       await yieldToBrowser();
     }
 
