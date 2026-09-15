@@ -16965,24 +16965,44 @@ export async function generateHtmlPDF(
 
   /*
    * =========================================================
-   * HIGH-FIDELITY LOCAL HTML -> PDF
+   * SEMANTIC HTML -> VECTOR PDF
    * =========================================================
    *
-   * Pipeline:
+   * This tool converts HTML CONTENT into a professional
+   * document. It intentionally does not attempt to reproduce
+   * interactive website UI, animations, Tailwind cards, etc.
    *
-   * HTML
-   * -> remove executable/network-active content
-   * -> preserve classes + authored CSS
-   * -> compile Tailwind locally when detected
-   * -> browser performs real CSS layout
-   * -> SnapDOM captures that rendered state ONCE
-   * -> rasterize only one PDF-page crop at a time
-   * -> lossless PNG into PDF
-   *
+   * No canvas page screenshots.
    * No html2canvas.
-   * No full-document bitmap.
+   * No WebAssembly.
+   * No Tailwind compiler.
    * No server.
    */
+
+  onProgress?.(
+    0,
+    1,
+    'Reading HTML structure...'
+  );
+
+  const parsed =
+    new DOMParser()
+      .parseFromString(
+        html,
+        'text/html'
+      );
+
+  /*
+   * Executable/non-document content has no place in a PDF.
+   */
+  parsed
+    .querySelectorAll(
+      'script,style,iframe,object,embed,canvas,video,audio,noscript,template,link,meta,base'
+    )
+    .forEach(
+      (node) =>
+        node.remove()
+    );
 
   const isReceipt =
     pageSize === 'receipt';
@@ -16992,7 +17012,7 @@ export async function generateHtmlPDF(
       'landscape' &&
     !isReceipt;
 
-  const targetWidthPt =
+  const pageWidth =
     isReceipt
       ? 226.77
       : pageSize === 'letter'
@@ -17003,1060 +17023,1148 @@ export async function generateHtmlPDF(
           ? 841.89
           : 595.28;
 
-  const targetHeightPt =
-    isReceipt
-      ? 0
-      : pageSize === 'letter'
-        ? isLandscape
-          ? 612
-          : 792
-        : isLandscape
-          ? 595.28
-          : 841.89;
-
-  const renderWidthPx =
-    isReceipt
-      ? 340
+  const normalPageHeight =
+    pageSize === 'letter'
+      ? isLandscape
+        ? 612
+        : 792
       : isLandscape
-        ? 1123
-        : 794;
+        ? 595.28
+        : 841.89;
+
+  const margin =
+    isReceipt
+      ? 16
+      : 42;
+
+  const usableWidth =
+    pageWidth -
+    margin * 2;
+
+  type HtmlPdfBlock =
+    | {
+        kind: 'text';
+        text: string;
+        fontSize: number;
+        bold?: boolean;
+        italic?: boolean;
+        bullet?: string;
+        color?: [number, number, number];
+        spacingBefore?: number;
+        spacingAfter?: number;
+      }
+    | {
+        kind: 'hr';
+      }
+    | {
+        kind: 'image';
+        src: string;
+      }
+    | {
+        kind: 'table';
+        rows: string[][];
+      };
+
+  const blocks:
+    HtmlPdfBlock[] = [];
+
+  const normalize =
+    (
+      value:
+        string |
+        null |
+        undefined
+    ) =>
+      String(
+        value || ''
+      )
+        .replace(
+          /\u00a0/g,
+          ' '
+        )
+        .replace(
+          /[ \t\r\n]+/g,
+          ' '
+        )
+        .trim();
+
+  const blockTags =
+    new Set([
+      'H1',
+      'H2',
+      'H3',
+      'H4',
+      'H5',
+      'H6',
+      'P',
+      'LI',
+      'PRE',
+      'BLOCKQUOTE',
+      'TABLE',
+      'HR',
+      'IMG',
+      'A',
+      'BUTTON',
+    ]);
+
+  const hasBlockChild =
+    (
+      element:
+        Element
+    ): boolean =>
+      Array.from(
+        element.children
+      ).some(
+        (
+          child
+        ): boolean =>
+          blockTags.has(
+            child.tagName
+          ) ||
+          hasBlockChild(
+            child
+          )
+      );
+
+  const addText =
+    (
+      text:
+        string,
+      options:
+        Omit<
+          Extract<
+            HtmlPdfBlock,
+            {
+              kind:
+                'text';
+            }
+          >,
+          'kind' |
+          'text'
+        >
+    ) => {
+      const clean =
+        normalize(
+          text
+        );
+
+      if (!clean) return;
+
+      blocks.push({
+        kind:
+          'text',
+        text:
+          clean,
+        ...options,
+      });
+    };
+
+  const visit =
+    (
+      node:
+        Node
+    ) => {
+      if (
+        node.nodeType ===
+        Node.TEXT_NODE
+      ) {
+        const value =
+          normalize(
+            node.nodeValue
+          );
+
+        if (value) {
+          addText(
+            value,
+            {
+              fontSize:
+                10.5,
+              spacingAfter:
+                5,
+            }
+          );
+        }
+
+        return;
+      }
+
+      if (
+        node.nodeType !==
+        Node.ELEMENT_NODE
+      ) {
+        return;
+      }
+
+      const element =
+        node as HTMLElement;
+
+      const tag =
+        element.tagName
+          .toUpperCase();
+
+      const text =
+        normalize(
+          element.textContent
+        );
+
+      if (
+        tag === 'H1'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              25,
+            bold:
+              true,
+            spacingBefore:
+              10,
+            spacingAfter:
+              10,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'H2'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              20,
+            bold:
+              true,
+            spacingBefore:
+              10,
+            spacingAfter:
+              8,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'H3'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              16,
+            bold:
+              true,
+            spacingBefore:
+              8,
+            spacingAfter:
+              6,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'H4' ||
+        tag === 'H5' ||
+        tag === 'H6'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              13,
+            bold:
+              true,
+            spacingBefore:
+              6,
+            spacingAfter:
+              5,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'P'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              10.5,
+            spacingAfter:
+              7,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'LI'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              10.25,
+            bullet:
+              '•',
+            spacingAfter:
+              4,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'BLOCKQUOTE'
+      ) {
+        addText(
+          text,
+          {
+            fontSize:
+              10.5,
+            italic:
+              true,
+            color:
+              [
+                82,
+                82,
+                91,
+              ],
+            spacingBefore:
+              5,
+            spacingAfter:
+              8,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'PRE'
+      ) {
+        addText(
+          element.textContent ||
+            '',
+          {
+            fontSize:
+              9,
+            spacingBefore:
+              5,
+            spacingAfter:
+              8,
+          }
+        );
+        return;
+      }
+
+      if (
+        tag === 'HR'
+      ) {
+        blocks.push({
+          kind:
+            'hr',
+        });
+        return;
+      }
+
+      if (
+        tag === 'IMG'
+      ) {
+        const src =
+          element.getAttribute(
+            'src'
+          ) || '';
+
+        if (
+          /^data:image\/(png|jpe?g|webp);base64,/i.test(
+            src
+          )
+        ) {
+          blocks.push({
+            kind:
+              'image',
+            src,
+          });
+        }
+
+        return;
+      }
+
+      if (
+        tag === 'TABLE'
+      ) {
+        const rows =
+          Array.from(
+            element.querySelectorAll(
+              'tr'
+            )
+          )
+            .map(
+              (row) =>
+                Array.from(
+                  row.querySelectorAll(
+                    ':scope > th, :scope > td'
+                  )
+                ).map(
+                  (cell) =>
+                    normalize(
+                      cell.textContent
+                    )
+                )
+            )
+            .filter(
+              (row) =>
+                row.length >
+                0
+            );
+
+        if (
+          rows.length >
+          0
+        ) {
+          blocks.push({
+            kind:
+              'table',
+            rows,
+          });
+        }
+
+        return;
+      }
+
+      if (
+        tag === 'A' ||
+        tag === 'BUTTON'
+      ) {
+        if (text) {
+          addText(
+            text,
+            {
+              fontSize:
+                10.5,
+              bold:
+                true,
+              color:
+                [
+                  37,
+                  99,
+                  235,
+                ],
+              spacingAfter:
+                5,
+            }
+          );
+        }
+
+        return;
+      }
+
+      /*
+       * Generic DIV/SPAN/etc containing only inline content:
+       * keep it together rather than splitting every span into
+       * its own line.
+       */
+      if (
+        text &&
+        !hasBlockChild(
+          element
+        )
+      ) {
+        const tagName =
+          tag.toLowerCase();
+
+        if (
+          ![
+            'ul',
+            'ol',
+          ].includes(
+            tagName
+          )
+        ) {
+          addText(
+            text,
+            {
+              fontSize:
+                10.5,
+              spacingAfter:
+                5,
+            }
+          );
+
+          return;
+        }
+      }
+
+      for (
+        const child of
+        Array.from(
+          element.childNodes
+        )
+      ) {
+        visit(
+          child
+        );
+      }
+    };
+
+  for (
+    const child of
+    Array.from(
+      parsed.body
+        .childNodes
+    )
+  ) {
+    visit(
+      child
+    );
+  }
+
+  if (
+    blocks.length ===
+    0
+  ) {
+    throw new Error(
+      'No readable document content was found in this HTML file.'
+    );
+  }
 
   onProgress?.(
     0,
-    1,
-    'Preparing styled HTML...'
+    blocks.length,
+    'Preparing PDF layout...'
   );
 
-
   /*
    * ---------------------------------------------------------
-   * 1. SAFE VISUAL HTML
+   * RECEIPT HEIGHT ESTIMATE
    * ---------------------------------------------------------
-   *
-   * Unlike sanitizeRichHtml(), this path must preserve CSS
-   * classes and safe authored <style> rules or visual fidelity
-   * would be destroyed.
-   *
-   * Scripts are NEVER executed.
    */
 
-  const parsed =
-    new DOMParser()
-      .parseFromString(
-        html,
-        'text/html'
+  const measureDoc =
+    new jsPDF({
+      unit:
+        'pt',
+      format: [
+        pageWidth,
+        800,
+      ],
+    });
+
+  const estimateTextHeight =
+    (
+      block:
+        Extract<
+          HtmlPdfBlock,
+          {
+            kind:
+              'text';
+          }
+        >
+    ) => {
+      measureDoc.setFont(
+        'helvetica',
+        block.bold
+          ? block.italic
+            ? 'bolditalic'
+            : 'bold'
+          : block.italic
+            ? 'italic'
+            : 'normal'
       );
 
-  const originalText =
-    html;
-
-  const authoredCss =
-    Array.from(
-      parsed.querySelectorAll(
-        'style'
-      )
-    )
-      .map(
-        (style) =>
-          style.textContent ||
-          ''
-      )
-      .join('\n')
-      /*
-       * PDF conversion must not make hidden network requests.
-       */
-      .replace(
-        /@import[\s\S]*?;/gi,
-        ''
-      )
-      .replace(
-        /url\(\s*(['"]?)(?!data:image\/)[^)]+\1\s*\)/gi,
-        'none'
-      )
-      .replace(
-        /expression\s*\([^)]*\)/gi,
-        ''
+      measureDoc.setFontSize(
+        block.fontSize
       );
 
+      const indent =
+        block.bullet
+          ? 16
+          : 0;
 
-  /*
-   * Remove anything executable or capable of embedding another
-   * browsing context.
-   */
-  parsed
-    .querySelectorAll(
-      'script, iframe, object, embed, link, meta, base'
-    )
-    .forEach(
-      (node) =>
-        node.remove()
-    );
+      const lines =
+        measureDoc.splitTextToSize(
+          block.text,
+          Math.max(
+            20,
+            usableWidth -
+              indent
+          )
+        ) as string[];
 
+      const lineHeight =
+        block.fontSize *
+        1.36;
 
-  const allElements =
-    Array.from(
-      parsed.body
-        .querySelectorAll(
-          '*'
-        )
-    ) as HTMLElement[];
+      return (
+        (block.spacingBefore ||
+          0) +
+        Math.max(
+          1,
+          lines.length
+        ) *
+          lineHeight +
+        (block.spacingAfter ||
+          0)
+      );
+    };
 
+  let estimatedHeight =
+    margin * 2;
 
   for (
-    const element of
-    allElements
+    const block of
+    blocks
   ) {
-    for (
-      const attribute of
-      Array.from(
-        element.attributes
+    if (
+      block.kind ===
+      'text'
+    ) {
+      estimatedHeight +=
+        estimateTextHeight(
+          block
+        );
+    } else if (
+      block.kind ===
+      'table'
+    ) {
+      estimatedHeight +=
+        Math.max(
+          28,
+          block.rows.length *
+            28
+        );
+    } else if (
+      block.kind ===
+      'image'
+    ) {
+      estimatedHeight +=
+        130;
+    } else {
+      estimatedHeight +=
+        16;
+    }
+  }
+
+  const receiptHeight =
+    Math.max(
+      180,
+      Math.min(
+        14000,
+        estimatedHeight +
+          20
       )
-    ) {
-      const name =
-        attribute.name
-          .toLowerCase();
-
-      const value =
-        attribute.value;
-
-      if (
-        name.startsWith(
-          'on'
-        ) ||
-        name === 'srcdoc'
-      ) {
-        element.removeAttribute(
-          attribute.name
-        );
-
-        continue;
-      }
-
-      if (
-        (
-          name === 'href' ||
-          name === 'action' ||
-          name === 'formaction'
-        ) &&
-        /^\s*(javascript|data:text\/html):/i.test(
-          value
-        )
-      ) {
-        element.removeAttribute(
-          attribute.name
-        );
-
-        continue;
-      }
-
-      /*
-       * Only embedded images can be guaranteed to work offline
-       * from a standalone uploaded .html file.
-       */
-      if (
-        name === 'src' &&
-        element.tagName
-          .toLowerCase() ===
-          'img' &&
-        !/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(
-          value
-        )
-      ) {
-        /*
-         * A standalone uploaded HTML file does not contain
-         * sibling assets such as logo.png.
-         *
-         * Use a transparent 1x1 local placeholder instead of
-         * a broken-image icon/ALT text. Width/height utilities
-         * can still preserve the intended layout footprint.
-         */
-        element.setAttribute(
-          'src',
-          'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
-        );
-
-        element.setAttribute(
-          'alt',
-          ''
-        );
-
-        continue;
-      }
-
-      if (
-        name === 'style' &&
-        /expression\s*\(|javascript:|url\s*\(/i.test(
-          value
-        )
-      ) {
-        /*
-         * Keep ordinary inline CSS but reject network/executable
-         * style values.
-         */
-        element.removeAttribute(
-          'style'
-        );
-      }
-    }
-  }
-
-
-  const bodyClass =
-    parsed.body
-      .getAttribute(
-        'class'
-      ) || '';
-
-  const bodyStyleRaw =
-    parsed.body
-      .getAttribute(
-        'style'
-      ) || '';
-
-  const bodyStyle =
-    /expression\s*\(|javascript:|url\s*\(/i.test(
-      bodyStyleRaw
-    )
-      ? ''
-      : bodyStyleRaw;
-
-
-  const safeBodyHtml =
-    parsed.body
-      .innerHTML;
-
-
-  /*
-   * ---------------------------------------------------------
-   * 2. LOCAL TAILWIND COMPILATION
-   * ---------------------------------------------------------
-   *
-   * Your test HTML loads Tailwind from a CDN.
-   * Instead, compile those utilities entirely inside the
-   * browser bundle so the tool still works offline.
-   */
-
-  const looksLikeTailwind =
-    /tailwindcss/i.test(
-      originalText
-    ) ||
-    /\b(?:sm:|md:|lg:|xl:|2xl:|bg-|text-|px-|py-|pt-|pb-|pl-|pr-|mx-|my-|mt-|mb-|ml-|mr-|flex\b|grid\b|rounded-|max-w-|min-h-|space-[xy]-|gap-)/.test(
-      originalText
     );
 
-
-  let generatedTailwindCss =
-    '';
-
-  const tailwindProbeHtml =
-    '<div id="__pdf_tailwind_probe" class="md:grid text-white bg-purple-600 text-5xl"></div>';
-
-  if (looksLikeTailwind) {
-    onProgress?.(
-      0,
-      1,
-      'Compiling complete styles locally...'
-    );
-
-    try {
-      const tailwindModule =
-        await import(
-          'tailwindcss-in-browser'
-        );
-
-      const buildCss =
-        tailwindModule.default;
-
-      /*
-       * Compile every class present in the actual document,
-       * plus a known responsive/style probe.
-       */
-      generatedTailwindCss =
-        await buildCss(
-          `<body class="${bodyClass}">${safeBodyHtml}${tailwindProbeHtml}</body>`,
-          '',
-          {
-            compileCssOptions: {
-              addPreflight:
-                true,
-            },
-            transformCssOptions: {
-              minify:
-                true,
-            },
-          }
-        );
-
-      if (
-        !generatedTailwindCss ||
-        generatedTailwindCss.length <
-          500
-      ) {
-        throw new Error(
-          'Tailwind compiler returned incomplete CSS.'
-        );
-      }
-    } catch (
-      error: any
-    ) {
-      /*
-       * Never silently generate another visually broken PDF.
-       */
-      throw new Error(
-        `Unable to compile this HTML's local Tailwind styles: ${
-          error?.message ||
-          'unknown compiler error'
-        }`
-      );
-    }
-  }
-
-
-
-  /*
-   * ---------------------------------------------------------
-   * 3. REAL BROWSER LAYOUT
-   * ---------------------------------------------------------
-   */
-
-  const iframe =
-    document.createElement(
-      'iframe'
-    );
-
-  iframe.setAttribute(
-    'sandbox',
-    'allow-same-origin'
-  );
-
-  iframe.style.position =
-    'fixed';
-
-  iframe.style.left =
-    '-100000px';
-
-  iframe.style.top =
-    '0';
-
-  iframe.style.width =
-    `${renderWidthPx}px`;
-
-  /*
-   * vh/min-h-screen must resolve against the same aspect ratio
-   * as the requested PDF page.
-   */
-  const renderViewportHeightPx =
+  const pageHeight =
     isReceipt
-      ? 1600
-      : Math.max(
+      ? receiptHeight
+      : normalPageHeight;
+
+  const pdf =
+    new jsPDF({
+      orientation:
+        isReceipt
+          ? 'portrait'
+          : orientation,
+      unit:
+        'pt',
+      format: [
+        pageWidth,
+        pageHeight,
+      ],
+      compress:
+        true,
+    });
+
+  let cursorY =
+    margin;
+
+  const bottom =
+    pageHeight -
+    margin;
+
+  const addNewPage =
+    () => {
+      pdf.addPage(
+        [
+          pageWidth,
+          pageHeight,
+        ],
+        isReceipt
+          ? 'portrait'
+          : orientation
+      );
+
+      cursorY =
+        margin;
+    };
+
+  const ensureSpace =
+    (
+      height:
+        number
+    ) => {
+      if (
+        cursorY +
+          height <=
+        bottom
+      ) {
+        return;
+      }
+
+      addNewPage();
+    };
+
+  const setTextStyle =
+    (
+      block:
+        Extract<
+          HtmlPdfBlock,
+          {
+            kind:
+              'text';
+          }
+        >
+    ) => {
+      pdf.setFont(
+        'helvetica',
+        block.bold
+          ? block.italic
+            ? 'bolditalic'
+            : 'bold'
+          : block.italic
+            ? 'italic'
+            : 'normal'
+      );
+
+      pdf.setFontSize(
+        block.fontSize
+      );
+
+      const color =
+        block.color || [
+          24,
+          24,
+          27,
+        ];
+
+      pdf.setTextColor(
+        color[0],
+        color[1],
+        color[2]
+      );
+    };
+
+  for (
+    let index = 0;
+    index <
+    blocks.length;
+    index++
+  ) {
+    const block =
+      blocks[index];
+
+    if (
+      block.kind ===
+      'text'
+    ) {
+      setTextStyle(
+        block
+      );
+
+      cursorY +=
+        block.spacingBefore ||
+        0;
+
+      const indent =
+        block.bullet
+          ? 16
+          : 0;
+
+      const lines =
+        pdf.splitTextToSize(
+          block.text,
+          Math.max(
+            20,
+            usableWidth -
+              indent
+          )
+        ) as string[];
+
+      const lineHeight =
+        block.fontSize *
+        1.36;
+
+      for (
+        let lineIndex = 0;
+        lineIndex <
+        lines.length;
+        lineIndex++
+      ) {
+        ensureSpace(
+          lineHeight +
+            2
+        );
+
+        if (
+          block.bullet &&
+          lineIndex ===
+            0
+        ) {
+          pdf.text(
+            block.bullet,
+            margin,
+            cursorY +
+              block.fontSize
+          );
+        }
+
+        pdf.text(
+          lines[lineIndex],
+          margin +
+            indent,
+          cursorY +
+            block.fontSize
+        );
+
+        cursorY +=
+          lineHeight;
+      }
+
+      cursorY +=
+        block.spacingAfter ||
+        0;
+    }
+
+    else if (
+      block.kind ===
+      'hr'
+    ) {
+      ensureSpace(
+        18
+      );
+
+      pdf.setDrawColor(
+        212,
+        212,
+        216
+      );
+
+      pdf.setLineWidth(
+        0.7
+      );
+
+      pdf.line(
+        margin,
+        cursorY +
+          6,
+        pageWidth -
+          margin,
+        cursorY +
+          6
+      );
+
+      cursorY +=
+        18;
+    }
+
+    else if (
+      block.kind ===
+      'table'
+    ) {
+      const columns =
+        Math.max(
           1,
-          Math.round(
-            (
-              targetHeightPt /
-              targetWidthPt
-            ) *
-              renderWidthPx
+          ...block.rows.map(
+            (row) =>
+              row.length
           )
         );
 
-  iframe.style.height =
-    `${renderViewportHeightPx}px`;
+      const columnWidth =
+        usableWidth /
+        columns;
 
-  iframe.style.border =
-    '0';
+      pdf.setFont(
+        'helvetica',
+        'normal'
+      );
 
-  iframe.style.opacity =
-    '0';
+      pdf.setFontSize(
+        9
+      );
 
-  iframe.style.pointerEvents =
-    'none';
+      for (
+        let rowIndex = 0;
+        rowIndex <
+        block.rows.length;
+        rowIndex++
+      ) {
+        const row =
+          block.rows[
+            rowIndex
+          ];
 
-  document.body.appendChild(
-    iframe
-  );
+        const cellLines =
+          Array.from(
+            {
+              length:
+                columns,
+            },
+            (
+              _,
+              columnIndex
+            ) =>
+              pdf.splitTextToSize(
+                row[
+                  columnIndex
+                ] || '',
+                Math.max(
+                  20,
+                  columnWidth -
+                    10
+                )
+              ) as string[]
+          );
 
+        const maxLines =
+          Math.max(
+            1,
+            ...cellLines.map(
+              (lines) =>
+                lines.length
+            )
+          );
 
-  const yieldToBrowser =
-    () =>
-      new Promise<void>(
+        const rowHeight =
+          Math.max(
+            24,
+            maxLines *
+              12 +
+              10
+          );
+
+        ensureSpace(
+          rowHeight +
+            2
+        );
+
+        for (
+          let columnIndex =
+            0;
+          columnIndex <
+          columns;
+          columnIndex++
+        ) {
+          const x =
+            margin +
+            columnIndex *
+              columnWidth;
+
+          if (
+            rowIndex ===
+            0
+          ) {
+            pdf.setFillColor(
+              244,
+              244,
+              245
+            );
+
+            pdf.rect(
+              x,
+              cursorY,
+              columnWidth,
+              rowHeight,
+              'F'
+            );
+
+            pdf.setFont(
+              'helvetica',
+              'bold'
+            );
+          } else {
+            pdf.setFont(
+              'helvetica',
+              'normal'
+            );
+          }
+
+          pdf.setDrawColor(
+            212,
+            212,
+            216
+          );
+
+          pdf.rect(
+            x,
+            cursorY,
+            columnWidth,
+            rowHeight,
+            'S'
+          );
+
+          pdf.setTextColor(
+            24,
+            24,
+            27
+          );
+
+          const lines =
+            cellLines[
+              columnIndex
+            ];
+
+          for (
+            let lineIndex = 0;
+            lineIndex <
+            lines.length;
+            lineIndex++
+          ) {
+            pdf.text(
+              lines[
+                lineIndex
+              ],
+              x +
+                5,
+              cursorY +
+                13 +
+                lineIndex *
+                  12
+            );
+          }
+        }
+
+        cursorY +=
+          rowHeight;
+      }
+
+      cursorY +=
+        10;
+    }
+
+    else if (
+      block.kind ===
+      'image'
+    ) {
+      try {
+        const image =
+          new Image();
+
+        image.src =
+          block.src;
+
+        try {
+          await image.decode();
+        } catch (_) {}
+
+        if (
+          image.naturalWidth >
+            0 &&
+          image.naturalHeight >
+            0
+        ) {
+          const ratio =
+            image.naturalHeight /
+            image.naturalWidth;
+
+          const width =
+            Math.min(
+              usableWidth,
+              360
+            );
+
+          const height =
+            width *
+            ratio;
+
+          ensureSpace(
+            height +
+              12
+          );
+
+          const format =
+            block.src
+              .startsWith(
+                'data:image/png'
+              )
+              ? 'PNG'
+              : block.src
+                    .startsWith(
+                      'data:image/webp'
+                    )
+                ? 'WEBP'
+                : 'JPEG';
+
+          pdf.addImage(
+            block.src,
+            format,
+            margin,
+            cursorY,
+            width,
+            height,
+            undefined,
+            'FAST'
+          );
+
+          cursorY +=
+            height +
+            12;
+        }
+      } catch (
+        error
+      ) {
+        console.warn(
+          'Embedded HTML image skipped:',
+          error
+        );
+      }
+    }
+
+    if (
+      index %
+        25 ===
+        0
+    ) {
+      onProgress?.(
+        index + 1,
+        blocks.length,
+        `Writing document ${index + 1} of ${blocks.length}...`
+      );
+
+      await new Promise<void>(
         (resolve) =>
           setTimeout(
             resolve,
             0
           )
       );
-
-
-  try {
-    const doc =
-      iframe.contentDocument ||
-      iframe.contentWindow
-        ?.document;
-
-    const view =
-      iframe.contentWindow;
-
-    if (
-      !doc ||
-      !view
-    ) {
-      throw new Error(
-        'Failed to create HTML rendering sandbox.'
-      );
     }
-
-
-    doc.open();
-
-    doc.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-
-          <style>
-            ${generatedTailwindCss}
-          </style>
-
-          <style>
-            ${authoredCss}
-          </style>
-
-          <style>
-            html {
-              width: 100% !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-
-            body {
-              width: 100% !important;
-              margin: 0 !important;
-              min-height: 1px !important;
-              overflow: visible !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-
-            *,
-            *::before,
-            *::after {
-              animation: none !important;
-              transition: none !important;
-              caret-color: transparent !important;
-            }
-
-            /*
-             * Scroll-reveal sections normally become visible
-             * through JavaScript. Scripts are intentionally not
-             * executed during local PDF conversion, so force the
-             * final visible state explicitly.
-             */
-            .reveal-on-scroll {
-              opacity: 1 !important;
-              transform: none !important;
-              visibility: visible !important;
-            }
-
-            /*
-             * Browser-only decoration has no useful static PDF
-             * meaning and can interfere with full-page geometry.
-             */
-            #particle-canvas,
-            #mouse-spotlight,
-            #custom-cursor-dot,
-            #custom-cursor-ring,
-            #type-cursor {
-              display: none !important;
-            }
-
-            html {
-              scroll-behavior: auto !important;
-            }
-
-            /*
-             * Fixed toolbars/navbars should appear once at their
-             * document location, not behave like viewport chrome.
-             */
-            .fixed {
-              position: absolute !important;
-            }
-
-            /*
-             * Do not let video/remote browsing contexts create
-             * network work during a local PDF conversion.
-             */
-            video {
-              background: #111827;
-            }
-          </style>
-        </head>
-
-        <body
-          class="${bodyClass.replace(/"/g, '&quot;')}"
-          style="${bodyStyle.replace(/"/g, '&quot;')}"
-        >
-          ${safeBodyHtml}
-          ${looksLikeTailwind ? tailwindProbeHtml : ''}
-        </body>
-      </html>
-    `);
-
-    doc.close();
-
-
-    /*
-     * Two browser frames allow layout + responsive media queries
-     * to settle without a fixed 300-1500ms sleep.
-     */
-    await new Promise<void>(
-      (resolve) =>
-        view.requestAnimationFrame(
-          () =>
-            view.requestAnimationFrame(
-              () =>
-                resolve()
-            )
-        )
-    );
-
-
-    /*
-     * The previous build silently continued when Tailwind was
-     * missing, which produced black text/default blue links.
-     *
-     * Verify the actual computed browser styles before creating
-     * any PDF. If this fails we show an error instead of making
-     * garbage output.
-     */
-    if (looksLikeTailwind) {
-      const probe =
-        doc.getElementById(
-          '__pdf_tailwind_probe'
-        );
-
-      if (!probe) {
-        throw new Error(
-          'Local Tailwind verification element is missing.'
-        );
-      }
-
-      const probeStyle =
-        view.getComputedStyle(
-          probe
-        );
-
-      const probeFontSize =
-        parseFloat(
-          probeStyle.fontSize
-        ) || 0;
-
-      if (
-        probeStyle.display !==
-          'grid' ||
-        probeFontSize <
-          30
-      ) {
-        throw new Error(
-          'Local Tailwind styles did not initialize correctly on this browser.'
-        );
-      }
-
-      probe.remove();
-    }
-
-
-    /*
-     * Convert any remaining computed fixed-position elements
-     * into absolute document elements so the full-page snapshot
-     * contains them once instead of treating them as viewport UI.
-     */
-    for (
-      const element of
-      Array.from(
-        doc.body.querySelectorAll(
-          '*'
-        )
-      ) as HTMLElement[]
-    ) {
-      const computed =
-        view.getComputedStyle(
-          element
-        );
-
-      if (
-        computed.position ===
-        'fixed'
-      ) {
-        const rect =
-          element.getBoundingClientRect();
-
-        element.style.position =
-          'absolute';
-
-        if (
-          computed.top !==
-          'auto'
-        ) {
-          element.style.top =
-            `${Math.max(
-              0,
-              rect.top
-            )}px`;
-        }
-      }
-    }
-
-
-    /*
-     * Fill the final A4/Letter page with the document background
-     * instead of leaving an arbitrary white strip after content.
-     */
-    if (!isReceipt) {
-      const liveHeight =
-        Math.max(
-          doc.documentElement
-            .scrollHeight,
-          doc.body
-            .scrollHeight,
-          1
-        );
-
-      const livePageHeight =
-        (
-          targetHeightPt /
-          targetWidthPt
-        ) *
-        renderWidthPx;
-
-      const paddedHeight =
-        Math.max(
-          livePageHeight,
-          Math.ceil(
-            liveHeight /
-            livePageHeight
-          ) *
-            livePageHeight
-        );
-
-      doc.documentElement
-        .style.minHeight =
-          `${paddedHeight}px`;
-
-      doc.body.style.minHeight =
-        `${paddedHeight}px`;
-
-      await new Promise<void>(
-        (resolve) =>
-          view.requestAnimationFrame(
-            () =>
-              resolve()
-          )
-      );
-    }
-
-
-    /*
-     * Hide dynamic pointer-only layers that normally rely on
-     * JavaScript state and are meaningless in a static PDF.
-     */
-    const possibleDynamicLayers =
-      Array.from(
-        doc.querySelectorAll(
-          'canvas, [id*="cursor" i], [id*="spotlight" i]'
-        )
-      ) as HTMLElement[];
-
-    for (
-      const element of
-      possibleDynamicLayers
-    ) {
-      const style =
-        view.getComputedStyle(
-          element
-        );
-
-      if (
-        style.position ===
-          'fixed' &&
-        style.pointerEvents ===
-          'none'
-      ) {
-        element.style.display =
-          'none';
-      }
-    }
-
-
-    await yieldToBrowser();
-
-
-    const body =
-      doc.body;
-
-    const bodyBackground =
-      view
-        .getComputedStyle(
-          body
-        )
-        .backgroundColor ||
-      '#ffffff';
-
-
-    onProgress?.(
-      0,
-      1,
-      'Capturing complete styled document...'
-    );
-
-
-    const snapdomModule =
-      await import(
-        '@zumer/snapdom'
-      );
-
-
-    /*
-     * Official full-page SnapDOM pattern:
-     * capture documentElement, then paginate from capture.meta.
-     *
-     * Important:
-     * do NOT calculate crop geometry from body.scrollHeight.
-     */
-    const capture =
-      await snapdomModule.snapdom(
-        doc.documentElement,
-        {
-          dpr:
-            1,
-          scale:
-            1,
-
-          /*
-           * Fidelity is now prioritized over the previous fast
-           * shortcut. The user accepts up to ~3 minutes.
-           */
-          fast:
-            false,
-
-          embedFonts:
-            true,
-
-          backgroundColor:
-            bodyBackground,
-        }
-      );
-
-
-    const captureAny =
-      capture as any;
-
-    const meta =
-      captureAny.meta ||
-      {};
-
-
-    const captureX =
-      Number(
-        meta.contentX
-      );
-
-    const captureY =
-      Number(
-        meta.contentY
-      );
-
-    const captureWidth =
-      Number(
-        meta.w0
-      );
-
-    const captureHeight =
-      Number(
-        meta.h0
-      );
-
-
-    if (
-      !Number.isFinite(
-        captureX
-      ) ||
-      !Number.isFinite(
-        captureY
-      ) ||
-      !Number.isFinite(
-        captureWidth
-      ) ||
-      !Number.isFinite(
-        captureHeight
-      ) ||
-      captureWidth <=
-        0 ||
-      captureHeight <=
-        0
-    ) {
-      throw new Error(
-        'The styled HTML capture returned invalid page geometry.'
-      );
-    }
-
-
-    /*
-     * PDF scale derives from the captured document itself.
-     * This prevents the repeated-first-page bug from the
-     * previous implementation.
-     */
-    const pxToPt =
-      targetWidthPt /
-      captureWidth;
-
-
-    const MAX_RECEIPT_HEIGHT_PT =
-      14000;
-
-
-    const normalPageHeightPx =
-      (
-        targetHeightPt /
-        targetWidthPt
-      ) *
-      captureWidth;
-
-
-    const receiptPageHeightPt =
-      Math.max(
-        100,
-        Math.min(
-          MAX_RECEIPT_HEIGHT_PT,
-          captureHeight *
-            pxToPt
-        )
-      );
-
-
-    const receiptPageHeightPx =
-      receiptPageHeightPt /
-      pxToPt;
-
-
-    const pageHeightPx =
-      isReceipt
-        ? receiptPageHeightPx
-        : normalPageHeightPx;
-
-
-    const outputPageHeightPt =
-      isReceipt
-        ? receiptPageHeightPt
-        : targetHeightPt;
-
-
-    /*
-     * From here onward, "contentHeightPx" intentionally means
-     * SnapDOM capture coordinates, NOT live DOM coordinates.
-     */
-    const contentHeightPx =
-      captureHeight;
-
-
-    const totalPages =
-      Math.max(
-        1,
-        Math.ceil(
-          captureHeight /
-          pageHeightPx
-        )
-      );
-
-
-    onProgress?.(
-      0,
-      totalPages,
-      `Rendering ${totalPages} high-fidelity PDF page${totalPages === 1 ? '' : 's'}...`
-    );
-
-
-    const pdf =
-      new jsPDF({
-        orientation:
-          isReceipt
-            ? 'portrait'
-            : orientation,
-        unit:
-          'pt',
-        format: [
-          targetWidthPt,
-          outputPageHeightPt,
-        ],
-        compress:
-          true,
-      });
-
-
-    for (
-      let pageIndex = 0;
-      pageIndex <
-      totalPages;
-      pageIndex++
-    ) {
-      if (
-        pageIndex >
-        0
-      ) {
-        pdf.addPage(
-          [
-            targetWidthPt,
-            outputPageHeightPt,
-          ],
-          isReceipt
-            ? 'portrait'
-            : orientation
-        );
-      }
-
-
-      const cropY =
-        pageIndex *
-        pageHeightPx;
-
-      const cropHeight =
-        Math.max(
-          1,
-          Math.min(
-            pageHeightPx,
-            contentHeightPx -
-              cropY
-          )
-        );
-
-
-      onProgress?.(
-        pageIndex + 1,
-        totalPages,
-        `Rendering page ${pageIndex + 1} of ${totalPages}...`
-      );
-
-
-      /*
-       * Page-sized Retina crop from the reusable full-DOM
-       * capture. DPR 2 preserves text, card edges, gradients,
-       * shadows and typography without allocating one giant
-       * full-document bitmap.
-       */
-      const canvas =
-        await captureAny.toCanvas({
-          crop: {
-            x:
-              captureX,
-            y:
-              captureY +
-              cropY,
-            width:
-              captureWidth,
-            height:
-              cropHeight,
-          },
-          scale:
-            1,
-          dpr:
-            2,
-          backgroundColor:
-            bodyBackground,
-        });
-
-
-      try {
-        /*
-         * PNG is deliberate here:
-         * lossless text, borders, gradients and UI edges.
-         * No JPEG quality reduction.
-         */
-        const pngBlob =
-          await new Promise<
-            Blob | null
-          >(
-            (resolve) =>
-              canvas.toBlob(
-                resolve,
-                'image/png'
-              )
-          );
-
-
-        if (!pngBlob) {
-          throw new Error(
-            `Failed to encode page ${pageIndex + 1}.`
-          );
-        }
-
-
-        const pngBytes =
-          new Uint8Array(
-            await pngBlob
-              .arrayBuffer()
-          );
-
-
-        pdf.addImage(
-          pngBytes,
-          'PNG',
-          0,
-          0,
-          targetWidthPt,
-          cropHeight *
-            pxToPt,
-          `html_page_${pageIndex}`,
-          'FAST'
-        );
-      } finally {
-        canvas.width =
-          1;
-
-        canvas.height =
-          1;
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-      }
-
-
-      /*
-       * Release each page bitmap before asking Safari for the
-       * next crop.
-       */
-      await yieldToBrowser();
-    }
-
-
-    onProgress?.(
-      totalPages,
-      totalPages,
-      'Finalizing PDF...'
-    );
-
-
-    const output =
-      new Uint8Array(
-        pdf.output(
-          'arraybuffer'
-        )
-      );
-
-
-    onProgress?.(
-      totalPages,
-      totalPages,
-      'PDF ready'
-    );
-
-
-    return output;
-  } finally {
-    try {
-      iframe.remove();
-    } catch (_) {}
   }
+
+  onProgress?.(
+    blocks.length,
+    blocks.length,
+    'Finalizing PDF...'
+  );
+
+  const bytes =
+    new Uint8Array(
+      pdf.output(
+        'arraybuffer'
+      )
+    );
+
+  onProgress?.(
+    blocks.length,
+    blocks.length,
+    'PDF ready'
+  );
+
+  return bytes;
 }
 // ============================================================================
 // ANNOTATE PDF ENGINE
