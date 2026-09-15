@@ -115,6 +115,8 @@ export const HtmlToPdf: React.FC = () => {
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [progressLabel, setProgressLabel] =
+    useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -381,6 +383,14 @@ export const HtmlToPdf: React.FC = () => {
       selectedFile
     );
 
+    /*
+     * Upload mode owns the File itself.
+     * Release any previous pasted HTML string immediately.
+     */
+    setHtmlContent(
+      ''
+    );
+
     setFileName(
       selectedFile.name.replace(
         /\.[^/.]+$/,
@@ -442,6 +452,10 @@ export const HtmlToPdf: React.FC = () => {
         true
       );
 
+      setProgressLabel(
+        'Preparing HTML...'
+      );
+
       setErrorMessage(
         null
       );
@@ -486,6 +500,15 @@ export const HtmlToPdf: React.FC = () => {
               sourceHtml,
             pageSize,
             orientation,
+            onProgress: (
+              _current,
+              _total,
+              stage
+            ) => {
+              setProgressLabel(
+                stage
+              );
+            },
           };
 
         const pdfBytes =
@@ -530,6 +553,10 @@ export const HtmlToPdf: React.FC = () => {
         setIsProcessing(
           false
         );
+
+        setProgressLabel(
+          ''
+        );
       }
     };
 
@@ -560,7 +587,7 @@ export const HtmlToPdf: React.FC = () => {
           }}
           className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
             activeTab === 'paste'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
+              ? '!bg-emerald-700 !text-white font-semibold shadow-sm'
               : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
@@ -574,7 +601,7 @@ export const HtmlToPdf: React.FC = () => {
           }}
           className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
             activeTab === 'upload'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
+              ? '!bg-emerald-700 !text-white font-semibold shadow-sm'
               : 'text-zinc-400 hover:text-zinc-200'
           }`}
         >
@@ -722,13 +749,27 @@ export const HtmlToPdf: React.FC = () => {
       {!downloadUrl ? (
         <button
           onClick={handleConvert}
-          disabled={isProcessing || !htmlContent.trim()}
-          className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed text-xs"
+          disabled={
+            isProcessing ||
+            (
+              activeTab === 'upload'
+                ? !file
+                : !htmlContent.trim()
+            )
+          }
+          className={`w-full py-3 px-4 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg cursor-pointer disabled:cursor-not-allowed text-xs ${
+            isProcessing
+              ? '!bg-emerald-700 !text-white opacity-100 shadow-emerald-700/20'
+              : '!bg-emerald-600 hover:!bg-emerald-500 !text-white disabled:!bg-zinc-300 disabled:!text-zinc-600 disabled:opacity-100 shadow-emerald-600/20'
+          }`}
         >
           {isProcessing ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Rendering HTML into PDF...</span>
+              <span>
+                {progressLabel ||
+                  'Rendering HTML into PDF...'}
+              </span>
             </>
           ) : (
             <>

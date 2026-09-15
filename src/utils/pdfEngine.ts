@@ -16942,10 +16942,20 @@ export interface HtmlToPdfOptions {
   html: string;
   pageSize?: 'receipt' | 'a4' | 'letter';
   orientation?: 'portrait' | 'landscape';
+  onProgress?: (
+    current: number,
+    total: number,
+    stage: string
+  ) => void;
 }
 
 export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8Array> {
-  const { html, pageSize = 'a4', orientation = 'portrait' } = options;
+  const {
+    html,
+    pageSize = 'a4',
+    orientation = 'portrait',
+    onProgress,
+  } = options;
 
   if (!html || !html.trim()) {
     throw new Error('No content provided to convert.');
@@ -17042,8 +17052,57 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     // Allow DOM to compute full layout
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const actualContentHeight = Math.max(1123, doc.body.scrollHeight || doc.body.offsetHeight);
-    iframe.style.height = `${actualContentHeight}px`;
+    const actualContentHeight =
+      Math.max(
+        1123,
+        doc.body.scrollHeight ||
+          doc.body.offsetHeight
+      );
+
+    /*
+     * CRITICAL MOBILE FIX
+     *
+     * Never resize the iframe viewport to the entire HTML
+     * document. A very long document then forces Safari to
+     * maintain an enormous layout/paint surface even though
+     * we only need a few PDF pages at a time.
+     */
+    const boundedPageHeightPx =
+      isReceipt
+        ? 2500
+        : Math.max(
+            1,
+            Math.floor(
+              (
+                targetHeightPt /
+                targetWidthPt
+              ) *
+                renderWidthPx
+            )
+          );
+
+    const boundedIframeHeight =
+      isReceipt
+        ? Math.min(
+            actualContentHeight,
+            2500
+          )
+        : Math.min(
+            actualContentHeight,
+            boundedPageHeightPx * 4
+          );
+
+    iframe.style.height =
+      `${Math.max(
+        1,
+        boundedIframeHeight
+      )}px`;
+
+    onProgress?.(
+      0,
+      1,
+      'Preparing HTML layout...'
+    );
 
     /*
      * =========================================================
@@ -17211,8 +17270,18 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
              * Keep layout calculations based on the real
              * document height.
              */
+            /*
+             * Do not give html2canvas a document-height
+             * viewport. Only the current bounded band exists
+             * as the rendering viewport.
+             */
             windowHeight:
-              actualContentHeight,
+              Math.max(
+                1,
+                Math.ceil(
+                  height
+                )
+              ),
 
             x: 0,
 
@@ -17314,8 +17383,26 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
        * 340 CSS px wide × 2000 CSS px high at 2x remains
        * dramatically smaller than an unlimited document canvas.
        */
+      /*
+       * Still bounded, but fewer complete DOM-clone passes.
+       *
+       * 340px × 3000px at 2x is ~16 MB raw RGBA,
+       * which is far safer than an unlimited canvas.
+       */
       const RECEIPT_STRIP_HEIGHT =
-        2000;
+        3000;
+
+      const totalReceiptStrips =
+        Math.max(
+          1,
+          Math.ceil(
+            actualContentHeight /
+              RECEIPT_STRIP_HEIGHT
+          )
+        );
+
+      let receiptStripIndex =
+        0;
 
       for (
         let sourceY = 0;
@@ -17330,6 +17417,15 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             actualContentHeight -
               sourceY
           );
+
+        receiptStripIndex +=
+          1;
+
+        onProgress?.(
+          receiptStripIndex,
+          totalReceiptStrips,
+          `Rendering receipt section ${receiptStripIndex} of ${totalReceiptStrips}...`
+        );
 
         const canvas =
           await renderBand(
@@ -17450,8 +17546,27 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
      * This is bounded enough for mobile while cutting the
      * expensive HTML rendering calls approximately in half.
      */
+    /*
+     * Up to four A4/Letter pages per DOM clone.
+     *
+     * At 2x this is ~57 MB of raw pixels for A4,
+     * while reducing repeated html2canvas DOM work by
+     * roughly 75% versus one-render-per-page.
+     *
+     * Short documents (<=4 pages) therefore use ONE
+     * html2canvas pass total.
+     */
     const PAGES_PER_RENDER =
-      2;
+      Math.max(
+        1,
+        Math.min(
+          4,
+          totalPages
+        )
+      );
+
+    let chunkNumber =
+      0;
 
 
     for (
@@ -17477,8 +17592,24 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         pageHeightPx;
 
 
+      chunkNumber +=
+        1;
+
+      onProgress?.(
+        Math.min(
+          totalPages,
+          chunkStart + 1
+        ),
+        totalPages,
+        `Rendering pages ${chunkStart + 1}-${Math.min(
+          totalPages,
+          chunkStart + chunkPages
+        )} of ${totalPages}...`
+      );
+
       /*
-       * ONE html2canvas traversal for TWO PDF pages.
+       * ONE html2canvas DOM traversal for as many as
+       * FOUR PDF pages.
        */
       const chunkCanvas =
         await renderBand(
@@ -17589,11 +17720,26 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     }
 
 
-    return new Uint8Array(
-      pdf.output(
-        'arraybuffer'
-      )
+    onProgress?.(
+      totalPages,
+      totalPages,
+      'Finalizing PDF...'
     );
+
+    const finalOutput =
+      new Uint8Array(
+        pdf.output(
+          'arraybuffer'
+        )
+      );
+
+    onProgress?.(
+      totalPages,
+      totalPages,
+      'PDF ready'
+    );
+
+    return finalOutput;
 
   } finally {
     if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
