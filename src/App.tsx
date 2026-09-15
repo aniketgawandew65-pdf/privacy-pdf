@@ -553,6 +553,255 @@ export default function App() {
     };
   }, []);
 
+  /*
+   * ==========================================================
+   * GLOBAL PROCESSING SCREEN WAKE LOCK
+   * ==========================================================
+   *
+   * Long local PDF operations should not require the user to
+   * keep touching the phone merely to prevent screen sleep.
+   *
+   * Existing 1into1 processing UIs consistently expose an
+   * animated spinner while work is active. We also support
+   * explicit aria/data processing markers for current/future
+   * tools.
+   *
+   * Safari/Chrome can automatically release a wake lock when
+   * the page becomes hidden. Re-request it when the page becomes
+   * visible again and processing is still active.
+   */
+  useEffect(() => {
+    let wakeLock:
+      any =
+      null;
+
+    let requestInFlight =
+      false;
+
+    let processing =
+      false;
+
+    let syncQueued =
+      false;
+
+    const processingSelector =
+      [
+        '.animate-spin',
+        '[aria-busy="true"]',
+        '[data-processing-active="true"]',
+      ].join(',');
+
+    const processingIsVisible =
+      () =>
+        Boolean(
+          document.querySelector(
+            processingSelector
+          )
+        );
+
+    const requestWakeLock =
+      async () => {
+        if (
+          !processing ||
+          document.visibilityState !==
+            'visible' ||
+          wakeLock ||
+          requestInFlight
+        ) {
+          return;
+        }
+
+        const wakeLockApi =
+          (navigator as any)
+            .wakeLock;
+
+        if (
+          !wakeLockApi ||
+          typeof wakeLockApi
+            .request !==
+            'function'
+        ) {
+          return;
+        }
+
+        requestInFlight =
+          true;
+
+        try {
+          const sentinel =
+            await wakeLockApi
+              .request(
+                'screen'
+              );
+
+          wakeLock =
+            sentinel;
+
+          /*
+           * The OS is allowed to revoke the lock, for example
+           * under battery/power-management conditions.
+           */
+          sentinel
+            ?.addEventListener?.(
+              'release',
+              () => {
+                if (
+                  wakeLock ===
+                  sentinel
+                ) {
+                  wakeLock =
+                    null;
+                }
+
+                if (
+                  processing &&
+                  document
+                    .visibilityState ===
+                    'visible'
+                ) {
+                  window.setTimeout(
+                    () => {
+                      void requestWakeLock();
+                    },
+                    500
+                  );
+                }
+              },
+              {
+                once: true,
+              }
+            );
+        } catch (
+          _
+        ) {
+          /*
+           * Wake lock is a usability enhancement.
+           * A browser/OS refusal must never fail PDF processing.
+           */
+          wakeLock =
+            null;
+        } finally {
+          requestInFlight =
+            false;
+        }
+      };
+
+    const releaseWakeLock =
+      async () => {
+        const current =
+          wakeLock;
+
+        wakeLock =
+          null;
+
+        if (
+          current &&
+          typeof current
+            .release ===
+            'function'
+        ) {
+          try {
+            await current
+              .release();
+          } catch (_) {}
+        }
+      };
+
+    const syncWakeLock =
+      () => {
+        syncQueued =
+          false;
+
+        const nextProcessing =
+          processingIsVisible();
+
+        processing =
+          nextProcessing;
+
+        if (
+          processing
+        ) {
+          void requestWakeLock();
+        } else {
+          void releaseWakeLock();
+        }
+      };
+
+    const queueSync =
+      () => {
+        if (
+          syncQueued
+        ) {
+          return;
+        }
+
+        syncQueued =
+          true;
+
+        queueMicrotask(
+          syncWakeLock
+        );
+      };
+
+    const observer =
+      new MutationObserver(
+        queueSync
+      );
+
+    observer.observe(
+      document.documentElement,
+      {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+          'class',
+          'aria-busy',
+          'data-processing-active',
+        ],
+      }
+    );
+
+    const handleVisibility =
+      () => {
+        if (
+          document
+            .visibilityState ===
+          'hidden'
+        ) {
+          void releaseWakeLock();
+          return;
+        }
+
+        queueSync();
+      };
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibility
+    );
+
+    /*
+     * Detect a process which was already active before this
+     * effect attached.
+     */
+    queueSync();
+
+    return () => {
+      observer.disconnect();
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibility
+      );
+
+      processing =
+        false;
+
+      void releaseWakeLock();
+    };
+  }, []);
+
   useEffect(() => {
     const meta = blogMeta(location.pathname) || TOOLS_METADATA[location.pathname] || { title: 'Page not found | 1into1 PDF', description: 'Find the right PDF tool at 1into1.', heading: 'Page not found', subheading: 'Choose a tool to keep working.' };
     document.title = meta.title;

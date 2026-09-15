@@ -3442,91 +3442,25 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     /*
      * ========================================================
-     * ONE AUTOMATIC REPAIR PASS
+     * SINGLE-PASS LARGE-PDF POLICY
      * ========================================================
      *
-     * If a selected value is still visually readable, rebuild
-     * from the ORIGINAL PDF using larger destructive blackouts
-     * only around the affected values.
+     * The finished PDF has already been securely reconstructed
+     * once and is now browser-backed in workingPdf.
      *
-     * We do not repair by drawing over the already-produced PDF.
+     * Do NOT rebuild a 150 MB document a second time merely
+     * because the independent verifier requests review.
+     *
+     * If verification is uncertain, preserve PASS 1 and send
+     * the user directly to manual review instead.
+     *
+     * Security is NOT weakened:
+     *
+     * - automatic download still requires verification.passed
+     * - uncertain output remains blocked from automatic download
+     * - manual review remains available
+     * - Download Anyway remains an explicit user decision
      */
-    if (
-      !verification.passed &&
-      verification
-        .failedTargetIds
-        .length >
-        0
-    ) {
-      const failedIds =
-        new Set<string>(
-          verification
-            .failedTargetIds
-        );
-
-      setStatus(
-        `Strengthening ${verification.leakedValues.length} redaction${
-          verification.leakedValues.length === 1
-            ? ""
-            : "s"
-        } automatically…`
-      );
-
-      /*
-       * PASS 1 already lives in browser-backed storage and the
-       * large byte array has already been released.
-       */
-      await settleRedactionMemory();
-
-      bytes =
-        await redactPDF(
-          file,
-          buildPayload(
-            failedIds
-          ),
-          (
-            current,
-            total
-          ) => {
-            setStatus(
-              `Strengthening page ${current} of ${total}…`
-            );
-          }
-        );
-
-      workingPdf =
-        await spillFinishedPdf(
-          bytes,
-          "private-pii-pass-2.pdf"
-        );
-
-      bytes =
-        new Uint8Array(
-          0
-        );
-
-      await settleRedactionMemory();
-
-      setStatus(
-        "Re-checking strengthened redactions…"
-      );
-
-      verification =
-        await verifyFinishedPdf(
-          workingPdf,
-          verificationTargets,
-          (
-            message
-          ) =>
-            setStatus(
-              message
-            ),
-          {
-            flattenedPages:
-              redactedPages,
-          }
-        );
-    }
 
     /*
      * ========================================================
@@ -3542,15 +3476,26 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             .failedTargetIds
         );
 
+      /*
+       * Exact failed IDs are preferred.
+       *
+       * Some structural verifier failures can be page-level
+       * rather than tied to one exact finding. In that case,
+       * review ALL selected boxes instead of returning an empty
+       * list and accidentally showing Auto-Redact again.
+       */
       const reviewItems =
-        selected.filter(
-          (
-            finding
-          ) =>
-            failedIdSet.has(
-              finding.id
+        failedIdSet.size >
+          0
+          ? selected.filter(
+              (
+                finding
+              ) =>
+                failedIdSet.has(
+                  finding.id
+                )
             )
-        );
+          : selected;
 
       /*
        * Keep the exact already-redacted output available for the
@@ -4141,9 +4086,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                   </strong>
 
                   <p className="mt-1 text-xs leading-5 text-amber-900">
-                    We automatically tried a stronger redaction once.
-                    These are the areas the final safety check could
-                    still read:
+                    The secure copy was created once. The independent
+                    final safety check flagged these areas for manual
+                    review before sharing:
                   </p>
 
                   <div className="mt-3 space-y-2">
