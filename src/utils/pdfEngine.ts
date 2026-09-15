@@ -15393,13 +15393,6 @@ export interface ExtractedMarkdownResult {
   estimatedTokens: number;
 }
 
-export interface MarkdownExtractOptions {
-  detectHeadings?: boolean;
-  detectLists?: boolean;
-  joinHyphenatedWords?: boolean;
-  onProgress?: (current: number, total: number) => void;
-}
-
 export async function extractMarkdownFromPDF(
   file: File,
   options: MarkdownExtractOptions = {}
@@ -15444,6 +15437,17 @@ export async function extractMarkdownFromPDF(
   let ocrWorker:
     any =
     null;
+
+  /*
+   * Tesseract's WASM heap can remain expanded after many
+   * consecutive pages. Recycle the worker periodically so an
+   * 80-100 page scan does not continually grow Safari memory.
+   */
+  let ocrPagesSinceRecycle =
+    0;
+
+  const OCR_WORKER_PAGE_LIMIT =
+    8;
 
   const yieldToBrowser =
     () =>
@@ -15669,6 +15673,31 @@ export async function extractMarkdownFromPDF(
         ] ||
         12;
 
+      /*
+       * Statements/tables often contain uppercase names and
+       * slightly different font sizes. Those are data rows,
+       * not Markdown headings.
+       */
+      const dateHeavyLineCount =
+        sourceLines.filter(
+          (line) => {
+            const matches =
+              line.text.match(
+                /\b\d{1,2}[-\/]([A-Za-z]{3}|\d{1,2})[-\/]\d{2,4}\b/g
+              );
+
+            return Boolean(
+              matches &&
+              matches.length >=
+                2
+            );
+          }
+        ).length;
+
+      const dataHeavyPage =
+        dateHeavyLineCount >=
+        3;
+
 
       for (
         let lineIndex = 0;
@@ -15789,8 +15818,14 @@ export async function extractMarkdownFromPDF(
 
         /*
          * Heading hierarchy.
+         *
+         * Disable aggressive heading inference on
+         * transaction/table-heavy pages.
          */
-        if (detectHeadings) {
+        if (
+          detectHeadings &&
+          !dataHeavyPage
+        ) {
           if (
             avgHeight >=
             medianHeight *
@@ -16027,14 +16062,41 @@ export async function extractMarkdownFromPDF(
           const rawItem of
           content.items as any[]
         ) {
-          const itemText =
+          const rawText =
             String(
               rawItem?.str ||
               ''
             );
 
+          const containsBinaryControls =
+            /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(
+              rawText
+            );
+
+          const itemText =
+            rawText
+              .replace(
+                /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+                ''
+              )
+              .replace(
+                /\uFFFD/g,
+                ''
+              )
+              .trim();
+
+          /*
+           * Barcode/font-encoding garbage often exposes control
+           * bytes through the PDF text layer. Do not send those
+           * artifacts into Markdown.
+           */
           if (
-            !itemText.trim()
+            !itemText ||
+            (
+              containsBinaryControls &&
+              itemText.length <
+                160
+            )
           ) {
             continue;
           }
@@ -16154,6 +16216,29 @@ export async function extractMarkdownFromPDF(
 
 
         if (shouldOcr) {
+          if (
+            ocrWorker &&
+            ocrPagesSinceRecycle >=
+              OCR_WORKER_PAGE_LIMIT
+          ) {
+            try {
+              await ocrWorker
+                .terminate();
+            } catch (_) {}
+
+            ocrWorker =
+              null;
+
+            ocrPagesSinceRecycle =
+              0;
+
+            /*
+             * Let Safari reclaim the old WASM heap before
+             * creating the next worker.
+             */
+            await yieldToBrowser();
+          }
+
           const worker =
             await ensureOcrWorker();
 
@@ -16255,6 +16340,9 @@ export async function extractMarkdownFromPDF(
                 canvas
               );
 
+            ocrPagesSinceRecycle +=
+              1;
+
             const scannedText =
               String(
                 data?.text ||
@@ -16323,6 +16411,21 @@ export async function extractMarkdownFromPDF(
         } catch (_) {}
       }
 
+
+      /*
+       * Long scanned documents can leave decoded fonts/images
+       * in PDF.js document caches even after page.cleanup().
+       * Release those caches periodically.
+       */
+      if (
+        pageNum %
+          8 ===
+        0
+      ) {
+        try {
+          await pdfDoc.cleanup();
+        } catch (_) {}
+      }
 
       /*
        * Safari gets a collection/main-thread opportunity after

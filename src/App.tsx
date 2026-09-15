@@ -602,9 +602,15 @@ export default function App() {
         );
 
     const requestWakeLock =
-      async () => {
+      async (
+        force =
+          false
+      ) => {
         if (
-          !processing ||
+          (
+            !processing &&
+            !force
+          ) ||
           document.visibilityState !==
             'visible' ||
           wakeLock ||
@@ -745,6 +751,78 @@ export default function App() {
         );
       };
 
+    /*
+     * Some mobile Safari/iOS configurations are more willing
+     * to grant a screen wake lock while handling a direct user
+     * gesture. Prime/retry the GLOBAL lock from any interaction
+     * that can launch processing, including file selection.
+     *
+     * If processing does not start, queueSync() releases the
+     * temporary lock shortly afterwards.
+     */
+    let gestureSyncTimer:
+      number |
+      null =
+      null;
+
+    const requestFromUserGesture =
+      () => {
+        if (
+          document.visibilityState !==
+          'visible'
+        ) {
+          return;
+        }
+
+        void requestWakeLock(
+          true
+        );
+
+        if (
+          gestureSyncTimer !==
+          null
+        ) {
+          window.clearTimeout(
+            gestureSyncTimer
+          );
+        }
+
+        gestureSyncTimer =
+          window.setTimeout(
+            () => {
+              gestureSyncTimer =
+                null;
+
+              queueSync();
+            },
+            1500
+          );
+      };
+
+    document.addEventListener(
+      'pointerdown',
+      requestFromUserGesture,
+      true
+    );
+
+    document.addEventListener(
+      'touchstart',
+      requestFromUserGesture,
+      true
+    );
+
+    document.addEventListener(
+      'keydown',
+      requestFromUserGesture,
+      true
+    );
+
+    document.addEventListener(
+      'change',
+      requestFromUserGesture,
+      true
+    );
+
     const observer =
       new MutationObserver(
         queueSync
@@ -791,6 +869,42 @@ export default function App() {
 
     return () => {
       observer.disconnect();
+
+      if (
+        gestureSyncTimer !==
+        null
+      ) {
+        window.clearTimeout(
+          gestureSyncTimer
+        );
+
+        gestureSyncTimer =
+          null;
+      }
+
+      document.removeEventListener(
+        'pointerdown',
+        requestFromUserGesture,
+        true
+      );
+
+      document.removeEventListener(
+        'touchstart',
+        requestFromUserGesture,
+        true
+      );
+
+      document.removeEventListener(
+        'keydown',
+        requestFromUserGesture,
+        true
+      );
+
+      document.removeEventListener(
+        'change',
+        requestFromUserGesture,
+        true
+      );
 
       document.removeEventListener(
         'visibilitychange',

@@ -30,10 +30,28 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * React state alone is not enough to guard an async effect:
+   * a second dependency update can happen before the previous
+   * extraction has finished. Keep a synchronous ref guard.
+   */
+  const extractionInFlightRef =
+    useRef(false);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   const handleExtraction = async () => {
-    if (!file) return;
+    if (
+      !file ||
+      extractionInFlightRef.current
+    ) {
+      return;
+    }
+
+    extractionInFlightRef.current =
+      true;
+
     setIsExtracting(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -59,6 +77,9 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
       setErrorMessage(err.message || 'Failed to extract Markdown.');
       setMdResult(null);
     } finally {
+      extractionInFlightRef.current =
+        false;
+
       setIsExtracting(false);
       setProgressStatus('');
     }
@@ -159,6 +180,7 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
               <input
                 type="checkbox"
                 checked={detectHeadings}
+                disabled={isExtracting}
                 onChange={(e) => setDetectHeadings(e.target.checked)}
                 className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0"
               />
@@ -169,6 +191,7 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
               <input
                 type="checkbox"
                 checked={detectLists}
+                disabled={isExtracting}
                 onChange={(e) => setDetectLists(e.target.checked)}
                 className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0"
               />
@@ -179,6 +202,7 @@ export const PdfToMarkdown: React.FC<PdfToMarkdownProps> = ({ file, onFileChange
               <input
                 type="checkbox"
                 checked={joinHyphenatedWords}
+                disabled={isExtracting}
                 onChange={(e) => setJoinHyphenatedWords(e.target.checked)}
                 className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0"
               />
