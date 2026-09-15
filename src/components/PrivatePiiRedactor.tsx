@@ -18,11 +18,14 @@ import {
   X,
   Upload,
 } from "lucide-react";
-import { PDFDocument } from "pdf-lib";
 import {
   loadPdfJsFromBlob,
   pdfjsLib,
 } from "../utils/pdfjs";
+import {
+  redactPDF,
+  type PageRedaction,
+} from "../utils/pdfEngine";
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -2898,786 +2901,516 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   };
 
   const redactPdf = async (): Promise<boolean> => {
-    if (!file) return false;
+    if (!file) {
+      return false;
+    }
+
+    const selected =
+      findings.filter(
+        (finding) =>
+          finding.selected &&
+          Boolean(
+            finding.page &&
+            finding.box &&
+            finding.pageWidth &&
+            finding.pageHeight
+          )
+      );
+
+    if (
+      selected.length ===
+      0
+    ) {
+      setError(
+        "No valid PDF redaction areas are selected."
+      );
+
+      return false;
+    }
 
     /*
-     * Keep the source PDF open ONLY while a secure output pass
-     * is actively rendering pages.
+     * ========================================================
+     * PRIVATE PII -> SHARED SECURE REDACT ENGINE
+     * ========================================================
      *
-     * The previous implementation kept the original PDF.js
-     * document alive during final OCR verification, causing the
-     * large input PDF and the large finished PDF to overlap in
-     * mobile memory.
+     * Private PII no longer maintains a second full-document
+     * rasterization implementation.
+     *
+     * The normal Redact tool already has the mobile-optimized
+     * secure engine:
+     *
+     * - only pages containing blackouts are rasterized
+     * - blackout pixels are permanently burned into those pages
+     * - original content streams from redacted pages are NOT
+     *   copied into the result
+     * - untouched pages remain lossless/vector
+     *
+     * This dramatically reduces memory for large PDFs.
      */
-    let loadedSourcePdf:
-      | Awaited<
-          ReturnType<
-            typeof loadPdfJsFromBlob
-          >
-        >
-      | null = null;
 
-    const getSourcePdf =
-      async () => {
-        if (
-          !loadedSourcePdf
+    const buildPayload =
+      (
+        strengthenValues:
+          ReadonlySet<string> =
+            new Set<string>()
+      ): PageRedaction[] => {
+        const byPage =
+          new Map<
+            number,
+            PageRedaction
+          >();
+
+        for (
+          const finding of
+            selected
         ) {
-          loadedSourcePdf =
-            await loadPdfJsFromBlob(
-              file
-            );
-        }
+          const page =
+            finding.page!;
 
-        return loadedSourcePdf.pdf;
-      };
+          const box =
+            finding.box!;
 
-    const releaseSourcePdf =
-      async () => {
-        const loaded =
-          loadedSourcePdf;
+          const pageWidth =
+            finding.pageWidth!;
 
-        loadedSourcePdf =
-          null;
+          const pageHeight =
+            finding.pageHeight!;
 
-        if (!loaded) {
-          return;
-        }
-
-        try {
-          await loaded.dispose();
-        } catch (_) {}
-      };
-
-    const selected = findings.filter(
-      (finding) =>
-        finding.selected &&
-        finding.page &&
-        finding.box
-    );
-
-    const renderScale = 1.7;
-
-    const buildSecurePdf = async (
-      strengthenValues = new Set<string>(),
-      repairBase: PDFDocument | null = null,
-      repairPages: ReadonlySet<number> | null = null
-    ): Promise<Uint8Array> => {
-      /*
-       * Open/reopen the original PDF only for the rendering
-       * stage. After this build finishes it can be completely
-       * released before OCR verification starts.
-       */
-      const pdf =
-        await getSourcePdf();
-
-      /*
-       * PASS 1:
-       *   Every page is rendered + flattened securely.
-       *
-       * REPAIR PASS:
-       *   Pages that already passed verification are copied
-       *   directly from PASS 1.
-       *
-       *   ONLY pages containing a failed sensitive value are
-       *   rendered again from the original source with stronger
-       *   destructive redaction.
-       *
-       * This keeps the security model unchanged while avoiding
-       * a second full-document raster pass.
-       */
-      const outputPdf =
-        await PDFDocument.create();
-
-      for (
-        let pageNumber = 1;
-        pageNumber <= pdf.numPages;
-        pageNumber++
-      ) {
-        const needsRepair =
-          Boolean(
-            repairBase &&
-            repairPages?.has(
-              pageNumber
-            )
-          );
-
-        /*
-         * The page already passed the safety check.
-         *
-         * Copy the already-flattened PASS 1 page instead of
-         * rendering the original PDF again.
-         *
-         * We intentionally copy it into a NEW PDFDocument rather
-         * than modifying PASS 1 in place. That prevents an old
-         * failed page/image from surviving as an unreferenced PDF
-         * object in the final repaired file.
-         */
-        if (
-          repairBase &&
-          !needsRepair
-        ) {
-          setStatus(
-            `Keeping verified secure page ${pageNumber} of ${pdf.numPages}…`
-          );
-
-          const [
-            copiedPage
-          ] =
-            await outputPdf.copyPages(
-              repairBase,
-              [
-                pageNumber - 1,
-              ]
+          const normalizedValue =
+            normalizeForSafetyCheck(
+              finding.value
             );
 
-          outputPdf.addPage(
-            copiedPage
-          );
+          const strengthen =
+            strengthenValues.has(
+              normalizedValue
+            );
 
           /*
-           * Give Safari / Chrome regular opportunities to paint,
-           * process input and reclaim temporary allocations.
+           * Normal automatic findings already contain safety
+           * padding from the scanner.
+           *
+           * Automatic repair adds extra padding only around a
+           * value which the final verifier could still read.
            */
-          if (
-            pageNumber % 12 === 0
-          ) {
-            await new Promise<void>(
-              (resolve) =>
-                setTimeout(
-                  resolve,
-                  0
+          const extraX =
+            strengthen
+              ? Math.max(
+                  6,
+                  box.height *
+                    0.5
                 )
-            );
-          }
+              : 0;
 
-          continue;
-        }
+          const extraY =
+            strengthen
+              ? Math.max(
+                  4,
+                  box.height *
+                    0.3
+                )
+              : 0;
 
-        setStatus(
-          repairBase
-            ? `Strengthening redacted page ${pageNumber} of ${pdf.numPages}…`
-            : `Creating secure redacted page ${pageNumber} of ${pdf.numPages}…`
-        );
-
-        const page =
-          await pdf.getPage(
-            pageNumber
-          );
-
-        let canvas:
-          HTMLCanvasElement | null =
-            null;
-
-        try {
-          const baseViewport =
-            page.getViewport({
-              scale: 1,
-            });
-
-          const renderViewport =
-            page.getViewport({
-              scale: renderScale,
-            });
-
-          canvas =
-            document.createElement(
-              "canvas"
+          const left =
+            Math.max(
+              0,
+              box.x -
+                extraX
             );
 
-          canvas.width =
-            Math.ceil(
-              renderViewport.width
+          const top =
+            Math.max(
+              0,
+              box.y -
+                extraY
             );
 
-          canvas.height =
-            Math.ceil(
-              renderViewport.height
+          const right =
+            Math.min(
+              pageWidth,
+              box.x +
+                box.width +
+                extraX
             );
 
-          const ctx =
-            canvas.getContext(
-              "2d",
-              {
-                alpha: false,
-              }
+          const bottom =
+            Math.min(
+              pageHeight,
+              box.y +
+                box.height +
+                extraY
             );
 
-          if (!ctx) {
-            throw new Error(
-              "Unable to create secure PDF renderer."
-            );
-          }
-
-          ctx.fillStyle =
-            "#ffffff";
-
-          ctx.fillRect(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-          await page.render({
-            canvasContext: ctx,
-            viewport:
-              renderViewport,
-            canvas,
-          } as any).promise;
-
-          const pageFindings =
-            selected.filter(
-              (finding) =>
-                finding.page ===
-                pageNumber
-            );
-
-          ctx.fillStyle =
-            "#000000";
-
-          for (
-            const finding of
-              pageFindings
-          ) {
-            const box =
-              finding.box!;
-
-            const normalizedValue =
-              normalizeForSafetyCheck(
-                finding.value
-              );
-
-            const strengthen =
-              strengthenValues.has(
-                normalizedValue
-              );
-
-            /*
-             * First pass uses the exact detected box.
-             *
-             * If verification says this specific value
-             * remains readable, the second pass adds
-             * generous privacy padding around ONLY that
-             * failed box.
-             */
-            const padX =
-              strengthen
-                ? Math.max(
-                    6,
-                    box.height *
-                      0.45
-                  )
-                : 0;
-
-            const padY =
-              strengthen
-                ? Math.max(
-                    4,
-                    box.height *
-                      0.30
-                  )
-                : 0;
-
-            const left =
+          const rect = {
+            x:
+              left /
+              pageWidth,
+            y:
+              top /
+              pageHeight,
+            width:
               Math.max(
-                0,
+                0.002,
                 (
-                  box.x -
-                  padX
-                ) *
-                  renderScale
-              );
-
-            const top =
-              Math.max(
-                0,
-                (
-                  box.y -
-                  padY
-                ) *
-                  renderScale
-              );
-
-            const right =
-              Math.min(
-                canvas.width,
-                (
-                  box.x +
-                  box.width +
-                  padX
-                ) *
-                  renderScale
-              );
-
-            const bottom =
-              Math.min(
-                canvas.height,
-                (
-                  box.y +
-                  box.height +
-                  padY
-                ) *
-                  renderScale
-              );
-
-            ctx.fillRect(
-              left,
-              top,
-              Math.max(
-                2,
-                right - left
+                  right -
+                  left
+                ) /
+                  pageWidth
               ),
+            height:
               Math.max(
-                2,
-                bottom - top
-              )
-            );
-          }
+                0.002,
+                (
+                  bottom -
+                  top
+                ) /
+                  pageHeight
+              ),
+          };
 
-          const imageBlob =
-            await new Promise<Blob>(
-              (
-                resolve,
-                reject
-              ) => {
-                canvas!.toBlob(
-                  (blob) => {
-                    if (blob) {
-                      resolve(
-                        blob
-                      );
-                    } else {
-                      reject(
-                        new Error(
-                          "Unable to render PDF page."
-                        )
-                      );
-                    }
-                  },
-                  "image/jpeg",
-                  0.94
-                );
+          const pageIndex =
+            page - 1;
+
+          const existing =
+            byPage.get(
+              page
+            );
+
+          if (existing) {
+            existing.rects.push(
+              rect
+            );
+          } else {
+            byPage.set(
+              page,
+              {
+                pageIndex,
+                rects: [
+                  rect,
+                ],
               }
             );
-
-          const imageBytes =
-            new Uint8Array(
-              await imageBlob.arrayBuffer()
-            );
-
-          const image =
-            await outputPdf.embedJpg(
-              imageBytes
-            );
-
-          const outputPage =
-            outputPdf.addPage([
-              baseViewport.width,
-              baseViewport.height,
-            ]);
-
-          outputPage.drawImage(
-            image,
-            {
-              x: 0,
-              y: 0,
-              width:
-                baseViewport.width,
-              height:
-                baseViewport.height,
-            }
-          );
-        } finally {
-          if (canvas) {
-            canvas.width = 1;
-            canvas.height = 1;
-
-            try {
-              canvas.remove();
-            } catch (_) {}
           }
-
-          try {
-            page.cleanup();
-          } catch (_) {}
         }
 
-        await new Promise<void>(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              0
+        return Array.from(
+          byPage.values()
+        );
+      };
+
+    const redactedPages =
+      new Set<number>(
+        selected.map(
+          (finding) =>
+            finding.page!
+        )
+      );
+
+    /*
+     * Run the same hardened Redact engine already proven on the
+     * large mobile-PDF workflow.
+     */
+    setStatus(
+      "Creating secure redacted pages…"
+    );
+
+    let bytes =
+      await redactPDF(
+        file,
+        buildPayload(),
+        (
+          current,
+          total
+        ) => {
+          setStatus(
+            `Securely redacting page ${current} of ${total}…`
+          );
+        }
+      );
+
+    /*
+     * ========================================================
+     * FINAL SAFETY CHECK
+     * ========================================================
+     *
+     * Only redacted pages are expected to be flattened now.
+     *
+     * Untouched pages intentionally remain lossless and may
+     * retain normal selectable text.
+     */
+    setStatus(
+      "Checking the finished redacted pages…"
+    );
+
+    let verification =
+      await verifyFinishedPdf(
+        bytes,
+        selected,
+        (
+          message
+        ) =>
+          setStatus(
+            message
+          ),
+        {
+          flattenedPages:
+            redactedPages,
+        }
+      );
+
+    /*
+     * ========================================================
+     * ONE AUTOMATIC REPAIR PASS
+     * ========================================================
+     *
+     * If a selected value is still visually readable, rebuild
+     * from the ORIGINAL PDF using larger destructive blackouts
+     * only around the affected values.
+     *
+     * We do not repair by drawing over the already-produced PDF.
+     */
+    if (
+      !verification.passed &&
+      verification
+        .leakedValues
+        .length >
+        0
+    ) {
+      const failedValues =
+        new Set<string>(
+          verification
+            .leakedValues
+            .map(
+              (
+                value
+              ) =>
+                normalizeForSafetyCheck(
+                  value
+                )
+            )
+            .filter(
+              Boolean
             )
         );
-      }
 
-      outputPdf.setTitle("");
-      outputPdf.setAuthor("");
-      outputPdf.setSubject("");
-      outputPdf.setKeywords([]);
-      outputPdf.setCreator("1into1");
-      outputPdf.setProducer("1into1");
-
-      return await outputPdf.save();
-    };
-
-    try {
-      // ======================================================
-      // PASS 1 — normal automatic redaction
-      // ======================================================
-
-      let bytes = await buildSecurePdf();
+      setStatus(
+        `Strengthening ${verification.leakedValues.length} redaction${
+          verification.leakedValues.length === 1
+            ? ""
+            : "s"
+        } automatically…`
+      );
 
       /*
-       * PASS 1 no longer needs the original document.
-       *
-       * Destroy PDF.js + revoke its Blob URL BEFORE opening the
-       * finished PDF for final OCR verification.
-       *
-       * This prevents:
-       *
-       *   original PDF
-       *   + finished PDF
-       *   + verification render/OCR
-       *
-       * from intentionally overlapping in mobile memory.
+       * Release our reference to PASS 1 before producing PASS 2.
        */
-      await releaseSourcePdf();
+      bytes =
+        new Uint8Array(
+          0
+        );
 
       await new Promise<void>(
-        (resolve) =>
+        (
+          resolve
+        ) =>
           setTimeout(
             resolve,
             0
           )
       );
 
+      bytes =
+        await redactPDF(
+          file,
+          buildPayload(
+            failedValues
+          ),
+          (
+            current,
+            total
+          ) => {
+            setStatus(
+              `Strengthening page ${current} of ${total}…`
+            );
+          }
+        );
+
       setStatus(
-        "Checking the finished PDF for anything still readable…"
+        "Re-checking strengthened redactions…"
       );
 
-      let verification =
+      verification =
         await verifyFinishedPdf(
           bytes,
           selected,
-          (message) =>
-            setStatus(message)
+          (
+            message
+          ) =>
+            setStatus(
+              message
+            ),
+          {
+            flattenedPages:
+              redactedPages,
+          }
+        );
+    }
+
+    /*
+     * ========================================================
+     * STILL UNSAFE -> MANUAL REVIEW
+     * ========================================================
+     */
+    if (
+      !verification.passed
+    ) {
+      const failedValueSet =
+        new Set(
+          verification
+            .leakedValues
+            .map(
+              (
+                value
+              ) =>
+                normalizeForSafetyCheck(
+                  value
+                )
+            )
+            .filter(
+              Boolean
+            )
         );
 
-      // ======================================================
-      // PASS 2 — AUTOMATIC REPAIR
-      //
-      // If individual sensitive values remain readable,
-      // automatically enlarge ONLY those redactions and
-      // regenerate the PDF once.
-      // ======================================================
-
-      if (
-        !verification.passed &&
-        verification.leakedValues.length > 0
-      ) {
-        const failedValues =
-          new Set(
-            verification.leakedValues
-              .map((value) =>
-                normalizeForSafetyCheck(
-                  value
-                )
-              )
-              .filter(Boolean)
-          );
-
-        /*
-         * Translate failed sensitive values back to the exact
-         * source pages that contain them.
-         *
-         * If the same failed value occurs on several pages,
-         * every occurrence is strengthened.
-         */
-        const failedPages =
-          new Set<number>(
-            selected
-              .filter(
-                (finding) =>
-                  Boolean(
-                    finding.page &&
-                    failedValues.has(
-                      normalizeForSafetyCheck(
-                        finding.value
-                      )
-                    )
-                  )
-              )
-              .map(
-                (finding) =>
-                  finding.page!
-              )
-          );
-
-        /*
-         * Only run the automatic repair when the verifier's
-         * leaked value can be mapped safely back to a page.
-         *
-         * If it cannot be mapped, the existing manual-review
-         * protection below remains authoritative.
-         */
-        if (
-          failedPages.size > 0
-        ) {
-          setStatus(
-            `Strengthening ${verification.leakedValues.length} redaction${
-              verification.leakedValues.length === 1
-                ? ""
-                : "s"
-            } across ${failedPages.size} page${
-              failedPages.size === 1
-                ? ""
-                : "s"
-            } automatically…`
-          );
-
-          /*
-           * PASS 1 is already a fully flattened secure PDF.
-           *
-           * Load it only as the source for pages which already
-           * passed verification. Those pages will be copied into
-           * a NEW output document without rasterizing them again.
-           */
-          let repairBase:
-            | PDFDocument
-            | null =
-            await PDFDocument.load(
-              bytes,
-              {
-                updateMetadata:
-                  false,
-              }
-            );
-
-          /*
-           * PDFDocument now owns the parsed PASS 1 document.
-           * Drop our standalone Uint8Array reference before
-           * rebuilding the repaired result.
-           */
-          bytes =
-            new Uint8Array(
-              0
-            );
-
-          await new Promise<void>(
-            (resolve) =>
-              setTimeout(
-                resolve,
-                0
-              )
-          );
-
-          /*
-           * buildSecurePdf now:
-           *
-           * - directly copies pages that passed verification
-           * - rerenders ONLY failed pages
-           * - reapplies ALL selected redactions on failed pages
-           * - gives failed values the existing stronger padding
-           *
-           * No OCR/detection rules are changed.
-           */
-          bytes =
-            await buildSecurePdf(
-              failedValues,
-              repairBase,
-              failedPages
-            );
-
-          /*
-           * Repair rendering is complete.
-           *
-           * The original PDF was reopened only for failed-page
-           * rerendering. Release it again BEFORE verification.
-           */
-          await releaseSourcePdf();
-
-          /*
-           * copyPages() already copied every verified PASS 1 page
-           * into a fresh output PDF. The parsed PASS 1 document is
-           * no longer required after serialization.
-           */
-          repairBase =
-            null;
-
-          await new Promise<void>(
-            (resolve) =>
-              setTimeout(
-                resolve,
-                0
-              )
-          );
-
-          setStatus(
-            "Re-checking the strengthened redactions…"
-          );
-
-          verification =
-            await verifyFinishedPdf(
-              bytes,
-              selected,
-              (message) =>
-                setStatus(
-                  message
-                )
-            );
-        }
-      }
-
-      // ======================================================
-      // STILL UNSAFE AFTER AUTOMATIC SECOND PASS
-      // ======================================================
-
-      if (!verification.passed) {
-        const failedValueSet =
-          new Set(
-            verification.leakedValues
-              .map((value) =>
-                normalizeForSafetyCheck(
-                  value
-                )
-              )
-              .filter(Boolean)
-          );
-
-        const reviewItems =
-          selected.filter((finding) =>
+      const reviewItems =
+        selected.filter(
+          (
+            finding
+          ) =>
             failedValueSet.has(
               normalizeForSafetyCheck(
                 finding.value
               )
             )
-          );
-
-        /*
-         * Keep the exact finished auto-redacted copy.
-         * Download Anyway reuses these bytes directly —
-         * no second OCR or redaction run.
-         */
-        /*
-         * bytes is already a Uint8Array.
-         *
-         * Do not clone the complete finished PDF here.
-         * The pending reference treats these finished bytes
-         * as immutable.
-         */
-        pendingRedactedPdfRef.current =
-          bytes;
-
-        redactorSessionCache.pendingRedactedPdf =
-          pendingRedactedPdfRef.current;
-
-        /*
-         * Preserve this exact already-redacted copy so
-         * Download Anyway still works after mobile Preview -> Back.
-         * It stays local in the browser workspace.
-         */
-        void saveToolWorkspaceFiles(
-          'private-pii-redactor-pending',
-          [
-            new File(
-              [
-                pendingRedactedPdfRef.current as unknown as BlobPart,
-              ],
-              'pending-redacted.pdf',
-              {
-                type: 'application/pdf',
-                lastModified: Date.now(),
-              }
-            ),
-          ]
         );
 
-        setManualReviewFindings(
-          reviewItems
+      /*
+       * Keep the exact already-redacted output available for the
+       * existing explicit Download Anyway workflow.
+       */
+      pendingRedactedPdfRef.current =
+        bytes;
+
+      redactorSessionCache.pendingRedactedPdf =
+        bytes;
+
+      void saveToolWorkspaceFiles(
+        'private-pii-redactor-pending',
+        [
+          new File(
+            [
+              bytes as unknown as BlobPart,
+            ],
+            'pending-redacted.pdf',
+            {
+              type:
+                'application/pdf',
+              lastModified:
+                Date.now(),
+            }
+          ),
+        ]
+      );
+
+      setManualReviewFindings(
+        reviewItems
+      );
+
+      if (
+        reviewItems.length >
+        0
+      ) {
+        setError(
+          `${reviewItems.length} sensitive item${
+            reviewItems.length === 1
+              ? ""
+              : "s"
+          } still need your review after automatic strengthening.`
         );
 
-        if (reviewItems.length > 0) {
-          setError(
-            `${reviewItems.length} sensitive item${
-              reviewItems.length === 1
-                ? ""
-                : "s"
-            } still need your review. We automatically tried a stronger redaction, but the safety check could still read ${
-              reviewItems.length === 1
-                ? "this area"
-                : "these areas"
-            }.`
-          );
+        setStatus(
+          `${reviewItems.length} item${
+            reviewItems.length === 1
+              ? ""
+              : "s"
+          } need manual review before download.`
+        );
+      } else if (
+        verification
+          .selectableTextFound
+      ) {
+        setError(
+          "A redacted page still contains selectable text where a permanently flattened page was expected. Download was blocked for your protection."
+        );
 
-          setStatus(
-            `${reviewItems.length} item${
-              reviewItems.length === 1
-                ? ""
-                : "s"
-            } need your review before download.`
-          );
-        } else if (
-          verification.selectableTextFound
-        ) {
-          setError(
-            "The finished PDF still contains selectable text where a secure flattened copy was expected. Download was blocked for your protection."
-          );
+        setStatus(
+          "A redacted page needs manual review before download."
+        );
+      } else {
+        setError(
+          "The safety check could not confirm every selected redaction. Download was blocked for your protection."
+        );
 
-          setStatus(
-            "The PDF needs manual review before download."
-          );
-        } else {
-          setError(
-            "The safety check could not confirm that every selected item is fully hidden. Download was blocked for your protection."
-          );
-
-          setStatus(
-            "The PDF needs manual review before download."
-          );
-        }
-
-        return false;
+        setStatus(
+          "The PDF needs manual review before download."
+        );
       }
 
-      // ======================================================
-      // PASSED
-      // ======================================================
-
-      pendingRedactedPdfRef.current = null;
-      redactorSessionCache.pendingRedactedPdf = null;
-
-      void clearToolWorkspace(
-        'private-pii-redactor-pending'
-      );
-
-      setManualReviewFindings([]);
-
-      setStatus(
-        "Safety check passed. Preparing download…"
-      );
-
-      const base =
-        file.name.replace(
-          /\.pdf$/i,
-          ""
-        );
-
-      downloadBlob(
-        new Blob([bytes as any], {
-          type: "application/pdf",
-        }),
-        `${base}-redacted.pdf`
-      );
-
-      return true;
-    } finally {
-      /*
-       * Covers every error path, including a failure midway
-       * through PASS 1 or the targeted repair pass.
-       */
-      await releaseSourcePdf();
+      return false;
     }
+
+    /*
+     * ========================================================
+     * PASSED
+     * ========================================================
+     */
+    pendingRedactedPdfRef.current =
+      null;
+
+    redactorSessionCache.pendingRedactedPdf =
+      null;
+
+    void clearToolWorkspace(
+      'private-pii-redactor-pending'
+    );
+
+    setManualReviewFindings(
+      []
+    );
+
+    setStatus(
+      "Safety check passed. Preparing download…"
+    );
+
+    const base =
+      file.name.replace(
+        /\.pdf$/i,
+        ""
+      );
+
+    downloadBlob(
+      new Blob(
+        [
+          bytes as unknown as BlobPart,
+        ],
+        {
+          type:
+            "application/pdf",
+        }
+      ),
+      `${base}-redacted.pdf`
+    );
+
+    return true;
   };
 
   const downloadCurrentRedactedPdf = async () => {

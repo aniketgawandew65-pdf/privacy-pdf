@@ -26,10 +26,23 @@ export type FinalVerificationResult = {
   selectableTextFound: boolean;
 };
 
+export type FinalVerificationOptions = {
+  /*
+   * When omitted, preserve the original strict behaviour:
+   * every page is expected to be flattened.
+   *
+   * When supplied, only these pages are required to have no
+   * selectable text. This supports the secure hybrid redaction
+   * engine where untouched pages intentionally remain lossless.
+   */
+  flattenedPages?: ReadonlySet<number>;
+};
+
 export const verifyFinishedPdf = async (
   bytes: Uint8Array,
   selectedFindings: SafetyVerificationTarget[],
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  options: FinalVerificationOptions = {}
 ): Promise<FinalVerificationResult> => {
   const verificationBlob =
     new Blob(
@@ -211,12 +224,60 @@ export const verifyFinishedPdf = async (
 
     let rollingTail = "";
 
+    /*
+     * Hybrid secure-redaction mode only needs to inspect pages
+     * which were destructively rebuilt.
+     *
+     * Legacy callers omit flattenedPages and retain the original
+     * full-document verification behaviour.
+     */
+    const requestedVerificationPages =
+      options.flattenedPages &&
+      options.flattenedPages.size >
+        0
+        ? Array.from(
+            options.flattenedPages
+          )
+            .filter(
+              (pageNumber) =>
+                Number.isInteger(
+                  pageNumber
+                ) &&
+                pageNumber >=
+                  1 &&
+                pageNumber <=
+                  verificationPdf.numPages
+            )
+            .sort(
+              (
+                a,
+                b
+              ) =>
+                a - b
+            )
+        : Array.from(
+            {
+              length:
+                verificationPdf.numPages,
+            },
+            (
+              _,
+              index
+            ) =>
+              index + 1
+          );
+
     for (
-      let pageNumber = 1;
-      pageNumber <=
-      verificationPdf.numPages;
-      pageNumber++
+      let verificationIndex = 0;
+      verificationIndex <
+        requestedVerificationPages.length;
+      verificationIndex++
     ) {
+      const pageNumber =
+        requestedVerificationPages[
+          verificationIndex
+        ];
+
       const page =
         await verificationPdf
           .getPage(
@@ -229,11 +290,13 @@ export const verifyFinishedPdf = async (
          * CHECK 1 — SELECTABLE TEXT
          * =====================================================
          *
-         * This still runs on EVERY finished page.
+         * In legacy/full-flatten mode this runs on every page.
          *
-         * Private PII output is expected to be flattened.
-         * Therefore an unexpected text layer anywhere in the
-         * document continues to fail the safety check.
+         * In hybrid mode it runs only on pages explicitly marked
+         * as flattened by the secure redaction engine.
+         *
+         * Untouched pages are intentionally allowed to preserve
+         * their original selectable/vector content.
          */
         onProgress?.(
           `Final safety verification ${pageNumber} of ${verificationPdf.numPages}…`
@@ -443,7 +506,11 @@ export const verifyFinishedPdf = async (
          * and Chrome stay responsive.
          */
         if (
-          pageNumber % 20 ===
+          (
+            verificationIndex +
+            1
+          ) %
+            10 ===
           0
         ) {
           await yieldToBrowser();
