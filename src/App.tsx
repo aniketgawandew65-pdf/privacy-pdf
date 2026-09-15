@@ -1,3 +1,4 @@
+import { hasRecoverableProcessing } from './utils/localProcessing';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ProModal } from './components/ProModal';
@@ -406,7 +407,8 @@ export default function App() {
          */
         if (
           isPageReload() &&
-          !returnedFromPdfPreview
+          !returnedFromPdfPreview &&
+          !hasRecoverableProcessing()
         ) {
           await resetWorkspaceSession();
 

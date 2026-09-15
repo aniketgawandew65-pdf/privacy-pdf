@@ -1,3 +1,5 @@
+import { exclusivelyProcess, localContentId, clearProcessingRecovery } from '../utils/localProcessing';
+import { readScanRecord, writeScanRecord, clearScanRecords, scanDiagnostics, type ScanPage } from '../utils/piiScanStore';
 import {
   normalizeForSafetyCheck,
   verifyFinishedPdf,
@@ -26,7 +28,7 @@ import {
   type PageRedaction,
 } from "../utils/pdfEngine";
 import {
-  redactPDFToFile,
+  redactPDFToFile, clearRedactionStreams,
 } from "../utils/streamingRedact";
 import {
   saveToolWorkspaceFiles,
@@ -641,6 +643,9 @@ interface PrivatePiiRedactorProps {
 export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   onContinueManual,
 }) => {
+  const scanAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => scanAbortRef.current?.abort(), []);
+  const assertScanning = () => scanAbortRef.current?.signal.throwIfAborted();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(
@@ -659,6 +664,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   );
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scanComplete, setScanComplete] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (file && workspaceHydrated && !isScanning) {
+      void localContentId(file).then(id => readScanRecord<boolean>(id, 'complete')).then(complete => {
+        if (!cancelled && complete) setScanComplete(true);
+      }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [file, workspaceHydrated, isScanning]);
   const [isRedacting, setIsRedacting] = useState(false);
 
   const [error, setError] = useState<string | null>(
@@ -1188,10 +1203,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   };
 
   const clearAll = () => {
+    scanAbortRef.current?.abort();
+    clearProcessingRecovery();
+    if (file) {
+      void localContentId(file).then(id => clearScanRecords(id)).catch(console.warn);
+      void clearRedactionStreams(file).catch(console.warn);
+    }
     redactorSessionCache = {
       ...EMPTY_REDACTOR_SESSION,
     };
 
+    setScanComplete(false);
     setFile(null);
     setFindings([]);
     setSourceText("");
@@ -1245,25 +1267,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     totalPages: number;
     dedicatedOcrPages: number[];
   }> => {
-    const {
-      pdf,
-      dispose: disposePdf,
-    } = await loadPdfJsFromBlob(
-      nextFile
-    );
-
+    const identity = await localContentId(nextFile);
+    let loaded: Awaited<ReturnType<typeof loadPdfJsFromBlob>> | null = null;
+    let totalPages = await readScanRecord<number>(identity, 'count') || 0;
     const nextFindings: Finding[] = [];
-
-    /*
-     * Pages classified as genuinely scanned/image-only during
-     * THIS SAME traversal are sent to the existing dedicated
-     * OCR scanner afterwards.
-     *
-     * This removes the separate full-document inspection pass.
-     */
     const dedicatedOcrPages: number[] = [];
-
-    let ocrWorker: any = null;
+    let pagesInBatch = 0;
 
     type PositionedSpan = {
       text: string;
@@ -1464,34 +1473,42 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return added;
     };
 
-    const getOcrWorker = async () => {
-      if (ocrWorker) return ocrWorker;
-
-      setStatus("Initializing private local OCR engine…");
-
-      const { createWorker } = await import("tesseract.js");
-
-      ocrWorker = await createWorker("eng", 1, {
-        workerPath: "/tessdata/worker.min.js",
-        corePath: "/tessdata/tesseract-core-simd-lstm.wasm.js",
-        langPath: "/tessdata",
-        gzip: true,
-      });
-
-      return ocrWorker;
-    };
-
     try {
+      if (!totalPages) {
+        loaded = await loadPdfJsFromBlob(nextFile);
+        totalPages = loaded.pdf.numPages;
+        await writeScanRecord(identity, 'count', 0, totalPages);
+      }
       for (
         let pageNumber = 1;
-        pageNumber <= pdf.numPages;
+        pageNumber <= totalPages;
         pageNumber++
       ) {
-        setStatus(
-          `Scanning page ${pageNumber} of ${pdf.numPages}…`
-        );
-
-        const page = await pdf.getPage(pageNumber);
+        assertScanning();
+        const cached = await readScanRecord<ScanPage<Finding>>(identity, 'native', pageNumber);
+        if (cached) {
+          nextFindings.push(...cached.findings);
+          if (cached.needsOcr) dedicatedOcrPages.push(pageNumber);
+          continue;
+        }
+        if (pagesInBatch === 4 && loaded) {
+          await loaded.dispose();
+          loaded = null;
+          pagesInBatch = 0;
+        }
+        loaded ??= await loadPdfJsFromBlob(nextFile);
+        pagesInBatch++;
+        const startedAt = performance.now();
+        const findingStart = nextFindings.length;
+        const savePage = async (needsOcr: boolean, scale = 1.6) => {
+          await writeScanRecord(identity, 'native', pageNumber, {
+            findings: nextFindings.slice(findingStart), needsOcr, scale,
+            elapsedMs: performance.now() - startedAt,
+          });
+        };
+        setStatus(`Reading page ${pageNumber} of ${totalPages}…`);
+        await writeScanRecord(identity, 'progress', 0, { page: pageNumber, stage: 'native-text' });
+        const page = await loaded.pdf.getPage(pageNumber);
         const viewport = page.getViewport({ scale: 1 });
 
         let textContent: any;
@@ -1510,13 +1527,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           );
 
           setStatus(
-            `Preparing page ${pageNumber} of ${pdf.numPages} for private OCR…`
+            `Preparing page ${pageNumber} of ${totalPages} for private OCR…`
           );
 
           try {
             page.cleanup();
           } catch (_) {}
 
+          await savePage(true);
           continue;
         }
 
@@ -1553,13 +1571,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           );
 
           setStatus(
-            `Preparing scanned page ${pageNumber} of ${pdf.numPages} for private OCR…`
+            `Preparing scanned page ${pageNumber} of ${totalPages} for private OCR…`
           );
 
           try {
             page.cleanup();
           } catch (_) {}
 
+          await savePage(true);
           continue;
         }
 
@@ -1630,182 +1649,19 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           digitalSpans.length >= 8 ||
           digitalFindings > 0;
 
-        if (!hasUsableDigitalText) {
-          setStatus(
-            `Page ${pageNumber} appears scanned — running private OCR…`
-          );
-
-          const worker = await getOcrWorker();
-          const ocrScale = 2;
-
-          const ocrViewport = page.getViewport({
-            scale: ocrScale,
-          });
-
-          const canvas =
-            document.createElement("canvas");
-
-          canvas.width = Math.ceil(
-            ocrViewport.width
-          );
-
-          canvas.height = Math.ceil(
-            ocrViewport.height
-          );
-
-          const ctx = canvas.getContext("2d", {
-            alpha: false,
-          });
-
-          if (!ctx) {
-            throw new Error(
-              "Unable to initialize local OCR canvas."
-            );
-          }
-
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-          await page.render({
-            canvasContext: ctx,
-            viewport: ocrViewport,
-            canvas,
-          } as any).promise;
-
-          const { data } =
-            await worker.recognize(
-              canvas,
-              {},
-              {
-                text: true,
-                blocks: true,
-              } as any
-            );
-
-          let ocrLines: any[][] = [];
-
-          if (
-            Array.isArray((data as any)?.blocks)
-          ) {
-            ocrLines = (data as any).blocks
-              .flatMap(
-                (block: any) =>
-                  block?.paragraphs || []
-              )
-              .flatMap(
-                (paragraph: any) =>
-                  paragraph?.lines || []
-              )
-              .map(
-                (line: any) =>
-                  line?.words || []
-              )
-              .filter(
-                (words: any[]) =>
-                  words.length > 0
-              );
-          }
-
-          if (
-            ocrLines.length === 0 &&
-            Array.isArray((data as any)?.words)
-          ) {
-            const positionedWords: PositionedSpan[] =
-              (data as any).words
-                .filter(
-                  (word: any) =>
-                    word?.text?.trim() &&
-                    word?.bbox
-                )
-                .map((word: any) => ({
-                  text: word.text,
-                  x:
-                    word.bbox.x0 /
-                    ocrScale,
-                  y:
-                    word.bbox.y0 /
-                    ocrScale,
-                  width:
-                    (word.bbox.x1 -
-                      word.bbox.x0) /
-                    ocrScale,
-                  height:
-                    (word.bbox.y1 -
-                      word.bbox.y0) /
-                    ocrScale,
-                }));
-
-            const fallbackLines =
-              groupIntoLines(positionedWords);
-
-            for (const line of fallbackLines) {
-              detectPositionedLine(
-                pageNumber,
-                line.spans,
-                viewport.width,
-                viewport.height,
-                "ocr"
-              );
-            }
-          } else {
-            for (
-              let lineIndex = 0;
-              lineIndex < ocrLines.length;
-              lineIndex++
-            ) {
-              const words =
-                ocrLines[lineIndex];
-
-              const positioned: PositionedSpan[] =
-                words
-                  .filter(
-                    (word: any) =>
-                      word?.text?.trim() &&
-                      word?.bbox
-                  )
-                  .map((word: any) => ({
-                    text: word.text,
-                    x:
-                      word.bbox.x0 /
-                      ocrScale,
-                    y:
-                      word.bbox.y0 /
-                      ocrScale,
-                    width:
-                      (word.bbox.x1 -
-                        word.bbox.x0) /
-                      ocrScale,
-                    height:
-                      (word.bbox.y1 -
-                        word.bbox.y0) /
-                      ocrScale,
-                  }));
-
-              detectPositionedLine(
-                pageNumber,
-                positioned,
-                viewport.width,
-                viewport.height,
-                `ocr-${lineIndex}`
-              );
-            }
-          }
-
-          ctx.clearRect(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-          canvas.width = 1;
-          canvas.height = 1;
-        }
+        // A readable header does not prove that an embedded scanned body is readable.
+        // Conservatively OCR image-bearing pages, retaining all native findings.
+        await writeScanRecord(identity, 'progress', 0, { page: pageNumber, stage: 'classify-images' });
+        const ops = await page.getOperatorList();
+        const imageOps = new Set<number>([
+          pdfjsLib.OPS.paintImageXObject, pdfjsLib.OPS.paintInlineImageXObject,
+          pdfjsLib.OPS.paintImageXObjectRepeat, pdfjsLib.OPS.paintImageMaskXObject,
+          pdfjsLib.OPS.paintImageMaskXObjectRepeat, pdfjsLib.OPS.paintInlineImageXObjectGroup,
+          pdfjsLib.OPS.paintImageMaskXObjectGroup,
+        ]);
+        const needsOcr = !hasUsableDigitalText || ops.fnArray.some((op: number) => imageOps.has(op));
+        if (needsOcr) dedicatedOcrPages.push(pageNumber);
+        await savePage(needsOcr, hasUsableDigitalText ? 1.6 : 2);
 
         try {
           page.cleanup();
@@ -1815,20 +1671,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       setFindings(nextFindings);
 
       return {
-        totalPages:
-          pdf.numPages,
+        totalPages,
         dedicatedOcrPages,
       };
     } finally {
-      if (ocrWorker) {
-        try {
-          await ocrWorker.terminate();
-        } catch (_) {}
-      }
-
-      try {
-        await disposePdf();
-      } catch (_) {}
+      await loaded?.dispose();
     }
   };
 
@@ -2174,6 +2021,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     appendToExisting = false
   ) => {
     const nextFindings: Finding[] = [];
+    const identity = await localContentId(nextFile);
 
     /*
      * ==========================================================
@@ -2194,8 +2042,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     const OCR_BATCH_SIZE =
       4;
 
-    const renderScale =
-      1.6;
 
     /*
      * Keep each OCR bitmap around ~1.4 million pixels.
@@ -2228,10 +2074,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     /*
      * Short probe only to obtain page count.
      */
-    let totalPages =
-      0;
+    let totalPages = await readScanRecord<number>(identity, 'count') || 0;
 
     try {
+      if (!totalPages) {
       const probe =
         await loadPdfJsFromBlob(
           nextFile
@@ -2242,6 +2088,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           probe.pdf.numPages;
       } finally {
         await probe.dispose();
+      }
+      await writeScanRecord(identity, 'count', 0, totalPages);
       }
     } catch (err: any) {
       if (
@@ -2257,7 +2105,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       throw err;
     }
 
-    const pagesToScan =
+    const requested =
       requestedPages &&
       requestedPages.length
         ? requestedPages
@@ -2272,6 +2120,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             ) =>
               index + 1
           );
+
+    const pagesToScan: number[] = [];
+    for (const pageNumber of requested) {
+      assertScanning();
+      const cached = await readScanRecord<ScanPage<Finding>>(identity, 'ocr', pageNumber);
+      if (cached) nextFindings.push(...cached.findings);
+      else pagesToScan.push(pageNumber);
+    }
 
     for (
       let batchStart = 0;
@@ -2303,11 +2159,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         /*
          * Fresh PDF.js document for this short batch.
          */
-        loaded =
-          await loadPdfJsFromBlob(
-            nextFile
-          );
-
+        assertScanning();
+        const parseStart = performance.now();
+        loaded = await loadPdfJsFromBlob(nextFile);
+        const parseMs = performance.now() - parseStart;
+        const workerStart = performance.now();
         const pdf =
           loaded.pdf;
 
@@ -2326,9 +2182,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               langPath:
                 "/tessdata",
               gzip: true,
+              workerBlobURL: false,
             }
           );
 
+        await writeScanRecord(identity, 'batch', batchPages[0], { parseMs, workerStartupMs: performance.now() - workerStart });
         for (
           let localIndex = 0;
           localIndex <
@@ -2344,6 +2202,13 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             `Scanning page ${pageNumber} of ${totalPages} with memory-safe local OCR…`
           );
 
+          assertScanning();
+          const startedAt = performance.now();
+          const findingStart = nextFindings.length;
+          let renderMs = 0, recognizeMs = 0, detectMs = 0;
+          const pageWordsForCache: Array<[string, number, number, number, number]> = [];
+          const native = await readScanRecord<ScanPage<Finding>>(identity, 'native', pageNumber);
+          const renderScale = native?.scale || 1.6;
           const page =
             await pdf.getPage(
               pageNumber
@@ -2393,14 +2258,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                   fullWidth
               );
 
-            const tileHeight =
-              Math.max(
-                320,
-                Math.min(
-                  1100,
-                  calculatedHeight
-                )
-              );
+            const tileHeight = Math.min(1100, calculatedHeight);
+            if (tileHeight <= TILE_OVERLAP * 2) {
+              throw new Error(`Page ${pageNumber} is too wide for safe OCR at its original resolution.`);
+            }
 
             let tileTop =
               0;
@@ -2412,6 +2273,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
               tileTop <
               fullHeight
             ) {
+              assertScanning();
               const tileBottom =
                 Math.min(
                   fullHeight,
@@ -2470,6 +2332,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                  *
                  * Pixel scale remains 1.6x.
                  */
+                await writeScanRecord(identity, 'progress', 0, { page: pageNumber, tile: tileIndex, stage: 'render', width: fullWidth, height: currentHeight });
+                const renderStart = performance.now();
                 await page.render({
                   canvasContext:
                     ctx as any,
@@ -2486,6 +2350,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                   ],
                 } as any).promise;
 
+                renderMs += performance.now() - renderStart;
+                await writeScanRecord(identity, 'progress', 0, { page: pageNumber, tile: tileIndex, stage: 'recognize' });
+                const recognizeStart = performance.now();
                 setStatus(
                   `OCR page ${pageNumber} of ${totalPages} · section ${tileIndex + 1}…`
                 );
@@ -2504,71 +2371,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                         true,
                       blocks:
                         true,
+                      hocr: true,
                     }
                   );
 
+                recognizeMs += performance.now() - recognizeStart;
+                const detectStart = performance.now();
                 let lines =
                   extractOcrLines(
                     result?.data ||
                       {}
                   );
-
-                /*
-                 * Preserve the existing hOCR compatibility path
-                 * when structured coordinates are unavailable.
-                 */
-                if (
-                  lines.length ===
-                  0
-                ) {
-                  result =
-                    await (
-                      worker as any
-                    ).recognize(
-                      canvas,
-                      {},
-                      {
-                        text:
-                          true,
-                        hocr:
-                          true,
-                        blocks:
-                          true,
-                      }
-                    );
-
-                  lines =
-                    extractOcrLines(
-                      result?.data ||
-                        {}
-                    );
-                }
-
-                /*
-                 * Each adjacent tile overlaps.
-                 *
-                 * Give every text line to exactly ONE tile using
-                 * the vertical centre of the line. This prevents
-                 * duplicate findings while preserving overlap.
-                 */
-                const halfOverlap =
-                  Math.floor(
-                    TILE_OVERLAP /
-                      2
-                  );
-
-                const ownedTop =
-                  tileTop === 0
-                    ? tileTop
-                    : tileTop +
-                      halfOverlap;
-
-                const ownedBottom =
-                  tileBottom ===
-                  fullHeight
-                    ? tileBottom
-                    : tileBottom -
-                      halfOverlap;
 
                 lines.forEach(
                   (
@@ -2577,46 +2390,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                   ) => {
                     if (
                       !words.length
-                    ) {
-                      return;
-                    }
-
-                    const minLocalY =
-                      Math.min(
-                        ...words.map(
-                          (
-                            word
-                          ) =>
-                            word.y0
-                        )
-                      );
-
-                    const maxLocalY =
-                      Math.max(
-                        ...words.map(
-                          (
-                            word
-                          ) =>
-                            word.y1
-                        )
-                      );
-
-                    const globalCenterY =
-                      tileTop +
-                      (
-                        minLocalY +
-                        maxLocalY
-                      ) /
-                        2;
-
-                    /*
-                     * The overlapping neighbour owns this line.
-                     */
-                    if (
-                      globalCenterY <
-                        ownedTop ||
-                      globalCenterY >=
-                        ownedBottom
                     ) {
                       return;
                     }
@@ -2640,6 +2413,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                         })
                       );
 
+                    pageWordsForCache.push(...pageWords.map(word => [word.text, word.x0, word.y0, word.x1, word.y1] as [string, number, number, number, number]));
                     nextFindings.push(
                       ...detectOcrLine(
                         pageWords,
@@ -2658,6 +2432,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 /*
                  * Drop large Tesseract result trees immediately.
                  */
+                detectMs += performance.now() - detectStart;
                 result =
                   null;
 
@@ -2706,6 +2481,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             } catch (_) {}
           }
 
+          assertScanning();
+          await writeScanRecord(identity, 'ocr', pageNumber, {
+            findings: nextFindings.slice(findingStart), words: pageWordsForCache,
+            scale: renderScale, elapsedMs: performance.now() - startedAt, renderMs, recognizeMs, detectMs,
+          });
           /*
            * Recovery between complete pages.
            */
@@ -2779,38 +2559,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       }
     }
 
-    /*
-     * Commit React state only when OCR has finished.
-     */
-    if (
-      appendToExisting
-    ) {
-      const replacedPages =
-        new Set(
-          pagesToScan
-        );
-
-      setFindings(
-        (
-          current
-        ) => [
-          ...current.filter(
-            (
-              finding
-            ) =>
-              !finding.page ||
-              !replacedPages.has(
-                finding.page
-              )
-          ),
-          ...nextFindings,
-        ]
-      );
-    } else {
-      setFindings(
-        nextFindings
-      );
-    }
+    const combine = (existing: Finding[]) => {
+      const seen = new Set<string>();
+      return [...existing, ...nextFindings].filter(finding => {
+        const key = JSON.stringify([finding.page, finding.category, finding.value, finding.box]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    setFindings(current => combine(appendToExisting ? current : []));
   };
 
   // ==========================================================
@@ -2843,30 +2601,11 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           nextFile
         );
     } catch (err: any) {
-      if (
-        isPdfPasswordError(
-          err
-        )
-      ) {
-        throw new Error(
-          "This PDF is password-protected. Please unlock it first."
-        );
-      }
-
-      /*
-       * Preserve the existing universal fallback.
-       *
-       * If an unusual but renderable PDF cannot use the normal
-       * text-layer scanner, process the complete document using
-       * the dedicated OCR route rather than rejecting it.
-       */
-      await scanPdfWithOcr(
-        nextFile,
-        undefined,
-        false
-      );
-
-      return;
+      assertScanning();
+      if (isPdfPasswordError(err)) throw new Error('This PDF is password-protected. Please unlock it first.');
+      // Per-page text extraction failures already route to tiled OCR.
+      // Do not turn storage/rendering failures into an uncheckpointed full rescan.
+      throw err;
     }
 
     if (
@@ -2883,14 +2622,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       return;
     }
 
-    const allPagesNeedDedicatedOcr =
-      classification.totalPages >
-        0 &&
-      classification
-        .dedicatedOcrPages
-        .length ===
-        classification.totalPages;
-
     /*
      * Scanned/mixed pages still use the SAME dedicated OCR
      * implementation as before.
@@ -2899,18 +2630,21 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
      *   replace findings with OCR findings.
      *
      * Mixed PDF:
-     *   keep digital findings and replace only scanned pages
-     *   with dedicated OCR findings.
+     *   retain native findings and add dedicated OCR findings.
      */
     await scanPdfWithOcr(
       nextFile,
       classification
         .dedicatedOcrPages,
-      !allPagesNeedDedicatedOcr
+      true
     );
   };
 
   const scanFile = async (nextFile: File) => {
+    if (scanAbortRef.current) return;
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
+    setScanComplete(false);
     setFile(nextFile);
     setFindings([]);
     setSourceText("");
@@ -2919,6 +2653,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     setIsScanning(true);
 
     try {
+      await exclusivelyProcess(async () => {
+      if (!await saveToolWorkspaceFiles('private-pii-redactor', [nextFile])) {
+        throw new Error('Unable to save the local source PDF. Free browser storage and retry.');
+      }
       const extension =
         nextFile.name.split(".").pop()?.toLowerCase() || "";
 
@@ -2936,6 +2674,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         );
       }
 
+      await writeScanRecord(await localContentId(nextFile), 'complete', 0, true);
+      });
+      setScanComplete(true);
       setStatus("Scan complete.");
     } catch (err: any) {
       console.error(err);
@@ -2947,12 +2688,13 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       setStatus(null);
     } finally {
+      scanAbortRef.current = null;
       setIsScanning(false);
     }
   };
 
   const handleFile = (nextFile?: File | null) => {
-    if (!nextFile) return;
+    if (!nextFile || !workspaceHydrated) return;
 
     const maxSize = 150 * 1024 * 1024;
 
@@ -3388,7 +3130,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
      * - automatic download still requires verification.passed
      * - uncertain output remains blocked from automatic download
      * - manual review remains available
-     * - Download Anyway remains an explicit user decision
+     * - failed output must be repaired before download
      */
 
     /*
@@ -3428,7 +3170,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       /*
        * Keep the exact already-redacted output available for the
-       * existing explicit Download Anyway workflow.
+       * manual repair workflow.
        */
       pendingRedactedPdfRef.current =
         workingPdf;
@@ -3542,81 +3284,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     return true;
   };
 
-  const downloadCurrentRedactedPdf = async () => {
-    if (!file) {
-      return;
-    }
-
-    let pendingPdf:
-      Blob | null =
-      pendingRedactedPdfRef.current;
-
-    /*
-     * After Preview -> Back, restore the browser-backed File
-     * directly. Do NOT turn it into a giant Uint8Array.
-     */
-    if (!pendingPdf) {
-      try {
-        const restoredPending =
-          await restoreToolWorkspaceFiles(
-            "private-pii-redactor-pending"
-          );
-
-        if (
-          restoredPending[0]
-        ) {
-          pendingPdf =
-            restoredPending[0];
-
-          pendingRedactedPdfRef.current =
-            pendingPdf;
-
-          redactorSessionCache.pendingRedactedPdf =
-            pendingPdf;
-        }
-      } catch (
-        error
-      ) {
-        console.warn(
-          "Unable to restore pending redacted PDF:",
-          error
-        );
-      }
-    }
-
-    if (!pendingPdf) {
-      setError(
-        "The pending redacted copy is no longer available. Run Auto-Redact again before downloading."
-      );
-      return;
-    }
-
-    const itemCount =
-      manualReviewFindings.length;
-
-    const confirmed =
-      window.confirm(
-        `The final safety check found ${itemCount} item${itemCount === 1 ? "" : "s"} that may still be readable. Downloading now will skip manual review. Download anyway?`
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
-    const base =
-      file.name.replace(
-        /\.pdf$/i,
-        ""
-      );
-
-    downloadBlob(
-      pendingPdf,
-      `${base}-redacted-review-needed.pdf`
-    );
-  };
-
   const createRedactedCopy = async () => {
-    if (!file || selectedCount === 0) return;
+    if (!file || selectedCount === 0 || !scanComplete || isRedacting) return;
 
     pendingRedactedPdfRef.current = null;
     redactorSessionCache.pendingRedactedPdf = null;
@@ -3640,7 +3309,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       let completed = false;
 
       if (extension === "pdf" || file.type === "application/pdf") {
-        completed = await redactPdf();
+        completed = await exclusivelyProcess(() => redactPdf());
       } else {
         completed = await redactPlainText();
       }
@@ -3766,6 +3435,22 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           }
         />
 
+        {file && !scanComplete && !isScanning && (
+          <button type="button" disabled={!workspaceHydrated || isRedacting}
+            onClick={() => void scanFile(file)}
+            className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-white">
+            Resume scan from saved pages
+          </button>
+        )}
+
+        {file && !isScanning && !isRedacting && (
+          <button type="button" className="mt-3 text-xs underline" onClick={() => {
+            void localContentId(file).then(scanDiagnostics).then(data => downloadBlob(
+              new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'local-scan-diagnostics.json'
+            )).catch(error => setError(String(error)));
+          }}>Download scan timings (no document text)</button>
+        )}
+
         {status && isScanning && (
           <div className="mt-4 flex items-center gap-2 text-xs text-zinc-950">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -3782,7 +3467,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
       </div>
 
-      {file && !isScanning && (
+      {file && !isScanning && scanComplete && (
         <div className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -4058,18 +3743,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                     <ArrowRight className="w-4 h-4" />
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={downloadCurrentRedactedPdf}
-                    className="mt-2 w-full min-h-11 rounded-xl border-2 border-amber-700 bg-white px-4 text-sm font-semibold text-amber-950 inline-flex items-center justify-center gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download Current PDF Anyway
-                  </button>
-
                   <p className="mt-2 text-center text-[11px] leading-4 text-amber-900">
                     This copy did not pass the final safety check.
-                    Manual review is recommended before sharing it.
+                    Repair the flagged areas before downloading.
                   </p>
                 </div>
               )}

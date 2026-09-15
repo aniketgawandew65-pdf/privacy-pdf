@@ -1,3 +1,5 @@
+import { restoreToolWorkspaceState, saveToolWorkspaceState } from '../utils/localWorkspace';
+import { exclusivelyProcess, localContentId } from '../utils/localProcessing';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
@@ -77,6 +79,10 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       ? routeState.manualReviewItems
       : [];
 
+  const [sourceIdentity, setSourceIdentity] = useState<string | null>(null);
+  const previewLifecycle = useRef<Promise<void>>(Promise.resolve());
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1); 
   const [redactMode, setRedactMode] = useState<"draw" | "pan">("draw");
@@ -143,8 +149,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     }
   };
 
+  useEffect(() => {
+    if (!sourceIdentity) return;
+    saveToolWorkspaceState('manual-redaction-geometry', { sourceIdentity, pageRedactions, currentPage });
+  }, [sourceIdentity, pageRedactions, currentPage]);
+
   // Reset state when file changes
   useEffect(() => {
+    setSourceIdentity(null);
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
@@ -184,15 +196,18 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     pdfDocRef.current = null;
 
     if (previousDispose) {
-      void previousDispose();
+      previewLifecycle.current = previewLifecycle.current.then(previousDispose);
     }
 
     setIsLoadingPage(true);
     setErrorMessage(null);
     revokeDownloadUrl();
 
-    (async () => {
+    previewLifecycle.current = previewLifecycle.current.then(async () => {
+      if (!isMounted) return;
       try {
+        const identity = await localContentId(file);
+        const saved = restoreToolWorkspaceState<{ sourceIdentity: string; pageRedactions: Record<number, RedactionRect[]>; currentPage: number }>('manual-redaction-geometry');
         const loaded =
           await loadPdfJsFromBlob(
             file
@@ -210,8 +225,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           loaded.dispose;
 
         setTotalPages(pdf.numPages);
-        setCurrentPage(1);
 
+        /*
+         * Fresh geometry coming from Auto Redactor must win over
+         * any older Manual Redact workspace for the same PDF.
+         *
+         * On a later remount with no route-state geometry, the
+         * persisted Manual workspace is restored instead.
+         */
         if (incomingAutoRedactions) {
           const cloned: Record<number, RedactionRect[]> = {};
 
@@ -223,11 +244,29 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             }));
           }
 
+          setCurrentPage(1);
           setPageRedactions(cloned);
+        } else if (
+          saved?.sourceIdentity === identity &&
+          saved.pageRedactions
+        ) {
+          setCurrentPage(
+            Math.max(
+              1,
+              Math.min(
+                pdf.numPages,
+                saved.currentPage || 1
+              )
+            )
+          );
+
+          setPageRedactions(saved.pageRedactions);
         } else {
+          setCurrentPage(1);
           setPageRedactions({});
         }
 
+        setSourceIdentity(identity);
         setSelectedIndex(null);
       } catch (err) {
         console.error('Redact doc load error:', err);
@@ -235,7 +274,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       } finally {
         if (isMounted) setIsLoadingPage(false);
       }
-    })();
+    });
 
     return () => {
       isMounted = false;
@@ -247,7 +286,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       pdfDocRef.current = null;
 
       if (dispose) {
-        void dispose();
+        previewLifecycle.current = previewLifecycle.current.then(dispose);
       }
     };
   }, [file]);
@@ -504,7 +543,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   };
 
   const handleApplyRedactions = async () => {
-    if (!file) return;
+    if (!file || isProcessing || isLoadingPage) return;
 
     const payload: PageRedaction[] =
       Object.entries(pageRedactions).map(
@@ -526,6 +565,12 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     revokeDownloadUrl();
 
     try {
+      await exclusivelyProcess(async () => {
+      const disposePreview = pdfDisposeRef.current;
+      pdfDisposeRef.current = null;
+      pdfDocRef.current = null;
+      await disposePreview?.();
+      if (canvasRef.current) { canvasRef.current.width = 1; canvasRef.current.height = 1; }
       /*
        * Create the actual permanent redacted PDF once.
        * These same bytes are verified and then used
@@ -545,118 +590,18 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           }
         );
 
-      /*
-       * AUTO REDACTOR -> MANUAL REDACTION
-       *
-       * The Auto Redactor already produced the fixed review list.
-       * Manual Redaction now treats that list as an informational
-       * checklist only.
-       *
-       * We burn the user's current blackout rectangles into the
-       * finished PDF and prepare the exact resulting bytes for
-       * download.
-       *
-       * We intentionally DO NOT run the old second OCR verifier
-       * here because it could incorrectly resolve an item from
-       * another page.
-       */
-      if (routeState?.fromAutoRedactor) {
-        const blob = redactedFile;
-
-        createUrl(blob);
-        return;
-      }
-
-      const verificationTargets =
-        manualVerificationTargetsRef.current;
-
-      /*
-       * Files opened directly in Manual Redaction do
-       * not have Auto-Redactor verification targets.
-       * Preserve the existing standalone workflow.
-       */
-      if (verificationTargets.length === 0) {
-        const blob = redactedFile;
-
-        createUrl(blob);
-        return;
-      }
-
-      setManualCheckStatus(
-        "Running final safety verification on the finished PDF…"
+      const verification = await verifyFinishedPdf(
+        redactedFile,
+        payload.flatMap(entry => entry.rects.map((region, index) => ({
+          id: `manual-${entry.pageIndex}-${index}`, value: '', page: entry.pageIndex + 1, region,
+        }))),
+        setManualCheckStatus,
+        { flattenedPages: new Set(payload.filter(entry => entry.rects.length).map(entry => entry.pageIndex + 1)) },
       );
-
-      const verification =
-        await verifyFinishedPdf(
-          redactedFile,
-          verificationTargets.map((item) => ({
-            value: item.value,
-          })),
-          (message) =>
-            setManualCheckStatus(message)
-        );
-
-      /*
-       * A flattened manual-redaction result should not
-       * contain selectable text. Treat this as a hard
-       * safety failure rather than offering a misleading
-       * download.
-       */
-      if (verification.selectableTextFound) {
-        setErrorMessage(
-          "Final safety verification found selectable text in the finished PDF. Download was blocked because the permanent redaction could not be confirmed."
-        );
-
-        setManualCheckStatus(
-          "Final safety verification could not confirm a secure flattened PDF."
-        );
-
-        return;
-      }
-
-      /*
-       * Some original flagged values are still visibly
-       * readable. Restore those exact items to the
-       * visible checklist, but still allow the user's
-       * explicit Download anyway workflow.
-       */
-      if (verification.leakedValues.length > 0) {
-        const leakedValues =
-          new Set(
-            verification.leakedValues
-          );
-
-        const unresolved =
-          verificationTargets.filter((item) =>
-            leakedValues.has(item.value)
-          );
-
-        setManualReviewItems(unresolved);
-
-        setManualCheckStatus(
-          `${unresolved.length} item${
-            unresolved.length === 1 ? "" : "s"
-          } still readable after final verification.`
-        );
-
-        const blob = redactedFile;
-
-        createUrl(blob);
-        return;
-      }
-
-      /*
-       * Full final verification passed.
-       */
-      setManualReviewItems([]);
-
-      setManualCheckStatus(
-        "Final safety verification passed ✓"
-      );
-
-      const blob = redactedFile;
-
-      createUrl(blob);
+      if (!verification.passed) throw new Error('Final verification could not confirm every blackout. Download was blocked; review the rectangles and retry.');
+      setManualCheckStatus('All applied blackouts passed final verification.');
+      createUrl(redactedFile);
+      });
     } catch (err: any) {
       console.error(
         "Redaction error:",
@@ -668,6 +613,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           "Failed to redact PDF."
       );
     } finally {
+      try {
+        if (!mounted.current) return;
+        const restoredPreview = await loadPdfJsFromBlob(file);
+        if (!mounted.current) { await restoredPreview.dispose(); return; }
+        pdfDocRef.current = restoredPreview.pdf;
+        pdfDisposeRef.current = restoredPreview.dispose;
+        await renderCurrentPage();
+      } catch (error) { console.warn('Unable to restore PDF preview', error); }
       setIsProcessing(false);
     }
   };
@@ -729,6 +682,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               </div>
             </div>
             <button
+              disabled={isProcessing}
               onClick={() => {
                 onFileChange(null);
                 revokeDownloadUrl();
@@ -1024,7 +978,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               <button
                 onClick={handleApplyRedactions}
                 disabled={
-                  isProcessing ||
+                  isProcessing || isLoadingPage ||
                   totalRedactionsCount === 0
                 }
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition text-xs shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed"
@@ -1044,6 +998,13 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             </>
           ) : (
             <div className="space-y-3">
+              {manualCheckStatus && (
+                <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {manualCheckStatus}
+                </div>
+              )}
+
               {manualReviewItems.length > 0 ? (
                 <div className="flex items-center justify-center gap-2 text-xs text-amber-300 bg-amber-950/30 p-3 rounded-lg border border-amber-800/40 font-medium">
                   <AlertCircle className="w-4 h-4" />

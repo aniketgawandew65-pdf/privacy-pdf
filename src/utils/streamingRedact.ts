@@ -1,3 +1,4 @@
+import { localContentId, digestText } from './localProcessing';
 import {
   loadPdfJsFromBlob,
   pdfjsLib,
@@ -102,6 +103,7 @@ const newRequestId =
       : `${Date.now()}-${Math.random()}`;
 
 class PdfStreamWriter {
+  private closed = false;
   private worker:
     Worker;
 
@@ -215,7 +217,8 @@ class PdfStreamWriter {
           window.setTimeout(
             () => {
               cleanup();
-
+              this.closed = true;
+              this.worker.terminate();
               reject(
                 new Error(
                   "Streaming PDF writer timed out."
@@ -354,6 +357,8 @@ class PdfStreamWriter {
     );
   }
 
+  async commit() { await this.request('commit'); }
+
   async finish() {
     try {
       const result =
@@ -367,12 +372,15 @@ class PdfStreamWriter {
             this.position
         );
     } finally {
+      this.closed = true;
       this.worker
         .terminate();
     }
   }
 
   async abort() {
+    if (this.closed) return;
+    this.closed = true;
     try {
       await this.request(
         "abort"
@@ -450,6 +458,12 @@ const normalizeMap =
       const entry of
       redactions
     ) {
+      if (!Number.isInteger(entry.pageIndex) || entry.pageIndex < 0) throw new Error('Invalid redaction page.');
+      for (const rect of entry.rects) {
+        if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ||
+            rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0 ||
+            rect.x >= 1 || rect.y >= 1) throw new Error('Invalid blackout coordinates.');
+      }
       const rects =
         entry.rects
           .map(
@@ -516,7 +530,7 @@ const normalizeMap =
       ) {
         map.set(
           entry.pageIndex,
-          rects
+          [...(map.get(entry.pageIndex) || []), ...rects]
         );
       }
     }
@@ -524,101 +538,9 @@ const normalizeMap =
     return map;
   };
 
-const localJobHash =
-  (
-    file:
-      File,
-    map:
-      Map<
-        number,
-        RedactionRect[]
-      >
-  ) => {
-    const geometry =
-      Array.from(
-        map.entries()
-      )
-        .sort(
-          (
-            a,
-            b
-          ) =>
-            a[0] -
-            b[0]
-        )
-        .map(
-          (
-            [
-              pageIndex,
-              rects,
-            ]
-          ) => ({
-            pageIndex,
-            rects:
-              rects.map(
-                (
-                  rect
-                ) => [
-                  rect.x.toFixed(
-                    6
-                  ),
-                  rect.y.toFixed(
-                    6
-                  ),
-                  rect.width.toFixed(
-                    6
-                  ),
-                  rect.height.toFixed(
-                    6
-                  ),
-                ]
-              ),
-          })
-        );
-
-    const source =
-      JSON.stringify({
-        name:
-          file.name,
-        size:
-          file.size,
-        modified:
-          file.lastModified,
-        geometry,
-      });
-
-    let hash =
-      0x811c9dc5;
-
-    for (
-      let index = 0;
-      index <
-        source.length;
-      index++
-    ) {
-      hash ^=
-        source.charCodeAt(
-          index
-        );
-
-      hash =
-        Math.imul(
-          hash,
-          0x01000193
-        );
-    }
-
-    return (
-      hash >>> 0
-    )
-      .toString(
-        16
-      )
-      .padStart(
-        8,
-        "0"
-      );
-  };
+const localJobHash = async (file: File, map: Map<number, RedactionRect[]>) =>
+  digestText(JSON.stringify(['strip-redaction-v2', await localContentId(file), file.name,
+    [...map.entries()].sort((a, b) => a[0] - b[0]), RENDER_SCALE, JPEG_QUALITY]));
 
 const pdfNumber =
   (
@@ -642,27 +564,10 @@ const pdfNumber =
     );
   };
 
-const saveCheckpoint =
-  (
-    key:
-      string,
-    checkpoint:
-      Checkpoint
-  ) => {
-    try {
-      localStorage.setItem(
-        key,
-        JSON.stringify(
-          checkpoint
-        )
-      );
-    } catch (_) {
-      /*
-       * Processing still works without crash-resume
-       * if storage quota blocks this tiny metadata entry.
-       */
-    }
-  };
+const saveCheckpoint = (key: string, checkpoint: Checkpoint) => {
+  // A storage error is actionable; never claim crash recovery without a commit.
+  localStorage.setItem(key, JSON.stringify(checkpoint));
+};
 
 const loadCheckpoint =
   (
@@ -771,14 +676,16 @@ const streamLargeRedaction =
       }
     }
 
+    if ([...redactionMap.keys()].some(index => index >= totalPages)) throw new Error('Redaction page is outside the document.');
+
     const hash =
-      localJobHash(
+      await localJobHash(
         file,
         redactionMap
       );
 
     const directoryName =
-      `redact-stream-${hash}`;
+      `redact-stream-${await localContentId(file)}-${hash}`;
 
     const outputName =
       `${
@@ -811,6 +718,15 @@ const streamLargeRedaction =
           );
 
         const valid =
+          Number.isInteger(checkpoint.nextPageIndex) &&
+          checkpoint.nextPageIndex >= 0 && checkpoint.nextPageIndex <= totalPages &&
+          Number.isSafeInteger(checkpoint.byteOffset) &&
+          Number.isSafeInteger(checkpoint.nextObjectId) && checkpoint.nextObjectId >= 3 &&
+          Array.isArray(checkpoint.offsets) && checkpoint.offsets.length === checkpoint.nextObjectId &&
+          Array.isArray(checkpoint.pageObjectIds) && checkpoint.pageObjectIds.length === checkpoint.nextPageIndex &&
+          new Set(checkpoint.pageObjectIds).size === checkpoint.nextPageIndex &&
+          checkpoint.pageObjectIds.every(id => Number.isInteger(id) && id >= 3 && id < checkpoint!.nextObjectId) &&
+          checkpoint.offsets.slice(3).every(offset => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) < checkpoint!.byteOffset) &&
           checkpoint.totalPages ===
             totalPages &&
           checkpoint.directoryName ===
@@ -906,6 +822,7 @@ const streamLargeRedaction =
         checkpoint.byteOffset =
           writer.position;
 
+        await writer.commit();
         saveCheckpoint(
           checkpointKey,
           checkpoint
@@ -1002,14 +919,10 @@ const streamLargeRedaction =
                     fullWidth
                 );
 
-              const stripHeight =
-                Math.max(
-                  128,
-                  Math.min(
-                    fullHeight,
-                    calculatedHeight
-                  )
-                );
+              const stripHeight = Math.min(fullHeight, calculatedHeight);
+              if (stripHeight < 1 || fullWidth > 16384) {
+                throw new Error(`Page ${pageIndex + 1} exceeds safe local rendering dimensions.`);
+              }
 
               const xObjects:
                 Array<{
@@ -1134,26 +1047,16 @@ const streamLargeRedaction =
                       rects
                     ) {
                       const left =
-                        rect.x *
-                        fullWidth;
+                        Math.floor(rect.x * viewport.width);
 
                       const right =
-                        (
-                          rect.x +
-                          rect.width
-                        ) *
-                        fullWidth;
+                        Math.ceil((rect.x + rect.width) * viewport.width);
 
                       const rectTop =
-                        rect.y *
-                        fullHeight;
+                        Math.floor(rect.y * viewport.height);
 
                       const rectBottom =
-                        (
-                          rect.y +
-                          rect.height
-                        ) *
-                        fullHeight;
+                        Math.ceil((rect.y + rect.height) * viewport.height);
 
                       const clippedTop =
                         Math.max(
@@ -1225,6 +1128,7 @@ const streamLargeRedaction =
                       }
                     );
 
+                  if (jpeg.type !== 'image/jpeg') throw new Error('JPEG encoding is unavailable in this browser.');
                   const jpegBytes =
                     await jpeg
                       .arrayBuffer();
@@ -1268,31 +1172,13 @@ const streamLargeRedaction =
                       imageObjectId,
                   });
 
-                  const stripPoints =
-                    (
-                      height /
-                      fullHeight
-                    ) *
-                    unscaled.height;
-
-                  const yPoints =
-                    unscaled.height -
-                    (
-                      (
-                        top +
-                        height
-                      ) /
-                      fullHeight
-                    ) *
-                      unscaled.height;
-
+                  const stripPoints = height / RENDER_SCALE;
+                  const yPoints = unscaled.height - (top + height) / RENDER_SCALE;
                   commands.push(
                     "q\n" +
-                    `${pdfNumber(unscaled.width)} 0 0 ` +
-                    `${pdfNumber(stripPoints)} 0 ` +
-                    `${pdfNumber(yPoints)} cm\n` +
-                    `/${resourceName} Do\n` +
-                    "Q\n"
+                    `0 0 ${pdfNumber(unscaled.width)} ${pdfNumber(unscaled.height)} re W n\n` +
+                    `${pdfNumber(fullWidth / RENDER_SCALE)} 0 0 ${pdfNumber(stripPoints)} 0 ${pdfNumber(yPoints)} cm\n` +
+                    `/${resourceName} Do\nQ\n`
                   );
 
                   stripIndex++;
@@ -1399,6 +1285,8 @@ const streamLargeRedaction =
               checkpoint.byteOffset =
                 writer.position;
 
+              // Make bytes durable BEFORE advertising them in the checkpoint.
+              await writer.commit();
               saveCheckpoint(
                 checkpointKey,
                 checkpoint
@@ -1504,8 +1392,7 @@ const streamLargeRedaction =
                 "0"
               )} 00000 n \n`;
         } else {
-          xref +=
-            "0000000000 00000 f \n";
+          throw new Error(`Missing PDF object offset ${objectId}.`);
         }
       }
 
@@ -1522,10 +1409,8 @@ const streamLargeRedaction =
 
       await writer.finish();
 
-      clearCheckpoint(
-        checkpointKey
-      );
-
+      // Retain the last page checkpoint through verification/download. A retry
+      // truncates the trailer and finalizes again without rerendering pages.
       const output =
         await getStoredFile(
           directoryName,
@@ -1630,4 +1515,19 @@ export async function redactPDFToFile(
         Date.now(),
     }
   );
+}
+
+/** Explicit Remove file also removes this source's temporary/output streams. */
+export async function clearRedactionStreams(file: File) {
+  const prefix = `redact-stream-${await localContentId(file)}-`;
+  const root = await navigator.storage.getDirectory();
+  for await (const name of (root as any).keys()) {
+    if (name.startsWith(prefix)) await root.removeEntry(name, { recursive: true });
+  }
+  for (const key of Object.keys(localStorage)) {
+    if (!key.startsWith('oneinto1-redact-checkpoint-')) continue;
+    try {
+      if (JSON.parse(localStorage.getItem(key) || '{}').directoryName?.startsWith(prefix)) localStorage.removeItem(key);
+    } catch { /* Ignore unrelated/corrupt records. */ }
+  }
 }

@@ -1,18 +1,22 @@
 /*
  * 1into1 PDF
- * Streaming OPFS writer for large local-only PDF exports.
+ * Crash-safe streaming OPFS writer.
  *
- * Everything stays on-device.
+ * Rules:
  *
- * Preferred on iPhone Safari:
- *   createSyncAccessHandle() inside this Dedicated Worker.
- *
- * Fallback:
- *   createWritable() where supported.
+ * 1. Never acknowledge a checkpoint until bytes are durable.
+ * 2. Never resume beyond the durable file size.
+ * 3. SyncAccessHandle.write() may perform a partial write,
+ *    therefore keep writing until the complete chunk is stored.
  */
 
-const scope: any =
+const scope:
+  any =
   self as any;
+
+let fileHandle:
+  any =
+  null;
 
 let syncHandle:
   any =
@@ -25,35 +29,12 @@ let writable:
 let position =
   0;
 
-const closeCurrent =
-  async () => {
-    if (syncHandle) {
-      try {
-        syncHandle.flush?.();
-      } catch (_) {}
-
-      try {
-        syncHandle.close();
-      } catch (_) {}
-
-      syncHandle =
-        null;
-    }
-
-    if (writable) {
-      try {
-        await writable.close();
-      } catch (_) {}
-
-      writable =
-        null;
-    }
-  };
-
 const send =
   (
-    requestId: string,
-    ok: boolean,
+    requestId:
+      string,
+    ok:
+      boolean,
     extra:
       Record<string, unknown> = {}
   ) => {
@@ -64,40 +45,201 @@ const send =
     });
   };
 
+const closeCurrent =
+  async () => {
+    if (
+      syncHandle
+    ) {
+      try {
+        syncHandle.close();
+      } catch (_) {}
+
+      syncHandle =
+        null;
+    }
+
+    if (
+      writable
+    ) {
+      try {
+        await writable.close();
+      } catch (_) {}
+
+      writable =
+        null;
+    }
+
+    fileHandle =
+      null;
+  };
+
+const getDurableSize =
+  async (
+    handle:
+      any
+  ) => {
+    if (
+      !handle ||
+      typeof handle.getFile !==
+        'function'
+    ) {
+      throw new Error(
+        'Unable to verify durable local PDF size.'
+      );
+    }
+
+    const file =
+      await handle.getFile();
+
+    const size =
+      Number(
+        file?.size
+      );
+
+    if (
+      !Number.isFinite(
+        size
+      ) ||
+      size <
+        0
+    ) {
+      throw new Error(
+        'Invalid durable local PDF size.'
+      );
+    }
+
+    return size;
+  };
+
+const reopenWritable =
+  async () => {
+    if (
+      !fileHandle ||
+      typeof fileHandle
+        .createWritable !==
+        'function'
+    ) {
+      throw new Error(
+        'Unable to reopen local PDF writer.'
+      );
+    }
+
+    writable =
+      await fileHandle
+        .createWritable({
+          keepExistingData:
+            true,
+        });
+
+    if (
+      position >
+        0
+    ) {
+      await writable.seek(
+        position
+      );
+    }
+  };
+
+const writeSyncFully =
+  (
+    bytes:
+      Uint8Array
+  ) => {
+    if (
+      !syncHandle
+    ) {
+      throw new Error(
+        'Synchronous PDF writer is unavailable.'
+      );
+    }
+
+    let writtenTotal =
+      0;
+
+    while (
+      writtenTotal <
+      bytes.byteLength
+    ) {
+      const remaining =
+        bytes.subarray(
+          writtenTotal
+        );
+
+      const written =
+        Number(
+          syncHandle.write(
+            remaining,
+            {
+              at:
+                position +
+                writtenTotal,
+            }
+          )
+        );
+
+      if (
+        !Number.isFinite(
+          written
+        ) ||
+        written <=
+          0 ||
+        written >
+          remaining.byteLength
+      ) {
+        throw new Error(
+          `Incomplete PDF write at byte ${
+            position +
+            writtenTotal
+          }.`
+        );
+      }
+
+      writtenTotal +=
+        written;
+    }
+  };
+
 scope.onmessage =
   async (
-    event: MessageEvent
+    event:
+      MessageEvent
   ) => {
     const message =
-      event.data || {};
+      event.data ||
+      {};
 
     const requestId =
       String(
-        message.requestId || ""
+        message.requestId ||
+          ''
       );
 
     try {
       if (
         message.type ===
-        "init"
+        'init'
       ) {
         await closeCurrent();
 
         const directoryName =
           String(
-            message.directoryName || ""
+            message.directoryName ||
+              ''
           );
 
         const fileName =
           String(
-            message.fileName || ""
+            message.fileName ||
+              ''
           );
 
         const truncateTo =
           Math.max(
             0,
             Number(
-              message.truncateTo || 0
+              message.truncateTo ||
+                0
             )
           );
 
@@ -106,12 +248,13 @@ scope.onmessage =
           !fileName
         ) {
           throw new Error(
-            "Invalid streaming PDF destination."
+            'Invalid streaming PDF destination.'
           );
         }
 
         const root =
-          await scope.navigator
+          await scope
+            .navigator
             .storage
             .getDirectory();
 
@@ -120,32 +263,60 @@ scope.onmessage =
             .getDirectoryHandle(
               directoryName,
               {
-                create: true,
+                create:
+                  true,
               }
             );
 
-        const handle:
-          any =
+        fileHandle =
           await directory
             .getFileHandle(
               fileName,
               {
-                create: true,
+                create:
+                  true,
               }
             );
 
         /*
-         * Safari-compatible path.
+         * CRITICAL RESUME INVARIANT
+         *
+         * A checkpoint may only point to bytes that are already
+         * present in the durable file.
+         *
+         * Never silently extend a file to satisfy a corrupt or
+         * premature checkpoint.
+         */
+        const durableSize =
+          await getDurableSize(
+            fileHandle
+          );
+
+        if (
+          truncateTo >
+          durableSize
+        ) {
+          throw new Error(
+            `Resume checkpoint ${truncateTo} exceeds durable PDF size ${durableSize}.`
+          );
+        }
+
+        /*
+         * Preferred worker-local synchronous OPFS path.
          */
         if (
-          typeof handle
+          typeof fileHandle
             .createSyncAccessHandle ===
-          "function"
+          'function'
         ) {
           syncHandle =
-            await handle
+            await fileHandle
               .createSyncAccessHandle();
 
+          /*
+           * Remove any uncommitted tail beyond the known-good
+           * checkpoint. This becomes durable only on commit().
+           */
           syncHandle.truncate(
             truncateTo
           );
@@ -159,7 +330,7 @@ scope.onmessage =
             {
               position,
               mode:
-                "sync",
+                'sync',
             }
           );
 
@@ -167,21 +338,24 @@ scope.onmessage =
         }
 
         /*
-         * Chrome/newer Safari path.
+         * Async OPFS fallback.
          */
         if (
-          typeof handle
+          typeof fileHandle
             .createWritable ===
-          "function"
+          'function'
         ) {
           writable =
-            await handle
+            await fileHandle
               .createWritable({
                 keepExistingData:
-                  truncateTo >
-                  0,
+                  true,
               });
 
+          /*
+           * Same rule: discard everything after the last known
+           * durable checkpoint.
+           */
           await writable.truncate(
             truncateTo
           );
@@ -204,7 +378,7 @@ scope.onmessage =
             {
               position,
               mode:
-                "async",
+                'async',
             }
           );
 
@@ -212,19 +386,19 @@ scope.onmessage =
         }
 
         throw new Error(
-          "This browser does not expose a compatible local streaming file API."
+          'No compatible local streaming file API is available.'
         );
       }
 
       if (
         message.type ===
-        "append"
+        'append'
       ) {
         if (
           !message.data
         ) {
           throw new Error(
-            "Missing streaming PDF data."
+            'Missing streaming PDF data.'
           );
         }
 
@@ -236,23 +410,15 @@ scope.onmessage =
         if (
           syncHandle
         ) {
-          const written =
-            syncHandle.write(
-              bytes,
-              {
-                at:
-                  position,
-              }
-            );
-
-          if (
-            written !==
-            bytes.byteLength
-          ) {
-            throw new Error(
-              `Incomplete PDF write at byte ${position}.`
-            );
-          }
+          /*
+           * SyncAccessHandle.write() is allowed to perform a
+           * partial write.
+           *
+           * Keep writing until the entire buffer is stored.
+           */
+          writeSyncFully(
+            bytes
+          );
         } else if (
           writable
         ) {
@@ -261,7 +427,7 @@ scope.onmessage =
           );
         } else {
           throw new Error(
-            "Streaming PDF writer is not initialized."
+            'Streaming PDF writer is not initialized.'
           );
         }
 
@@ -279,27 +445,46 @@ scope.onmessage =
         return;
       }
 
+      /*
+       * ======================================================
+       * DURABLE PAGE COMMIT
+       * ======================================================
+       *
+       * streamingRedact.ts is only allowed to advance its page
+       * checkpoint AFTER this operation succeeds.
+       */
       if (
         message.type ===
-        "finish"
+        'commit'
       ) {
         if (
           syncHandle
         ) {
-          syncHandle.flush?.();
-          syncHandle.close();
-
-          syncHandle =
-            null;
-        }
-
-        if (
+          /*
+           * flush() is the durability boundary for the sync path.
+           */
+          syncHandle.flush();
+        } else if (
           writable
         ) {
+          /*
+           * FileSystemWritableFileStream commits its temporary
+           * file when close() succeeds.
+           */
           await writable.close();
 
           writable =
             null;
+
+          /*
+           * Reopen the now-durable file and continue appending at
+           * the same logical position.
+           */
+          await reopenWritable();
+        } else {
+          throw new Error(
+            'Streaming PDF writer is not initialized.'
+          );
         }
 
         send(
@@ -315,7 +500,47 @@ scope.onmessage =
 
       if (
         message.type ===
-        "abort"
+        'finish'
+      ) {
+        if (
+          syncHandle
+        ) {
+          syncHandle.flush();
+          syncHandle.close();
+
+          syncHandle =
+            null;
+        }
+
+        if (
+          writable
+        ) {
+          await writable.close();
+
+          writable =
+            null;
+        }
+
+        fileHandle =
+          null;
+
+        send(
+          requestId,
+          true,
+          {
+            position,
+          }
+        );
+
+        return;
+      }
+
+      /*
+       * Abort must NOT make uncommitted bytes durable.
+       */
+      if (
+        message.type ===
+        'abort'
       ) {
         if (
           syncHandle
@@ -335,7 +560,7 @@ scope.onmessage =
             if (
               typeof writable
                 .abort ===
-              "function"
+              'function'
             ) {
               await writable.abort();
             } else {
@@ -346,6 +571,9 @@ scope.onmessage =
           writable =
             null;
         }
+
+        fileHandle =
+          null;
 
         send(
           requestId,
@@ -362,7 +590,8 @@ scope.onmessage =
         `Unknown streaming command: ${message.type}`
       );
     } catch (
-      error: any
+      error:
+        any
     ) {
       send(
         requestId,
@@ -370,7 +599,9 @@ scope.onmessage =
         {
           error:
             error?.message ||
-            String(error),
+            String(
+              error
+            ),
         }
       );
     }

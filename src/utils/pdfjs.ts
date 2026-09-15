@@ -9,78 +9,246 @@ if (
 }
 
 /*
- * Load a browser File/Blob into PDF.js without first calling
- * file.arrayBuffer().
+ * ============================================================
+ * LOCAL BLOB RANGE TRANSPORT
+ * ============================================================
  *
- * This is important for large PDFs:
+ * Large local PDFs must stay browser-backed.
  *
- * Old path:
- * File -> ArrayBuffer -> Uint8Array -> optional slice -> PDF.js
+ * Do NOT:
+ *   File -> full ArrayBuffer -> PDF.js
  *
- * A 150 MB PDF could therefore create one or more additional
- * 150 MB JavaScript buffers before PDF.js even starts.
+ * Do NOT rely on:
+ *   blob: URL -> PDF.js network layer
  *
- * Blob URLs keep the original File/Blob browser-backed and let
- * PDF.js consume it without us creating that initial full-size
- * JS copy.
+ * Instead PDF.js requests only the byte ranges it needs and
+ * Blob.slice() supplies those ranges.
  */
-export const loadPdfJsFromBlob = async (
-  blob: Blob,
-  options: Record<string, unknown> = {}
-) => {
-  if (
-    typeof URL === 'undefined' ||
-    typeof URL.createObjectURL !== 'function'
+
+const RANGE_CHUNK_SIZE =
+  256 * 1024;
+
+class LocalBlobRangeTransport extends
+  (pdfjsLib as any).PDFDataRangeTransport {
+  private readonly source:
+    Blob;
+
+  private stopped =
+    false;
+
+  constructor(
+    source:
+      Blob,
+    initialData:
+      Uint8Array
   ) {
-    throw new Error(
-      'Local PDF loading is not supported in this browser.'
+    super(
+      source.size,
+      initialData,
+      false
     );
+
+    this.source =
+      source;
   }
 
-  const objectUrl =
-    URL.createObjectURL(blob);
+  requestDataRange(
+    begin:
+      number,
+    end:
+      number
+  ) {
+    if (
+      this.stopped
+    ) {
+      return;
+    }
 
-  let pdf: any = null;
+    const safeBegin =
+      Math.max(
+        0,
+        Math.min(
+          this.source.size,
+          begin
+        )
+      );
+
+    const safeEnd =
+      Math.max(
+        safeBegin,
+        Math.min(
+          this.source.size,
+          end
+        )
+      );
+
+    void this.source
+      .slice(
+        safeBegin,
+        safeEnd
+      )
+      .arrayBuffer()
+      .then(
+        (
+          buffer
+        ) => {
+          if (
+            this.stopped
+          ) {
+            return;
+          }
+
+          this.onDataRange(
+            safeBegin,
+            new Uint8Array(
+              buffer
+            )
+          );
+        }
+      )
+      .catch(
+        (
+          error
+        ) => {
+          console.error(
+            'Local PDF range read failed:',
+            error
+          );
+
+          if (
+            !this.stopped
+          ) {
+            this.onDataRange(
+              safeBegin,
+              new Uint8Array(
+                0
+              )
+            );
+          }
+        }
+      );
+  }
+
+  abort() {
+    this.stopped =
+      true;
+  }
+}
+
+export const loadPdfJsFromBlob = async (
+  blob:
+    Blob,
+  options:
+    Record<string, unknown> = {}
+) => {
+  /*
+   * Give PDF.js only a small initial prefix.
+   * Remaining bytes are requested through Blob.slice().
+   */
+  const firstChunkEnd =
+    Math.min(
+      blob.size,
+      RANGE_CHUNK_SIZE
+    );
+
+  const initialData =
+    new Uint8Array(
+      await blob
+        .slice(
+          0,
+          firstChunkEnd
+        )
+        .arrayBuffer()
+    );
+
+  const rangeTransport =
+    new LocalBlobRangeTransport(
+      blob,
+      initialData
+    );
+
+  let loadingTask:
+    any =
+    null;
+
+  let pdf:
+    any =
+    null;
 
   try {
-    const loadingTask =
+    loadingTask =
       pdfjsLib.getDocument({
         ...options,
-        url: objectUrl,
-        isEvalSupported: false,
+
+        range:
+          rangeTransport as any,
+
+        rangeChunkSize:
+          RANGE_CHUNK_SIZE,
+
+        /*
+         * Force range-driven access.
+         *
+         * This prevents PDF.js from automatically pulling the
+         * complete 147 MB source into another contiguous buffer.
+         */
+        disableRange:
+          false,
+
+        disableStream:
+          true,
+
+        disableAutoFetch:
+          true,
+
+        isEvalSupported:
+          false,
       });
 
-    pdf = await loadingTask.promise;
-  } catch (error) {
-    URL.revokeObjectURL(objectUrl);
+    pdf =
+      await loadingTask.promise;
+  } catch (
+    error
+  ) {
+    rangeTransport.abort();
+
+    try {
+      await loadingTask
+        ?.destroy?.();
+    } catch (_) {}
+
     throw error;
   }
 
-  let disposed = false;
+  let disposed =
+    false;
 
   return {
     pdf,
 
-    /*
-     * Always use dispose() when finished.
-     * It releases both PDF.js resources and the temporary
-     * browser Blob URL.
-     */
-    dispose: async () => {
-      if (disposed) return;
+    dispose:
+      async () => {
+        if (
+          disposed
+        ) {
+          return;
+        }
 
-      disposed = true;
+        disposed =
+          true;
 
-      try {
-        await pdf?.destroy();
-      } catch (_) {
-        // Cleanup should never hide the original operation result.
-      } finally {
-        URL.revokeObjectURL(
-          objectUrl
-        );
-      }
-    },
+        rangeTransport.abort();
+
+        try {
+          await pdf
+            ?.destroy?.();
+        } catch (_) {
+          try {
+            await loadingTask
+              ?.destroy?.();
+          } catch (_) {}
+        }
+      },
   };
 };
 

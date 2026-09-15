@@ -1,1082 +1,147 @@
-import {
-  loadPdfJsFromBlob,
-} from "./pdfjs";
+import { loadPdfJsFromBlob, pdfjsLib } from './pdfjs';
 
-export const normalizeForSafetyCheck = (
-  value: string
-) =>
-  value
-    .toLowerCase()
-    .replace(
-      /[^a-z0-9]/g,
-      ""
-    );
+export const normalizeForSafetyCheck = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+export type SafetyVerificationRegion = { x: number; y: number; width: number; height: number };
+export type SafetyVerificationTarget = { id?: string; value: string; page?: number; region?: SafetyVerificationRegion };
+export type FinalVerificationResult = { passed: boolean; leakedValues: string[]; failedTargetIds: string[]; selectableTextFound: boolean };
+export type FinalVerificationOptions = { flattenedPages?: ReadonlySet<number> };
 
-export type SafetyVerificationRegion = {
-  /*
-   * Normalized browser/page coordinates.
-   * 0.0 -> 1.0
-   *
-   * Same coordinate system used by redactPDF().
-   */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-export type SafetyVerificationTarget = {
-  /*
-   * Stable finding ID lets Private PII identify the EXACT
-   * redaction which failed verification.
-   */
-  id?: string;
-
-  value: string;
-  page?: number;
-
-  /*
-   * Exact expected blackout position in the finished PDF.
-   *
-   * Private PII supplies this for every automatic finding.
-   */
-  region?: SafetyVerificationRegion;
-};
-
-export type FinalVerificationResult = {
-  passed: boolean;
-
-  /*
-   * Retained for compatibility with existing callers/UI.
-   *
-   * These values now correspond to targets whose final blackout
-   * could not be confirmed.
-   */
-  leakedValues: string[];
-
-  /*
-   * Exact IDs are more precise than matching duplicate values.
-   */
-  failedTargetIds: string[];
-
-  selectableTextFound: boolean;
-};
-
-export type FinalVerificationOptions = {
-  /*
-   * Hybrid secure redaction leaves untouched pages vector/lossless.
-   *
-   * Only pages listed here are expected to have been destructively
-   * flattened by the secure redaction engine.
-   *
-   * If omitted, every page is treated as flattened.
-   */
-  flattenedPages?: ReadonlySet<number>;
-};
-
-const clamp01 = (
-  value: number
-) =>
-  Math.max(
-    0,
-    Math.min(
-      1,
-      value
-    )
-  );
-
-export const verifyFinishedPdf = async (
-  source:
-    | Uint8Array
-    | Blob,
-  selectedFindings:
-    SafetyVerificationTarget[],
-  onProgress?: (
-    message: string
-  ) => void,
-  options:
-    FinalVerificationOptions =
-      {}
-): Promise<FinalVerificationResult> => {
-  /*
-   * ==========================================================
-   * DETERMINISTIC FINAL REDACTION VERIFIER
-   * ==========================================================
-   *
-   * IMPORTANT:
-   *
-   * This deliberately does NOT run OCR.
-   *
-   * The heavy OCR scanner has already located the sensitive
-   * information and created exact page-space boxes.
-   *
-   * redactPDF() then permanently burns those boxes into
-   * rasterized redacted pages.
-   *
-   * The final job is therefore:
-   *
-   *   A) verify the affected page contains no selectable text
-   *   B) verify the exact expected redaction pixels are black
-   *
-   * This validates the FINISHED output without another
-   * Tesseract/WASM pass.
-   */
-
-  const verificationBlob =
-    source instanceof Blob
-      ? source
-      : new Blob(
-          [
-            source as unknown as
-              BlobPart,
-          ],
-          {
-            type:
-              "application/pdf",
-          }
-        );
-
-  /*
-   * No high-resolution OCR is required.
-   *
-   * 1.15x gives plenty of pixels for reliable blackout sampling
-   * while keeping memory dramatically below the old 1.7x OCR
-   * verifier.
-   */
-  const VERIFY_SCALE =
-    1.15;
-
-  /*
-   * Hard-reset PDF.js regularly on mobile.
-   *
-   * There is no Tesseract worker anymore.
-   */
-  const PAGE_BATCH_SIZE =
-    4;
-
-  const yieldToMobile =
-    (
-      delay = 30
-    ) =>
-      new Promise<void>(
-        (
-          resolve
-        ) =>
-          setTimeout(
-            resolve,
-            delay
-          )
-      );
-
-  /*
-   * Short probe to get page count.
-   */
-  let totalPages =
-    0;
-
-  {
-    const probe =
-      await loadPdfJsFromBlob(
-        verificationBlob
-      );
-
-    try {
-      totalPages =
-        probe.pdf.numPages;
-    } finally {
-      await probe.dispose();
-    }
-  }
-
-  /*
-   * Normalize target metadata.
-   */
-  const targets =
-    selectedFindings.map(
-      (
-        finding,
-        index
-      ) => {
-        const page =
-          Number.isInteger(
-            finding.page
-          ) &&
-          Number(
-            finding.page
-          ) >
-            0
-            ? Number(
-                finding.page
-              )
-            : null;
-
-        return {
-          id:
-            finding.id ||
-            `verification-${index}`,
-          value:
-            finding.value,
-          page,
-          region:
-            finding.region ||
-            null,
-        };
-      }
-    );
-
-  const targetsByPage =
-    new Map<
-      number,
-      typeof targets
-    >();
-
-  for (
-    const target of
-      targets
-  ) {
-    if (
-      target.page ===
-      null
-    ) {
+/** Restrict flattened pages to non-overlapping raster image paints. This rejects
+ * a selectable-text-free image merely covered by a vector or another image.
+ * Version-specific to pinned PDF.js 3.11 operator list; unknown paints fail shut. */
+async function rasterOnlyPage(page: any): Promise<boolean> {
+  const ops = await page.getOperatorList();
+  const O = pdfjsLib.OPS;
+  let matrix = [1, 0, 0, 1, 0, 0];
+  const stack: number[][] = [];
+  const images: number[][] = [];
+  const [x0, y0, x1, y1] = page.view;
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const op = ops.fnArray[i], args = ops.argsArray[i];
+    if (op === O.dependency) continue;
+    if (op === O.save) { stack.push([...matrix]); continue; }
+    if (op === O.restore) { if (!stack.length) return false; matrix = stack.pop()!; continue; }
+    if (op === O.transform) { matrix = pdfjsLib.Util.transform(matrix, args); continue; }
+    if (op === O.constructPath) {
+      // Only the page-sized clipping path emitted by the strip writer is allowed.
+      if (args[0].length !== 1 || args[0][0] !== O.rectangle ||
+          args[1].some((value: number, j: number) => Math.abs(value - [x0, y0, x1 - x0, y1 - y0][j]) > 0.001) ||
+          matrix.some((value, j) => Math.abs(value - [1,0,0,1,0,0][j]) > 0.001)) return false;
       continue;
     }
-
-    const current =
-      targetsByPage.get(
-        target.page
-      ) || [];
-
-    current.push(
-      target
-    );
-
-    targetsByPage.set(
-      target.page,
-      current
-    );
+    if (op === O.clip || op === O.endPath) continue;
+    if (op !== O.paintImageXObject) return false;
+    const [a,b,c,d,e,f] = matrix;
+    if (![a,b,c,d,e,f].every(Number.isFinite) || Math.abs(b) > 0.001 || Math.abs(c) > 0.001 || a <= 0 || d <= 0) return false;
+    const box = [e,f,e+a,f+d];
+    // Only the subpixel ceil padding at the outer canvas edge may be clipped.
+    if (box[0] < x0-1 || box[1] < y0-1 || box[2] > x1+1 || box[3] > y1+1) return false;
+    if (images.some(other => Math.min(box[2],other[2])-Math.max(box[0],other[0]) > 0.001 &&
+                            Math.min(box[3],other[3])-Math.max(box[1],other[1]) > 0.001)) return false;
+    images.push(box);
   }
+  return images.length > 0 && stack.length === 0;
+}
 
-  const requestedVerificationPages =
-    options.flattenedPages &&
-    options.flattenedPages
-      .size >
-      0
-      ? Array.from(
-          options
-            .flattenedPages
-        )
-          .filter(
-            (
-              pageNumber
-            ) =>
-              Number.isInteger(
-                pageNumber
-              ) &&
-              pageNumber >=
-                1 &&
-              pageNumber <=
-                totalPages
-          )
-          .sort(
-            (
-              a,
-              b
-            ) =>
-              a - b
-          )
-      : Array.from(
-          {
-            length:
-              totalPages,
-          },
-          (
-            _,
-            index
-          ) =>
-            index + 1
-        );
-
-  const failedTargetIds =
-    new Set<string>();
-
-  const failedValues =
-    new Map<
-      string,
-      string
-    >();
-
-  let selectableTextFound =
-    false;
-
-  /*
-   * Fail safely if a target that is supposed to be verified
-   * does not contain enough geometry information.
-   *
-   * Never silently pass an un-verifiable selected finding.
-   */
-  for (
-    const target of
-      targets
-  ) {
-    if (
-      target.page ===
-        null ||
-      !target.region
-    ) {
-      failedTargetIds.add(
-        target.id
-      );
-
-      failedValues.set(
-        target.id,
-        target.value
-      );
+/** Independently reopens the finished PDF. Checks flattened-page text/annotations
+ * and the interior pixels of EVERY supplied rectangle. This verifies application
+ * of selected boxes, not detector recall or absence of PII outside those boxes. */
+export async function verifyFinishedPdf(
+  source: Uint8Array | Blob,
+  selectedFindings: SafetyVerificationTarget[],
+  onProgress?: (message: string) => void,
+  options: FinalVerificationOptions = {},
+): Promise<FinalVerificationResult> {
+  const blob = source instanceof Blob ? source : new Blob([source as BlobPart], { type: 'application/pdf' });
+  let loaded: Awaited<ReturnType<typeof loadPdfJsFromBlob>> | null = await loadPdfJsFromBlob(blob, { stopAtErrors: true });
+  const targets = selectedFindings.map((target, index) => ({ ...target, id: target.id || `verification-${index}` }));
+  const failed = new Set<string>();
+  let selectableTextFound = false;
+  let structureFailed = false;
+  const validRegion = (r?: SafetyVerificationRegion) => !!r &&
+    [r.x, r.y, r.width, r.height].every(Number.isFinite) &&
+    r.x >= 0 && r.y >= 0 && r.width > 0 && r.height > 0 &&
+    r.x + r.width <= 1.000001 && r.y + r.height <= 1.000001;
+  try {
+    const totalPages = loaded.pdf.numPages;
+    const pages = options.flattenedPages ? [...options.flattenedPages] : Array.from({ length: totalPages }, (_, i) => i + 1);
+    if (pages.some(p => !Number.isInteger(p) || p < 1 || p > totalPages)) structureFailed = true;
+    const pageSet = new Set(pages);
+    for (const target of targets) {
+      if (!Number.isInteger(target.page) || !pageSet.has(target.page!) || !validRegion(target.region)) failed.add(target.id);
     }
-  }
-
-  /*
-   * ==========================================================
-   * VERIFY SHORT PAGE BATCHES
-   * ==========================================================
-   */
-  for (
-    let batchStart = 0;
-    batchStart <
-      requestedVerificationPages
-        .length;
-    batchStart +=
-      PAGE_BATCH_SIZE
-  ) {
-    const batchPages =
-      requestedVerificationPages.slice(
-        batchStart,
-        batchStart +
-          PAGE_BATCH_SIZE
-      );
-
-    let loaded:
-      | Awaited<
-          ReturnType<
-            typeof loadPdfJsFromBlob
-          >
-        >
-      | null =
-      null;
-
-    try {
-      loaded =
-        await loadPdfJsFromBlob(
-          verificationBlob
-        );
-
-      const pdf =
-        loaded.pdf;
-
-      for (
-        let localIndex = 0;
-        localIndex <
-          batchPages.length;
-        localIndex++
-      ) {
-        const pageNumber =
-          batchPages[
-            localIndex
-          ];
-
-        onProgress?.(
-          `Verifying secure blackout page ${pageNumber} of ${totalPages}…`
-        );
-
-        const page =
-          await pdf.getPage(
-            pageNumber
-          );
-
-        try {
-          /*
-           * ===================================================
-           * CHECK 1 — FLATTENED PAGE MUST HAVE NO TEXT LAYER
-           * ===================================================
-           */
-          const textContent =
-            await page
-              .getTextContent();
-
-          const selectableText =
-            textContent.items
-              .map(
-                (
-                  item: any
-                ) =>
-                  item?.str ||
-                  ""
-              )
-              .join(
-                " "
-              )
-              .trim();
-
-          if (
-            selectableText.length >
-            0
-          ) {
-            selectableTextFound =
-              true;
-
-            /*
-             * A page expected to be destructively flattened
-             * should contain no selectable text.
-             *
-             * If that invariant fails, every selected finding
-             * on this page becomes a concrete manual-review
-             * item so the suggestion box is never empty.
-             */
-            const pageFailureTargets =
-              targetsByPage.get(
-                pageNumber
-              ) || [];
-
-            for (
-              const target of
-                pageFailureTargets
-            ) {
-              failedTargetIds.add(
-                target.id
-              );
-
-              failedValues.set(
-                target.id,
-                target.value
-              );
-            }
-          }
-
-          const pageTargets =
-            targetsByPage.get(
-              pageNumber
-            ) || [];
-
-          if (
-            pageTargets.length ===
-            0
-          ) {
-            continue;
-          }
-
-          /*
-           * ===================================================
-           * CHECK 2 — RENDER ONLY THE AREA AROUND BLACKOUTS
-           * ===================================================
-           *
-           * Instead of rendering/OCRing the complete page,
-           * calculate one bounding crop containing this page's
-           * expected redaction boxes.
-           */
-          const validRegions =
-            pageTargets
-              .map(
-                (
-                  target
-                ) => {
-                  const region =
-                    target.region;
-
-                  if (!region) {
-                    return null;
-                  }
-
-                  const x =
-                    clamp01(
-                      region.x
-                    );
-
-                  const y =
-                    clamp01(
-                      region.y
-                    );
-
-                  const width =
-                    Math.max(
-                      0,
-                      Math.min(
-                        1 - x,
-                        region.width
-                      )
-                    );
-
-                  const height =
-                    Math.max(
-                      0,
-                      Math.min(
-                        1 - y,
-                        region.height
-                      )
-                    );
-
-                  if (
-                    width <=
-                      0 ||
-                    height <=
-                      0
-                  ) {
-                    failedTargetIds.add(
-                      target.id
-                    );
-
-                    failedValues.set(
-                      target.id,
-                      target.value
-                    );
-
-                    return null;
-                  }
-
-                  return {
-                    target,
-                    x,
-                    y,
-                    width,
-                    height,
-                  };
-                }
-              )
-              .filter(
-                Boolean
-              ) as Array<{
-                target:
-                  (
-                    typeof targets
-                  )[number];
-                x: number;
-                y: number;
-                width: number;
-                height: number;
-              }>;
-
-          if (
-            validRegions.length ===
-            0
-          ) {
-            continue;
-          }
-
-          /*
-           * Small margin around all expected boxes.
-           *
-           * The sampled verification itself still checks the
-           * INSIDE of each exact blackout box.
-           */
-          const cropMargin =
-            0.01;
-
-          const cropLeft =
-            Math.max(
-              0,
-              Math.min(
-                ...validRegions.map(
-                  (
-                    region
-                  ) =>
-                    region.x
-                )
-              ) -
-                cropMargin
-            );
-
-          const cropTop =
-            Math.max(
-              0,
-              Math.min(
-                ...validRegions.map(
-                  (
-                    region
-                  ) =>
-                    region.y
-                )
-              ) -
-                cropMargin
-            );
-
-          const cropRight =
-            Math.min(
-              1,
-              Math.max(
-                ...validRegions.map(
-                  (
-                    region
-                  ) =>
-                    region.x +
-                    region.width
-                )
-              ) +
-                cropMargin
-            );
-
-          const cropBottom =
-            Math.min(
-              1,
-              Math.max(
-                ...validRegions.map(
-                  (
-                    region
-                  ) =>
-                    region.y +
-                    region.height
-                )
-              ) +
-                cropMargin
-            );
-
-          const fullViewport =
-            page.getViewport({
-              scale:
-                VERIFY_SCALE,
-            });
-
-          const fullWidth =
-            Math.max(
-              1,
-              Math.ceil(
-                fullViewport.width
-              )
-            );
-
-          const fullHeight =
-            Math.max(
-              1,
-              Math.ceil(
-                fullViewport.height
-              )
-            );
-
-          const cropLeftPx =
-            Math.floor(
-              cropLeft *
-                fullWidth
-            );
-
-          const cropTopPx =
-            Math.floor(
-              cropTop *
-                fullHeight
-            );
-
-          const cropRightPx =
-            Math.ceil(
-              cropRight *
-                fullWidth
-            );
-
-          const cropBottomPx =
-            Math.ceil(
-              cropBottom *
-                fullHeight
-            );
-
-          const canvas =
-            document.createElement(
-              "canvas"
-            );
-
-          canvas.width =
-            Math.max(
-              1,
-              cropRightPx -
-                cropLeftPx
-            );
-
-          canvas.height =
-            Math.max(
-              1,
-              cropBottomPx -
-                cropTopPx
-            );
-
-          try {
-            const ctx =
-              canvas.getContext(
-                "2d",
-                {
-                  alpha:
-                    false,
-                  willReadFrequently:
-                    true,
-                }
-              );
-
-            if (!ctx) {
-              throw new Error(
-                "Unable to create final blackout verification renderer."
-              );
-            }
-
-            ctx.fillStyle =
-              "#ffffff";
-
-            ctx.fillRect(
-              0,
-              0,
-              canvas.width,
-              canvas.height
-            );
-
-            /*
-             * Render only this page crop.
-             */
-            await page.render({
-              canvasContext:
-                ctx,
-              viewport:
-                fullViewport,
-              canvas,
-              transform: [
-                1,
-                0,
-                0,
-                1,
-                -cropLeftPx,
-                -cropTopPx,
-              ],
-            } as any).promise;
-
-            /*
-             * =================================================
-             * VERIFY EVERY EXPECTED BLACKOUT
-             * =================================================
-             *
-             * We sample the INNER portion of the expected box.
-             *
-             * Ignoring a small edge avoids JPEG anti-aliasing /
-             * compression around the rectangle boundary.
-             */
-            for (
-              const region of
-                validRegions
-            ) {
-              const insetRatio =
-                0.16;
-
-              const innerLeft =
-                (
-                  region.x +
-                  region.width *
-                    insetRatio
-                ) *
-                  fullWidth -
-                cropLeftPx;
-
-              const innerTop =
-                (
-                  region.y +
-                  region.height *
-                    insetRatio
-                ) *
-                  fullHeight -
-                cropTopPx;
-
-              const innerRight =
-                (
-                  region.x +
-                  region.width *
-                    (
-                      1 -
-                      insetRatio
-                    )
-                ) *
-                  fullWidth -
-                cropLeftPx;
-
-              const innerBottom =
-                (
-                  region.y +
-                  region.height *
-                    (
-                      1 -
-                      insetRatio
-                    )
-                ) *
-                  fullHeight -
-                cropTopPx;
-
-              const sampleX =
-                Math.max(
-                  0,
-                  Math.floor(
-                    innerLeft
-                  )
-                );
-
-              const sampleY =
-                Math.max(
-                  0,
-                  Math.floor(
-                    innerTop
-                  )
-                );
-
-              const sampleRight =
-                Math.min(
-                  canvas.width,
-                  Math.ceil(
-                    innerRight
-                  )
-                );
-
-              const sampleBottom =
-                Math.min(
-                  canvas.height,
-                  Math.ceil(
-                    innerBottom
-                  )
-                );
-
-              const sampleWidth =
-                Math.max(
-                  1,
-                  sampleRight -
-                    sampleX
-                );
-
-              const sampleHeight =
-                Math.max(
-                  1,
-                  sampleBottom -
-                    sampleY
-                );
-
-              let imageData:
-                ImageData;
-
-              try {
-                imageData =
-                  ctx.getImageData(
-                    sampleX,
-                    sampleY,
-                    sampleWidth,
-                    sampleHeight
-                  );
-              } catch (_) {
-                failedTargetIds.add(
-                  region.target
-                    .id
-                );
-
-                failedValues.set(
-                  region.target
-                    .id,
-                  region.target
-                    .value
-                );
-
-                continue;
-              }
-
-              const data =
-                imageData.data;
-
-              /*
-               * Cap work for very large boxes while still
-               * sampling thousands of pixels.
-               */
-              const pixelCount =
-                sampleWidth *
-                sampleHeight;
-
-              const stride =
-                Math.max(
-                  1,
-                  Math.floor(
-                    Math.sqrt(
-                      pixelCount /
-                        6000
-                    )
-                  )
-                );
-
-              let sampled =
-                0;
-
-              let darkPixels =
-                0;
-
-              for (
-                let y = 0;
-                y <
-                  sampleHeight;
-                y += stride
-              ) {
-                for (
-                  let x = 0;
-                  x <
-                    sampleWidth;
-                  x += stride
-                ) {
-                  const offset =
-                    (
-                      y *
-                        sampleWidth +
-                      x
-                    ) *
-                    4;
-
-                  const r =
-                    data[
-                      offset
-                    ];
-
-                  const g =
-                    data[
-                      offset +
-                        1
-                    ];
-
-                  const b =
-                    data[
-                      offset +
-                        2
-                    ];
-
-                  /*
-                   * Standard perceived luminance approximation.
-                   */
-                  const luminance =
-                    (
-                      r *
-                        299 +
-                      g *
-                        587 +
-                      b *
-                        114
-                    ) /
-                    1000;
-
-                  sampled++;
-
-                  /*
-                   * Burned black at JPEG 0.92 remains far below
-                   * this threshold even with compression.
-                   */
-                  if (
-                    luminance <
-                    95
-                  ) {
-                    darkPixels++;
-                  }
-                }
-              }
-
-              const darkRatio =
-                sampled >
-                0
-                  ? darkPixels /
-                    sampled
-                  : 0;
-
-              /*
-               * A proper burned blackout should be almost
-               * entirely dark.
-               *
-               * Normal black text on a white page cannot reach
-               * this ratio, so an unredacted text region fails.
-               */
-              if (
-                darkRatio <
-                0.82
-              ) {
-                failedTargetIds.add(
-                  region.target
-                    .id
-                );
-
-                failedValues.set(
-                  region.target
-                    .id,
-                  region.target
-                    .value
-                );
-              }
-            }
-          } finally {
-            /*
-             * Release crop backing store immediately.
-             */
-            canvas.width =
-              1;
-
-            canvas.height =
-              1;
-
-            try {
-              canvas.remove();
-            } catch (_) {}
-          }
-
-          await yieldToMobile(
-            20
-          );
-        } finally {
-          try {
-            page.cleanup();
-          } catch (_) {}
+    if (await loaded.pdf.getAttachments()) structureFailed = true;
+    const validPages = pages.filter(p => Number.isInteger(p) && p >= 1 && p <= totalPages).sort((a, b) => a - b);
+    for (let index = 0; index < validPages.length; index++) {
+      if (index > 0 && index % 4 === 0) {
+        await loaded.dispose();
+        loaded = await loadPdfJsFromBlob(blob, { stopAtErrors: true });
+      }
+      const pageNumber = validPages[index];
+      onProgress?.(`Verifying secure blackout page ${pageNumber} of ${totalPages}…`);
+      const page = await loaded.pdf.getPage(pageNumber);
+      const pageTargets = targets.filter(t => t.page === pageNumber && !failed.has(t.id));
+      try {
+        const content = await page.getTextContent();
+        const hasText = content.items.some((item: any) => typeof item.str === 'string' && item.str.trim());
+        const annotations = await page.getAnnotations();
+        const rasterOnly = await rasterOnlyPage(page);
+        if (hasText || annotations.length || !rasterOnly) {
+          selectableTextFound ||= hasText;
+          structureFailed = true;
+          pageTargets.forEach(t => failed.add(t.id));
         }
-      }
-    } finally {
-      /*
-       * Full PDF.js hard reset every short batch.
-       */
-      if (loaded) {
-        try {
-          await loaded
-            .dispose();
-        } catch (_) {}
-
-        loaded =
-          null;
-      }
+        if (!pageTargets.length) continue;
+        const viewport = page.getViewport({ scale: 1.15 });
+        // Map against actual viewport dimensions, not ceil-rounded canvas size.
+        const regions = pageTargets.map(t => {
+          const r = t.region!;
+          const insetX = Math.min(1, r.width * viewport.width / 4);
+          const insetY = Math.min(1, r.height * viewport.height / 4);
+          return { target: t, left: Math.ceil(r.x * viewport.width + insetX),
+            top: Math.ceil(r.y * viewport.height + insetY),
+            right: Math.floor((r.x + r.width) * viewport.width - insetX),
+            bottom: Math.floor((r.y + r.height) * viewport.height - insetY), count: 0 };
+        });
+        const left = Math.max(0, Math.min(...regions.map(r => r.left)));
+        const right = Math.min(Math.ceil(viewport.width), Math.max(...regions.map(r => r.right)));
+        const top = Math.max(0, Math.min(...regions.map(r => r.top)));
+        const bottom = Math.min(Math.ceil(viewport.height), Math.max(...regions.map(r => r.bottom)));
+        const width = right - left;
+        if (width <= 0 || width > 16384) { pageTargets.forEach(t => failed.add(t.id)); continue; }
+        const stripHeight = Math.max(1, Math.floor(1_000_000 / width));
+        for (let y = top; y < bottom; y += stripHeight) {
+          const height = Math.min(stripHeight, bottom - y);
+          const intersections = regions.filter(r => r.bottom > y && r.top < y + height && !failed.has(r.target.id));
+          if (!intersections.length) continue;
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          try {
+            const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+            if (!ctx) throw new Error('Unable to render final verification.');
+            await page.render({ canvasContext: ctx, viewport, transform: [1, 0, 0, 1, -left, -y], background: '#ffffff' }).promise;
+            for (const region of intersections) {
+              const sampleTop = Math.max(y, region.top);
+              const sampleBottom = Math.min(y + height, region.bottom);
+              const w = region.right - region.left;
+              if (w <= 0 || sampleBottom <= sampleTop) { failed.add(region.target.id); continue; }
+              const data = ctx.getImageData(region.left - left, sampleTop - y, w, sampleBottom - sampleTop).data;
+              region.count += data.length / 4;
+              // Inspect every interior pixel; the old 82% dark threshold could
+              // pass a region with substantial unredacted text/white space.
+              for (let pixel = 0; pixel < data.length; pixel += 4) {
+                if (data[pixel] > 64 || data[pixel + 1] > 64 || data[pixel + 2] > 64) {
+                  failed.add(region.target.id); break;
+                }
+              }
+            }
+          } finally { canvas.width = 1; canvas.height = 1; canvas.remove(); }
+        }
+        regions.filter(r => r.count === 0).forEach(r => failed.add(r.target.id));
+      } finally { page.cleanup(); }
     }
-
-    if (
-      batchStart +
-        PAGE_BATCH_SIZE <
-      requestedVerificationPages
-        .length
-    ) {
-      await yieldToMobile(
-        120
-      );
-    }
-  }
-
-  const failedIds =
-    Array.from(
-      failedTargetIds
-    );
-
-  const leakedValues =
-    failedIds
-      .map(
-        (
-          id
-        ) =>
-          failedValues.get(
-            id
-          ) || ""
-      )
-      .filter(
-        Boolean
-      );
-
-  return {
-    passed:
-      !selectableTextFound &&
-      failedIds.length ===
-        0,
-
-    leakedValues,
-
-    failedTargetIds:
-      failedIds,
-
-    selectableTextFound,
-  };
-};
+  } finally { await loaded?.dispose(); }
+  return { passed: !structureFailed && !selectableTextFound && failed.size === 0,
+    selectableTextFound, failedTargetIds: [...failed],
+    leakedValues: targets.filter(t => failed.has(t.id)).map(t => t.value).filter(Boolean) };
+}

@@ -1133,9 +1133,6 @@ export const restoreToolWorkspaceFiles =
   async (
     scope: string
   ): Promise<File[]> => {
-    if (isPageReload()) {
-      return [];
-    }
     const key =
       TOOL_MANIFEST_PREFIX +
       safeToolScope(scope);
@@ -1238,10 +1235,6 @@ export const restoreToolWorkspaceState =
   <T>(
     scope: string
   ): T | null => {
-    if (isPageReload()) {
-      return null;
-    }
-
     try {
       const raw =
         sessionStorage.getItem(
