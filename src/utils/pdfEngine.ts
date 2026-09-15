@@ -1,6 +1,5 @@
 import { sanitizeRichHtml } from './sanitizeHtml';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import {
   PDFDocument,
   degrees,
@@ -16949,7 +16948,9 @@ export interface HtmlToPdfOptions {
   ) => void;
 }
 
-export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8Array> {
+export async function generateHtmlPDF(
+  options: HtmlToPdfOptions
+): Promise<Uint8Array> {
   const {
     html,
     pageSize = 'a4',
@@ -16957,766 +16958,1688 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     onProgress,
   } = options;
 
-  if (!html || !html.trim()) {
-    throw new Error('No content provided to convert.');
+  if (
+    !html ||
+    !html.trim()
+  ) {
+    throw new Error(
+      'No content provided to convert.'
+    );
   }
 
-  const isReceipt = pageSize === 'receipt';
-  const isLandscape = orientation === 'landscape' && !isReceipt;
+  /*
+   * =========================================================
+   * FAST DOM -> PDF ENGINE
+   * =========================================================
+   *
+   * We intentionally DO NOT use html2canvas here.
+   *
+   * Browser:
+   *   parses + lays out the sanitized HTML.
+   *
+   * jsPDF:
+   *   draws the resulting boxes, borders, images and text.
+   *
+   * This avoids repainting an entire 2x document canvas.
+   */
 
-  // Standard document dimensions in points (pt)
-  const targetWidthPt = isReceipt
-    ? 226.77
-    : pageSize === 'letter'
-    ? isLandscape ? 792 : 612
-    : isLandscape ? 841.89 : 595.28;
+  const isReceipt =
+    pageSize ===
+    'receipt';
 
-  const targetHeightPt = isReceipt
-    ? 0
-    : pageSize === 'letter'
-    ? isLandscape ? 612 : 792
-    : isLandscape ? 595.28 : 841.89;
+  const isLandscape =
+    orientation ===
+      'landscape' &&
+    !isReceipt;
 
-  // 794px is exact standard 96-DPI A4 width
-  const renderWidthPx = isReceipt ? 340 : isLandscape ? 1123 : 794;
-  const sanitizedHtml = sanitizeRichHtml(html);
+  const targetWidthPt =
+    isReceipt
+      ? 226.77
+      : pageSize ===
+          'letter'
+        ? isLandscape
+          ? 792
+          : 612
+        : isLandscape
+          ? 841.89
+          : 595.28;
 
-  // Strict 1:1 Document Flow CSS (No flex, no squishing, full-width coverage)
-  const NORMALIZATION_CSS = `
-    * {
-      box-sizing: border-box !important;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    html, body {
-      width: 100% !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      background: #ffffff !important;
-      color: #111827 !important;
-      display: block !important;
-      overflow: visible !important;
-    }
-    table {
-      width: 100% !important;
-      border-collapse: collapse !important;
-      margin: 12px 0 !important;
-    }
-    th, td {
-      border: 1px solid #d1d5db !important;
-      padding: 6px 10px !important;
-    }
-    th {
-      background-color: #f3f4f6 !important;
-      font-weight: bold !important;
-    }
-    img, svg {
-      max-width: 100% !important;
-      height: auto !important;
-    }
-    p, div, span, h1, h2, h3, h4, h5, h6 {
-      word-break: break-word !important;
-    }
-  `;
+  const targetHeightPt =
+    isReceipt
+      ? 0
+      : pageSize ===
+          'letter'
+        ? isLandscape
+          ? 612
+          : 792
+        : isLandscape
+          ? 595.28
+          : 841.89;
 
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin');
-  iframe.style.position = 'fixed';
-  iframe.style.top = '0';
-  iframe.style.left = '0';
-  iframe.style.width = `${renderWidthPx}px`;
-  iframe.style.height = '1123px';
-  iframe.style.zIndex = '-99999';
-  iframe.style.border = 'none';
-  iframe.style.opacity = '0';
-  iframe.style.pointerEvents = 'none';
-  document.body.appendChild(iframe);
+  /*
+   * Preserve the same browser layout width used by the old
+   * renderer, so responsive/flex/table layout remains familiar.
+   */
+  const renderWidthPx =
+    isReceipt
+      ? 340
+      : isLandscape
+        ? 1123
+        : 794;
+
+  const sanitizedHtml =
+    sanitizeRichHtml(
+      html
+    );
+
+  onProgress?.(
+    0,
+    1,
+    'Preparing vector layout...'
+  );
+
+  const iframe =
+    document.createElement(
+      'iframe'
+    );
+
+  iframe.setAttribute(
+    'sandbox',
+    'allow-same-origin'
+  );
+
+  iframe.style.position =
+    'fixed';
+
+  iframe.style.left =
+    '-100000px';
+
+  iframe.style.top =
+    '0';
+
+  iframe.style.width =
+    `${renderWidthPx}px`;
+
+  /*
+   * Keep the viewport bounded.
+   * Content can overflow vertically and still receives proper
+   * layout coordinates without creating a giant pixel surface.
+   */
+  iframe.style.height =
+    '1123px';
+
+  iframe.style.border =
+    '0';
+
+  iframe.style.opacity =
+    '0';
+
+  iframe.style.pointerEvents =
+    'none';
+
+  document.body.appendChild(
+    iframe
+  );
+
+  const yieldToBrowser =
+    () =>
+      new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+  /*
+   * Computed CSS colors normally arrive as rgb()/rgba().
+   */
+  const parseColor = (
+    raw:
+      string |
+      null |
+      undefined
+  ):
+    | [
+        number,
+        number,
+        number,
+        number
+      ]
+    | null => {
+    const value =
+      String(
+        raw || ''
+      ).trim();
+
+    if (
+      !value ||
+      value ===
+        'transparent'
+    ) {
+      return null;
+    }
+
+    const rgbMatch =
+      value.match(
+        /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i
+      );
+
+    if (rgbMatch) {
+      return [
+        Math.max(
+          0,
+          Math.min(
+            255,
+            Math.round(
+              Number(
+                rgbMatch[1]
+              )
+            )
+          )
+        ),
+        Math.max(
+          0,
+          Math.min(
+            255,
+            Math.round(
+              Number(
+                rgbMatch[2]
+              )
+            )
+          )
+        ),
+        Math.max(
+          0,
+          Math.min(
+            255,
+            Math.round(
+              Number(
+                rgbMatch[3]
+              )
+            )
+          )
+        ),
+        rgbMatch[4] ===
+        undefined
+          ? 1
+          : Math.max(
+              0,
+              Math.min(
+                1,
+                Number(
+                  rgbMatch[4]
+                )
+              )
+            ),
+      ];
+    }
+
+    const hexMatch =
+      value.match(
+        /^#([0-9a-f]{6})$/i
+      );
+
+    if (hexMatch) {
+      const hex =
+        hexMatch[1];
+
+      return [
+        parseInt(
+          hex.slice(
+            0,
+            2
+          ),
+          16
+        ),
+        parseInt(
+          hex.slice(
+            2,
+            4
+          ),
+          16
+        ),
+        parseInt(
+          hex.slice(
+            4,
+            6
+          ),
+          16
+        ),
+        1,
+      ];
+    }
+
+    return null;
+  };
+
+
+  const mapFontFamily = (
+    raw: string
+  ):
+    | 'helvetica'
+    | 'times'
+    | 'courier' => {
+    const family =
+      raw.toLowerCase();
+
+    if (
+      family.includes(
+        'courier'
+      ) ||
+      family.includes(
+        'monospace'
+      )
+    ) {
+      return 'courier';
+    }
+
+    if (
+      family.includes(
+        'times'
+      ) ||
+      family.includes(
+        'georgia'
+      )
+    ) {
+      return 'times';
+    }
+
+    /*
+     * Test sans-serif before generic serif because the string
+     * "sans-serif" itself contains "serif".
+     */
+    if (
+      family.includes(
+        'arial'
+      ) ||
+      family.includes(
+        'helvetica'
+      ) ||
+      family.includes(
+        'sans-serif'
+      ) ||
+      family.includes(
+        '-apple-system'
+      ) ||
+      family.includes(
+        'system-ui'
+      )
+    ) {
+      return 'helvetica';
+    }
+
+    if (
+      family.includes(
+        'serif'
+      )
+    ) {
+      return 'times';
+    }
+
+    return 'helvetica';
+  };
+
 
   try {
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) throw new Error('Failed to initialize rendering sandbox.');
+    const doc =
+      iframe.contentDocument ||
+      iframe.contentWindow
+        ?.document;
 
+    const view =
+      iframe.contentWindow;
+
+    if (
+      !doc ||
+      !view
+    ) {
+      throw new Error(
+        'Failed to initialize HTML rendering sandbox.'
+      );
+    }
+
+    /*
+     * Same safe document-oriented normalization territory as
+     * the previous renderer, but no bitmap capture.
+     */
     doc.open();
+
     doc.write(`
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <style>${NORMALIZATION_CSS}</style>
+          <style>
+            * {
+              box-sizing: border-box !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+
+            html,
+            body {
+              width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff;
+              color: #111827;
+              overflow: visible !important;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+
+            img {
+              max-width: 100%;
+              height: auto;
+            }
+
+            p,
+            div,
+            span,
+            h1,
+            h2,
+            h3,
+            h4,
+            h5,
+            h6,
+            td,
+            th,
+            li {
+              overflow-wrap: break-word;
+              word-break: break-word;
+            }
+          </style>
         </head>
-        <body>${sanitizedHtml}</body>
+
+        <body>
+          ${sanitizedHtml}
+        </body>
       </html>
     `);
+
     doc.close();
 
-    // Allow DOM to compute full layout
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    const actualContentHeight =
-      Math.max(
-        1123,
-        doc.body.scrollHeight ||
-          doc.body.offsetHeight
-      );
-
     /*
-     * CRITICAL MOBILE FIX
-     *
-     * Never resize the iframe viewport to the entire HTML
-     * document. A very long document then forces Safari to
-     * maintain an enormous layout/paint surface even though
-     * we only need a few PDF pages at a time.
+     * A frame is enough for normal DOM layout.
      */
-    const boundedPageHeightPx =
-      isReceipt
-        ? 2500
-        : Math.max(
-            1,
-            Math.floor(
-              (
-                targetHeightPt /
-                targetWidthPt
-              ) *
-                renderWidthPx
-            )
+    await new Promise<void>(
+      (resolve) => {
+        if (
+          typeof view
+            .requestAnimationFrame ===
+          'function'
+        ) {
+          view.requestAnimationFrame(
+            () =>
+              resolve()
           );
-
-    const boundedIframeHeight =
-      isReceipt
-        ? Math.min(
-            actualContentHeight,
-            2500
-          )
-        : Math.min(
-            actualContentHeight,
-            boundedPageHeightPx * 4
+        } else {
+          setTimeout(
+            resolve,
+            16
           );
-
-    iframe.style.height =
-      `${Math.max(
-        1,
-        boundedIframeHeight
-      )}px`;
-
-    onProgress?.(
-      0,
-      1,
-      'Preparing HTML layout...'
+        }
+      }
     );
 
     /*
-     * =========================================================
-     * BOUNDED HTML RENDERING
-     * =========================================================
-     *
-     * OLD:
-     * entire document -> one giant 2x canvas -> slice afterward.
-     *
-     * NEW:
-     * one page / one receipt strip -> encode -> PDF -> destroy.
-     *
-     * Rendering quality remains:
-     *   html2canvas scale: 2
-     *   JPEG quality: 0.98
-     *
-     * Only peak memory/lifetime changes.
+     * Embedded data images are local. Give them a short chance
+     * to decode; never block indefinitely.
      */
+    const images =
+      Array.from(
+        doc.images
+      );
 
-    const yieldToBrowser =
-      () =>
+    if (
+      images.length >
+      0
+    ) {
+      await Promise.race([
+        Promise.all(
+          images.map(
+            async (
+              image
+            ) => {
+              if (
+                image.complete
+              ) {
+                try {
+                  await image.decode();
+                } catch (_) {}
+
+                return;
+              }
+
+              await new Promise<void>(
+                (
+                  resolve
+                ) => {
+                  const done =
+                    () =>
+                      resolve();
+
+                  image.addEventListener(
+                    'load',
+                    done,
+                    {
+                      once: true,
+                    }
+                  );
+
+                  image.addEventListener(
+                    'error',
+                    done,
+                    {
+                      once: true,
+                    }
+                  );
+                }
+              );
+            }
+          )
+        ),
         new Promise<void>(
           (resolve) =>
             setTimeout(
               resolve,
-              0
+              1000
             )
-        );
-
-    /*
-     * Give web fonts and already-started images a brief chance
-     * to settle before the first page is captured.
-     *
-     * Never wait indefinitely for a remote resource because
-     * this tool must continue working offline.
-     */
-    try {
-      const fontSet =
-        (doc as any).fonts;
-
-      if (fontSet?.ready) {
-        await Promise.race([
-          fontSet.ready,
-          new Promise<void>(
-            (resolve) =>
-              setTimeout(
-                resolve,
-                1500
-              )
-          ),
-        ]);
-      }
-    } catch (_) {}
-
-    try {
-      const pendingImages =
-        Array.from(
-          doc.images || []
-        ).filter(
-          (img: any) =>
-            !img.complete
-        );
-
-      if (
-        pendingImages.length >
-        0
-      ) {
-        await Promise.race([
-          Promise.all(
-            pendingImages.map(
-              (img: any) =>
-                new Promise<void>(
-                  (resolve) => {
-                    const done =
-                      () =>
-                        resolve();
-
-                    img.addEventListener(
-                      'load',
-                      done,
-                      {
-                        once: true,
-                      }
-                    );
-
-                    img.addEventListener(
-                      'error',
-                      done,
-                      {
-                        once: true,
-                      }
-                    );
-                  }
-                )
-            )
-          ),
-          new Promise<void>(
-            (resolve) =>
-              setTimeout(
-                resolve,
-                1500
-              )
-          ),
-        ]);
-      }
-    } catch (_) {}
-
-    /*
-     * =========================================================
-     * FAST BOUNDED HTML RENDERER
-     * =========================================================
-     *
-     * Important:
-     * html2canvas is expensive because every invocation has
-     * to clone/style/paint the HTML document.
-     *
-     * Therefore:
-     * - NEVER render once per PDF page.
-     * - Render two PDF pages in one bounded canvas.
-     * - Encode that band once.
-     * - Reuse the same JPEG across the two PDF pages.
-     *
-     * Page clipping in PDF exposes only the appropriate half.
-     *
-     * Quality remains:
-     * html2canvas scale = 2
-     * JPEG quality = 0.98
-     */
-
-
-    const renderBand =
-      async (
-        y: number,
-        height: number
-      ) => {
-        return await html2canvas(
-          doc.body,
-          {
-            scale: 2,
-
-            useCORS: true,
-
-            allowTaint: false,
-
-            backgroundColor:
-              '#ffffff',
-
-            logging: false,
-
-            width:
-              renderWidthPx,
-
-            height:
-              Math.max(
-                1,
-                Math.ceil(
-                  height
-                )
-              ),
-
-            windowWidth:
-              renderWidthPx,
-
-            /*
-             * Keep layout calculations based on the real
-             * document height.
-             */
-            /*
-             * Do not give html2canvas a document-height
-             * viewport. Only the current bounded band exists
-             * as the rendering viewport.
-             */
-            windowHeight:
-              Math.max(
-                1,
-                Math.ceil(
-                  height
-                )
-              ),
-
-            x: 0,
-
-            y:
-              Math.max(
-                0,
-                Math.floor(
-                  y
-                )
-              ),
-
-            scrollX: 0,
-            scrollY: 0,
-
-            /*
-             * html2canvas otherwise has a long default wait
-             * for unavailable external images on EVERY render.
-             *
-             * Images that already loaded in the iframe remain
-             * available normally.
-             */
-            imageTimeout:
-              4000,
-
-            removeContainer:
-              true,
-          }
-        );
-      };
-
-
-    const encodeCanvas =
-      async (
-        canvas:
-          HTMLCanvasElement,
-        label:
-          string
-      ) => {
-        const blob =
-          await new Promise<
-            Blob | null
-          >(
-            (resolve) => {
-              canvas.toBlob(
-                resolve,
-                'image/jpeg',
-                0.98
-              );
-            }
-          );
-
-        if (!blob) {
-          throw new Error(
-            `Failed to encode ${label}.`
-          );
-        }
-
-        return new Uint8Array(
-          await blob.arrayBuffer()
-        );
-      };
-
-
-    /*
-     * =========================================================
-     * RECEIPT
-     * =========================================================
-     */
-
-    if (isReceipt) {
-      const receiptHeightPt =
-        Math.max(
-          100,
-          (
-            actualContentHeight /
-            renderWidthPx
-          ) *
-            targetWidthPt
-        );
-
-      const pdf =
-        new jsPDF({
-          orientation:
-            'portrait',
-
-          unit:
-            'pt',
-
-          format: [
-            targetWidthPt,
-            receiptHeightPt,
-          ],
-        });
-
-      /*
-       * Receipt width is much smaller than A4, so a taller
-       * bounded strip is still safe.
-       *
-       * 340 CSS px wide × 2000 CSS px high at 2x remains
-       * dramatically smaller than an unlimited document canvas.
-       */
-      /*
-       * Still bounded, but fewer complete DOM-clone passes.
-       *
-       * 340px × 3000px at 2x is ~16 MB raw RGBA,
-       * which is far safer than an unlimited canvas.
-       */
-      const RECEIPT_STRIP_HEIGHT =
-        3000;
-
-      const totalReceiptStrips =
-        Math.max(
-          1,
-          Math.ceil(
-            actualContentHeight /
-              RECEIPT_STRIP_HEIGHT
-          )
-        );
-
-      let receiptStripIndex =
-        0;
-
-      for (
-        let sourceY = 0;
-        sourceY <
-        actualContentHeight;
-        sourceY +=
-          RECEIPT_STRIP_HEIGHT
-      ) {
-        const currentHeight =
-          Math.min(
-            RECEIPT_STRIP_HEIGHT,
-            actualContentHeight -
-              sourceY
-          );
-
-        receiptStripIndex +=
-          1;
-
-        onProgress?.(
-          receiptStripIndex,
-          totalReceiptStrips,
-          `Rendering receipt section ${receiptStripIndex} of ${totalReceiptStrips}...`
-        );
-
-        const canvas =
-          await renderBand(
-            sourceY,
-            currentHeight
-          );
-
-        try {
-          const bytes =
-            await encodeCanvas(
-              canvas,
-              'receipt strip'
-            );
-
-          const yPt =
-            (
-              sourceY /
-              renderWidthPx
-            ) *
-            targetWidthPt;
-
-          const heightPt =
-            (
-              currentHeight /
-              renderWidthPx
-            ) *
-            targetWidthPt;
-
-          pdf.addImage(
-            bytes,
-            'JPEG',
-
-            0,
-            yPt,
-
-            targetWidthPt,
-            heightPt,
-
-            `receipt_${sourceY}`,
-            'FAST'
-          );
-        } finally {
-          canvas.width =
-            1;
-
-          canvas.height =
-            1;
-
-          try {
-            canvas.remove();
-          } catch (_) {}
-        }
-
-        await yieldToBrowser();
-      }
-
-      return new Uint8Array(
-        pdf.output(
-          'arraybuffer'
-        )
-      );
+        ),
+      ]);
     }
 
+    const bodyRect =
+      doc.body
+        .getBoundingClientRect();
 
-    /*
-     * =========================================================
-     * A4 / LETTER
-     * =========================================================
-     */
-
-    const pageHeightPx =
+    const contentHeightPx =
       Math.max(
         1,
-        Math.floor(
-          (
-            targetHeightPt /
-            targetWidthPt
-          ) *
-            renderWidthPx
-        )
+        doc.body
+          .scrollHeight,
+        doc.documentElement
+          .scrollHeight,
+        doc.body
+          .offsetHeight
       );
+
+    const pxToPt =
+      targetWidthPt /
+      renderWidthPx;
+
+    /*
+     * A PDF page itself has practical size limits.
+     * A normal continuous receipt stays one page; extremely
+     * long receipts continue onto another receipt-width page
+     * rather than producing an invalid PDF.
+     */
+    const MAX_RECEIPT_PAGE_PT =
+      14000;
+
+    const contentHeightPt =
+      contentHeightPx *
+      pxToPt;
+
+    const actualPageHeightPt =
+      isReceipt
+        ? Math.max(
+            100,
+            Math.min(
+              MAX_RECEIPT_PAGE_PT,
+              contentHeightPt
+            )
+          )
+        : targetHeightPt;
+
+    const pageHeightPx =
+      actualPageHeightPt /
+      pxToPt;
 
     const totalPages =
       Math.max(
         1,
         Math.ceil(
-          actualContentHeight /
-            pageHeightPx
+          contentHeightPx /
+          pageHeightPx
         )
       );
+
+    onProgress?.(
+      0,
+      totalPages,
+      `Building ${totalPages} vector PDF page${totalPages === 1 ? '' : 's'}...`
+    );
 
     const pdf =
       new jsPDF({
-        orientation,
-
-        unit:
-          'pt',
-
+        orientation:
+          isReceipt
+            ? 'portrait'
+            : orientation,
+        unit: 'pt',
         format: [
           targetWidthPt,
-          targetHeightPt,
+          actualPageHeightPt,
         ],
+        compress: true,
       });
 
-
-    /*
-     * Two pages per render is deliberate.
-     *
-     * At A4 portrait:
-     *   794 CSS px wide
-     *   ~2246 CSS px high for 2 pages
-     *
-     * At scale 2 the pixel backing store is roughly:
-     *   1588 × 4492
-     *
-     * ~7.1 million pixels.
-     *
-     * This is bounded enough for mobile while cutting the
-     * expensive HTML rendering calls approximately in half.
-     */
-    /*
-     * Up to four A4/Letter pages per DOM clone.
-     *
-     * At 2x this is ~57 MB of raw pixels for A4,
-     * while reducing repeated html2canvas DOM work by
-     * roughly 75% versus one-render-per-page.
-     *
-     * Short documents (<=4 pages) therefore use ONE
-     * html2canvas pass total.
-     */
-    const PAGES_PER_RENDER =
-      Math.max(
-        1,
-        Math.min(
-          4,
-          totalPages
-        )
-      );
-
-    let chunkNumber =
-      0;
-
-
     for (
-      let chunkStart = 0;
-      chunkStart <
+      let pageIndex = 1;
+      pageIndex <
       totalPages;
-      chunkStart +=
-        PAGES_PER_RENDER
+      pageIndex++
     ) {
-      const chunkPages =
-        Math.min(
-          PAGES_PER_RENDER,
-          totalPages -
-            chunkStart
-        );
-
-      const sourceY =
-        chunkStart *
-        pageHeightPx;
-
-      const chunkHeightPx =
-        chunkPages *
-        pageHeightPx;
-
-
-      chunkNumber +=
-        1;
-
-      onProgress?.(
-        Math.min(
-          totalPages,
-          chunkStart + 1
-        ),
-        totalPages,
-        `Rendering pages ${chunkStart + 1}-${Math.min(
-          totalPages,
-          chunkStart + chunkPages
-        )} of ${totalPages}...`
+      pdf.addPage(
+        [
+          targetWidthPt,
+          actualPageHeightPt,
+        ],
+        isReceipt
+          ? 'portrait'
+          : orientation
       );
+    }
 
-      /*
-       * ONE html2canvas DOM traversal for as many as
-       * FOUR PDF pages.
-       */
-      const chunkCanvas =
-        await renderBand(
-          sourceY,
-          chunkHeightPx
+
+    const setPage =
+      (
+        pageIndex:
+          number
+      ) => {
+        pdf.setPage(
+          Math.max(
+            1,
+            Math.min(
+              totalPages,
+              pageIndex + 1
+            )
+          )
+        );
+      };
+
+
+    const pageIndexForY =
+      (
+        yPx:
+          number
+      ) =>
+        Math.max(
+          0,
+          Math.min(
+            totalPages - 1,
+            Math.floor(
+              Math.max(
+                0,
+                yPx
+              ) /
+              pageHeightPx
+            )
+          )
         );
 
-      try {
-        /*
-         * ONE JPEG encode for TWO PDF pages.
-         */
-        const chunkBytes =
-          await encodeCanvas(
-            chunkCanvas,
-            `HTML pages ${
-              chunkStart + 1
-            }-${
-              chunkStart +
-              chunkPages
-            }`
+
+    /*
+     * Draw a browser rectangle across however many PDF pages
+     * it overlaps.
+     */
+    const drawRectangle =
+      (
+        xPx:
+          number,
+        yPx:
+          number,
+        widthPx:
+          number,
+        heightPx:
+          number,
+        fill:
+          | [
+              number,
+              number,
+              number,
+              number
+            ]
+          | null,
+        border:
+          | [
+              number,
+              number,
+              number,
+              number
+            ]
+          | null,
+        borderWidthPx:
+          number
+      ) => {
+        if (
+          widthPx <= 0 ||
+          heightPx <= 0
+        ) {
+          return;
+        }
+
+        const firstPage =
+          pageIndexForY(
+            yPx
           );
 
-
-        const imageAlias =
-          `html_chunk_${chunkStart}`;
-
+        const lastPage =
+          pageIndexForY(
+            yPx +
+              Math.max(
+                0,
+                heightPx -
+                  0.01
+              )
+          );
 
         for (
-          let localPage = 0;
-          localPage <
-          chunkPages;
-          localPage++
+          let pageIndex =
+            firstPage;
+          pageIndex <=
+          lastPage;
+          pageIndex++
         ) {
-          const globalPage =
-            chunkStart +
-            localPage;
+          const pageTopPx =
+            pageIndex *
+            pageHeightPx;
 
+          const segmentTopPx =
+            Math.max(
+              yPx,
+              pageTopPx
+            );
+
+          const segmentBottomPx =
+            Math.min(
+              yPx +
+                heightPx,
+              pageTopPx +
+                pageHeightPx
+            );
+
+          const segmentHeightPx =
+            segmentBottomPx -
+            segmentTopPx;
 
           if (
-            globalPage >
+            segmentHeightPx <=
             0
           ) {
-            pdf.addPage(
-              [
-                targetWidthPt,
-                targetHeightPt,
-              ],
-              orientation
+            continue;
+          }
+
+          setPage(
+            pageIndex
+          );
+
+          const x =
+            xPx *
+            pxToPt;
+
+          const y =
+            (
+              segmentTopPx -
+              pageTopPx
+            ) *
+            pxToPt;
+
+          const width =
+            widthPx *
+            pxToPt;
+
+          const height =
+            segmentHeightPx *
+            pxToPt;
+
+          if (
+            fill &&
+            fill[3] >
+              0.01
+          ) {
+            pdf.setFillColor(
+              fill[0],
+              fill[1],
+              fill[2]
+            );
+
+            pdf.rect(
+              x,
+              y,
+              width,
+              height,
+              'F'
             );
           }
 
+          if (
+            border &&
+            border[3] >
+              0.01 &&
+            borderWidthPx >
+              0
+          ) {
+            pdf.setDrawColor(
+              border[0],
+              border[1],
+              border[2]
+            );
 
-          /*
-           * Reuse the SAME tall JPEG.
-           *
-           * PDF page boundaries clip the image naturally:
-           *
-           * page 1:
-           *   y = 0
-           *
-           * page 2:
-           *   y = -pageHeight
-           *
-           * There is no second page-sized canvas and no
-           * second JPEG encoding pass.
-           */
-          pdf.addImage(
-            chunkBytes,
-            'JPEG',
+            pdf.setLineWidth(
+              Math.max(
+                0.25,
+                borderWidthPx *
+                  pxToPt
+              )
+            );
 
-            0,
-
-            -localPage *
-              targetHeightPt,
-
-            targetWidthPt,
-
-            targetHeightPt *
-              chunkPages,
-
-            imageAlias,
-
-            'FAST'
-          );
+            pdf.rect(
+              x,
+              y,
+              width,
+              height,
+              'S'
+            );
+          }
         }
-      } finally {
-        /*
-         * Release the entire two-page pixel backing store
-         * before the next bounded chunk.
-         */
-        chunkCanvas.width =
-          1;
+      };
 
-        chunkCanvas.height =
-          1;
 
-        try {
-          chunkCanvas.remove();
-        } catch (_) {}
+    /*
+     * =========================================================
+     * PASS 1
+     * backgrounds, borders, separators and embedded images
+     * =========================================================
+     */
+
+    const elements =
+      Array.from(
+        doc.body
+          .querySelectorAll(
+            '*'
+          )
+      ) as HTMLElement[];
+
+    onProgress?.(
+      0,
+      totalPages,
+      'Drawing document structure...'
+    );
+
+    for (
+      let elementIndex = 0;
+      elementIndex <
+      elements.length;
+      elementIndex++
+    ) {
+      const element =
+        elements[
+          elementIndex
+        ];
+
+      const computed =
+        view.getComputedStyle(
+          element
+        );
+
+      if (
+        computed.display ===
+          'none' ||
+        computed.visibility ===
+          'hidden'
+      ) {
+        continue;
+      }
+
+      const rects =
+        Array.from(
+          element
+            .getClientRects()
+        );
+
+      const background =
+        parseColor(
+          computed
+            .backgroundColor
+        );
+
+      const borderColor =
+        parseColor(
+          computed
+            .borderTopColor
+        );
+
+      const borderWidth =
+        Math.max(
+          parseFloat(
+            computed
+              .borderTopWidth
+          ) || 0,
+          parseFloat(
+            computed
+              .borderRightWidth
+          ) || 0,
+          parseFloat(
+            computed
+              .borderBottomWidth
+          ) || 0,
+          parseFloat(
+            computed
+              .borderLeftWidth
+          ) || 0
+        );
+
+      const tag =
+        element.tagName
+          .toLowerCase();
+
+      /*
+       * Draw backgrounds and borders from the real browser
+       * layout boxes. This preserves flex/table alignment
+       * without rasterizing the page.
+       */
+      for (
+        const rect of
+        rects
+      ) {
+        const xPx =
+          rect.left -
+          bodyRect.left;
+
+        const yPx =
+          rect.top -
+          bodyRect.top;
+
+        if (
+          tag === 'hr'
+        ) {
+          const pageIndex =
+            pageIndexForY(
+              yPx
+            );
+
+          setPage(
+            pageIndex
+          );
+
+          const pageTopPx =
+            pageIndex *
+            pageHeightPx;
+
+          const hrColor =
+            borderColor ||
+            [
+              180,
+              180,
+              180,
+              1,
+            ];
+
+          pdf.setDrawColor(
+            hrColor[0],
+            hrColor[1],
+            hrColor[2]
+          );
+
+          pdf.setLineWidth(
+            Math.max(
+              0.5,
+              borderWidth *
+                pxToPt
+            )
+          );
+
+          pdf.line(
+            xPx *
+              pxToPt,
+            (
+              yPx -
+              pageTopPx +
+              rect.height /
+                2
+            ) *
+              pxToPt,
+            (
+              xPx +
+              rect.width
+            ) *
+              pxToPt,
+            (
+              yPx -
+              pageTopPx +
+              rect.height /
+                2
+            ) *
+              pxToPt
+          );
+
+          continue;
+        }
+
+        drawRectangle(
+          xPx,
+          yPx,
+          rect.width,
+          rect.height,
+          background,
+          borderColor,
+          borderWidth
+        );
       }
 
 
       /*
-       * Safari gets a collection opportunity after every
-       * two-page chunk.
+       * Embedded local images only.
+       * sanitizeRichHtml already removes remote URL sources.
        */
-      await yieldToBrowser();
+      if (
+        element.tagName
+          .toLowerCase() ===
+        'img'
+      ) {
+        const imageElement =
+          element as HTMLImageElement;
+
+        const source =
+          imageElement.src;
+
+        if (
+          /^data:image\/(png|jpeg|jpg|webp);base64,/i.test(
+            source
+          )
+        ) {
+          const rect =
+            element
+              .getBoundingClientRect();
+
+          if (
+            rect.width >
+              0 &&
+            rect.height >
+              0
+          ) {
+            const xPx =
+              rect.left -
+              bodyRect.left;
+
+            const yPx =
+              rect.top -
+              bodyRect.top;
+
+            const firstPage =
+              pageIndexForY(
+                yPx
+              );
+
+            const lastPage =
+              pageIndexForY(
+                yPx +
+                  Math.max(
+                    0,
+                    rect.height -
+                      0.01
+                  )
+              );
+
+            const formatMatch =
+              source.match(
+                /^data:image\/(png|jpeg|jpg|webp)/i
+              );
+
+            const format =
+              formatMatch?.[1]
+                ?.toLowerCase() ===
+              'png'
+                ? 'PNG'
+                : formatMatch?.[1]
+                      ?.toLowerCase() ===
+                    'webp'
+                  ? 'WEBP'
+                  : 'JPEG';
+
+            for (
+              let pageIndex =
+                firstPage;
+              pageIndex <=
+              lastPage;
+              pageIndex++
+            ) {
+              const pageTopPx =
+                pageIndex *
+                pageHeightPx;
+
+              setPage(
+                pageIndex
+              );
+
+              try {
+                pdf.addImage(
+                  source,
+                  format,
+                  xPx *
+                    pxToPt,
+                  (
+                    yPx -
+                    pageTopPx
+                  ) *
+                    pxToPt,
+                  rect.width *
+                    pxToPt,
+                  rect.height *
+                    pxToPt,
+                  `html_img_${elementIndex}`,
+                  'FAST'
+                );
+              } catch (
+                imageError
+              ) {
+                console.warn(
+                  'Unable to render embedded HTML image:',
+                  imageError
+                );
+              }
+            }
+          }
+        }
+      }
+
+      if (
+        elementIndex >
+          0 &&
+        elementIndex %
+          50 ===
+          0
+      ) {
+        await yieldToBrowser();
+      }
+    }
+
+
+    /*
+     * =========================================================
+     * PASS 2
+     * browser-positioned text
+     * =========================================================
+     */
+
+    const textNodes:
+      Text[] = [];
+
+    const walker =
+      doc.createTreeWalker(
+        doc.body,
+        4
+      );
+
+    let current:
+      Node |
+      null =
+      walker.nextNode();
+
+    while (current) {
+      if (
+        current.nodeType ===
+        3
+      ) {
+        textNodes.push(
+          current as Text
+        );
+      }
+
+      current =
+        walker.nextNode();
+    }
+
+    onProgress?.(
+      0,
+      totalPages,
+      'Writing vector text...'
+    );
+
+
+    for (
+      let textIndex = 0;
+      textIndex <
+      textNodes.length;
+      textIndex++
+    ) {
+      const node =
+        textNodes[
+          textIndex
+        ];
+
+      const parent =
+        node.parentElement;
+
+      if (!parent) {
+        continue;
+      }
+
+      const computed =
+        view.getComputedStyle(
+          parent
+        );
+
+      if (
+        computed.display ===
+          'none' ||
+        computed.visibility ===
+          'hidden'
+      ) {
+        continue;
+      }
+
+      const preserveWhitespace =
+        computed.whiteSpace
+          .startsWith(
+            'pre'
+          );
+
+      const rawText =
+        node.nodeValue ||
+        '';
+
+      const normalizedText =
+        preserveWhitespace
+          ? rawText.replace(
+              /\r/g,
+              ''
+            )
+          : rawText
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim();
+
+      if (
+        !normalizedText
+      ) {
+        continue;
+      }
+
+      const range =
+        doc.createRange();
+
+      range.selectNodeContents(
+        node
+      );
+
+      const browserRects =
+        Array.from(
+          range
+            .getClientRects()
+        ).filter(
+          (rect) =>
+            rect.width >
+              0 &&
+            rect.height >
+              0
+        );
+
+      range.detach();
+
+      if (
+        browserRects.length ===
+        0
+      ) {
+        continue;
+      }
+
+      const fontSizePx =
+        Math.max(
+          4,
+          parseFloat(
+            computed
+              .fontSize
+          ) || 16
+        );
+
+      const fontSizePt =
+        Math.max(
+          4,
+          fontSizePx *
+            pxToPt
+        );
+
+      const fontFamily =
+        mapFontFamily(
+          computed
+            .fontFamily
+        );
+
+      const weight =
+        computed
+          .fontWeight
+          .toLowerCase();
+
+      const numericWeight =
+        Number(
+          weight
+        );
+
+      const isBold =
+        weight ===
+          'bold' ||
+        (
+          Number.isFinite(
+            numericWeight
+          ) &&
+          numericWeight >=
+            600
+        );
+
+      const isItalic =
+        computed
+          .fontStyle ===
+          'italic' ||
+        computed
+          .fontStyle ===
+          'oblique';
+
+      const fontStyle =
+        isBold &&
+        isItalic
+          ? 'bolditalic'
+          : isBold
+            ? 'bold'
+            : isItalic
+              ? 'italic'
+              : 'normal';
+
+      pdf.setFont(
+        fontFamily,
+        fontStyle
+      );
+
+      pdf.setFontSize(
+        fontSizePt
+      );
+
+      const textColor =
+        parseColor(
+          computed.color
+        ) || [
+          17,
+          24,
+          39,
+          1,
+        ];
+
+      pdf.setTextColor(
+        textColor[0],
+        textColor[1],
+        textColor[2]
+      );
+
+
+      /*
+       * Use jsPDF measurement to split the source while using
+       * the browser's real line rectangles for placement.
+       */
+      let lines:
+        string[] = [];
+
+      if (
+        preserveWhitespace
+      ) {
+        lines =
+          normalizedText
+            .split(
+              '\n'
+            );
+      } else {
+        const maxWidthPt =
+          Math.max(
+            4,
+            Math.max(
+              ...browserRects.map(
+                (rect) =>
+                  rect.width *
+                  pxToPt
+              )
+            )
+          );
+
+        const wrapped =
+          pdf.splitTextToSize(
+            normalizedText,
+            maxWidthPt
+          );
+
+        lines =
+          Array.isArray(
+            wrapped
+          )
+            ? wrapped.map(
+                String
+              )
+            : [
+                String(
+                  wrapped
+                ),
+              ];
+      }
+
+      if (
+        lines.length ===
+        0
+      ) {
+        lines = [
+          normalizedText,
+        ];
+      }
+
+
+      for (
+        let lineIndex = 0;
+        lineIndex <
+        lines.length;
+        lineIndex++
+      ) {
+        const line =
+          lines[
+            lineIndex
+          ];
+
+        if (!line) {
+          continue;
+        }
+
+        const sourceRect =
+          browserRects[
+            Math.min(
+              lineIndex,
+              browserRects.length -
+                1
+            )
+          ];
+
+        const extraLine =
+          Math.max(
+            0,
+            lineIndex -
+              browserRects.length +
+              1
+          );
+
+        const lineHeightPx =
+          Math.max(
+            sourceRect.height,
+            parseFloat(
+              computed
+                .lineHeight
+            ) ||
+              fontSizePx *
+                1.2
+          );
+
+        const xPx =
+          sourceRect.left -
+          bodyRect.left;
+
+        const topPx =
+          sourceRect.top -
+          bodyRect.top +
+          extraLine *
+            lineHeightPx;
+
+        const pageIndex =
+          pageIndexForY(
+            topPx
+          );
+
+        const pageTopPx =
+          pageIndex *
+          pageHeightPx;
+
+        setPage(
+          pageIndex
+        );
+
+
+        /*
+         * Standard PDF fonts cover normal document text.
+         *
+         * For Unicode/emoji, use a tiny line-only local canvas.
+         * This is radically cheaper than rasterizing an entire
+         * PDF page and preserves browser glyph rendering.
+         */
+        const needsGlyphFallback =
+          /[^\u0020-\u00ff]/.test(
+            line
+          );
+
+        if (
+          needsGlyphFallback
+        ) {
+          const lineCanvas =
+            document.createElement(
+              'canvas'
+            );
+
+          const rasterScale =
+            2;
+
+          lineCanvas.width =
+            Math.max(
+              2,
+              Math.ceil(
+                sourceRect.width *
+                  rasterScale +
+                  4
+              )
+            );
+
+          lineCanvas.height =
+            Math.max(
+              2,
+              Math.ceil(
+                lineHeightPx *
+                  rasterScale +
+                  4
+              )
+            );
+
+          const context =
+            lineCanvas.getContext(
+              '2d',
+              {
+                alpha: true,
+              }
+            );
+
+          if (context) {
+            context.scale(
+              rasterScale,
+              rasterScale
+            );
+
+            context.clearRect(
+              0,
+              0,
+              lineCanvas.width /
+                rasterScale,
+              lineCanvas.height /
+                rasterScale
+            );
+
+            context.font =
+              `${computed.fontStyle} ${computed.fontWeight} ${fontSizePx}px ${computed.fontFamily}`;
+
+            context.textBaseline =
+              'top';
+
+            context.fillStyle =
+              computed.color;
+
+            context.fillText(
+              line,
+              0,
+              0
+            );
+
+            const glyphData =
+              lineCanvas.toDataURL(
+                'image/png'
+              );
+
+            try {
+              pdf.addImage(
+                glyphData,
+                'PNG',
+                xPx *
+                  pxToPt,
+                (
+                  topPx -
+                  pageTopPx
+                ) *
+                  pxToPt,
+                Math.max(
+                  sourceRect.width *
+                    pxToPt,
+                  1
+                ),
+                Math.max(
+                  lineHeightPx *
+                    pxToPt,
+                  1
+                ),
+                `html_text_${textIndex}_${lineIndex}`,
+                'FAST'
+              );
+            } catch (
+              glyphError
+            ) {
+              console.warn(
+                'Unable to render Unicode HTML text:',
+                glyphError
+              );
+            }
+          }
+
+          lineCanvas.width =
+            1;
+
+          lineCanvas.height =
+            1;
+
+          continue;
+        }
+
+
+        const baselinePx =
+          topPx +
+          Math.min(
+            lineHeightPx *
+              0.82,
+            fontSizePx *
+              0.92
+          );
+
+        pdf.text(
+          line,
+          xPx *
+            pxToPt,
+          (
+            baselinePx -
+            pageTopPx
+          ) *
+            pxToPt
+        );
+
+
+        if (
+          computed
+            .textDecorationLine
+            .includes(
+              'underline'
+            )
+        ) {
+          const lineWidthPt =
+            Math.min(
+              pdf.getTextWidth(
+                line
+              ),
+              sourceRect.width *
+                pxToPt
+            );
+
+          const underlineY =
+            (
+              baselinePx -
+              pageTopPx
+            ) *
+              pxToPt +
+            Math.max(
+              0.5,
+              fontSizePt *
+                0.08
+            );
+
+          pdf.setDrawColor(
+            textColor[0],
+            textColor[1],
+            textColor[2]
+          );
+
+          pdf.setLineWidth(
+            Math.max(
+              0.3,
+              fontSizePt /
+                18
+            )
+          );
+
+          pdf.line(
+            xPx *
+              pxToPt,
+            underlineY,
+            xPx *
+              pxToPt +
+              lineWidthPt,
+            underlineY
+          );
+        }
+      }
+
+
+      if (
+        textIndex >
+          0 &&
+        textIndex %
+          100 ===
+          0
+      ) {
+        onProgress?.(
+          Math.min(
+            totalPages,
+            Math.max(
+              1,
+              Math.round(
+                (
+                  textIndex /
+                  Math.max(
+                    1,
+                    textNodes.length
+                  )
+                ) *
+                totalPages
+              )
+            )
+          ),
+          totalPages,
+          'Writing vector text...'
+        );
+
+        await yieldToBrowser();
+      }
     }
 
 
@@ -17726,7 +18649,10 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       'Finalizing PDF...'
     );
 
-    const finalOutput =
+    /*
+     * One serialization only.
+     */
+    const output =
       new Uint8Array(
         pdf.output(
           'arraybuffer'
@@ -17739,13 +18665,13 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       'PDF ready'
     );
 
-    return finalOutput;
-
+    return output;
   } finally {
-    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    try {
+      iframe.remove();
+    } catch (_) {}
   }
 }
-
 // ============================================================================
 // ANNOTATE PDF ENGINE
 // Flattened annotations for consistent desktop/mobile PDF viewing
