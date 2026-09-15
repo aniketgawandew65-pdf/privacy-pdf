@@ -166,21 +166,17 @@ export const HtmlToPdf: React.FC = () => {
             null;
 
         /*
-         * Uploaded HTML is already stored as the original OPFS
-         * source file. Do not keep a second 150 MB-class copy.
+         * Upload mode already restored the original File from
+         * OPFS above.
+         *
+         * Do NOT also decode that potentially huge file into a
+         * JavaScript string during workspace hydration.
+         *
+         * The file will be read only when Convert is pressed.
          */
         if (
-          savedState?.activeTab ===
+          savedState?.activeTab !==
             'upload' &&
-          restored[0]
-        ) {
-          try {
-            restoredHtml =
-              await restored[0].text();
-          } catch (_) {
-            restoredHtml = null;
-          }
-        } else if (
           restoredContentFiles[0]
         ) {
           try {
@@ -197,6 +193,8 @@ export const HtmlToPdf: React.FC = () => {
          */
         if (
           restoredHtml === null &&
+          savedState?.activeTab !==
+            'upload' &&
           typeof savedState?.htmlContent ===
             'string'
         ) {
@@ -354,66 +352,186 @@ export const HtmlToPdf: React.FC = () => {
     workspaceHydrated,
   ]);
 
-  const handleFileDrop = async (selectedFile: File) => {
-    // Source file size limit
-    const sizeCheck = validateTaskFiles(
-      [selectedFile],
-      'Selected file'
-    );
-
-    if (!sizeCheck.allowed) {
-      setErrorMessage(sizeCheck.errorMessage);
-      return;
-    }
-
-    setFile(selectedFile);
-    setFileName(selectedFile.name.replace(/\.[^/.]+$/, ''));
-    revokeUrl();
-    setErrorMessage(null);
-
-    try {
-      const text = await selectedFile.text();
-      setHtmlContent(text);
-      if (pageSize === 'receipt') setPageSize('a4');
-    } catch {
-      setErrorMessage('Could not read HTML file.');
-    }
-  };
-
-  const handleConvert = async () => {
-    if (!htmlContent.trim()) return;
-    if (file) {
-      const currentSizeCheck = validateTaskFiles(
-        [file],
+  const handleFileDrop = async (
+    selectedFile: File
+  ) => {
+    const sizeCheck =
+      validateTaskFiles(
+        [selectedFile],
         'Selected file'
       );
 
-      if (!currentSizeCheck.allowed) {
-        setErrorMessage(currentSizeCheck.errorMessage);
-        return;
-      }
+    if (!sizeCheck.allowed) {
+      setErrorMessage(
+        sizeCheck.errorMessage
+      );
+      return;
     }
 
-    setIsProcessing(true);
-    setErrorMessage(null);
+    /*
+     * Keep only the File reference here.
+     *
+     * OLD:
+     * File + selectedFile.text() remained in memory together.
+     *
+     * NEW:
+     * The HTML string is created only during Convert.
+     */
+    setFile(
+      selectedFile
+    );
+
+    setFileName(
+      selectedFile.name.replace(
+        /\.[^/.]+$/,
+        ''
+      )
+    );
+
     revokeUrl();
+    setErrorMessage(
+      null
+    );
 
-    try {
-      const options: HtmlToPdfOptions = {
-        html: htmlContent,
-        pageSize,
-        orientation,
-      };
-
-      const pdfBytes = await generateHtmlPDF(options);
-      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to render HTML to PDF.');
-    } finally {
-      setIsProcessing(false);
+    if (
+      pageSize ===
+      'receipt'
+    ) {
+      setPageSize(
+        'a4'
+      );
     }
   };
+
+  const handleConvert =
+    async () => {
+      if (
+        activeTab ===
+          'paste' &&
+        !htmlContent.trim()
+      ) {
+        return;
+      }
+
+      if (
+        activeTab ===
+          'upload' &&
+        !file
+      ) {
+        return;
+      }
+
+      if (file) {
+        const currentSizeCheck =
+          validateTaskFiles(
+            [file],
+            'Selected file'
+          );
+
+        if (
+          !currentSizeCheck.allowed
+        ) {
+          setErrorMessage(
+            currentSizeCheck.errorMessage
+          );
+          return;
+        }
+      }
+
+      setIsProcessing(
+        true
+      );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeUrl();
+
+      /*
+       * Keep uploaded HTML text alive only for this conversion.
+       */
+      let sourceHtml =
+        '';
+
+      try {
+        if (
+          activeTab ===
+            'upload'
+        ) {
+          if (!file) {
+            throw new Error(
+              'Please select an HTML file.'
+            );
+          }
+
+          sourceHtml =
+            await file.text();
+        } else {
+          sourceHtml =
+            htmlContent;
+        }
+
+        if (
+          !sourceHtml.trim()
+        ) {
+          throw new Error(
+            'No content provided to convert.'
+          );
+        }
+
+        const options:
+          HtmlToPdfOptions = {
+            html:
+              sourceHtml,
+            pageSize,
+            orientation,
+          };
+
+        const pdfBytes =
+          await generateHtmlPDF(
+            options
+          );
+
+        /*
+         * Release our direct reference before creating the
+         * downloadable Blob.
+         */
+        sourceHtml =
+          '';
+
+        const blob =
+          new Blob(
+            [
+              pdfBytes as
+                unknown as
+                BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+        createUrl(
+          blob
+        );
+      } catch (
+        err: any
+      ) {
+        setErrorMessage(
+          err?.message ||
+            'Failed to render HTML to PDF.'
+        );
+      } finally {
+        sourceHtml =
+          '';
+
+        setIsProcessing(
+          false
+        );
+      }
+    };
 
   const handleClear = () => {
     setFile(null);

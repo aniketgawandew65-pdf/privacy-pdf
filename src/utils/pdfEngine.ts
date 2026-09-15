@@ -17045,146 +17045,173 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const actualContentHeight = Math.max(1123, doc.body.scrollHeight || doc.body.offsetHeight);
     iframe.style.height = `${actualContentHeight}px`;
 
-    const rawCanvas = await html2canvas(doc.body, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: false,
-      backgroundColor: '#ffffff',
-      logging: false,
-      width: renderWidthPx,
-      height: actualContentHeight,
-      windowWidth: renderWidthPx,
-      windowHeight: actualContentHeight,
-      y: 0,
-      x: 0,
-    });
+    /*
+     * =========================================================
+     * BOUNDED HTML RENDERING
+     * =========================================================
+     *
+     * OLD:
+     * entire document -> one giant 2x canvas -> slice afterward.
+     *
+     * NEW:
+     * one page / one receipt strip -> encode -> PDF -> destroy.
+     *
+     * Rendering quality remains:
+     *   html2canvas scale: 2
+     *   JPEG quality: 0.98
+     *
+     * Only peak memory/lifetime changes.
+     */
 
-    // 80mm Thermal Receipt continuous output
-    if (isReceipt) {
-      const receiptHeightPt = Math.max(
-        100,
-        (rawCanvas.height / rawCanvas.width) *
-          targetWidthPt
-      );
-
-      const receiptBlob =
-        await new Promise<Blob | null>(
-          (resolve) => {
-            rawCanvas.toBlob(
+    const yieldToBrowser =
+      () =>
+        new Promise<void>(
+          (resolve) =>
+            setTimeout(
               resolve,
-              'image/jpeg',
-              0.98
-            );
+              0
+            )
+        );
+
+    /*
+     * Give web fonts and already-started images a brief chance
+     * to settle before the first page is captured.
+     *
+     * Never wait indefinitely for a remote resource because
+     * this tool must continue working offline.
+     */
+    try {
+      const fontSet =
+        (doc as any).fonts;
+
+      if (fontSet?.ready) {
+        await Promise.race([
+          fontSet.ready,
+          new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                1500
+              )
+          ),
+        ]);
+      }
+    } catch (_) {}
+
+    try {
+      const pendingImages =
+        Array.from(
+          doc.images || []
+        ).filter(
+          (img: any) =>
+            !img.complete
+        );
+
+      if (
+        pendingImages.length >
+        0
+      ) {
+        await Promise.race([
+          Promise.all(
+            pendingImages.map(
+              (img: any) =>
+                new Promise<void>(
+                  (resolve) => {
+                    const done =
+                      () =>
+                        resolve();
+
+                    img.addEventListener(
+                      'load',
+                      done,
+                      {
+                        once: true,
+                      }
+                    );
+
+                    img.addEventListener(
+                      'error',
+                      done,
+                      {
+                        once: true,
+                      }
+                    );
+                  }
+                )
+            )
+          ),
+          new Promise<void>(
+            (resolve) =>
+              setTimeout(
+                resolve,
+                1500
+              )
+          ),
+        ]);
+      }
+    } catch (_) {}
+
+    const renderSlice =
+      async (
+        y: number,
+        height: number
+      ) => {
+        /*
+         * html2canvas creates ONLY this bounded output canvas.
+         *
+         * windowHeight remains the real document height so
+         * normal document positioning/layout stays consistent
+         * between slices.
+         */
+        return await html2canvas(
+          doc.body,
+          {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor:
+              '#ffffff',
+            logging: false,
+            width:
+              renderWidthPx,
+            height:
+              Math.max(
+                1,
+                Math.ceil(
+                  height
+                )
+              ),
+            windowWidth:
+              renderWidthPx,
+            windowHeight:
+              actualContentHeight,
+            x: 0,
+            y:
+              Math.max(
+                0,
+                Math.floor(
+                  y
+                )
+              ),
+            scrollX: 0,
+            scrollY: 0,
           }
         );
+      };
 
-      if (!receiptBlob) {
-        throw new Error(
-          'Failed to encode receipt image.'
-        );
-      }
-
-      const receiptBytes =
-        new Uint8Array(
-          await receiptBlob.arrayBuffer()
-        );
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'pt',
-        format: [
-          targetWidthPt,
-          receiptHeightPt,
-        ],
-      });
-
-      pdf.addImage(
-        receiptBytes,
-        'JPEG',
-        0,
-        0,
-        targetWidthPt,
-        receiptHeightPt
-      );
-
-      const output =
-        new Uint8Array(
-          pdf.output(
-            'arraybuffer'
-          )
-        );
-
-      rawCanvas.width = 1;
-      rawCanvas.height = 1;
-
-      return output;
-    }
-
-    // A4 / Letter Multi-Page Export
-    const pdf = new jsPDF({
-      orientation,
-      unit: 'pt',
-      format: pageSize,
-    });
-
-    const pageHeightPx = Math.floor((targetHeightPt / targetWidthPt) * rawCanvas.width);
-    const totalPages = Math.max(1, Math.ceil(rawCanvas.height / pageHeightPx));
-
-    for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
-      if (pageIdx > 0) pdf.addPage();
-
-      const sourceY = pageIdx * pageHeightPx;
-      const currentSliceHeight = Math.min(pageHeightPx, rawCanvas.height - sourceY);
-
-      const sliceCanvas =
-        document.createElement(
-          'canvas'
-        );
-
-      sliceCanvas.width =
-        rawCanvas.width;
-
-      sliceCanvas.height =
-        pageHeightPx;
-
-      try {
-        const sliceCtx =
-          sliceCanvas.getContext(
-            '2d'
-          );
-
-        if (!sliceCtx) {
-          throw new Error(
-            'Failed to create HTML-to-PDF page canvas.'
-          );
-        }
-
-        sliceCtx.fillStyle =
-          '#ffffff';
-
-        sliceCtx.fillRect(
-          0,
-          0,
-          sliceCanvas.width,
-          sliceCanvas.height
-        );
-
-        sliceCtx.drawImage(
-          rawCanvas,
-          0,
-          sourceY,
-          rawCanvas.width,
-          currentSliceHeight,
-          0,
-          0,
-          rawCanvas.width,
-          currentSliceHeight
-        );
-
-        const sliceBlob =
-          await new Promise<Blob | null>(
+    const encodeJpeg =
+      async (
+        canvas:
+          HTMLCanvasElement,
+        label:
+          string
+      ) => {
+        const blob =
+          await new Promise<
+            Blob | null
+          >(
             (resolve) => {
-              sliceCanvas.toBlob(
+              canvas.toBlob(
                 resolve,
                 'image/jpeg',
                 0.98
@@ -17192,19 +17219,219 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             }
           );
 
-        if (!sliceBlob) {
+        if (!blob) {
           throw new Error(
-            `Failed to encode HTML-to-PDF page ${pageIdx + 1}.`
+            `Failed to encode ${label}.`
           );
         }
 
-        const sliceBytes =
-          new Uint8Array(
-            await sliceBlob.arrayBuffer()
+        return new Uint8Array(
+          await blob.arrayBuffer()
+        );
+      };
+
+    /*
+     * =========================================================
+     * 80mm RECEIPT
+     * =========================================================
+     *
+     * Keep the existing continuous receipt PDF page, but feed
+     * it several bounded images instead of one enormous image.
+     */
+    if (isReceipt) {
+      const receiptHeightPt =
+        Math.max(
+          100,
+          (
+            actualContentHeight /
+            renderWidthPx
+          ) *
+            targetWidthPt
+        );
+
+      const pdf =
+        new jsPDF({
+          orientation:
+            'portrait',
+          unit: 'pt',
+          format: [
+            targetWidthPt,
+            receiptHeightPt,
+          ],
+        });
+
+      /*
+       * 1200 CSS pixels at scale 2 on a 340px receipt:
+       * roughly 680 x 2400 pixels.
+       *
+       * This keeps each RGBA backing store small enough for
+       * mobile while retaining exactly the same 2x quality.
+       */
+      const RECEIPT_STRIP_HEIGHT =
+        1200;
+
+      for (
+        let sourceY = 0;
+        sourceY <
+        actualContentHeight;
+        sourceY +=
+          RECEIPT_STRIP_HEIGHT
+      ) {
+        const currentHeight =
+          Math.min(
+            RECEIPT_STRIP_HEIGHT,
+            actualContentHeight -
+              sourceY
+          );
+
+        const stripCanvas =
+          await renderSlice(
+            sourceY,
+            currentHeight
+          );
+
+        try {
+          const stripBytes =
+            await encodeJpeg(
+              stripCanvas,
+              'receipt strip'
+            );
+
+          const yPt =
+            (
+              sourceY /
+              renderWidthPx
+            ) *
+            targetWidthPt;
+
+          const heightPt =
+            (
+              currentHeight /
+              renderWidthPx
+            ) *
+            targetWidthPt;
+
+          pdf.addImage(
+            stripBytes,
+            'JPEG',
+            0,
+            yPt,
+            targetWidthPt,
+            heightPt
+          );
+        } finally {
+          /*
+           * Release decoded RGBA pixels before rendering the
+           * next strip.
+           */
+          stripCanvas.width =
+            1;
+
+          stripCanvas.height =
+            1;
+
+          try {
+            stripCanvas.remove();
+          } catch (_) {}
+        }
+
+        await yieldToBrowser();
+      }
+
+      return new Uint8Array(
+        pdf.output(
+          'arraybuffer'
+        )
+      );
+    }
+
+
+    /*
+     * =========================================================
+     * A4 / LETTER
+     * =========================================================
+     *
+     * Each PDF page is rendered independently.
+     *
+     * There is never a document-height canvas and never a
+     * second page-slicing canvas.
+     */
+    const pageHeightPx =
+      Math.max(
+        1,
+        Math.floor(
+          (
+            targetHeightPt /
+            targetWidthPt
+          ) *
+            renderWidthPx
+        )
+      );
+
+    const totalPages =
+      Math.max(
+        1,
+        Math.ceil(
+          actualContentHeight /
+            pageHeightPx
+        )
+      );
+
+    const pdf =
+      new jsPDF({
+        orientation,
+        unit: 'pt',
+        format: [
+          targetWidthPt,
+          targetHeightPt,
+        ],
+      });
+
+    for (
+      let pageIdx = 0;
+      pageIdx <
+      totalPages;
+      pageIdx++
+    ) {
+      if (
+        pageIdx >
+        0
+      ) {
+        pdf.addPage(
+          [
+            targetWidthPt,
+            targetHeightPt,
+          ],
+          orientation
+        );
+      }
+
+      const sourceY =
+        pageIdx *
+        pageHeightPx;
+
+      /*
+       * Render a full PDF-page-height canvas even on the last
+       * page. html2canvas fills the area beyond content white,
+       * matching the old sliceCanvas behavior.
+       */
+      const pageCanvas =
+        await renderSlice(
+          sourceY,
+          pageHeightPx
+        );
+
+      try {
+        const pageBytes =
+          await encodeJpeg(
+            pageCanvas,
+            `HTML-to-PDF page ${
+              pageIdx + 1
+            }`
           );
 
         pdf.addImage(
-          sliceBytes,
+          pageBytes,
           'JPEG',
           0,
           0,
@@ -17212,26 +17439,30 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
           targetHeightPt
         );
       } finally {
-        /*
-         * Release decoded RGBA pixels before rendering
-         * the next page slice.
-         */
-        sliceCanvas.width = 1;
-        sliceCanvas.height = 1;
+        pageCanvas.width =
+          1;
+
+        pageCanvas.height =
+          1;
+
+        try {
+          pageCanvas.remove();
+        } catch (_) {}
       }
+
+      /*
+       * Allow Safari/Chrome to reclaim this page's native
+       * canvas/JPEG memory before opening the next page.
+       */
+      await yieldToBrowser();
     }
 
-    const output =
-      new Uint8Array(
-        pdf.output(
-          'arraybuffer'
-        )
-      );
+    return new Uint8Array(
+      pdf.output(
+        'arraybuffer'
+      )
+    );
 
-    rawCanvas.width = 1;
-    rawCanvas.height = 1;
-
-    return output;
   } finally {
     if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
   }
