@@ -2,105 +2,161 @@ import {
   loadPdfJsFromBlob,
 } from "./pdfjs";
 
-export const normalizeForSafetyCheck = (value: string) =>
+export const normalizeForSafetyCheck = (
+  value: string
+) =>
   value
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
+    .replace(
+      /[^a-z0-9]/g,
+      ""
+    );
+
+export type SafetyVerificationRegion = {
+  /*
+   * Normalized browser/page coordinates.
+   * 0.0 -> 1.0
+   *
+   * Same coordinate system used by redactPDF().
+   */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export type SafetyVerificationTarget = {
+  /*
+   * Stable finding ID lets Private PII identify the EXACT
+   * redaction which failed verification.
+   */
+  id?: string;
+
   value: string;
+  page?: number;
 
   /*
-   * Optional page number allows the verifier to OCR only pages
-   * that actually contain selected sensitive findings.
+   * Exact expected blackout position in the finished PDF.
    *
-   * Callers without page information automatically retain the
-   * original full-document OCR verification behaviour.
+   * Private PII supplies this for every automatic finding.
    */
-  page?: number;
+  region?: SafetyVerificationRegion;
 };
 
 export type FinalVerificationResult = {
   passed: boolean;
+
+  /*
+   * Retained for compatibility with existing callers/UI.
+   *
+   * These values now correspond to targets whose final blackout
+   * could not be confirmed.
+   */
   leakedValues: string[];
+
+  /*
+   * Exact IDs are more precise than matching duplicate values.
+   */
+  failedTargetIds: string[];
+
   selectableTextFound: boolean;
 };
 
 export type FinalVerificationOptions = {
   /*
-   * When omitted, preserve the original strict behaviour:
-   * every page is expected to be flattened.
+   * Hybrid secure redaction leaves untouched pages vector/lossless.
    *
-   * When supplied, only these pages are required to have no
-   * selectable text. This supports the secure hybrid redaction
-   * engine where untouched pages intentionally remain lossless.
+   * Only pages listed here are expected to have been destructively
+   * flattened by the secure redaction engine.
+   *
+   * If omitted, every page is treated as flattened.
    */
   flattenedPages?: ReadonlySet<number>;
 };
 
+const clamp01 = (
+  value: number
+) =>
+  Math.max(
+    0,
+    Math.min(
+      1,
+      value
+    )
+  );
+
 export const verifyFinishedPdf = async (
-  bytes: Uint8Array,
-  selectedFindings: SafetyVerificationTarget[],
-  onProgress?: (message: string) => void,
-  options: FinalVerificationOptions = {}
+  source:
+    | Uint8Array
+    | Blob,
+  selectedFindings:
+    SafetyVerificationTarget[],
+  onProgress?: (
+    message: string
+  ) => void,
+  options:
+    FinalVerificationOptions =
+      {}
 ): Promise<FinalVerificationResult> => {
   /*
    * ==========================================================
-   * MOBILE-SAFE FINAL PII VERIFIER
+   * DETERMINISTIC FINAL REDACTION VERIFIER
    * ==========================================================
    *
-   * Security behaviour remains the same:
+   * IMPORTANT:
    *
-   * 1. expected flattened pages must contain NO selectable text
-   * 2. selected sensitive values must NOT remain visually
-   *    readable through OCR
+   * This deliberately does NOT run OCR.
    *
-   * Memory architecture changes:
+   * The heavy OCR scanner has already located the sensitive
+   * information and created exact page-space boxes.
    *
-   * - same OCR resolution: 1.7x
-   * - pages OCR'd in overlapping strips
-   * - no giant full-page OCR bitmap
-   * - Tesseract worker hard-reset every short page batch
-   * - PDF.js document hard-reset every short page batch
+   * redactPDF() then permanently burns those boxes into
+   * rasterized redacted pages.
+   *
+   * The final job is therefore:
+   *
+   *   A) verify the affected page contains no selectable text
+   *   B) verify the exact expected redaction pixels are black
+   *
+   * This validates the FINISHED output without another
+   * Tesseract/WASM pass.
    */
 
   const verificationBlob =
-    new Blob(
-      [
-        bytes as unknown as
-          BlobPart,
-      ],
-      {
-        type:
-          "application/pdf",
-      }
-    );
-
-  const VERIFY_SCALE =
-    1.7;
-
-  const VERIFY_BATCH_SIZE =
-    4;
+    source instanceof Blob
+      ? source
+      : new Blob(
+          [
+            source as unknown as
+              BlobPart,
+          ],
+          {
+            type:
+              "application/pdf",
+          }
+        );
 
   /*
-   * Keep an individual verification canvas around
-   * ~1.25 million pixels.
+   * No high-resolution OCR is required.
    *
-   * OCR resolution itself remains 1.7x.
+   * 1.15x gives plenty of pixels for reliable blackout sampling
+   * while keeping memory dramatically below the old 1.7x OCR
+   * verifier.
    */
-  const MAX_TILE_PIXELS =
-    1_250_000;
+  const VERIFY_SCALE =
+    1.15;
 
   /*
-   * Enough overlap for text lines / sensitive strings around a
-   * strip boundary to appear completely in at least one tile.
+   * Hard-reset PDF.js regularly on mobile.
+   *
+   * There is no Tesseract worker anymore.
    */
-  const TILE_OVERLAP =
-    128;
+  const PAGE_BATCH_SIZE =
+    6;
 
   const yieldToMobile =
     (
-      delay = 35
+      delay = 30
     ) =>
       new Promise<void>(
         (
@@ -112,107 +168,12 @@ export const verifyFinishedPdf = async (
           )
       );
 
-  const selectedValues =
-    selectedFindings
-      .map(
-        (
-          finding
-        ) => {
-          const page =
-            Number.isInteger(
-              finding.page
-            ) &&
-            Number(
-              finding.page
-            ) >
-              0
-              ? Number(
-                  finding.page
-                )
-              : null;
-
-          return {
-            original:
-              finding.value,
-            normalized:
-              normalizeForSafetyCheck(
-                finding.value
-              ),
-            page,
-          };
-        }
-      )
-      .filter(
-        (
-          item
-        ) =>
-          item.normalized
-            .length >=
-          4
-      );
-
   /*
-   * Targeted OCR is safe only when every selected finding has
-   * an exact page number.
-   *
-   * Legacy callers without page metadata automatically retain
-   * document-wide checking.
+   * Short probe to get page count.
    */
-  const useTargetedOcr =
-    selectedValues.length >
-      0 &&
-    selectedValues.every(
-      (
-        item
-      ) =>
-        item.page !==
-        null
-    );
-
-  const targetsByPage =
-    new Map<
-      number,
-      Array<
-        (
-          typeof selectedValues
-        )[number]
-      >
-    >();
-
-  if (
-    useTargetedOcr
-  ) {
-    for (
-      const item of
-        selectedValues
-    ) {
-      const pageNumber =
-        item.page!;
-
-      const current =
-        targetsByPage.get(
-          pageNumber
-        ) || [];
-
-      current.push(
-        item
-      );
-
-      targetsByPage.set(
-        pageNumber,
-        current
-      );
-    }
-  }
-
   let totalPages =
     0;
 
-  /*
-   * Very short probe to obtain page count.
-   *
-   * Destroy it immediately before real verification begins.
-   */
   {
     const probe =
       await loadPdfJsFromBlob(
@@ -225,6 +186,74 @@ export const verifyFinishedPdf = async (
     } finally {
       await probe.dispose();
     }
+  }
+
+  /*
+   * Normalize target metadata.
+   */
+  const targets =
+    selectedFindings.map(
+      (
+        finding,
+        index
+      ) => {
+        const page =
+          Number.isInteger(
+            finding.page
+          ) &&
+          Number(
+            finding.page
+          ) >
+            0
+            ? Number(
+                finding.page
+              )
+            : null;
+
+        return {
+          id:
+            finding.id ||
+            `verification-${index}`,
+          value:
+            finding.value,
+          page,
+          region:
+            finding.region ||
+            null,
+        };
+      }
+    );
+
+  const targetsByPage =
+    new Map<
+      number,
+      typeof targets
+    >();
+
+  for (
+    const target of
+      targets
+  ) {
+    if (
+      target.page ===
+      null
+    ) {
+      continue;
+    }
+
+    const current =
+      targetsByPage.get(
+        target.page
+      ) || [];
+
+    current.push(
+      target
+    );
+
+    targetsByPage.set(
+      target.page,
+      current
+    );
   }
 
   const requestedVerificationPages =
@@ -267,45 +296,62 @@ export const verifyFinishedPdf = async (
             index + 1
         );
 
+  const failedTargetIds =
+    new Set<string>();
+
+  const failedValues =
+    new Map<
+      string,
+      string
+    >();
+
   let selectableTextFound =
     false;
 
-  const leakedNormalized =
-    new Set<string>();
+  /*
+   * Fail safely if a target that is supposed to be verified
+   * does not contain enough geometry information.
+   *
+   * Never silently pass an un-verifiable selected finding.
+   */
+  for (
+    const target of
+      targets
+  ) {
+    if (
+      target.page ===
+        null ||
+      !target.region
+    ) {
+      failedTargetIds.add(
+        target.id
+      );
+
+      failedValues.set(
+        target.id,
+        target.value
+      );
+    }
+  }
 
   /*
-   * Compatibility rolling tail for callers which do not provide
-   * page-aware targets.
+   * ==========================================================
+   * VERIFY SHORT PAGE BATCHES
+   * ==========================================================
    */
-  const maxTargetLength =
-    selectedValues.reduce(
-      (
-        max,
-        item
-      ) =>
-        Math.max(
-          max,
-          item.normalized
-            .length
-        ),
-      0
-    );
-
-  let documentRollingTail =
-    "";
-
   for (
     let batchStart = 0;
     batchStart <
-      requestedVerificationPages.length;
+      requestedVerificationPages
+        .length;
     batchStart +=
-      VERIFY_BATCH_SIZE
+      PAGE_BATCH_SIZE
   ) {
     const batchPages =
       requestedVerificationPages.slice(
         batchStart,
         batchStart +
-          VERIFY_BATCH_SIZE
+          PAGE_BATCH_SIZE
       );
 
     let loaded:
@@ -317,45 +363,7 @@ export const verifyFinishedPdf = async (
       | null =
       null;
 
-    let worker: any =
-      null;
-
-    const getWorker =
-      async () => {
-        if (worker) {
-          return worker;
-        }
-
-        const {
-          createWorker,
-        } =
-          await import(
-            "tesseract.js"
-          );
-
-        worker =
-          await createWorker(
-            "eng",
-            1,
-            {
-              workerPath:
-                "/tessdata/worker.min.js",
-              corePath:
-                "/tessdata/tesseract-core-simd-lstm.wasm.js",
-              langPath:
-                "/tessdata",
-              gzip:
-                true,
-            } as any
-          );
-
-        return worker;
-      };
-
     try {
-      /*
-       * Fresh PDF.js session for only this short batch.
-       */
       loaded =
         await loadPdfJsFromBlob(
           verificationBlob
@@ -375,6 +383,10 @@ export const verifyFinishedPdf = async (
             localIndex
           ];
 
+        onProgress?.(
+          `Verifying secure blackout page ${pageNumber} of ${totalPages}…`
+        );
+
         const page =
           await pdf.getPage(
             pageNumber
@@ -383,16 +395,9 @@ export const verifyFinishedPdf = async (
         try {
           /*
            * ===================================================
-           * CHECK 1 — SELECTABLE TEXT
+           * CHECK 1 — FLATTENED PAGE MUST HAVE NO TEXT LAYER
            * ===================================================
-           *
-           * Every page requested for flatten verification must
-           * contain no selectable text.
            */
-          onProgress?.(
-            `Final safety verification ${pageNumber} of ${totalPages}…`
-          );
-
           const textContent =
             await page
               .getTextContent();
@@ -417,21 +422,39 @@ export const verifyFinishedPdf = async (
           ) {
             selectableTextFound =
               true;
+
+            /*
+             * A page expected to be destructively flattened
+             * should contain no selectable text.
+             *
+             * If that invariant fails, every selected finding
+             * on this page becomes a concrete manual-review
+             * item so the suggestion box is never empty.
+             */
+            const pageFailureTargets =
+              targetsByPage.get(
+                pageNumber
+              ) || [];
+
+            for (
+              const target of
+                pageFailureTargets
+            ) {
+              failedTargetIds.add(
+                target.id
+              );
+
+              failedValues.set(
+                target.id,
+                target.value
+              );
+            }
           }
 
-          /*
-           * ===================================================
-           * CHECK 2 — VISUAL OCR
-           * ===================================================
-           */
           const pageTargets =
-            useTargetedOcr
-              ? (
-                  targetsByPage.get(
-                    pageNumber
-                  ) || []
-                )
-              : selectedValues;
+            targetsByPage.get(
+              pageNumber
+            ) || [];
 
           if (
             pageTargets.length ===
@@ -440,17 +463,170 @@ export const verifyFinishedPdf = async (
             continue;
           }
 
-          onProgress?.(
-            useTargetedOcr
-              ? `Safety-checking sensitive page ${pageNumber} of ${totalPages}…`
-              : `Final OCR safety verification ${pageNumber} of ${totalPages}…`
-          );
+          /*
+           * ===================================================
+           * CHECK 2 — RENDER ONLY THE AREA AROUND BLACKOUTS
+           * ===================================================
+           *
+           * Instead of rendering/OCRing the complete page,
+           * calculate one bounding crop containing this page's
+           * expected redaction boxes.
+           */
+          const validRegions =
+            pageTargets
+              .map(
+                (
+                  target
+                ) => {
+                  const region =
+                    target.region;
+
+                  if (!region) {
+                    return null;
+                  }
+
+                  const x =
+                    clamp01(
+                      region.x
+                    );
+
+                  const y =
+                    clamp01(
+                      region.y
+                    );
+
+                  const width =
+                    Math.max(
+                      0,
+                      Math.min(
+                        1 - x,
+                        region.width
+                      )
+                    );
+
+                  const height =
+                    Math.max(
+                      0,
+                      Math.min(
+                        1 - y,
+                        region.height
+                      )
+                    );
+
+                  if (
+                    width <=
+                      0 ||
+                    height <=
+                      0
+                  ) {
+                    failedTargetIds.add(
+                      target.id
+                    );
+
+                    failedValues.set(
+                      target.id,
+                      target.value
+                    );
+
+                    return null;
+                  }
+
+                  return {
+                    target,
+                    x,
+                    y,
+                    width,
+                    height,
+                  };
+                }
+              )
+              .filter(
+                Boolean
+              ) as Array<{
+                target:
+                  (
+                    typeof targets
+                  )[number];
+                x: number;
+                y: number;
+                width: number;
+                height: number;
+              }>;
+
+          if (
+            validRegions.length ===
+            0
+          ) {
+            continue;
+          }
 
           /*
-           * Same 1.7x page resolution as the old verifier.
+           * Small margin around all expected boxes.
            *
-           * We never allocate the whole bitmap at once.
+           * The sampled verification itself still checks the
+           * INSIDE of each exact blackout box.
            */
+          const cropMargin =
+            0.01;
+
+          const cropLeft =
+            Math.max(
+              0,
+              Math.min(
+                ...validRegions.map(
+                  (
+                    region
+                  ) =>
+                    region.x
+                )
+              ) -
+                cropMargin
+            );
+
+          const cropTop =
+            Math.max(
+              0,
+              Math.min(
+                ...validRegions.map(
+                  (
+                    region
+                  ) =>
+                    region.y
+                )
+              ) -
+                cropMargin
+            );
+
+          const cropRight =
+            Math.min(
+              1,
+              Math.max(
+                ...validRegions.map(
+                  (
+                    region
+                  ) =>
+                    region.x +
+                    region.width
+                )
+              ) +
+                cropMargin
+            );
+
+          const cropBottom =
+            Math.min(
+              1,
+              Math.max(
+                ...validRegions.map(
+                  (
+                    region
+                  ) =>
+                    region.y +
+                    region.height
+                )
+              ) +
+                cropMargin
+            );
+
           const fullViewport =
             page.getViewport({
               scale:
@@ -473,227 +649,370 @@ export const verifyFinishedPdf = async (
               )
             );
 
-          const calculatedHeight =
+          const cropLeftPx =
             Math.floor(
-              MAX_TILE_PIXELS /
+              cropLeft *
                 fullWidth
             );
 
-          const tileHeight =
-            Math.max(
-              300,
-              Math.min(
-                1000,
-                calculatedHeight
-              )
+          const cropTopPx =
+            Math.floor(
+              cropTop *
+                fullHeight
             );
 
-          /*
-           * Rolling text tail catches a sensitive value which OCR
-           * happens to divide between adjacent strips.
-           */
-          let pageRollingTail =
-            useTargetedOcr
-              ? ""
-              : documentRollingTail;
+          const cropRightPx =
+            Math.ceil(
+              cropRight *
+                fullWidth
+            );
 
-          let tileTop =
-            0;
+          const cropBottomPx =
+            Math.ceil(
+              cropBottom *
+                fullHeight
+            );
 
-          let tileIndex =
-            0;
+          const canvas =
+            document.createElement(
+              "canvas"
+            );
 
-          while (
-            tileTop <
-            fullHeight
-          ) {
-            const tileBottom =
-              Math.min(
-                fullHeight,
-                tileTop +
-                  tileHeight
-              );
+          canvas.width =
+            Math.max(
+              1,
+              cropRightPx -
+                cropLeftPx
+            );
 
-            const currentHeight =
-              Math.max(
-                1,
-                tileBottom -
-                  tileTop
-              );
+          canvas.height =
+            Math.max(
+              1,
+              cropBottomPx -
+                cropTopPx
+            );
 
-            const canvas =
-              document.createElement(
-                "canvas"
-              );
-
-            canvas.width =
-              fullWidth;
-
-            canvas.height =
-              currentHeight;
-
-            try {
-              const ctx =
-                canvas.getContext(
-                  "2d",
-                  {
-                    alpha:
-                      false,
-                  }
-                );
-
-              if (!ctx) {
-                throw new Error(
-                  "Unable to create final safety verification tile."
-                );
-              }
-
-              ctx.fillStyle =
-                "#ffffff";
-
-              ctx.fillRect(
-                0,
-                0,
-                canvas.width,
-                canvas.height
-              );
-
-              /*
-               * Render this strip from the SAME 1.7x viewport.
-               */
-              await page.render({
-                canvasContext:
-                  ctx,
-                viewport:
-                  fullViewport,
-                canvas,
-                transform: [
-                  1,
-                  0,
-                  0,
-                  1,
-                  0,
-                  -tileTop,
-                ],
-              } as any).promise;
-
-              const activeWorker =
-                await getWorker();
-
-              const {
-                data,
-              } =
-                await activeWorker
-                  .recognize(
-                    canvas,
-                    {},
-                    {
-                      text:
-                        true,
-                    } as any
-                  );
-
-              const normalizedTileText =
-                normalizeForSafetyCheck(
-                  data?.text ||
-                    ""
-                );
-
-              const searchableText =
-                pageRollingTail +
-                normalizedTileText;
-
-              for (
-                const item of
-                  pageTargets
-              ) {
-                if (
-                  leakedNormalized.has(
-                    item.normalized
-                  )
-                ) {
-                  continue;
+          try {
+            const ctx =
+              canvas.getContext(
+                "2d",
+                {
+                  alpha:
+                    false,
+                  willReadFrequently:
+                    true,
                 }
+              );
 
-                if (
-                  searchableText.includes(
-                    item.normalized
-                  )
-                ) {
-                  leakedNormalized.add(
-                    item.normalized
-                  );
-                }
-              }
-
-              /*
-               * Preserve enough characters to detect a target
-               * crossing from this tile into the next tile.
-               */
-              if (
-                maxTargetLength >
-                1
-              ) {
-                pageRollingTail =
-                  searchableText.slice(
-                    -(
-                      maxTargetLength -
-                      1
-                    )
-                  );
-              } else {
-                pageRollingTail =
-                  "";
-              }
-            } finally {
-              /*
-               * Critical iOS memory release.
-               */
-              canvas.width =
-                1;
-
-              canvas.height =
-                1;
-
-              try {
-                canvas.remove();
-              } catch (_) {}
+            if (!ctx) {
+              throw new Error(
+                "Unable to create final blackout verification renderer."
+              );
             }
 
-            tileIndex++;
+            ctx.fillStyle =
+              "#ffffff";
 
-            if (
-              tileBottom >=
-              fullHeight
-            ) {
-              break;
-            }
-
-            tileTop =
-              Math.max(
-                tileTop + 1,
-                tileBottom -
-                  TILE_OVERLAP
-              );
+            ctx.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
 
             /*
-             * Give Safari a chance to release this tile before
-             * another render/OCR allocation begins.
+             * Render only this page crop.
              */
-            await yieldToMobile(
-              30
-            );
-          }
+            await page.render({
+              canvasContext:
+                ctx,
+              viewport:
+                fullViewport,
+              canvas,
+              transform: [
+                1,
+                0,
+                0,
+                1,
+                -cropLeftPx,
+                -cropTopPx,
+              ],
+            } as any).promise;
 
-          if (
-            !useTargetedOcr
-          ) {
-            documentRollingTail =
-              pageRollingTail;
+            /*
+             * =================================================
+             * VERIFY EVERY EXPECTED BLACKOUT
+             * =================================================
+             *
+             * We sample the INNER portion of the expected box.
+             *
+             * Ignoring a small edge avoids JPEG anti-aliasing /
+             * compression around the rectangle boundary.
+             */
+            for (
+              const region of
+                validRegions
+            ) {
+              const insetRatio =
+                0.16;
+
+              const innerLeft =
+                (
+                  region.x +
+                  region.width *
+                    insetRatio
+                ) *
+                  fullWidth -
+                cropLeftPx;
+
+              const innerTop =
+                (
+                  region.y +
+                  region.height *
+                    insetRatio
+                ) *
+                  fullHeight -
+                cropTopPx;
+
+              const innerRight =
+                (
+                  region.x +
+                  region.width *
+                    (
+                      1 -
+                      insetRatio
+                    )
+                ) *
+                  fullWidth -
+                cropLeftPx;
+
+              const innerBottom =
+                (
+                  region.y +
+                  region.height *
+                    (
+                      1 -
+                      insetRatio
+                    )
+                ) *
+                  fullHeight -
+                cropTopPx;
+
+              const sampleX =
+                Math.max(
+                  0,
+                  Math.floor(
+                    innerLeft
+                  )
+                );
+
+              const sampleY =
+                Math.max(
+                  0,
+                  Math.floor(
+                    innerTop
+                  )
+                );
+
+              const sampleRight =
+                Math.min(
+                  canvas.width,
+                  Math.ceil(
+                    innerRight
+                  )
+                );
+
+              const sampleBottom =
+                Math.min(
+                  canvas.height,
+                  Math.ceil(
+                    innerBottom
+                  )
+                );
+
+              const sampleWidth =
+                Math.max(
+                  1,
+                  sampleRight -
+                    sampleX
+                );
+
+              const sampleHeight =
+                Math.max(
+                  1,
+                  sampleBottom -
+                    sampleY
+                );
+
+              let imageData:
+                ImageData;
+
+              try {
+                imageData =
+                  ctx.getImageData(
+                    sampleX,
+                    sampleY,
+                    sampleWidth,
+                    sampleHeight
+                  );
+              } catch (_) {
+                failedTargetIds.add(
+                  region.target
+                    .id
+                );
+
+                failedValues.set(
+                  region.target
+                    .id,
+                  region.target
+                    .value
+                );
+
+                continue;
+              }
+
+              const data =
+                imageData.data;
+
+              /*
+               * Cap work for very large boxes while still
+               * sampling thousands of pixels.
+               */
+              const pixelCount =
+                sampleWidth *
+                sampleHeight;
+
+              const stride =
+                Math.max(
+                  1,
+                  Math.floor(
+                    Math.sqrt(
+                      pixelCount /
+                        6000
+                    )
+                  )
+                );
+
+              let sampled =
+                0;
+
+              let darkPixels =
+                0;
+
+              for (
+                let y = 0;
+                y <
+                  sampleHeight;
+                y += stride
+              ) {
+                for (
+                  let x = 0;
+                  x <
+                    sampleWidth;
+                  x += stride
+                ) {
+                  const offset =
+                    (
+                      y *
+                        sampleWidth +
+                      x
+                    ) *
+                    4;
+
+                  const r =
+                    data[
+                      offset
+                    ];
+
+                  const g =
+                    data[
+                      offset +
+                        1
+                    ];
+
+                  const b =
+                    data[
+                      offset +
+                        2
+                    ];
+
+                  /*
+                   * Standard perceived luminance approximation.
+                   */
+                  const luminance =
+                    (
+                      r *
+                        299 +
+                      g *
+                        587 +
+                      b *
+                        114
+                    ) /
+                    1000;
+
+                  sampled++;
+
+                  /*
+                   * Burned black at JPEG 0.92 remains far below
+                   * this threshold even with compression.
+                   */
+                  if (
+                    luminance <
+                    95
+                  ) {
+                    darkPixels++;
+                  }
+                }
+              }
+
+              const darkRatio =
+                sampled >
+                0
+                  ? darkPixels /
+                    sampled
+                  : 0;
+
+              /*
+               * A proper burned blackout should be almost
+               * entirely dark.
+               *
+               * Normal black text on a white page cannot reach
+               * this ratio, so an unredacted text region fails.
+               */
+              if (
+                darkRatio <
+                0.82
+              ) {
+                failedTargetIds.add(
+                  region.target
+                    .id
+                );
+
+                failedValues.set(
+                  region.target
+                    .id,
+                  region.target
+                    .value
+                );
+              }
+            }
+          } finally {
+            /*
+             * Release crop backing store immediately.
+             */
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
           }
 
           await yieldToMobile(
-            50
+            20
           );
         } finally {
           try {
@@ -703,18 +1022,8 @@ export const verifyFinishedPdf = async (
       }
     } finally {
       /*
-       * TRUE HARD RESET after a few verified pages.
+       * Full PDF.js hard reset every short batch.
        */
-      if (worker) {
-        try {
-          await worker
-            .terminate();
-        } catch (_) {}
-
-        worker =
-          null;
-      }
-
       if (loaded) {
         try {
           await loaded
@@ -728,38 +1037,46 @@ export const verifyFinishedPdf = async (
 
     if (
       batchStart +
-        VERIFY_BATCH_SIZE <
-      requestedVerificationPages.length
+        PAGE_BATCH_SIZE <
+      requestedVerificationPages
+        .length
     ) {
       await yieldToMobile(
-        300
+        120
       );
     }
   }
 
+  const failedIds =
+    Array.from(
+      failedTargetIds
+    );
+
   const leakedValues =
-    selectedValues
-      .filter(
-        (
-          item
-        ) =>
-          leakedNormalized.has(
-            item.normalized
-          )
-      )
+    failedIds
       .map(
         (
-          item
+          id
         ) =>
-          item.original
+          failedValues.get(
+            id
+          ) || ""
+      )
+      .filter(
+        Boolean
       );
 
   return {
     passed:
       !selectableTextFound &&
-      leakedValues.length ===
+      failedIds.length ===
         0,
+
     leakedValues,
+
+    failedTargetIds:
+      failedIds,
+
     selectableTextFound,
   };
 };

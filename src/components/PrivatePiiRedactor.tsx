@@ -2950,7 +2950,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     const buildPayload =
       (
-        strengthenValues:
+        strengthenIds:
           ReadonlySet<string> =
             new Set<string>()
       ): PageRedaction[] => {
@@ -2976,14 +2976,9 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           const pageHeight =
             finding.pageHeight!;
 
-          const normalizedValue =
-            normalizeForSafetyCheck(
-              finding.value
-            );
-
           const strengthen =
-            strengthenValues.has(
-              normalizedValue
+            strengthenIds.has(
+              finding.id
             );
 
           /*
@@ -3107,6 +3102,44 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       );
 
     /*
+     * Exact expected blackout geometry in normalized page space.
+     *
+     * Final verification checks these regions on the FINISHED
+     * output PDF. It does not rerun OCR.
+     */
+    const verificationTargets =
+      selected.map(
+        (finding) => ({
+          id:
+            finding.id,
+
+          value:
+            finding.value,
+
+          page:
+            finding.page!,
+
+          region: {
+            x:
+              finding.box!.x /
+              finding.pageWidth!,
+
+            y:
+              finding.box!.y /
+              finding.pageHeight!,
+
+            width:
+              finding.box!.width /
+              finding.pageWidth!,
+
+            height:
+              finding.box!.height /
+              finding.pageHeight!,
+          },
+        })
+      );
+
+    /*
      * Run the same hardened Redact engine already proven on the
      * large mobile-PDF workflow.
      */
@@ -3145,7 +3178,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     let verification =
       await verifyFinishedPdf(
         bytes,
-        selected,
+        verificationTargets,
         (
           message
         ) =>
@@ -3172,25 +3205,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     if (
       !verification.passed &&
       verification
-        .leakedValues
+        .failedTargetIds
         .length >
         0
     ) {
-      const failedValues =
+      const failedIds =
         new Set<string>(
           verification
-            .leakedValues
-            .map(
-              (
-                value
-              ) =>
-                normalizeForSafetyCheck(
-                  value
-                )
-            )
-            .filter(
-              Boolean
-            )
+            .failedTargetIds
         );
 
       setStatus(
@@ -3223,7 +3245,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
         await redactPDF(
           file,
           buildPayload(
-            failedValues
+            failedIds
           ),
           (
             current,
@@ -3242,7 +3264,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       verification =
         await verifyFinishedPdf(
           bytes,
-          selected,
+          verificationTargets,
           (
             message
           ) =>
@@ -3264,21 +3286,10 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
     if (
       !verification.passed
     ) {
-      const failedValueSet =
-        new Set(
+      const failedIdSet =
+        new Set<string>(
           verification
-            .leakedValues
-            .map(
-              (
-                value
-              ) =>
-                normalizeForSafetyCheck(
-                  value
-                )
-            )
-            .filter(
-              Boolean
-            )
+            .failedTargetIds
         );
 
       const reviewItems =
@@ -3286,10 +3297,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           (
             finding
           ) =>
-            failedValueSet.has(
-              normalizeForSafetyCheck(
-                finding.value
-              )
+            failedIdSet.has(
+              finding.id
             )
         );
 
