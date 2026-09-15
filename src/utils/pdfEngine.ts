@@ -17151,29 +17151,51 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
       }
     } catch (_) {}
 
-    const renderSlice =
+    /*
+     * =========================================================
+     * FAST BOUNDED HTML RENDERER
+     * =========================================================
+     *
+     * Important:
+     * html2canvas is expensive because every invocation has
+     * to clone/style/paint the HTML document.
+     *
+     * Therefore:
+     * - NEVER render once per PDF page.
+     * - Render two PDF pages in one bounded canvas.
+     * - Encode that band once.
+     * - Reuse the same JPEG across the two PDF pages.
+     *
+     * Page clipping in PDF exposes only the appropriate half.
+     *
+     * Quality remains:
+     * html2canvas scale = 2
+     * JPEG quality = 0.98
+     */
+
+
+    const renderBand =
       async (
         y: number,
         height: number
       ) => {
-        /*
-         * html2canvas creates ONLY this bounded output canvas.
-         *
-         * windowHeight remains the real document height so
-         * normal document positioning/layout stays consistent
-         * between slices.
-         */
         return await html2canvas(
           doc.body,
           {
             scale: 2,
+
             useCORS: true,
+
             allowTaint: false,
+
             backgroundColor:
               '#ffffff',
+
             logging: false,
+
             width:
               renderWidthPx,
+
             height:
               Math.max(
                 1,
@@ -17181,11 +17203,19 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
                   height
                 )
               ),
+
             windowWidth:
               renderWidthPx,
+
+            /*
+             * Keep layout calculations based on the real
+             * document height.
+             */
             windowHeight:
               actualContentHeight,
+
             x: 0,
+
             y:
               Math.max(
                 0,
@@ -17193,13 +17223,28 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
                   y
                 )
               ),
+
             scrollX: 0,
             scrollY: 0,
+
+            /*
+             * html2canvas otherwise has a long default wait
+             * for unavailable external images on EVERY render.
+             *
+             * Images that already loaded in the iframe remain
+             * available normally.
+             */
+            imageTimeout:
+              4000,
+
+            removeContainer:
+              true,
           }
         );
       };
 
-    const encodeJpeg =
+
+    const encodeCanvas =
       async (
         canvas:
           HTMLCanvasElement,
@@ -17230,14 +17275,13 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         );
       };
 
+
     /*
      * =========================================================
-     * 80mm RECEIPT
+     * RECEIPT
      * =========================================================
-     *
-     * Keep the existing continuous receipt PDF page, but feed
-     * it several bounded images instead of one enormous image.
      */
+
     if (isReceipt) {
       const receiptHeightPt =
         Math.max(
@@ -17253,7 +17297,10 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         new jsPDF({
           orientation:
             'portrait',
-          unit: 'pt',
+
+          unit:
+            'pt',
+
           format: [
             targetWidthPt,
             receiptHeightPt,
@@ -17261,14 +17308,14 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
         });
 
       /*
-       * 1200 CSS pixels at scale 2 on a 340px receipt:
-       * roughly 680 x 2400 pixels.
+       * Receipt width is much smaller than A4, so a taller
+       * bounded strip is still safe.
        *
-       * This keeps each RGBA backing store small enough for
-       * mobile while retaining exactly the same 2x quality.
+       * 340 CSS px wide × 2000 CSS px high at 2x remains
+       * dramatically smaller than an unlimited document canvas.
        */
       const RECEIPT_STRIP_HEIGHT =
-        1200;
+        2000;
 
       for (
         let sourceY = 0;
@@ -17284,16 +17331,16 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
               sourceY
           );
 
-        const stripCanvas =
-          await renderSlice(
+        const canvas =
+          await renderBand(
             sourceY,
             currentHeight
           );
 
         try {
-          const stripBytes =
-            await encodeJpeg(
-              stripCanvas,
+          const bytes =
+            await encodeCanvas(
+              canvas,
               'receipt strip'
             );
 
@@ -17312,26 +17359,27 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
             targetWidthPt;
 
           pdf.addImage(
-            stripBytes,
+            bytes,
             'JPEG',
+
             0,
             yPt,
+
             targetWidthPt,
-            heightPt
+            heightPt,
+
+            `receipt_${sourceY}`,
+            'FAST'
           );
         } finally {
-          /*
-           * Release decoded RGBA pixels before rendering the
-           * next strip.
-           */
-          stripCanvas.width =
+          canvas.width =
             1;
 
-          stripCanvas.height =
+          canvas.height =
             1;
 
           try {
-            stripCanvas.remove();
+            canvas.remove();
           } catch (_) {}
         }
 
@@ -17350,12 +17398,8 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
      * =========================================================
      * A4 / LETTER
      * =========================================================
-     *
-     * Each PDF page is rendered independently.
-     *
-     * There is never a document-height canvas and never a
-     * second page-slicing canvas.
      */
+
     const pageHeightPx =
       Math.max(
         1,
@@ -17380,82 +17424,170 @@ export async function generateHtmlPDF(options: HtmlToPdfOptions): Promise<Uint8A
     const pdf =
       new jsPDF({
         orientation,
-        unit: 'pt',
+
+        unit:
+          'pt',
+
         format: [
           targetWidthPt,
           targetHeightPt,
         ],
       });
 
+
+    /*
+     * Two pages per render is deliberate.
+     *
+     * At A4 portrait:
+     *   794 CSS px wide
+     *   ~2246 CSS px high for 2 pages
+     *
+     * At scale 2 the pixel backing store is roughly:
+     *   1588 × 4492
+     *
+     * ~7.1 million pixels.
+     *
+     * This is bounded enough for mobile while cutting the
+     * expensive HTML rendering calls approximately in half.
+     */
+    const PAGES_PER_RENDER =
+      2;
+
+
     for (
-      let pageIdx = 0;
-      pageIdx <
+      let chunkStart = 0;
+      chunkStart <
       totalPages;
-      pageIdx++
+      chunkStart +=
+        PAGES_PER_RENDER
     ) {
-      if (
-        pageIdx >
-        0
-      ) {
-        pdf.addPage(
-          [
-            targetWidthPt,
-            targetHeightPt,
-          ],
-          orientation
+      const chunkPages =
+        Math.min(
+          PAGES_PER_RENDER,
+          totalPages -
+            chunkStart
         );
-      }
 
       const sourceY =
-        pageIdx *
+        chunkStart *
         pageHeightPx;
 
+      const chunkHeightPx =
+        chunkPages *
+        pageHeightPx;
+
+
       /*
-       * Render a full PDF-page-height canvas even on the last
-       * page. html2canvas fills the area beyond content white,
-       * matching the old sliceCanvas behavior.
+       * ONE html2canvas traversal for TWO PDF pages.
        */
-      const pageCanvas =
-        await renderSlice(
+      const chunkCanvas =
+        await renderBand(
           sourceY,
-          pageHeightPx
+          chunkHeightPx
         );
 
       try {
-        const pageBytes =
-          await encodeJpeg(
-            pageCanvas,
-            `HTML-to-PDF page ${
-              pageIdx + 1
+        /*
+         * ONE JPEG encode for TWO PDF pages.
+         */
+        const chunkBytes =
+          await encodeCanvas(
+            chunkCanvas,
+            `HTML pages ${
+              chunkStart + 1
+            }-${
+              chunkStart +
+              chunkPages
             }`
           );
 
-        pdf.addImage(
-          pageBytes,
-          'JPEG',
-          0,
-          0,
-          targetWidthPt,
-          targetHeightPt
-        );
+
+        const imageAlias =
+          `html_chunk_${chunkStart}`;
+
+
+        for (
+          let localPage = 0;
+          localPage <
+          chunkPages;
+          localPage++
+        ) {
+          const globalPage =
+            chunkStart +
+            localPage;
+
+
+          if (
+            globalPage >
+            0
+          ) {
+            pdf.addPage(
+              [
+                targetWidthPt,
+                targetHeightPt,
+              ],
+              orientation
+            );
+          }
+
+
+          /*
+           * Reuse the SAME tall JPEG.
+           *
+           * PDF page boundaries clip the image naturally:
+           *
+           * page 1:
+           *   y = 0
+           *
+           * page 2:
+           *   y = -pageHeight
+           *
+           * There is no second page-sized canvas and no
+           * second JPEG encoding pass.
+           */
+          pdf.addImage(
+            chunkBytes,
+            'JPEG',
+
+            0,
+
+            -localPage *
+              targetHeightPt,
+
+            targetWidthPt,
+
+            targetHeightPt *
+              chunkPages,
+
+            imageAlias,
+
+            'FAST'
+          );
+        }
       } finally {
-        pageCanvas.width =
+        /*
+         * Release the entire two-page pixel backing store
+         * before the next bounded chunk.
+         */
+        chunkCanvas.width =
           1;
 
-        pageCanvas.height =
+        chunkCanvas.height =
           1;
 
         try {
-          pageCanvas.remove();
+          chunkCanvas.remove();
         } catch (_) {}
       }
 
+
       /*
-       * Allow Safari/Chrome to reclaim this page's native
-       * canvas/JPEG memory before opening the next page.
+       * Safari gets a collection opportunity after every
+       * two-page chunk.
        */
       await yieldToBrowser();
     }
+
 
     return new Uint8Array(
       pdf.output(
