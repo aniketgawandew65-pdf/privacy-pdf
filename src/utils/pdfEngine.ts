@@ -15411,6 +15411,19 @@ export async function extractMarkdownFromPDF(
     onProgress,
   } = options;
 
+  /*
+   * =========================================================
+   * STREAMING PDF -> MARKDOWN
+   * =========================================================
+   *
+   * Important:
+   * - PDF.js reads the browser-backed File.
+   * - Only ONE page's text data is retained at a time.
+   * - Normal digital PDFs never initialize OCR.
+   * - Mixed PDFs OCR only pages that actually need OCR.
+   * - Canvas memory is released immediately after OCR.
+   */
+
   const loadedPdf =
     await loadPdfJsFromBlob(
       file,
@@ -15422,9 +15435,25 @@ export async function extractMarkdownFromPDF(
   const pdfDoc =
     loadedPdf.pdf;
 
-  try {
-    const totalPages =
-      pdfDoc.numPages;
+  const totalPages =
+    pdfDoc.numPages;
+
+  const markdownBlocks:
+    string[] = [];
+
+  let ocrWorker:
+    any =
+    null;
+
+  const yieldToBrowser =
+    () =>
+      new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
 
   interface TextItemData {
     str: string;
@@ -15434,89 +15463,787 @@ export async function extractMarkdownFromPDF(
     width: number;
   }
 
-  const pagesTextData: TextItemData[][] = [];
-  const fontHeights: number[] = [];
-  let totalDigitalItems = 0;
+  type StructuredLine = {
+    text: string;
+    avgHeight: number;
+  };
 
-  // Step 1: Extract digital text coordinates
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    onProgress?.(pageNum, totalPages);
-    const page = await pdfDoc.getPage(pageNum);
-    const content = await page.getTextContent();
 
-    const items: TextItemData[] = [];
-    for (const item of content.items as any[]) {
-      if (!item.str || !item.str.trim()) continue;
-      const height = Math.abs(item.transform[3]) || Math.abs(item.transform[0]) || 12;
-      fontHeights.push(height);
-      items.push({
-        str: item.str,
-        x: item.transform[4],
-        y: item.transform[5],
-        height,
-        width: item.width || 0,
-      });
-    }
-    totalDigitalItems += items.length;
-    pagesTextData.push(items);
-    page.cleanup();
-  }
+  /*
+   * ---------------------------------------------------------
+   * DIGITAL PAGE STRUCTURING
+   * ---------------------------------------------------------
+   */
 
-  const markdownBlocks: string[] = [];
+  const buildLines =
+    (
+      items:
+        TextItemData[]
+    ): StructuredLine[] => {
+      if (!items.length) {
+        return [];
+      }
 
-  // =========================================================================
-  // PATH A: Automatic OCR Fallback for Scanned PDFs (e.g. Address agreement.pdf)
-  // =========================================================================
-  if (totalDigitalItems < 10) {
-    const ocrWorker = await createWorker('eng', 1, {
-      workerPath: '/tessdata/worker.min.js',
-      corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-      langPath: '/tessdata',
-      gzip: true,
-    });
+      /*
+       * Operate on this page only.
+       * No document-wide coordinate array is retained.
+       */
+      items.sort(
+        (
+          a,
+          b
+        ) => {
+          if (
+            Math.abs(
+              b.y -
+              a.y
+            ) >
+            4
+          ) {
+            return (
+              b.y -
+              a.y
+            );
+          }
 
-    try {
-      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-        onProgress?.(pageNum, totalPages);
-        const page =
-          await pdfDoc.getPage(
-            pageNum
+          return (
+            a.x -
+            b.x
+          );
+        }
+      );
+
+      const lines:
+        StructuredLine[] = [];
+
+      let currentLine:
+        TextItemData[] = [];
+
+      let currentY:
+        number |
+        null =
+        null;
+
+      const flushLine =
+        () => {
+          if (
+            currentLine.length ===
+            0
+          ) {
+            return;
+          }
+
+          const lineText =
+            currentLine
+              .map(
+                (item) =>
+                  item.str
+              )
+              .join(' ')
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim();
+
+          if (lineText) {
+            const avgHeight =
+              currentLine.reduce(
+                (
+                  total,
+                  item
+                ) =>
+                  total +
+                  item.height,
+                0
+              ) /
+              currentLine.length;
+
+            lines.push({
+              text:
+                lineText,
+              avgHeight,
+            });
+          }
+
+          currentLine = [];
+          currentY = null;
+        };
+
+      for (
+        const item of
+        items
+      ) {
+        if (
+          currentY ===
+            null ||
+          Math.abs(
+            item.y -
+            currentY
+          ) <=
+            4
+        ) {
+          currentLine.push(
+            item
           );
 
-        const canvas =
-          document.createElement(
-            'canvas'
+          /*
+           * Running average makes lines with tiny baseline
+           * differences more stable than locking to item #1.
+           */
+          currentY =
+            currentLine.reduce(
+              (
+                total,
+                current
+              ) =>
+                total +
+                current.y,
+              0
+            ) /
+            currentLine.length;
+        } else {
+          flushLine();
+
+          currentLine = [
+            item,
+          ];
+
+          currentY =
+            item.y;
+        }
+      }
+
+      flushLine();
+
+      return lines;
+    };
+
+
+  const appendStructuredLines =
+    (
+      sourceLines:
+        StructuredLine[]
+    ) => {
+      if (
+        sourceLines.length ===
+        0
+      ) {
+        return;
+      }
+
+      const heights =
+        sourceLines
+          .map(
+            (line) =>
+              line.avgHeight
+          )
+          .filter(
+            (height) =>
+              Number.isFinite(
+                height
+              ) &&
+              height >
+                0
+          )
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              a -
+              b
           );
 
-        try {
-          const viewport =
+      /*
+       * Page-local median avoids storing every font size from
+       * the complete document while preserving relative
+       * heading detection.
+       */
+      const medianHeight =
+        heights[
+          Math.floor(
+            heights.length /
+            2
+          )
+        ] ||
+        12;
+
+
+      for (
+        let lineIndex = 0;
+        lineIndex <
+        sourceLines.length;
+        lineIndex++
+      ) {
+        let lineText =
+          sourceLines[
+            lineIndex
+          ].text.trim();
+
+        const avgHeight =
+          sourceLines[
+            lineIndex
+          ].avgHeight;
+
+        if (!lineText) {
+          continue;
+        }
+
+
+        /*
+         * Horizontal separator.
+         */
+        if (
+          /^[-—_=~.]{3,}$/.test(
+            lineText
+          )
+        ) {
+          markdownBlocks.push(
+            '\n---\n'
+          );
+
+          continue;
+        }
+
+
+        /*
+         * Join a genuine hyphenated word across lines.
+         *
+         * Old implementation removed "-" but left the next
+         * fragment on another Markdown line.
+         *
+         * Only join when the following line begins lowercase,
+         * which avoids accidentally merging a heading.
+         */
+        if (
+          joinHyphenatedWords &&
+          lineText.endsWith(
+            '-'
+          ) &&
+          lineIndex + 1 <
+            sourceLines.length
+        ) {
+          const nextText =
+            sourceLines[
+              lineIndex +
+                1
+            ].text.trim();
+
+          if (
+            /^[a-zà-öø-ÿ]/.test(
+              nextText
+            )
+          ) {
+            lineText =
+              lineText.slice(
+                0,
+                -1
+              ) +
+              nextText;
+
+            lineIndex +=
+              1;
+          }
+        }
+
+
+        /*
+         * Lists.
+         */
+        if (detectLists) {
+          const bulletMatch =
+            lineText.match(
+              /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7\u25AA\u25AB\u2043\u00B7\u2013\u2014•]\s*(.*)$/
+            );
+
+          if (
+            bulletMatch
+          ) {
+            markdownBlocks.push(
+              `- ${
+                bulletMatch[1]
+                  .trim()
+              }`
+            );
+
+            continue;
+          }
+
+          const numberedMatch =
+            lineText.match(
+              /^(\d+[\.\)])\s*(.*)$/
+            );
+
+          if (
+            numberedMatch
+          ) {
+            markdownBlocks.push(
+              `${numberedMatch[1]} ${numberedMatch[2]}`
+            );
+
+            continue;
+          }
+        }
+
+
+        /*
+         * Heading hierarchy.
+         */
+        if (detectHeadings) {
+          if (
+            avgHeight >=
+            medianHeight *
+              1.7
+          ) {
+            if (
+              markdownBlocks.length >
+                0 &&
+              markdownBlocks[
+                markdownBlocks.length -
+                  1
+              ].startsWith(
+                '# '
+              )
+            ) {
+              markdownBlocks[
+                markdownBlocks.length -
+                  1
+              ] +=
+                ` ${lineText}`;
+            } else {
+              markdownBlocks.push(
+                `\n# ${lineText}\n`
+              );
+            }
+
+            continue;
+          }
+
+          if (
+            avgHeight >=
+            medianHeight *
+              1.35
+          ) {
+            markdownBlocks.push(
+              `\n## ${lineText}\n`
+            );
+
+            continue;
+          }
+
+          if (
+            (
+              lineText.length <
+                50 &&
+              /^[A-Z0-9\s&,:\/\-\(\)]{3,}$/.test(
+                lineText
+              ) &&
+              /[A-Z]{3,}/.test(
+                lineText
+              )
+            ) ||
+            (
+              avgHeight >=
+                medianHeight *
+                  1.15 &&
+              lineText.length <
+                80
+            )
+          ) {
+            markdownBlocks.push(
+              `\n### ${
+                lineText.replace(
+                  /:$/,
+                  ''
+                )
+              }\n`
+            );
+
+            continue;
+          }
+        }
+
+        markdownBlocks.push(
+          lineText
+        );
+      }
+    };
+
+
+  /*
+   * ---------------------------------------------------------
+   * OCR TEXT STRUCTURING
+   * ---------------------------------------------------------
+   */
+
+  const appendOcrText =
+    (
+      rawText:
+        string
+    ) => {
+      const rawLines =
+        rawText.split(
+          '\n'
+        );
+
+      for (
+        const rawLine of
+        rawLines
+      ) {
+        const trimmed =
+          rawLine
+            .replace(
+              /\s+/g,
+              ' '
+            )
+            .trim();
+
+        if (!trimmed) {
+          continue;
+        }
+
+        if (
+          detectHeadings &&
+          trimmed.length <
+            60 &&
+          (
+            trimmed ===
+              trimmed.toUpperCase() ||
+            /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(
+              trimmed
+            )
+          ) &&
+          /[A-Za-z]{3,}/.test(
+            trimmed
+          )
+        ) {
+          markdownBlocks.push(
+            `\n### ${trimmed}\n`
+          );
+
+          continue;
+        }
+
+        if (detectLists) {
+          const bulletMatch =
+            trimmed.match(
+              /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7\u25AA\u25AB\u2043\u00B7\u2013\u2014•]\s*(.*)$/
+            );
+
+          if (
+            bulletMatch
+          ) {
+            markdownBlocks.push(
+              `- ${
+                bulletMatch[1]
+                  .trim()
+              }`
+            );
+
+            continue;
+          }
+
+          const numberedMatch =
+            trimmed.match(
+              /^(\d+[\.\)])\s*(.*)$/
+            );
+
+          if (
+            numberedMatch
+          ) {
+            markdownBlocks.push(
+              `${numberedMatch[1]} ${numberedMatch[2]}`
+            );
+
+            continue;
+          }
+        }
+
+        markdownBlocks.push(
+          trimmed
+        );
+      }
+    };
+
+
+  const ensureOcrWorker =
+    async () => {
+      if (ocrWorker) {
+        return ocrWorker;
+      }
+
+      ocrWorker =
+        await createWorker(
+          'eng',
+          1,
+          {
+            workerPath:
+              '/tessdata/worker.min.js',
+
+            corePath:
+              '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+            langPath:
+              '/tessdata',
+
+            gzip:
+              true,
+          }
+        );
+
+      return ocrWorker;
+    };
+
+
+  try {
+    for (
+      let pageNum = 1;
+      pageNum <=
+      totalPages;
+      pageNum++
+    ) {
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+      try {
+        const content =
+          await page.getTextContent();
+
+        const items:
+          TextItemData[] = [];
+
+        let digitalChars =
+          0;
+
+        for (
+          const rawItem of
+          content.items as any[]
+        ) {
+          const itemText =
+            String(
+              rawItem?.str ||
+              ''
+            );
+
+          if (
+            !itemText.trim()
+          ) {
+            continue;
+          }
+
+          const height =
+            Math.abs(
+              rawItem
+                .transform?.[3] ||
+              0
+            ) ||
+            Math.abs(
+              rawItem
+                .transform?.[0] ||
+              0
+            ) ||
+            12;
+
+          items.push({
+            str:
+              itemText,
+
+            x:
+              Number(
+                rawItem
+                  .transform?.[4] ||
+                0
+              ),
+
+            y:
+              Number(
+                rawItem
+                  .transform?.[5] ||
+                0
+              ),
+
+            height,
+
+            width:
+              Number(
+                rawItem?.width ||
+                0
+              ),
+          });
+
+          digitalChars +=
+            itemText.trim()
+              .length;
+        }
+
+
+        /*
+         * Normal digital page:
+         * no canvas, no OCR worker, no rasterization.
+         */
+        let shouldOcr =
+          items.length ===
+            0 ||
+          digitalChars ===
+            0;
+
+
+        /*
+         * Sparse text can be only a page number/header placed
+         * over an otherwise scanned page.
+         *
+         * For sparse pages only, cheaply inspect drawing ops.
+         */
+        if (
+          !shouldOcr &&
+          digitalChars <
+            40 &&
+          items.length <
+            5
+        ) {
+          try {
+            const operatorList =
+              await page
+                .getOperatorList();
+
+            const imageOps =
+              new Set([
+                pdfjsLib.OPS
+                  .paintImageXObject,
+
+                pdfjsLib.OPS
+                  .paintInlineImageXObject,
+
+                pdfjsLib.OPS
+                  .paintImageXObjectRepeat,
+              ]);
+
+            shouldOcr =
+              operatorList
+                .fnArray
+                .some(
+                  (
+                    operation:
+                      number
+                  ) =>
+                    imageOps.has(
+                      operation
+                    )
+                );
+          } catch (_) {
+            /*
+             * If operator inspection fails but selectable text
+             * exists, preserve that text instead of forcing OCR.
+             */
+            shouldOcr =
+              false;
+          }
+        }
+
+
+        let pageProducedText =
+          false;
+
+
+        if (shouldOcr) {
+          const worker =
+            await ensureOcrWorker();
+
+          const baseViewport =
             page.getViewport({
-              scale: 1.5,
+              scale:
+                1,
             });
 
-          canvas.width =
-            Math.floor(
-              viewport.width
+          /*
+           * Preserve the old 1.5x OCR quality while bounding
+           * pathological giant pages for mobile stability.
+           */
+          const maxDimension =
+            Math.max(
+              baseViewport.width,
+              baseViewport.height
             );
 
-          canvas.height =
-            Math.floor(
-              viewport.height
+          const ocrScale =
+            Math.min(
+              1.5,
+              Math.max(
+                1,
+                2200 /
+                  Math.max(
+                    1,
+                    maxDimension
+                  )
+              )
             );
 
-          const ctx =
-            canvas.getContext(
-              '2d',
-              {
-                alpha: false,
-              }
+          const viewport =
+            page.getViewport({
+              scale:
+                ocrScale,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
             );
 
-          if (ctx) {
+          try {
+            canvas.width =
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.width
+                )
+              );
+
+            canvas.height =
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.height
+                )
+              );
+
+            const context =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha:
+                    false,
+                }
+              );
+
+            if (!context) {
+              throw new Error(
+                `Unable to allocate OCR canvas for page ${pageNum}.`
+              );
+            }
+
+            context.fillStyle =
+              '#ffffff';
+
+            context.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
             await (
               page.render({
                 canvasContext:
-                  ctx as any,
+                  context as any,
+
                 viewport,
               } as any) as any
             ).promise;
@@ -15524,83 +16251,64 @@ export async function extractMarkdownFromPDF(
             const {
               data,
             } =
-              await ocrWorker.recognize(
+              await worker.recognize(
                 canvas
               );
 
-            if (
-              data?.text
-            ) {
-              const rawLines =
-                data.text.split(
-                  '\n'
-                );
+            const scannedText =
+              String(
+                data?.text ||
+                ''
+              ).trim();
 
-              for (
-                const rLine of
-                rawLines
-              ) {
-                const trimmed =
-                  rLine.trim();
+            if (scannedText) {
+              appendOcrText(
+                scannedText
+              );
 
-                if (!trimmed) {
-                  continue;
-                }
-
-                if (
-                  detectHeadings &&
-                  trimmed.length <
-                    60 &&
-                  (
-                    trimmed ===
-                      trimmed.toUpperCase() ||
-                    /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(
-                      trimmed
-                    )
-                  ) &&
-                  /[A-Za-z]{3,}/.test(
-                    trimmed
-                  )
-                ) {
-                  markdownBlocks.push(
-                    '\n### ' +
-                      trimmed +
-                      '\n'
-                  );
-                } else if (
-                  detectLists &&
-                  /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*(.*)$/.test(
-                    trimmed
-                  )
-                ) {
-                  markdownBlocks.push(
-                    '- ' +
-                      trimmed.replace(
-                        /^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7•]\s*/,
-                        ''
-                      )
-                  );
-                } else {
-                  markdownBlocks.push(
-                    trimmed
-                  );
-                }
-              }
+              pageProducedText =
+                true;
             }
+          } finally {
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
           }
-        } finally {
-          canvas.width = 1;
-          canvas.height = 1;
-
-          try {
-            canvas.remove();
-          } catch (_) {}
-
-          try {
-            page.cleanup();
-          } catch (_) {}
         }
 
+
+        /*
+         * Digital path, or safe fallback if OCR returned no text.
+         */
+        if (
+          !pageProducedText &&
+          items.length >
+            0
+        ) {
+          const lines =
+            buildLines(
+              items
+            );
+
+          appendStructuredLines(
+            lines
+          );
+
+          pageProducedText =
+            lines.length >
+            0;
+        }
+
+
+        /*
+         * Keep explicit page boundaries for LLM/RAG use.
+         */
         if (
           pageNum <
           totalPages
@@ -15609,128 +16317,62 @@ export async function extractMarkdownFromPDF(
             '\n---\n'
           );
         }
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
-    } finally {
-      await ocrWorker.terminate();
+
+
+      /*
+       * Safari gets a collection/main-thread opportunity after
+       * every completed page.
+       */
+      await yieldToBrowser();
     }
-  } else {
-    // =========================================================================
-    // PATH B: Intelligent Digital Text Structuring
-    // =========================================================================
-    fontHeights.sort((a, b) => a - b);
-    const medianHeight = fontHeights[Math.floor(fontHeights.length / 2)] || 12;
 
-    for (let pageIndex = 0; pageIndex < pagesTextData.length; pageIndex++) {
-      const items = pagesTextData[pageIndex];
-      if (items.length === 0) continue;
 
-      items.sort((a, b) => {
-        if (Math.abs(b.y - a.y) > 4) return b.y - a.y;
-        return a.x - b.x;
-      });
+    let markdown =
+      markdownBlocks
+        .join('\n')
+        /*
+         * Existing ordinal repair retained.
+         */
+        .replace(
+          /\n(th|st|nd|rd)\n+(\d+)\s+/gi,
+          '\n$2$1 '
+        )
+        .replace(
+          /(\d+)\n+(th|st|nd|rd)\b/gi,
+          '$1$2'
+        )
+        .replace(
+          /\n{3,}/g,
+          '\n\n'
+        )
+        .trim();
 
-      const lines: { text: string; avgHeight: number }[] = [];
-      let currentLineItems: TextItemData[] = [];
-      let currentY: number | null = null;
 
-      for (const item of items) {
-        if (currentY === null || Math.abs(item.y - currentY) <= 4) {
-          currentLineItems.push(item);
-          currentY = item.y;
-        } else {
-          if (currentLineItems.length > 0) {
-            const text = currentLineItems.map((i) => i.str).join(' ').trim();
-            const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
-            lines.push({ text, avgHeight });
-          }
-          currentLineItems = [item];
-          currentY = item.y;
-        }
-      }
+    const charCount =
+      markdown.length;
 
-      if (currentLineItems.length > 0) {
-        const text = currentLineItems.map((i) => i.str).join(' ').trim();
-        const avgHeight = currentLineItems.reduce((acc, i) => acc + i.height, 0) / currentLineItems.length;
-        lines.push({ text, avgHeight });
-      }
+    const wordCount =
+      markdown
+        .trim()
+      ? markdown
+          .trim()
+          .split(
+            /\s+/
+          )
+          .length
+      : 0;
 
-      for (let lIdx = 0; lIdx < lines.length; lIdx++) {
-        let lineText = lines[lIdx].text.trim();
-        const avgHeight = lines[lIdx].avgHeight;
-        if (!lineText) continue;
+    const estimatedTokens =
+      Math.round(
+        charCount /
+        4
+      );
 
-        // 1. Clean horizontal dividers
-        if (/^[-—_=~.]{3,}$/.test(lineText)) {
-          markdownBlocks.push('\n---\n');
-          continue;
-        }
-
-        // 2. Join hyphenated line breaks
-        if (joinHyphenatedWords && lineText.endsWith('-')) {
-          lineText = lineText.slice(0, -1);
-        }
-
-        // 3. Detect and clean all types of bullet lists (including Word Symbol/Wingdings)
-        if (detectLists) {
-          const bulletMatch = lineText.match(/^[\u2022\u25E6\u2023\u2219\*\-\uF06C\uF0B7\u25AA\u25AB\u2043\u00B7\u2013\u2014•]\s*(.*)$/);
-          if (bulletMatch) {
-            markdownBlocks.push(`- ${bulletMatch[1]}`);
-            continue;
-          }
-
-          const numberedMatch = lineText.match(/^(\d+[\.\)])\s*(.*)$/);
-          if (numberedMatch) {
-            markdownBlocks.push(`${numberedMatch[1]} ${numberedMatch[2]}`);
-            continue;
-          }
-        }
-
-        // 4. Detect headings
-        if (detectHeadings) {
-          // Check for Title / Subtitle based on relative font scale
-          if (avgHeight >= medianHeight * 1.7) {
-            // Merge consecutive huge titles (e.g. First Name + Last Name)
-            if (markdownBlocks.length > 0 && markdownBlocks[markdownBlocks.length - 1].startsWith('# ')) {
-              markdownBlocks[markdownBlocks.length - 1] += ` ${lineText}`;
-            } else {
-              markdownBlocks.push(`\n# ${lineText}\n`);
-            }
-            continue;
-          } else if (avgHeight >= medianHeight * 1.35) {
-            markdownBlocks.push(`\n## ${lineText}\n`);
-            continue;
-          } else if (
-            // Detect Section Titles in ALL CAPS (e.g. "EDUCATION", "PROFESSIONAL EXPERIENCE")
-            (lineText.length < 50 &&
-              /^[A-Z0-9\s&,:\/\-\(\)]{3,}$/.test(lineText) &&
-              /[A-Z]{3,}/.test(lineText)) ||
-            (avgHeight >= medianHeight * 1.15 && lineText.length < 80)
-          ) {
-            markdownBlocks.push(`\n### ${lineText.replace(/:$/, '')}\n`);
-            continue;
-          }
-        }
-
-        markdownBlocks.push(lineText);
-      }
-
-      if (pageIndex < pagesTextData.length - 1) {
-        markdownBlocks.push('\n---\n');
-      }
-    }
-  }
-
-  // Step 5: Post-processing cleanups (Fix broken superscript ordinals: "th\n12 in 2011" -> "12th in 2011")
-  let markdown = markdownBlocks.join('\n');
-  markdown = markdown
-    .replace(/\n(th|st|nd|rd)\n+(\d+)\s+/gi, '\n$2$1 ')
-    .replace(/(\d+)\n+(th|st|nd|rd)\b/gi, '$1$2')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  const charCount = markdown.length;
-  const wordCount = markdown.trim() ? markdown.trim().split(/\s+/).length : 0;
-  const estimatedTokens = Math.round(charCount / 4);
 
     return {
       markdown,
@@ -15739,10 +16381,19 @@ export async function extractMarkdownFromPDF(
       estimatedTokens,
     };
   } finally {
+    if (ocrWorker) {
+      try {
+        await ocrWorker
+          .terminate();
+      } catch (_) {}
+
+      ocrWorker =
+        null;
+    }
+
     await loadedPdf.dispose();
   }
 }
-
 export interface TextToPdfOptions {
   text: string;
   fontFamily?: 'helvetica' | 'times' | 'courier';
