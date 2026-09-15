@@ -17162,8 +17162,22 @@ export async function generateHtmlPDF(
           value
         )
       ) {
-        element.removeAttribute(
-          'src'
+        /*
+         * A standalone uploaded HTML file does not contain
+         * sibling assets such as logo.png.
+         *
+         * Use a transparent 1x1 local placeholder instead of
+         * a broken-image icon/ALT text. Width/height utilities
+         * can still preserve the intended layout footprint.
+         */
+        element.setAttribute(
+          'src',
+          'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+        );
+
+        element.setAttribute(
+          'alt',
+          ''
         );
 
         continue;
@@ -17234,11 +17248,14 @@ export async function generateHtmlPDF(
   let generatedTailwindCss =
     '';
 
+  const tailwindProbeHtml =
+    '<div id="__pdf_tailwind_probe" class="md:grid text-white bg-purple-600 text-5xl"></div>';
+
   if (looksLikeTailwind) {
     onProgress?.(
       0,
       1,
-      'Compiling styles locally...'
+      'Compiling complete styles locally...'
     );
 
     try {
@@ -17250,9 +17267,13 @@ export async function generateHtmlPDF(
       const buildCss =
         tailwindModule.default;
 
+      /*
+       * Compile every class present in the actual document,
+       * plus a known responsive/style probe.
+       */
       generatedTailwindCss =
         await buildCss(
-          `<body class="${bodyClass}">${safeBodyHtml}</body>`,
+          `<body class="${bodyClass}">${safeBodyHtml}${tailwindProbeHtml}</body>`,
           '',
           {
             compileCssOptions: {
@@ -17265,15 +17286,31 @@ export async function generateHtmlPDF(
             },
           }
         );
+
+      if (
+        !generatedTailwindCss ||
+        generatedTailwindCss.length <
+          500
+      ) {
+        throw new Error(
+          'Tailwind compiler returned incomplete CSS.'
+        );
+      }
     } catch (
-      error
+      error: any
     ) {
-      console.warn(
-        'Local Tailwind compilation failed; continuing with authored CSS:',
-        error
+      /*
+       * Never silently generate another visually broken PDF.
+       */
+      throw new Error(
+        `Unable to compile this HTML's local Tailwind styles: ${
+          error?.message ||
+          'unknown compiler error'
+        }`
       );
     }
   }
+
 
 
   /*
@@ -17304,8 +17341,26 @@ export async function generateHtmlPDF(
   iframe.style.width =
     `${renderWidthPx}px`;
 
+  /*
+   * vh/min-h-screen must resolve against the same aspect ratio
+   * as the requested PDF page.
+   */
+  const renderViewportHeightPx =
+    isReceipt
+      ? 1600
+      : Math.max(
+          1,
+          Math.round(
+            (
+              targetHeightPt /
+              targetWidthPt
+            ) *
+              renderWidthPx
+          )
+        );
+
   iframe.style.height =
-    '1123px';
+    `${renderViewportHeightPx}px`;
 
   iframe.style.border =
     '0';
@@ -17392,6 +17447,42 @@ export async function generateHtmlPDF(
             }
 
             /*
+             * Scroll-reveal sections normally become visible
+             * through JavaScript. Scripts are intentionally not
+             * executed during local PDF conversion, so force the
+             * final visible state explicitly.
+             */
+            .reveal-on-scroll {
+              opacity: 1 !important;
+              transform: none !important;
+              visibility: visible !important;
+            }
+
+            /*
+             * Browser-only decoration has no useful static PDF
+             * meaning and can interfere with full-page geometry.
+             */
+            #particle-canvas,
+            #mouse-spotlight,
+            #custom-cursor-dot,
+            #custom-cursor-ring,
+            #type-cursor {
+              display: none !important;
+            }
+
+            html {
+              scroll-behavior: auto !important;
+            }
+
+            /*
+             * Fixed toolbars/navbars should appear once at their
+             * document location, not behave like viewport chrome.
+             */
+            .fixed {
+              position: absolute !important;
+            }
+
+            /*
              * Do not let video/remote browsing contexts create
              * network work during a local PDF conversion.
              */
@@ -17406,6 +17497,7 @@ export async function generateHtmlPDF(
           style="${bodyStyle.replace(/"/g, '&quot;')}"
         >
           ${safeBodyHtml}
+          ${looksLikeTailwind ? tailwindProbeHtml : ''}
         </body>
       </html>
     `);
@@ -17427,6 +17519,141 @@ export async function generateHtmlPDF(
             )
         )
     );
+
+
+    /*
+     * The previous build silently continued when Tailwind was
+     * missing, which produced black text/default blue links.
+     *
+     * Verify the actual computed browser styles before creating
+     * any PDF. If this fails we show an error instead of making
+     * garbage output.
+     */
+    if (looksLikeTailwind) {
+      const probe =
+        doc.getElementById(
+          '__pdf_tailwind_probe'
+        );
+
+      if (!probe) {
+        throw new Error(
+          'Local Tailwind verification element is missing.'
+        );
+      }
+
+      const probeStyle =
+        view.getComputedStyle(
+          probe
+        );
+
+      const probeFontSize =
+        parseFloat(
+          probeStyle.fontSize
+        ) || 0;
+
+      if (
+        probeStyle.display !==
+          'grid' ||
+        probeFontSize <
+          30
+      ) {
+        throw new Error(
+          'Local Tailwind styles did not initialize correctly on this browser.'
+        );
+      }
+
+      probe.remove();
+    }
+
+
+    /*
+     * Convert any remaining computed fixed-position elements
+     * into absolute document elements so the full-page snapshot
+     * contains them once instead of treating them as viewport UI.
+     */
+    for (
+      const element of
+      Array.from(
+        doc.body.querySelectorAll(
+          '*'
+        )
+      ) as HTMLElement[]
+    ) {
+      const computed =
+        view.getComputedStyle(
+          element
+        );
+
+      if (
+        computed.position ===
+        'fixed'
+      ) {
+        const rect =
+          element.getBoundingClientRect();
+
+        element.style.position =
+          'absolute';
+
+        if (
+          computed.top !==
+          'auto'
+        ) {
+          element.style.top =
+            `${Math.max(
+              0,
+              rect.top
+            )}px`;
+        }
+      }
+    }
+
+
+    /*
+     * Fill the final A4/Letter page with the document background
+     * instead of leaving an arbitrary white strip after content.
+     */
+    if (!isReceipt) {
+      const liveHeight =
+        Math.max(
+          doc.documentElement
+            .scrollHeight,
+          doc.body
+            .scrollHeight,
+          1
+        );
+
+      const livePageHeight =
+        (
+          targetHeightPt /
+          targetWidthPt
+        ) *
+        renderWidthPx;
+
+      const paddedHeight =
+        Math.max(
+          livePageHeight,
+          Math.ceil(
+            liveHeight /
+            livePageHeight
+          ) *
+            livePageHeight
+        );
+
+      doc.documentElement
+        .style.minHeight =
+          `${paddedHeight}px`;
+
+      doc.body.style.minHeight =
+        `${paddedHeight}px`;
+
+      await new Promise<void>(
+        (resolve) =>
+          view.requestAnimationFrame(
+            () =>
+              resolve()
+          )
+      );
+    }
 
 
     /*
@@ -17467,49 +17694,141 @@ export async function generateHtmlPDF(
     const body =
       doc.body;
 
-    const bodyRect =
-      body.getBoundingClientRect();
-
-    const contentHeightPx =
-      Math.max(
-        1,
-        body.scrollHeight,
-        body.offsetHeight,
-        Math.ceil(
-          bodyRect.height
+    const bodyBackground =
+      view
+        .getComputedStyle(
+          body
         )
+        .backgroundColor ||
+      '#ffffff';
+
+
+    onProgress?.(
+      0,
+      1,
+      'Capturing complete styled document...'
+    );
+
+
+    const snapdomModule =
+      await import(
+        '@zumer/snapdom'
       );
 
 
-    const pxToPt =
-      targetWidthPt /
-      renderWidthPx;
+    /*
+     * Official full-page SnapDOM pattern:
+     * capture documentElement, then paginate from capture.meta.
+     *
+     * Important:
+     * do NOT calculate crop geometry from body.scrollHeight.
+     */
+    const capture =
+      await snapdomModule.snapdom(
+        doc.documentElement,
+        {
+          dpr:
+            1,
+          scale:
+            1,
+
+          /*
+           * Fidelity is now prioritized over the previous fast
+           * shortcut. The user accepts up to ~3 minutes.
+           */
+          fast:
+            false,
+
+          embedFonts:
+            true,
+
+          backgroundColor:
+            bodyBackground,
+        }
+      );
 
 
-    const normalPageHeightPx =
-      isReceipt
-        ? contentHeightPx
-        : (
-            targetHeightPt /
-            targetWidthPt
-          ) *
-          renderWidthPx;
+    const captureAny =
+      capture as any;
+
+    const meta =
+      captureAny.meta ||
+      {};
+
+
+    const captureX =
+      Number(
+        meta.contentX
+      );
+
+    const captureY =
+      Number(
+        meta.contentY
+      );
+
+    const captureWidth =
+      Number(
+        meta.w0
+      );
+
+    const captureHeight =
+      Number(
+        meta.h0
+      );
+
+
+    if (
+      !Number.isFinite(
+        captureX
+      ) ||
+      !Number.isFinite(
+        captureY
+      ) ||
+      !Number.isFinite(
+        captureWidth
+      ) ||
+      !Number.isFinite(
+        captureHeight
+      ) ||
+      captureWidth <=
+        0 ||
+      captureHeight <=
+        0
+    ) {
+      throw new Error(
+        'The styled HTML capture returned invalid page geometry.'
+      );
+    }
 
 
     /*
-     * PDF viewers themselves have practical page-dimension
-     * limits. Extremely long receipts continue onto additional
-     * receipt-width pages.
+     * PDF scale derives from the captured document itself.
+     * This prevents the repeated-first-page bug from the
+     * previous implementation.
      */
+    const pxToPt =
+      targetWidthPt /
+      captureWidth;
+
+
     const MAX_RECEIPT_HEIGHT_PT =
       14000;
+
+
+    const normalPageHeightPx =
+      (
+        targetHeightPt /
+        targetWidthPt
+      ) *
+      captureWidth;
+
 
     const receiptPageHeightPt =
       Math.max(
         100,
         Math.min(
           MAX_RECEIPT_HEIGHT_PT,
-          contentHeightPx *
+          captureHeight *
             pxToPt
         )
       );
@@ -17532,11 +17851,19 @@ export async function generateHtmlPDF(
         : targetHeightPt;
 
 
+    /*
+     * From here onward, "contentHeightPx" intentionally means
+     * SnapDOM capture coordinates, NOT live DOM coordinates.
+     */
+    const contentHeightPx =
+      captureHeight;
+
+
     const totalPages =
       Math.max(
         1,
         Math.ceil(
-          contentHeightPx /
+          captureHeight /
           pageHeightPx
         )
       );
@@ -17545,81 +17872,8 @@ export async function generateHtmlPDF(
     onProgress?.(
       0,
       totalPages,
-      'Capturing styled document...'
+      `Rendering ${totalPages} high-fidelity PDF page${totalPages === 1 ? '' : 's'}...`
     );
-
-
-    /*
-     * ---------------------------------------------------------
-     * 4. CAPTURE DOM ONCE
-     * ---------------------------------------------------------
-     *
-     * SnapDOM serializes the rendered DOM once.
-     * We then request page-sized crop windows from that stable
-     * capture. No giant full-height bitmap is created.
-     */
-
-    const snapdomModule =
-      await import(
-        '@zumer/snapdom'
-      );
-
-    const capture =
-      await snapdomModule.snapdom(
-        body,
-        {
-          dpr: 1,
-          scale: 1,
-          fast: true,
-          embedFonts: false,
-          backgroundColor:
-            view
-              .getComputedStyle(
-                body
-              )
-              .backgroundColor ||
-            '#ffffff',
-        }
-      );
-
-
-    const captureAny =
-      capture as any;
-
-    const meta =
-      captureAny.meta ||
-      {};
-
-    const captureX =
-      Number.isFinite(
-        Number(
-          meta.contentX
-        )
-      )
-        ? Number(
-            meta.contentX
-          )
-        : 0;
-
-    const captureY =
-      Number.isFinite(
-        Number(
-          meta.contentY
-        )
-      )
-        ? Number(
-            meta.contentY
-          )
-        : 0;
-
-
-    const bodyBackground =
-      view
-        .getComputedStyle(
-          body
-        )
-        .backgroundColor ||
-      '#ffffff';
 
 
     const pdf =
@@ -17684,10 +17938,10 @@ export async function generateHtmlPDF(
 
 
       /*
-       * Page-sized Retina raster only.
-       *
-       * dpr=2 preserves the quality target without ever
-       * allocating one enormous full-document canvas.
+       * Page-sized Retina crop from the reusable full-DOM
+       * capture. DPR 2 preserves text, card edges, gradients,
+       * shadows and typography without allocating one giant
+       * full-document bitmap.
        */
       const canvas =
         await captureAny.toCanvas({
@@ -17698,7 +17952,7 @@ export async function generateHtmlPDF(
               captureY +
               cropY,
             width:
-              renderWidthPx,
+              captureWidth,
             height:
               cropHeight,
           },
