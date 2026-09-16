@@ -1322,10 +1322,10 @@ export const DocumentDataExtractor:
                   onClick={
                     downloadCsv
                   }
-                  className="min-h-12 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 px-5 flex items-center justify-center gap-2 text-sm font-semibold transition"
+                  className="min-h-12 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 px-5 flex items-center justify-center gap-2 text-sm font-semibold transition"
                 >
                   <Download className="w-4 h-4" />
-                  Download CSV
+                  Download CSV (.csv)
                 </button>
 
                 <button

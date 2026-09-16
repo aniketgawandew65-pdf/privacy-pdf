@@ -586,6 +586,19 @@ export default function App() {
     let syncQueued =
       false;
 
+    /*
+     * Safari destroys the previous WakeLockSentinel when its
+     * WebContent process is recreated.
+     *
+     * Keep retrying while a local operation is active so one
+     * transient refusal after restoration does not leave the
+     * phone free to sleep.
+     */
+    let wakeRetryTimer:
+      number |
+      null =
+      null;
+
     const processingSelector =
       [
         '.animate-spin',
@@ -599,7 +612,16 @@ export default function App() {
           document.querySelector(
             processingSelector
           )
-        );
+        ) ||
+        /*
+         * After an iOS/Safari process restart the React tool
+         * may not have mounted its spinner yet.
+         *
+         * The recoverable-processing marker survives that
+         * reload and tells us immediately that the screen must
+         * remain awake while the job is restored.
+         */
+        hasRecoverableProcessing();
 
     const requestWakeLock =
       async (
@@ -842,6 +864,78 @@ export default function App() {
       }
     );
 
+    /*
+     * ========================================================
+     * WAKE-LOCK REACQUISITION AFTER BROWSER PROCESS RESTART
+     * ========================================================
+     *
+     * Safari cannot preserve the old WakeLockSentinel when its
+     * WebContent process is recreated.
+     *
+     * While a local job is still recoverable, automatically
+     * request a fresh screen wake lock.
+     */
+    wakeRetryTimer =
+      window.setInterval(
+        () => {
+          const nextProcessing =
+            processingIsVisible();
+
+          processing =
+            nextProcessing;
+
+          if (
+            processing &&
+            document.visibilityState ===
+              'visible'
+          ) {
+            if (
+              !wakeLock &&
+              !requestInFlight
+            ) {
+              void requestWakeLock();
+            }
+          } else if (
+            !processing &&
+            wakeLock
+          ) {
+            void releaseWakeLock();
+          }
+        },
+        1000
+      );
+
+    const handlePageReturn =
+      () => {
+        const nextProcessing =
+          processingIsVisible();
+
+        processing =
+          nextProcessing;
+
+        if (
+          processing &&
+          document.visibilityState ===
+            'visible'
+        ) {
+          void requestWakeLock(
+            true
+          );
+        }
+
+        queueSync();
+      };
+
+    window.addEventListener(
+      'pageshow',
+      handlePageReturn
+    );
+
+    window.addEventListener(
+      'focus',
+      handlePageReturn
+    );
+
     const handleVisibility =
       () => {
         if (
@@ -851,6 +945,20 @@ export default function App() {
         ) {
           void releaseWakeLock();
           return;
+        }
+
+        const nextProcessing =
+          processingIsVisible();
+
+        processing =
+          nextProcessing;
+
+        if (
+          processing
+        ) {
+          void requestWakeLock(
+            true
+          );
         }
 
         queueSync();
@@ -910,6 +1018,28 @@ export default function App() {
         'visibilitychange',
         handleVisibility
       );
+
+      window.removeEventListener(
+        'pageshow',
+        handlePageReturn
+      );
+
+      window.removeEventListener(
+        'focus',
+        handlePageReturn
+      );
+
+      if (
+        wakeRetryTimer !==
+        null
+      ) {
+        window.clearInterval(
+          wakeRetryTimer
+        );
+
+        wakeRetryTimer =
+          null;
+      }
 
       processing =
         false;
