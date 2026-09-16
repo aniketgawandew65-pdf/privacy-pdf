@@ -2,8 +2,8 @@ import { safeStorage, safeSessionStorage } from './safeStorage';
 import { getLicenseStatus } from './license';
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
-const MAX_FREE_DAILY_TASKS = 4;
-export const MAX_FREE_FILE_SIZE_MB = 25;
+const MAX_FREE_DAILY_TASKS = 2;
+export const MAX_FREE_FILE_SIZE_MB = 10;
 export const MAX_PRO_FILE_SIZE_MB = 150;
 
 interface DailyUsageRecord {
@@ -109,7 +109,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
     return {
       allowed: false,
       reason: 'DAILY_LIMIT',
-      errorMessage: `You have reached your free daily limit of ${MAX_FREE_DAILY_TASKS} tasks. Limit resets tomorrow or unlock unlimited with Pro.`,
+      errorMessage: `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in with Google for 2 additional free tasks, or upgrade to Pro.`,
     };
   }
 
