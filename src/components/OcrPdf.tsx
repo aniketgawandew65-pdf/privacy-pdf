@@ -395,7 +395,13 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
                        * may contain zero words because structured
                        * Tesseract geometry was not requested.
                        */
-                      'searchable-ocr-v3-shared-geometry',
+                      /*
+                       * v4 invalidates v3 checkpoints created
+                       * while normalized OCR words were being
+                       * discarded by the obsolete word.bbox
+                       * check.
+                       */
+                      'searchable-ocr-v4-normalized-coordinates',
                       sourceIdentity,
                       language,
                       1.6,

@@ -10391,10 +10391,17 @@ export async function ocrPDFToSearchable(
               const word of
               rawWords
             ) {
+              /*
+               * extractMobileOcrLines() already normalizes every
+               * Tesseract output format into:
+               *
+               *   { text, x0, y0, x1, y1 }
+               *
+               * Do NOT look for the old word.bbox object here.
+               */
               if (
                 !word ||
-                !word.text ||
-                !word.bbox
+                !word.text
               ) {
                 continue;
               }
@@ -10416,36 +10423,28 @@ export async function ocrPDFToSearchable(
               }
 
 
-              const box =
-                word.bbox;
-
-
               const x0 =
                 Number(
-                  box.x0 ||
-                  0
+                  word.x0
                 );
 
 
               const x1 =
                 Number(
-                  box.x1 ||
-                  0
+                  word.x1
                 );
 
 
               const y0 =
                 Number(
-                  box.y0 ||
-                  0
+                  word.y0
                 ) +
                 tileTop;
 
 
               const y1 =
                 Number(
-                  box.y1 ||
-                  0
+                  word.y1
                 ) +
                 tileTop;
 
