@@ -1,4 +1,4 @@
-import { safeStorage } from './safeStorage';
+import { safeStorage, safeSessionStorage } from './safeStorage';
 import { getLicenseStatus } from './license';
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
@@ -9,6 +9,54 @@ export const MAX_PRO_FILE_SIZE_MB = 150;
 interface DailyUsageRecord {
   date: string; // YYYY-MM-DD
   count: number;
+}
+
+// Keep credit persistence separate from license/preferences storage. Private or
+// restricted browsers may reject localStorage writes; sessionStorage survives
+// both ordinary and cache-bypassing reloads within the same tab/session.
+let lastKnownUsage: DailyUsageRecord | null = null;
+
+function parseUsage(raw: string | null): DailyUsageRecord | null {
+  try {
+    const record = JSON.parse(raw || 'null');
+    return record && typeof record.date === 'string' &&
+      Number.isSafeInteger(record.count) && record.count >= 0
+      ? { date: record.date, count: record.count }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistUsage(record: DailyUsageRecord): void {
+  lastKnownUsage = record;
+  const raw = JSON.stringify(record);
+  // Avoid redundant storage events between normal-browser tabs.
+  if (safeStorage.getItem(DAILY_LIMIT_KEY) !== raw) {
+    safeStorage.setItem(DAILY_LIMIT_KEY, raw);
+  }
+  if (safeSessionStorage.getItem(DAILY_LIMIT_KEY) !== raw) {
+    safeSessionStorage.setItem(DAILY_LIMIT_KEY, raw);
+  }
+}
+
+function readUsage(today: string): DailyUsageRecord {
+  const records = [
+    parseUsage(safeStorage.getItem(DAILY_LIMIT_KEY)),
+    parseUsage(safeSessionStorage.getItem(DAILY_LIMIT_KEY)),
+    lastKnownUsage,
+  ];
+  const record = {
+    date: today,
+    // Never let an older same-day copy restore credits. This also preserves
+    // localStorage's cross-tab behavior when a tab has a stale session backup.
+    count: Math.max(0, ...records.filter(r => r?.date === today).map(r => r!.count)),
+  };
+  // Mirror existing usage on first read, recover a missing/failed storage copy,
+  // and keep the existing local-calendar-day reset. Do not initialize storage
+  // just because a new visitor looked at the credit counter.
+  if (records.some(Boolean)) persistUsage(record);
+  return record;
 }
 
 function getTodayString(): string {
@@ -23,25 +71,9 @@ export function getDailyUsage(): { count: number; remaining: number; max: number
   }
 
   const today = getTodayString();
-  const raw = safeStorage.getItem(DAILY_LIMIT_KEY);
-
-  if (!raw) {
-    return { count: 0, remaining: MAX_FREE_DAILY_TASKS, max: MAX_FREE_DAILY_TASKS, isPro: false };
-  }
-
-  try {
-    const record: DailyUsageRecord = JSON.parse(raw);
-    if (record.date !== today) {
-      // New day: reset usage counter
-      safeStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: 0 }));
-      return { count: 0, remaining: MAX_FREE_DAILY_TASKS, max: MAX_FREE_DAILY_TASKS, isPro: false };
-    }
-
-    const remaining = Math.max(0, MAX_FREE_DAILY_TASKS - record.count);
-    return { count: record.count, remaining, max: MAX_FREE_DAILY_TASKS, isPro: false };
-  } catch {
-    return { count: 0, remaining: MAX_FREE_DAILY_TASKS, max: MAX_FREE_DAILY_TASKS, isPro: false };
-  }
+  const record = readUsage(today);
+  const remaining = Math.max(0, MAX_FREE_DAILY_TASKS - record.count);
+  return { count: record.count, remaining, max: MAX_FREE_DAILY_TASKS, isPro: false };
 }
 
 export function checkActionAllowed(fileSizeBytes?: number): {
@@ -89,19 +121,6 @@ export function recordActionExecution(): void {
   if (isPro) return;
 
   const today = getTodayString();
-  const raw = safeStorage.getItem(DAILY_LIMIT_KEY);
-  let currentCount = 0;
-
-  if (raw) {
-    try {
-      const record: DailyUsageRecord = JSON.parse(raw);
-      if (record.date === today) {
-        currentCount = record.count;
-      }
-    } catch {
-      currentCount = 0;
-    }
-  }
-
-  safeStorage.setItem(DAILY_LIMIT_KEY, JSON.stringify({ date: today, count: currentCount + 1 }));
+  const record = readUsage(today);
+  persistUsage({ date: today, count: record.count + 1 });
 }
