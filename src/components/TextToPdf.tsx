@@ -205,7 +205,22 @@ export const TextToPdf: React.FC<any> = () => {
   const [zoom, setZoom] = useState<number>(1.0);
   const [fontSize, setFontSize] = useState<number>(14);
   const [toolbarFontSize, setToolbarFontSize] = useState<number>(14);
-  const [selectedFont, setSelectedFont] = useState<string>(FONT_OPTIONS[0].value);
+  /*
+   * selectedFont = document/base font.
+   * toolbarFont  = font currently chosen from the toolbar.
+   *
+   * They must be separate so formatting selected text does not
+   * silently change the font of the entire document.
+   */
+  const [selectedFont, setSelectedFont] =
+    useState<string>(
+      FONT_OPTIONS[0].value
+    );
+
+  const [toolbarFont, setToolbarFont] =
+    useState<string>(
+      FONT_OPTIONS[0].value
+    );
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -303,6 +318,10 @@ export const TextToPdf: React.FC<any> = () => {
           'string'
         ) {
           setSelectedFont(
+            saved.selectedFont
+          );
+
+          setToolbarFont(
             saved.selectedFont
           );
         }
@@ -1326,10 +1345,146 @@ export const TextToPdf: React.FC<any> = () => {
     }
   };
 
-  const handleFontFamilyChange = (font: string) => {
-    setSelectedFont(font);
-    formatDoc("fontName", font);
-  };
+  const handleFontFamilyChange =
+    (
+      font:
+        string
+    ) => {
+      /*
+       * The native mobile <select> can collapse the browser
+       * selection when its picker opens.
+       *
+       * savedRangeRef contains the last valid editor selection,
+       * so restore it before deciding whether this is:
+       *
+       *   selected-text formatting
+       *   OR
+       *   a document-wide/base-font change.
+       */
+      let selection =
+        window.getSelection();
+
+      const selectionIsUsable =
+        Boolean(
+          selection &&
+          selection.rangeCount >
+            0 &&
+          !selection.isCollapsed &&
+          editorRef.current &&
+          editorRef.current.contains(
+            selection.anchorNode
+          ) &&
+          editorRef.current.contains(
+            selection.focusNode
+          )
+        );
+
+
+      if (
+        !selectionIsUsable &&
+        savedRangeRef.current &&
+        editorRef.current
+      ) {
+        try {
+          selection =
+            window.getSelection();
+
+          selection?.removeAllRanges();
+
+          selection?.addRange(
+            savedRangeRef.current
+          );
+        } catch (_) {}
+      }
+
+
+      const restoredSelectionIsUsable =
+        Boolean(
+          selection &&
+          selection.rangeCount >
+            0 &&
+          !selection.isCollapsed &&
+          editorRef.current &&
+          editorRef.current.contains(
+            selection.anchorNode
+          ) &&
+          editorRef.current.contains(
+            selection.focusNode
+          )
+        );
+
+
+      setToolbarFont(
+        font
+      );
+
+
+      if (
+        restoredSelectionIsUsable
+      ) {
+        /*
+         * IMPORTANT:
+         * Do NOT call setSelectedFont() here.
+         *
+         * selectedFont controls the entire editor/preview/PDF.
+         * Only apply an inline font-family to the highlighted
+         * text.
+         *
+         * execCommand is already used by this editor and handles
+         * selections spanning multiple inline nodes more safely
+         * than manually wrapping the Range in one <span>.
+         */
+        document.execCommand(
+          "styleWithCSS",
+          false,
+          "true"
+        );
+
+        document.execCommand(
+          "fontName",
+          false,
+          font
+        );
+
+        /*
+         * Keep the resulting selection as the latest mobile
+         * toolbar range.
+         */
+        const updatedSelection =
+          window.getSelection();
+
+        if (
+          updatedSelection &&
+          updatedSelection.rangeCount >
+            0 &&
+          !updatedSelection.isCollapsed
+        ) {
+          try {
+            savedRangeRef.current =
+              updatedSelection
+                .getRangeAt(0)
+                .cloneRange();
+          } catch (_) {}
+        }
+
+        syncContent();
+
+        return;
+      }
+
+
+      /*
+       * No highlighted text:
+       * user is intentionally choosing the document/base font.
+       */
+      setSelectedFont(
+        font
+      );
+
+      setToolbarFont(
+        font
+      );
+    };
 
   const handleApplyTextColor = (color: string) => {
     document.execCommand("styleWithCSS", false, "true");
@@ -1648,8 +1803,12 @@ export const TextToPdf: React.FC<any> = () => {
           <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-700/80 rounded px-1.5 py-0.5">
             <Type className="w-3 h-3 text-zinc-400" />
             <select
-              value={selectedFont}
-              onChange={(e) => handleFontFamilyChange(e.target.value)}
+              value={toolbarFont}
+              onChange={(e) =>
+                handleFontFamilyChange(
+                  e.target.value
+                )
+              }
               className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
             >
               {FONT_OPTIONS.map((f) => (
