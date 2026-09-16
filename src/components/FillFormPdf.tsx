@@ -181,13 +181,13 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
 
           {/* No Fields Notice */}
           {!isLoadingFields && fields.length === 0 && (
-            <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-800/30 flex items-start gap-3">
-              <HelpCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-xs text-amber-200/90 space-y-1">
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
+              <HelpCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-950 space-y-1">
                 <p className="font-semibold">No interactive form fields detected</p>
-                <p className="text-zinc-400 leading-relaxed">
+                <p className="text-zinc-800 leading-relaxed">
                   This document is a flat or scanned PDF without native AcroForm inputs. To overlay text or signatures onto a flat page, use the{' '}
-                  <span className="text-emerald-400 font-medium">Sign PDF</span> tool.
+                  <span className="text-emerald-700 font-medium">Sign PDF</span> tool.
                 </p>
               </div>
             </div>
