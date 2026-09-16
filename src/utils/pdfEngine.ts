@@ -9804,7 +9804,7 @@ export async function ocrPDFToSearchable(
 
 
     const HARD_CHUNK_PAGES =
-      4;
+      2;
 
     let freshPagesSinceRecycle =
       0;
@@ -9960,102 +9960,130 @@ export async function ocrPDFToSearchable(
 
 
         /*
-         * Preserve existing dark-scan detection/inversion.
+         * Preserve the existing dark-scan detection/inversion,
+         * but WITHOUT cloning the entire 2x page into a second
+         * full-resolution RGBA ImageData buffer.
+         *
+         * A tiny 64x64 sample is enough to measure overall page
+         * brightness while the original OCR canvas remains at
+         * the exact same 2.0x resolution.
          */
-        const imgData =
-          ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
+        const sampleCanvas =
+          document.createElement(
+            'canvas'
           );
 
+        sampleCanvas.width =
+          64;
 
-        const pixels =
-          imgData.data;
+        sampleCanvas.height =
+          64;
 
+        try {
+          const sampleCtx =
+            sampleCanvas.getContext(
+              '2d',
+              {
+                alpha:
+                  false,
+              }
+            );
 
-        let totalBrightness =
-          0;
-
-        const sampleStep =
-          16;
-
-        let sampleCount =
-          0;
-
-
-        for (
-          let i = 0;
-          i <
-          pixels.length;
-          i +=
-            4 *
-            sampleStep
-        ) {
-          totalBrightness +=
-            pixels[i] *
-              0.299 +
-            pixels[
-              i + 1
-            ] *
-              0.587 +
-            pixels[
-              i + 2
-            ] *
-              0.114;
-
-          sampleCount++;
-        }
+          if (sampleCtx) {
+            sampleCtx.drawImage(
+              canvas,
+              0,
+              0,
+              sampleCanvas.width,
+              sampleCanvas.height
+            );
 
 
-        const avgBrightness =
-          totalBrightness /
-          Math.max(
-            1,
-            sampleCount
-          );
+            const samplePixels =
+              sampleCtx.getImageData(
+                0,
+                0,
+                sampleCanvas.width,
+                sampleCanvas.height
+              ).data;
 
 
-        if (
-          avgBrightness <
-          128
-        ) {
-          for (
-            let i = 0;
-            i <
-            pixels.length;
-            i += 4
-          ) {
-            pixels[i] =
-              255 -
-              pixels[i];
+            let totalBrightness =
+              0;
 
-            pixels[
-              i + 1
-            ] =
-              255 -
-              pixels[
-                i + 1
-              ];
+            let sampleCount =
+              0;
 
-            pixels[
-              i + 2
-            ] =
-              255 -
-              pixels[
-                i + 2
-              ];
+
+            for (
+              let i = 0;
+              i <
+              samplePixels.length;
+              i += 4
+            ) {
+              totalBrightness +=
+                samplePixels[i] *
+                  0.299 +
+                samplePixels[
+                  i + 1
+                ] *
+                  0.587 +
+                samplePixels[
+                  i + 2
+                ] *
+                  0.114;
+
+              sampleCount++;
+            }
+
+
+            const avgBrightness =
+              totalBrightness /
+              Math.max(
+                1,
+                sampleCount
+              );
+
+
+            if (
+              avgBrightness <
+              128
+            ) {
+              /*
+               * Equivalent RGB inversion to the old per-pixel
+               * loop, but performed in-place by the canvas
+               * compositor instead of allocating another
+               * full-size pixel array.
+               */
+              ctx.save();
+
+              ctx.globalCompositeOperation =
+                'difference';
+
+              ctx.fillStyle =
+                '#ffffff';
+
+              ctx.fillRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+
+              ctx.restore();
+            }
           }
+        } finally {
+          sampleCanvas.width =
+            1;
 
+          sampleCanvas.height =
+            1;
 
-          ctx.putImageData(
-            imgData,
-            0,
-            0
-          );
+          try {
+            sampleCanvas.remove();
+          } catch (_) {}
         }
-
 
         const ocrWorker =
           await ensureWorker();
@@ -10304,7 +10332,7 @@ export async function ocrPDFToSearchable(
 
 
       await yieldToBrowser(
-        25
+        75
       );
 
 

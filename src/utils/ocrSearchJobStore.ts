@@ -237,6 +237,67 @@ const deleteMeta =
   };
 
 
+const durableSourceAlreadyMatches =
+  async (
+    file: File,
+    meta: OcrSearchJobMeta | null
+  ): Promise<boolean> => {
+    if (
+      !meta ||
+      meta.version !== 1 ||
+      meta.name !== file.name ||
+      meta.size !== file.size ||
+      meta.lastModified !==
+        (file.lastModified || 0)
+    ) {
+      return false;
+    }
+
+    if (
+      typeof navigator ===
+        'undefined' ||
+      !navigator.storage ||
+      typeof navigator.storage
+        .getDirectory !==
+        'function'
+    ) {
+      return false;
+    }
+
+    try {
+      const root =
+        await navigator.storage
+          .getDirectory();
+
+      const directory =
+        await root.getDirectoryHandle(
+          DIRECTORY,
+          {
+            create: false,
+          }
+        );
+
+      const handle =
+        await directory.getFileHandle(
+          SOURCE_FILE,
+          {
+            create: false,
+          }
+        );
+
+      const stored =
+        await handle.getFile();
+
+      return (
+        stored.size ===
+        file.size
+      );
+    } catch {
+      return false;
+    }
+  };
+
+
 export const saveOcrSearchJobSource =
   async (
     file:
@@ -245,6 +306,46 @@ export const saveOcrSearchJobSource =
     language:
       string
   ): Promise<void> => {
+    /*
+     * Browser recovery can call this function many times.
+     *
+     * Never rewrite the same 147 MB source merely because
+     * Safari recreated the JS process.
+     */
+    const existingMeta =
+      await readMeta()
+        .catch(
+          () => null
+        );
+
+    if (
+      await durableSourceAlreadyMatches(
+        file,
+        existingMeta
+      )
+    ) {
+      /*
+       * The source bytes already exist intact in OPFS.
+       * Refresh only the tiny job metadata.
+       */
+      await putMeta({
+        version: 1,
+        name: file.name,
+        type:
+          file.type ||
+          'application/pdf',
+        size: file.size,
+        lastModified:
+          file.lastModified ||
+          0,
+        language,
+        updatedAt:
+          Date.now(),
+      });
+
+      return;
+    }
+
     /*
      * IMPORTANT:
      *

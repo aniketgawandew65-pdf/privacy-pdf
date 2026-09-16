@@ -457,6 +457,24 @@ export default function App() {
   useEffect(() => {
     if (!workspaceReady) return;
 
+    /*
+     * Searchable OCR owns a dedicated durable OPFS recovery
+     * source while processing.
+     *
+     * After Safari recreates the page, OcrPdf restores that
+     * exact source. Do not immediately copy the same ~150 MB
+     * file into the generic workspace a second time.
+     *
+     * Other tools keep the existing generic workspace behavior.
+     */
+    if (
+      location.pathname ===
+        '/ocr-pdf' &&
+      hasRecoverableProcessing()
+    ) {
+      return;
+    }
+
     void saveWorkspaceFiles(
       sharedFiles
     ).catch((error) => {
@@ -468,6 +486,7 @@ export default function App() {
   }, [
     sharedFiles,
     workspaceReady,
+    location.pathname,
   ]);
 
   useEffect(() => {
