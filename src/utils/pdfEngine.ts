@@ -5982,11 +5982,68 @@ export async function fillAndFlattenPDF(
 
   if (flatten) {
     form.flatten();
+
+    /*
+     * Some PDFs leave stale Widget annotation references behind after
+     * AcroForm flattening. Strict viewers such as iOS Quick Look can reject
+     * the resulting PDF even though repair-capable renderers still open it.
+     *
+     * Remove only dead/form Widget annotations. Preserve normal links and
+     * other non-form annotations.
+     */
+    for (const page of pdfDoc.getPages()) {
+      const annots = page.node.Annots();
+
+      if (!annots) continue;
+
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const ref = annots.get(i);
+        let remove = false;
+
+        try {
+          const annot = pdfDoc.context.lookup(ref, PDFDict);
+          const subtype = annot.get(PDFName.of('Subtype'));
+
+          if (subtype?.toString() === '/Widget') {
+            remove = true;
+          }
+        } catch {
+          // A dangling annotation reference is invalid and must not survive.
+          remove = true;
+        }
+
+        if (remove) {
+          annots.remove(i);
+        }
+      }
+
+      if (annots.size() === 0) {
+        page.node.delete(PDFName.of('Annots'));
+      }
+    }
+
+    /*
+     * Rebuild flattened pages into a fresh PDFDocument.
+     * This deliberately creates a new catalog/page tree/xref instead of
+     * carrying incremental-update generations or stale AcroForm objects
+     * from the source file into the finished static PDF.
+     */
+    const cleanPdf = await PDFDocument.create();
+
+    const copiedPages = await cleanPdf.copyPages(
+      pdfDoc,
+      pdfDoc.getPageIndices()
+    );
+
+    copiedPages.forEach((page) => cleanPdf.addPage(page));
+
+    return await cleanPdf.save({
+      useObjectStreams: false,
+    });
   }
 
+  // Non-flattened mode must retain the interactive AcroForm.
   return await pdfDoc.save({
-    // Classic xref tables are larger but substantially more compatible
-    // after flattening very large AcroForms on Safari/iOS and desktop readers.
     useObjectStreams: false,
   });
 }
