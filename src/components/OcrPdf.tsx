@@ -383,10 +383,18 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
                 await digestText(
                   JSON.stringify(
                     [
-                      'searchable-ocr-v1',
+                      /*
+                       * v2 intentionally invalidates previous
+                       * 2.0x page-coordinate checkpoints.
+                       *
+                       * Never mix old 2.0x OCR pages with the
+                       * new mobile-safe 1.6x coordinate system.
+                       */
+                      'searchable-ocr-v2-tiled',
                       sourceIdentity,
                       language,
-                      2.0,
+                      1.6,
+                      1400000,
                     ]
                   )
                 );

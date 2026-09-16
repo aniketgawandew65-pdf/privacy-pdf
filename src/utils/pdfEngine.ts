@@ -9633,6 +9633,16 @@ export async function ocrPDFToSearchable(
   let totalPagesForProgress =
     1;
 
+  /*
+   * Searchable OCR uses bounded page strips on mobile.
+   * Keep progress monotonic across all strips of one page.
+   */
+  let activeTileIndex =
+    0;
+
+  let activeTileCount =
+    1;
+
 
   const createOcrWorker =
     async () =>
@@ -9674,7 +9684,7 @@ export async function ocrPDFToSearchable(
                   1
               );
 
-            const withinPage =
+            const workerProgress =
               Math.max(
                 0,
                 Math.min(
@@ -9682,6 +9692,22 @@ export async function ocrPDFToSearchable(
                   Number(
                     m.progress ||
                     0
+                  )
+                )
+              );
+
+            const withinPage =
+              Math.max(
+                0,
+                Math.min(
+                  1,
+                  (
+                    activeTileIndex +
+                    workerProgress
+                  ) /
+                  Math.max(
+                    1,
+                    activeTileCount
                   )
                 )
               );
@@ -9803,8 +9829,12 @@ export async function ocrPDFToSearchable(
       totalPages;
 
 
+    /*
+     * Do not allow Tesseract WASM or PDF.js page caches to span
+     * multiple freshly-recognized pages on mobile Safari.
+     */
     const HARD_CHUNK_PAGES =
-      2;
+      1;
 
     let freshPagesSinceRecycle =
       0;
@@ -9886,366 +9916,586 @@ export async function ocrPDFToSearchable(
         );
 
 
-      const canvas =
-        document.createElement(
-          'canvas'
-        );
-
-
       try {
         /*
-         * IMPORTANT:
-         * Existing OCR quality is preserved exactly at 2.0x.
+         * =====================================================
+         * MOBILE-SAFE SEARCHABLE OCR
+         * =====================================================
+         *
+         * 1.6x is intentionally used here.
+         *
+         * It is the same quality/stability territory already
+         * proven by our Private PII OCR pipeline, rather than
+         * forcing this tool to sustain full-page 2.0x OCR.
+         *
+         * We additionally enforce a hard bitmap ceiling.
          */
-        const viewport =
+        const OCR_SCALE =
+          1.6;
+
+        const MAX_TILE_PIXELS =
+          1_400_000;
+
+        /*
+         * Overlap gives Tesseract full context for words and
+         * text lines close to strip boundaries.
+         */
+        const TILE_OVERLAP =
+          160;
+
+
+        const fullViewport =
           pdfJsPage.getViewport({
             scale:
-              2.0,
+              OCR_SCALE,
           });
 
 
-        canvas.width =
+        const fullWidth =
           Math.max(
             1,
-            Math.floor(
-              viewport.width
-            )
-          );
-
-        canvas.height =
-          Math.max(
-            1,
-            Math.floor(
-              viewport.height
+            Math.ceil(
+              fullViewport.width
             )
           );
 
 
-        const ctx =
-          canvas.getContext(
-            '2d',
-            {
-              alpha:
-                false,
-            }
+        const fullHeight =
+          Math.max(
+            1,
+            Math.ceil(
+              fullViewport.height
+            )
           );
-
-
-        if (!ctx) {
-          throw new Error(
-            `Canvas rendering context unavailable for page ${pageNum}.`
-          );
-        }
-
-
-        ctx.fillStyle =
-          '#ffffff';
-
-        ctx.fillRect(
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
-
-
-        await (
-          pdfJsPage.render({
-            canvasContext:
-              ctx as any,
-
-            viewport,
-          } as any) as any
-        ).promise;
 
 
         /*
-         * Preserve the existing dark-scan detection/inversion,
-         * but WITHOUT cloning the entire 2x page into a second
-         * full-resolution RGBA ImageData buffer.
+         * Full-width vertical strips preserve complete lines.
          *
-         * A tiny 64x64 sample is enough to measure overall page
-         * brightness while the original OCR canvas remains at
-         * the exact same 2.0x resolution.
+         * A normal A4 page at 1.6x may fit in a single bounded
+         * bitmap. Larger/scanned pages are automatically split.
          */
-        const sampleCanvas =
-          document.createElement(
-            'canvas'
-          );
-
-        sampleCanvas.width =
-          64;
-
-        sampleCanvas.height =
-          64;
-
-        try {
-          const sampleCtx =
-            sampleCanvas.getContext(
-              '2d',
-              {
-                alpha:
-                  false,
-              }
-            );
-
-          if (sampleCtx) {
-            sampleCtx.drawImage(
-              canvas,
-              0,
-              0,
-              sampleCanvas.width,
-              sampleCanvas.height
-            );
-
-
-            const samplePixels =
-              sampleCtx.getImageData(
-                0,
-                0,
-                sampleCanvas.width,
-                sampleCanvas.height
-              ).data;
-
-
-            let totalBrightness =
-              0;
-
-            let sampleCount =
-              0;
-
-
-            for (
-              let i = 0;
-              i <
-              samplePixels.length;
-              i += 4
-            ) {
-              totalBrightness +=
-                samplePixels[i] *
-                  0.299 +
-                samplePixels[
-                  i + 1
-                ] *
-                  0.587 +
-                samplePixels[
-                  i + 2
-                ] *
-                  0.114;
-
-              sampleCount++;
-            }
-
-
-            const avgBrightness =
-              totalBrightness /
-              Math.max(
-                1,
-                sampleCount
-              );
-
-
-            if (
-              avgBrightness <
-              128
-            ) {
-              /*
-               * Equivalent RGB inversion to the old per-pixel
-               * loop, but performed in-place by the canvas
-               * compositor instead of allocating another
-               * full-size pixel array.
-               */
-              ctx.save();
-
-              ctx.globalCompositeOperation =
-                'difference';
-
-              ctx.fillStyle =
-                '#ffffff';
-
-              ctx.fillRect(
-                0,
-                0,
-                canvas.width,
-                canvas.height
-              );
-
-              ctx.restore();
-            }
-          }
-        } finally {
-          sampleCanvas.width =
-            1;
-
-          sampleCanvas.height =
-            1;
-
-          try {
-            sampleCanvas.remove();
-          } catch (_) {}
-        }
-
-        const ocrWorker =
-          await ensureWorker();
-
-
-        const {
-          data,
-        } =
-          await ocrWorker.recognize(
-            canvas
+        const calculatedTileHeight =
+          Math.floor(
+            MAX_TILE_PIXELS /
+            fullWidth
           );
 
 
-        /*
-         * Same Tesseract v4/v5 word fallback hierarchy as the
-         * current implementation.
-         */
-        let rawWords:
-          any[] =
-          [];
+        const tileHeight =
+          Math.min(
+            fullHeight,
+            calculatedTileHeight
+          );
 
 
         if (
-          Array.isArray(
-            (data as any)
-              ?.words
-          ) &&
-          (data as any)
-            .words.length >
-            0
+          tileHeight <=
+            TILE_OVERLAP * 2 ||
+          fullWidth >
+            16384
         ) {
-          rawWords =
-            (data as any)
-              .words;
-        } else if (
-          Array.isArray(
-            (data as any)
-              ?.blocks
-          )
-        ) {
-          rawWords =
-            (data as any)
-              .blocks
-              .flatMap(
-                (
-                  block:
-                    any
-                ) =>
-                  block.paragraphs ??
-                  []
-              )
-              .flatMap(
-                (
-                  paragraph:
-                    any
-                ) =>
-                  paragraph.lines ??
-                  []
-              )
-              .flatMap(
-                (
-                  line:
-                    any
-                ) =>
-                  line.words ??
-                  []
-              );
+          throw new Error(
+            `Page ${pageNum} is too wide for safe local OCR at 1.6x resolution.`
+          );
         }
 
 
-        const words =
-          rawWords
-            .map(
-              (
-                word:
-                  any
-              ) => {
-                if (
-                  !word ||
-                  !word.text ||
-                  !word.bbox
-                ) {
-                  return null;
-                }
+        const tileTops:
+          number[] =
+          [];
 
 
-                const clean =
-                  String(
-                    word.text
-                  )
-                    .replace(
-                      /[^ -~ -ÿ]/g,
-                      ''
-                    )
-                    .trim();
+        let nextTileTop =
+          0;
 
 
-                if (!clean) {
-                  return null;
-                }
+        while (
+          nextTileTop <
+          fullHeight
+        ) {
+          tileTops.push(
+            nextTileTop
+          );
 
 
-                const box =
-                  word.bbox;
-
-
-                return {
-                  text:
-                    clean,
-
-                  x0:
-                    Number(
-                      box.x0 ||
-                      0
-                    ),
-
-                  x1:
-                    Number(
-                      box.x1 ||
-                      0
-                    ),
-
-                  y0:
-                    Number(
-                      box.y0 ||
-                      0
-                    ),
-
-                  y1:
-                    Number(
-                      box.y1 ||
-                      0
-                    ),
-                };
-              }
-            )
-            .filter(
-              (
-                word
-              ): word is {
-                text: string;
-                x0: number;
-                x1: number;
-                y0: number;
-                y1: number;
-              } =>
-                Boolean(
-                  word &&
-                  Number.isFinite(
-                    word.x0
-                  ) &&
-                  Number.isFinite(
-                    word.x1
-                  ) &&
-                  Number.isFinite(
-                    word.y0
-                  ) &&
-                  Number.isFinite(
-                    word.y1
-                  )
-                )
+          const tileBottom =
+            Math.min(
+              fullHeight,
+              nextTileTop +
+                tileHeight
             );
+
+
+          if (
+            tileBottom >=
+            fullHeight
+          ) {
+            break;
+          }
+
+
+          nextTileTop =
+            Math.max(
+              nextTileTop +
+                1,
+              tileBottom -
+                TILE_OVERLAP
+            );
+        }
+
+
+        activeTileCount =
+          Math.max(
+            1,
+            tileTops.length
+          );
+
+
+        const pageWords:
+          Array<{
+            text: string;
+            x0: number;
+            x1: number;
+            y0: number;
+            y1: number;
+          }> =
+          [];
+
+
+        for (
+          let tileIndex =
+            0;
+
+          tileIndex <
+            tileTops.length;
+
+          tileIndex++
+        ) {
+          activeTileIndex =
+            tileIndex;
+
+
+          const tileTop =
+            tileTops[
+              tileIndex
+            ];
+
+
+          const tileBottom =
+            Math.min(
+              fullHeight,
+              tileTop +
+                tileHeight
+            );
+
+
+          const currentHeight =
+            Math.max(
+              1,
+              tileBottom -
+                tileTop
+            );
+
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+
+          try {
+            canvas.width =
+              fullWidth;
+
+            canvas.height =
+              currentHeight;
+
+
+            const ctx =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha:
+                    false,
+                }
+              );
+
+
+            if (!ctx) {
+              throw new Error(
+                `Canvas rendering context unavailable for page ${pageNum}.`
+              );
+            }
+
+
+            ctx.fillStyle =
+              '#ffffff';
+
+            ctx.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
+
+            /*
+             * Render ONLY this bounded strip.
+             * There is never a complete giant 1.6x page canvas
+             * when the page exceeds our safe bitmap budget.
+             */
+            await (
+              pdfJsPage.render({
+                canvasContext:
+                  ctx as any,
+
+                viewport:
+                  fullViewport,
+
+                canvas,
+
+                transform: [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  -tileTop,
+                ],
+              } as any) as any
+            ).promise;
+
+
+            /*
+             * Tiny brightness probe instead of cloning the
+             * complete OCR bitmap with getImageData().
+             */
+            const sampleCanvas =
+              document.createElement(
+                'canvas'
+              );
+
+            sampleCanvas.width =
+              64;
+
+            sampleCanvas.height =
+              64;
+
+
+            try {
+              const sampleCtx =
+                sampleCanvas.getContext(
+                  '2d',
+                  {
+                    alpha:
+                      false,
+                  }
+                );
+
+
+              if (sampleCtx) {
+                sampleCtx.drawImage(
+                  canvas,
+                  0,
+                  0,
+                  64,
+                  64
+                );
+
+
+                const pixels =
+                  sampleCtx.getImageData(
+                    0,
+                    0,
+                    64,
+                    64
+                  ).data;
+
+
+                let brightness =
+                  0;
+
+
+                for (
+                  let i = 0;
+                  i <
+                  pixels.length;
+                  i += 4
+                ) {
+                  brightness +=
+                    pixels[i] *
+                      0.299 +
+                    pixels[
+                      i + 1
+                    ] *
+                      0.587 +
+                    pixels[
+                      i + 2
+                    ] *
+                      0.114;
+                }
+
+
+                const average =
+                  brightness /
+                  Math.max(
+                    1,
+                    pixels.length /
+                      4
+                  );
+
+
+                if (
+                  average <
+                  128
+                ) {
+                  ctx.save();
+
+                  ctx.globalCompositeOperation =
+                    'difference';
+
+                  ctx.fillStyle =
+                    '#ffffff';
+
+                  ctx.fillRect(
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
+                  );
+
+                  ctx.restore();
+                }
+              }
+            } finally {
+              sampleCanvas.width =
+                1;
+
+              sampleCanvas.height =
+                1;
+
+              try {
+                sampleCanvas.remove();
+              } catch (_) {}
+            }
+
+
+            const ocrWorker =
+              await ensureWorker();
+
+
+            const {
+              data,
+            } =
+              await ocrWorker.recognize(
+                canvas
+              );
+
+
+            let rawWords:
+              any[] =
+              [];
+
+
+            if (
+              Array.isArray(
+                (data as any)
+                  ?.words
+              ) &&
+              (data as any)
+                .words.length >
+                0
+            ) {
+              rawWords =
+                (data as any)
+                  .words;
+            } else if (
+              Array.isArray(
+                (data as any)
+                  ?.blocks
+              )
+            ) {
+              rawWords =
+                (data as any)
+                  .blocks
+                  .flatMap(
+                    (
+                      block:
+                        any
+                    ) =>
+                      block.paragraphs ??
+                      []
+                  )
+                  .flatMap(
+                    (
+                      paragraph:
+                        any
+                    ) =>
+                      paragraph.lines ??
+                      []
+                  )
+                  .flatMap(
+                    (
+                      line:
+                        any
+                    ) =>
+                      line.words ??
+                      []
+                  );
+            }
+
+
+            /*
+             * Both neighboring strips SEE their overlap.
+             *
+             * Only one strip OWNS each overlap word so the final
+             * invisible PDF text layer does not contain duplicate
+             * searchable words.
+             */
+            const topOwnership =
+              tileTop >
+                0
+                ? tileTop +
+                  TILE_OVERLAP /
+                    2
+                : 0;
+
+
+            const bottomOwnership =
+              tileBottom <
+                fullHeight
+                ? tileBottom -
+                  TILE_OVERLAP /
+                    2
+                : fullHeight;
+
+
+            for (
+              const word of
+              rawWords
+            ) {
+              if (
+                !word ||
+                !word.text ||
+                !word.bbox
+              ) {
+                continue;
+              }
+
+
+              const clean =
+                String(
+                  word.text
+                )
+                  .replace(
+                    /[^ -~ -ÿ]/g,
+                    ''
+                  )
+                  .trim();
+
+
+              if (!clean) {
+                continue;
+              }
+
+
+              const box =
+                word.bbox;
+
+
+              const x0 =
+                Number(
+                  box.x0 ||
+                  0
+                );
+
+
+              const x1 =
+                Number(
+                  box.x1 ||
+                  0
+                );
+
+
+              const y0 =
+                Number(
+                  box.y0 ||
+                  0
+                ) +
+                tileTop;
+
+
+              const y1 =
+                Number(
+                  box.y1 ||
+                  0
+                ) +
+                tileTop;
+
+
+              if (
+                ![
+                  x0,
+                  x1,
+                  y0,
+                  y1,
+                ].every(
+                  Number.isFinite
+                )
+              ) {
+                continue;
+              }
+
+
+              const centerY =
+                (
+                  y0 +
+                  y1
+                ) /
+                2;
+
+
+              if (
+                centerY <
+                  topOwnership ||
+                centerY >=
+                  bottomOwnership
+              ) {
+                continue;
+              }
+
+
+              pageWords.push({
+                text:
+                  clean,
+
+                x0,
+                x1,
+                y0,
+                y1,
+              });
+            }
+          } finally {
+            /*
+             * Release every OCR bitmap immediately.
+             */
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
+          }
+
+
+          await yieldToBrowser(
+            75
+          );
+        }
 
 
         const pageData:
@@ -10254,21 +10504,18 @@ export async function ocrPDFToSearchable(
               pageNum,
 
             viewportWidth:
-              viewport.width,
+              fullViewport.width,
 
             viewportHeight:
-              viewport.height,
+              fullViewport.height,
 
-            words,
+            words:
+              pageWords,
           };
 
 
         /*
-         * Persist only after the complete page OCR has
-         * succeeded.
-         *
-         * If Safari dies during this page, only this page is
-         * repeated.
+         * One COMPLETE page remains the atomic recovery unit.
          */
         let persisted =
           false;
@@ -10296,9 +10543,6 @@ export async function ocrPDFToSearchable(
         }
 
 
-        /*
-         * Browsers without persistent IDB still work normally.
-         */
         if (!persisted) {
           memoryPages.set(
             pageNum,
@@ -10310,24 +10554,15 @@ export async function ocrPDFToSearchable(
         freshPagesSinceRecycle +=
           1;
       } finally {
-        /*
-         * Release native pixel/page memory immediately.
-         */
-        canvas.width =
-          1;
-
-        canvas.height =
-          1;
-
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-
-
         try {
           pdfJsPage.cleanup();
         } catch (_) {}
+
+        activeTileIndex =
+          0;
+
+        activeTileCount =
+          1;
       }
 
 
