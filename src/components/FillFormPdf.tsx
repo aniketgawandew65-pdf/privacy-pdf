@@ -103,6 +103,20 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
     }
   };
 
+  const handlePreview = () => {
+    if (!downloadUrl) return;
+
+    const previewWindow = window.open(downloadUrl, '_blank');
+
+    if (previewWindow) {
+      try {
+        previewWindow.opener = null;
+      } catch {}
+    } else {
+      window.location.href = downloadUrl;
+    }
+  };
+
   const handleDownload = async () => {
     if (!file || !downloadUrl || !outputBlob) return;
 
@@ -345,6 +359,15 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
                 <CheckCircle2 className="w-4 h-4" /> Form Processed & Saved Successfully
               </div>
+              <button
+                type="button"
+                onClick={handlePreview}
+                className="w-full py-3 px-4 border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-900 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all"
+              >
+                <FileText className="w-4 h-4 stroke-[2.5]" />
+                <span>Preview Filled PDF</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => void handleDownload()}
