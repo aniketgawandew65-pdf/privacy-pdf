@@ -12,6 +12,9 @@ import {
   verifyFinishedPdf,
 } from "../utils/pdfSafetyVerifier";
 import { createWorker } from 'tesseract.js';
+import {
+  recognizeMobileOcrTile,
+} from '../utils/mobileOcrEngine';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -3128,20 +3131,18 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                       : `OCR page ${pageNumber} of ${totalPages} · section ${tileIndex + 1}…`
                   );
 
+                  /*
+                   * Shared OCR recognition contract.
+                   *
+                   * This is functionally identical to the
+                   * previous Private PII call:
+                   *
+                   * text=true, blocks=true, hocr=true.
+                   */
                   let result: any =
-                    await (
-                      worker as any
-                    ).recognize(
-                      canvas,
-                      {},
-                      {
-                        text:
-                          true,
-                        blocks:
-                          true,
-                        hocr:
-                          true,
-                      }
+                    await recognizeMobileOcrTile(
+                      worker,
+                      canvas
                     );
 
                   recognizeMs +=

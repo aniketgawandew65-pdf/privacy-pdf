@@ -390,11 +390,17 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
                        * Never mix old 2.0x OCR pages with the
                        * new mobile-safe 1.6x coordinate system.
                        */
-                      'searchable-ocr-v2-tiled',
+                      /*
+                       * v3 invalidates the old checkpoints that
+                       * may contain zero words because structured
+                       * Tesseract geometry was not requested.
+                       */
+                      'searchable-ocr-v3-shared-geometry',
                       sourceIdentity,
                       language,
                       1.6,
                       1400000,
+                      'text-blocks-hocr',
                     ]
                   )
                 );

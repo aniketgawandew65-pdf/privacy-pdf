@@ -27,6 +27,13 @@ if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
 if (typeof window !== "undefined") {  }
 import { Zip, ZipPassThrough } from 'fflate';
 import { createWorker } from 'tesseract.js';
+import {
+  extractMobileOcrLines,
+  MOBILE_OCR_MAX_TILE_PIXELS,
+  MOBILE_OCR_SCALE,
+  MOBILE_OCR_TILE_OVERLAP,
+  recognizeMobileOcrTile,
+} from './mobileOcrEngine';
 
 
 // Configure offline worker for 100% local processing
@@ -9839,6 +9846,14 @@ export async function ocrPDFToSearchable(
     let freshPagesSinceRecycle =
       0;
 
+    /*
+     * Final sanity check:
+     * a document with OCR text must never successfully export
+     * an entirely empty searchable layer again.
+     */
+    let totalRecognizedWords =
+      0;
+
 
     for (
       let pageNum = 1;
@@ -9864,6 +9879,9 @@ export async function ocrPDFToSearchable(
               pageNum
             )
           ) {
+            totalRecognizedWords +=
+              cached.words.length;
+
             /*
              * Do not emit fake page 1 -> N progress for cached
              * pages. The UI jumps directly to the first page
@@ -9931,17 +9949,17 @@ export async function ocrPDFToSearchable(
          * We additionally enforce a hard bitmap ceiling.
          */
         const OCR_SCALE =
-          1.6;
+          MOBILE_OCR_SCALE;
 
         const MAX_TILE_PIXELS =
-          1_400_000;
+          MOBILE_OCR_MAX_TILE_PIXELS;
 
         /*
-         * Overlap gives Tesseract full context for words and
-         * text lines close to strip boundaries.
+         * Use the SAME overlap policy as the shared mobile OCR
+         * architecture / Private PII.
          */
         const TILE_OVERLAP =
-          160;
+          MOBILE_OCR_TILE_OVERLAP;
 
 
         const fullViewport =
@@ -10285,64 +10303,62 @@ export async function ocrPDFToSearchable(
               await ensureWorker();
 
 
-            const {
-              data,
-            } =
-              await ocrWorker.recognize(
+            /*
+             * IMPORTANT:
+             *
+             * The previous Searchable OCR implementation called:
+             *
+             *   worker.recognize(canvas)
+             *
+             * With our current Tesseract.js version that can
+             * produce recognized text while NOT populating the
+             * positional word/block outputs that this tool needs.
+             *
+             * Use the same explicit structured-output contract
+             * already proven by Private PII.
+             */
+            const result =
+              await recognizeMobileOcrTile(
+                ocrWorker,
                 canvas
               );
 
 
-            let rawWords:
+            const data =
+              result?.data ||
+              {};
+
+
+            const lines =
+              extractMobileOcrLines(
+                data
+              );
+
+
+            const rawWords:
               any[] =
-              [];
+              lines.flat();
 
 
+            /*
+             * Never silently create another visually-correct but
+             * non-searchable PDF.
+             *
+             * If Tesseract says there is text but geometry is
+             * missing, fail this page instead of checkpointing
+             * an empty invisible layer.
+             */
             if (
-              Array.isArray(
-                (data as any)
-                  ?.words
-              ) &&
-              (data as any)
-                .words.length >
+              String(
+                data?.text ||
+                ''
+              ).trim() &&
+              rawWords.length ===
                 0
             ) {
-              rawWords =
-                (data as any)
-                  .words;
-            } else if (
-              Array.isArray(
-                (data as any)
-                  ?.blocks
-              )
-            ) {
-              rawWords =
-                (data as any)
-                  .blocks
-                  .flatMap(
-                    (
-                      block:
-                        any
-                    ) =>
-                      block.paragraphs ??
-                      []
-                  )
-                  .flatMap(
-                    (
-                      paragraph:
-                        any
-                    ) =>
-                      paragraph.lines ??
-                      []
-                  )
-                  .flatMap(
-                    (
-                      line:
-                        any
-                    ) =>
-                      line.words ??
-                      []
-                  );
+              throw new Error(
+                `OCR recognized text on page ${pageNum} but returned no searchable word geometry.`
+              );
             }
 
 
@@ -10514,6 +10530,10 @@ export async function ocrPDFToSearchable(
           };
 
 
+        totalRecognizedWords +=
+          pageWords.length;
+
+
         /*
          * One COMPLETE page remains the atomic recovery unit.
          */
@@ -10612,6 +10632,22 @@ export async function ocrPDFToSearchable(
         freshPagesSinceRecycle =
           0;
       }
+    }
+
+
+    /*
+     * A fully blank layer is not a successful searchable PDF.
+     *
+     * This guard would have caught the previous 86-page output
+     * instead of letting it download as if OCR had succeeded.
+     */
+    if (
+      totalRecognizedWords ===
+      0
+    ) {
+      throw new Error(
+        'OCR completed but produced no searchable text. The PDF was not exported.'
+      );
     }
 
 
