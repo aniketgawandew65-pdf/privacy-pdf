@@ -14792,32 +14792,67 @@ const universalExtractFinancialHints = (
 
 
 
+
+export interface UniversalDocumentRecovery {
+  readPage?: (
+    pageNumber: number
+  ) => Promise<
+    unknown |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber: number,
+    pageData: unknown
+  ) => Promise<void>;
+}
+
+
 async function universalExtractScannedPages(
   file: File,
-  options: TableExtractOptions
+  options: TableExtractOptions,
+  recovery: UniversalDocumentRecovery = {}
 ): Promise<UniversalScannedPageData[]> {
-  const loadedPdf =
+  const createUniversalWorker =
+    async () =>
+      await createWorker(
+        'eng',
+        1,
+        {
+          workerPath:
+            '/tessdata/worker.min.js',
+          corePath:
+            '/tessdata/tesseract-core-simd-lstm.wasm.js',
+          langPath:
+            '/tessdata',
+          gzip: true,
+        }
+      );
+
+  let loadedPdf =
     await loadPdfJsFromBlob(
       file
     );
 
-  const pdf =
+  let pdf =
     loadedPdf.pdf;
 
-  const worker =
-    await createWorker(
-      'eng',
-      1,
-      {
-        workerPath:
-          '/tessdata/worker.min.js',
-        corePath:
-          '/tessdata/tesseract-core-simd-lstm.wasm.js',
-        langPath:
-          '/tessdata',
-        gzip: true,
-      }
-    );
+  const totalPages =
+    pdf.numPages;
+
+  let worker =
+    await createUniversalWorker();
+
+  /*
+   * Hard WebKit memory boundary.
+   *
+   * Quality is unchanged. We only recycle the heavy engines.
+   */
+  const HARD_CHUNK_PAGES =
+    4;
+
+  let freshPagesSinceRecycle =
+    0;
 
   const pages:
     UniversalScannedPageData[] = [];
@@ -14825,12 +14860,59 @@ async function universalExtractScannedPages(
   try {
     for (
       let pageNumber = 1;
-      pageNumber <= pdf.numPages;
+      pageNumber <= totalPages;
       pageNumber++
     ) {
+      /*
+       * Same recovery model as Private PII / Markdown:
+       * completed pages bypass PDF.js and OCR completely.
+       */
+      if (
+        recovery.readPage
+      ) {
+        try {
+          const cached =
+            await recovery.readPage(
+              pageNumber
+            ) as
+              | UniversalScannedPageData
+              | undefined;
+
+          if (
+            cached &&
+            cached.pageNumber ===
+              pageNumber &&
+            Array.isArray(
+              cached.rows
+            )
+          ) {
+            pages.push(
+              cached
+            );
+
+            await new Promise<void>(
+              (resolve) =>
+                setTimeout(
+                  resolve,
+                  0
+                )
+            );
+
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read Universal page ${pageNumber} recovery record:`,
+            recoveryReadError
+          );
+        }
+      }
+
       options.onProgress?.(
         pageNumber,
-        pdf.numPages
+        totalPages
       );
 
       const page =
@@ -15079,6 +15161,33 @@ async function universalExtractScannedPages(
         rows: pageRows,
       });
 
+      /*
+       * Atomic checkpoint:
+       * only a fully completed OCR page is persisted.
+       */
+      if (
+        recovery.writePage
+      ) {
+        const completedPage =
+          pages[
+            pages.length - 1
+          ];
+
+        if (
+          completedPage &&
+          completedPage.pageNumber ===
+            pageNumber
+        ) {
+          await recovery.writePage(
+            pageNumber,
+            completedPage
+          );
+        }
+      }
+
+      freshPagesSinceRecycle++;
+
+
       ctx.clearRect(
         0,
         0,
@@ -15092,6 +15201,47 @@ async function universalExtractScannedPages(
       try {
         page.cleanup();
       } catch {}
+
+      if (
+        freshPagesSinceRecycle >=
+          HARD_CHUNK_PAGES &&
+        pageNumber <
+          totalPages
+      ) {
+        /*
+         * Release Tesseract WASM + PDF.js caches completely.
+         * OCR scale/recognition settings remain unchanged.
+         */
+        try {
+          await worker.terminate();
+        } catch {}
+
+        try {
+          await loadedPdf.dispose();
+        } catch {}
+
+        await new Promise<void>(
+          (resolve) =>
+            setTimeout(
+              resolve,
+              100
+            )
+        );
+
+        loadedPdf =
+          await loadPdfJsFromBlob(
+            file
+          );
+
+        pdf =
+          loadedPdf.pdf;
+
+        worker =
+          await createUniversalWorker();
+
+        freshPagesSinceRecycle =
+          0;
+      }
     }
   } finally {
     try {
@@ -15108,7 +15258,8 @@ async function universalExtractScannedPages(
 
 export async function extractUniversalDocumentData(
   file: File,
-  options: TableExtractOptions = {}
+  options: TableExtractOptions = {},
+  recovery: UniversalDocumentRecovery = {}
 ): Promise<UniversalDocumentExtractResult> {
   const isScanned =
     await universalIsMostlyScannedPdf(
@@ -15124,7 +15275,8 @@ export async function extractUniversalDocumentData(
     scannedPages =
       await universalExtractScannedPages(
         file,
-        options
+        options,
+        recovery
       );
 
     rawRows =

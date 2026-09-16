@@ -22,6 +22,23 @@ import {
   extractUniversalDocumentData,
 } from '../utils/pdfEngine';
 
+import {
+  clearProcessingRecovery,
+  digestText,
+  exclusivelyProcess,
+  localContentId,
+} from '../utils/localProcessing';
+
+import {
+  saveWorkspaceFiles,
+} from '../utils/localWorkspace';
+
+import {
+  clearUniversalPages,
+  readUniversalPage,
+  writeUniversalPage,
+} from '../utils/universalPageStore';
+
 interface DocumentDataExtractorProps {
   file: File | null;
   onFileChange: (
@@ -183,6 +200,13 @@ export const DocumentDataExtractor:
         null
       );
 
+    /*
+     * Prevent handleFile + useEffect from launching the same
+     * 150 MB extraction twice inside one JS process.
+     */
+    const extractionInFlightRef =
+      useRef(false);
+
     const [
       sections,
       setSections,
@@ -257,6 +281,18 @@ export const DocumentDataExtractor:
         ...EMPTY_SESSION,
       };
 
+      void clearUniversalPages()
+        .catch(
+          (recoveryError) => {
+            console.warn(
+              'Unable to clear Universal recovery records:',
+              recoveryError
+            );
+          }
+        );
+
+      clearProcessingRecovery();
+
       onFileChange(null);
       setSections([]);
       setError(null);
@@ -274,30 +310,98 @@ export const DocumentDataExtractor:
       async (
         targetFile: File
       ) => {
+        if (
+          extractionInFlightRef.current
+        ) {
+          return;
+        }
+
+        extractionInFlightRef.current =
+          true;
+
         setIsProcessing(true);
         setError(null);
         setSections([]);
 
         try {
-          setStatus(
-            'Inspecting document structure…'
-          );
-
           const result =
-            await extractUniversalDocumentData(
-              targetFile,
-              {
-                delimiter: ',',
-                yTolerance: 4,
-                minColumnGap: 12,
-                onProgress: (
-                  current,
-                  total
-                ) => {
-                  setStatus(
-                    `Analyzing page ${current} of ${total}…`
+            await exclusivelyProcess(
+              async () => {
+                /*
+                 * Ensure the 147 MB source survives a Safari
+                 * WebContent restart before long OCR begins.
+                 */
+                await saveWorkspaceFiles(
+                  [
+                    targetFile,
+                  ]
+                );
+
+                setStatus(
+                  'Preparing local recovery…'
+                );
+
+                const sourceIdentity =
+                  await localContentId(
+                    targetFile
                   );
-                },
+
+                const cacheIdentity =
+                  await digestText(
+                    JSON.stringify(
+                      [
+                        'universal-data-extractor-v1',
+                        sourceIdentity,
+                        ',',
+                        4,
+                        12,
+                      ]
+                    )
+                  );
+
+                setStatus(
+                  'Inspecting document structure…'
+                );
+
+                return await extractUniversalDocumentData(
+                  targetFile,
+                  {
+                    delimiter: ',',
+                    yTolerance: 4,
+                    minColumnGap: 12,
+
+                    onProgress: (
+                      current,
+                      total
+                    ) => {
+                      setStatus(
+                        `Analyzing page ${current} of ${total}…`
+                      );
+                    },
+                  },
+                  {
+                    readPage:
+                      async (
+                        pageNumber
+                      ) =>
+                        await readUniversalPage(
+                          cacheIdentity,
+                          pageNumber
+                        ),
+
+                    writePage:
+                      async (
+                        pageNumber,
+                        pageData
+                      ) => {
+                        await writeUniversalPage(
+                          cacheIdentity,
+                          pageNumber,
+                          pageData
+                        );
+                      },
+                  }
+                );
               }
             );
 
@@ -364,8 +468,7 @@ export const DocumentDataExtractor:
 
           setStatus(
             `${result.label} detected · ${nextSections.length} ${
-              nextSections.length ===
-              1
+              nextSections.length === 1
                 ? 'section'
                 : 'sections'
             } · ${result.totalRows} rows · ${Math.round(
@@ -373,6 +476,8 @@ export const DocumentDataExtractor:
                 100
             )}% structure confidence.`
           );
+
+          clearProcessingRecovery();
         } catch (
           err: any
         ) {
@@ -381,13 +486,21 @@ export const DocumentDataExtractor:
             err
           );
 
+          /*
+           * Keep page records + processing recovery marker.
+           * A Safari restart/reload can continue from the
+           * first unfinished page.
+           */
           setError(
             err?.message ||
-              'Unable to extract structured data from this document.'
+              'Processing was interrupted. Reopen this tool to continue from the last completed page.'
           );
 
           setStatus('');
         } finally {
+          extractionInFlightRef.current =
+            false;
+
           setIsProcessing(
             false
           );
