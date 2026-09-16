@@ -63,6 +63,140 @@ const TEXT_COLORS = [
   { label: "Orange", value: "#ea580c" },
 ];
 
+
+/*
+ * ============================================================
+ * SAFE DOCUMENT PASTE NORMALIZATION
+ * ============================================================
+ *
+ * Keep semantic document formatting:
+ *   headings, bold, italic, underline, lists, tables, alignment
+ *
+ * But never allow Word/WPS/web clipboard CSS to silently replace
+ * our document typography or A4 layout.
+ */
+const normalizeTextPdfPaste =
+  (
+    html: string
+  ): string => {
+    const safe =
+      sanitizeRichHtml(
+        html
+      );
+
+    const parsed =
+      new DOMParser()
+        .parseFromString(
+          safe,
+          'text/html'
+        );
+
+    /*
+     * These are presentation properties that are safe and
+     * useful to preserve from a source document.
+     *
+     * Font family/size, margins, dimensions and flex/layout
+     * properties deliberately do NOT survive paste.
+     */
+    const keepStyle =
+      new Set([
+        'color',
+        'background-color',
+        'font-weight',
+        'font-style',
+        'text-align',
+        'text-decoration',
+        'text-decoration-line',
+      ]);
+
+    for (
+      const node of
+      Array.from(
+        parsed.body
+          .querySelectorAll(
+            '*'
+          )
+      )
+    ) {
+      const element =
+        node as HTMLElement;
+
+      if (
+        element.hasAttribute(
+          'style'
+        )
+      ) {
+        const style =
+          element.style;
+
+        for (
+          const property of
+          Array.from(style)
+        ) {
+          if (
+            !keepStyle.has(
+              property
+            )
+          ) {
+            style.removeProperty(
+              property
+            );
+          }
+        }
+
+        if (
+          style.length ===
+          0
+        ) {
+          element.removeAttribute(
+            'style'
+          );
+        }
+      }
+
+      /*
+       * Legacy rich-text clipboard HTML commonly uses:
+       *
+       * <font size="7" face="Times New Roman">
+       *
+       * Those attributes are exactly what can turn a normal
+       * 14px document into the huge text seen on mobile.
+       */
+      if (
+        element.tagName
+          .toLowerCase() ===
+        'font'
+      ) {
+        element.removeAttribute(
+          'size'
+        );
+
+        element.removeAttribute(
+          'face'
+        );
+      }
+
+      /*
+       * sanitizeRichHtml already blocks external image requests.
+       * Remove the resulting empty image shell as well.
+       */
+      if (
+        element.tagName
+          .toLowerCase() ===
+          'img' &&
+        !element.getAttribute(
+          'src'
+        )
+      ) {
+        element.remove();
+      }
+    }
+
+    return parsed.body
+      .innerHTML;
+  };
+
+
 export const TextToPdf: React.FC<any> = () => {
   const [content, setContent] = useState<string>("");
   const [charCount, setCharCount] = useState<number>(0);
@@ -248,150 +382,793 @@ export const TextToPdf: React.FC<any> = () => {
   }, []);
 
   // 3. True DOM Pagination: Measures elements and partitions them into separate A4 page containers
-  const paginateDocument = useCallback((rawHtml: string, font: string, baseSize: number) => {
-    if (!rawHtml || !rawHtml.trim()) {
-      setPagesHtml([""]);
-      return;
-    }
+  const paginateDocument =
+    useCallback(
+      (
+        rawHtml:
+          string,
 
-    const cleanHtml = sanitizeRichHtml(rawHtml)
-      .replace(/--- PAGE BREAK[\s\S]*?---/gi, "")
-      .replace(/✂/g, "");
+        font:
+          string,
 
-    // Match pagination measurements to the real PDF/preview rendering.
-    // Without this, a line can be assigned to the previous page and then
-    // get clipped by the final fixed-height A4 sheet.
-    const measurementStyle = document.createElement("style");
-    measurementStyle.textContent = `
-      .text-to-pdf-measure p {
-        margin: 0 0 6px 0;
-      }
-      .text-to-pdf-measure table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 12px 0;
-        font-size: inherit;
-      }
-      .text-to-pdf-measure th,
-      .text-to-pdf-measure td {
-        border: 1px solid #d4d4d8;
-        padding: 8px 12px;
-        text-align: left;
-      }
-      .text-to-pdf-measure th {
-        font-weight: 600;
-      }
-      .text-to-pdf-measure ul {
-        list-style-type: disc;
-        padding-left: 28px;
-        margin: 8px 0;
-      }
-      .text-to-pdf-measure ol {
-        list-style-type: decimal;
-        padding-left: 28px;
-        margin: 8px 0;
-      }
-      .text-to-pdf-measure li {
-        display: list-item;
-        margin-bottom: 4px;
-      }
-      .text-to-pdf-measure hr {
-        border: none;
-        border-top: 1px solid #e4e4e7;
-        margin: 16px 0;
-      }
-      .text-to-pdf-measure [style*="font-size"] {
-        line-height: 1.35;
-      }
-      .text-to-pdf-measure font[size="1"] { font-size: 10px !important; }
-      .text-to-pdf-measure font[size="2"] { font-size: 12px !important; }
-      .text-to-pdf-measure font[size="3"] { font-size: 14px !important; }
-      .text-to-pdf-measure font[size="4"] { font-size: 16px !important; }
-      .text-to-pdf-measure font[size="5"] { font-size: 18px !important; }
-      .text-to-pdf-measure font[size="6"] { font-size: 24px !important; }
-      .text-to-pdf-measure font[size="7"] { font-size: 32px !important; }
-    `;
-    document.head.appendChild(measurementStyle);
+        baseSize:
+          number
+      ) => {
+        if (
+          !rawHtml ||
+          !rawHtml.trim()
+        ) {
+          setPagesHtml(
+            [""]
+          );
 
-    const measuringSandbox = document.createElement("div");
-    measuringSandbox.className = "text-to-pdf-measure";
-    measuringSandbox.style.position = "absolute";
-    measuringSandbox.style.left = "-9999px";
-    measuringSandbox.style.top = "0";
-    measuringSandbox.style.width = `${A4_WIDTH_PX}px`;
-    measuringSandbox.style.padding = "56px 64px";
-    measuringSandbox.style.boxSizing = "border-box";
-    measuringSandbox.style.fontFamily = font;
-    measuringSandbox.style.fontSize = `${baseSize}px`;
-    measuringSandbox.style.lineHeight = "1.6";
-    measuringSandbox.style.wordBreak = "break-word";
-    measuringSandbox.innerHTML = cleanHtml;
-    document.body.appendChild(measuringSandbox);
-
-    const testContainer = document.createElement("div");
-    testContainer.className = "text-to-pdf-measure";
-    testContainer.style.position = "absolute";
-    testContainer.style.left = "-9999px";
-    testContainer.style.top = "0";
-    testContainer.style.width = `${A4_WIDTH_PX}px`;
-    testContainer.style.padding = "56px 64px";
-    testContainer.style.boxSizing = "border-box";
-    testContainer.style.fontFamily = font;
-    testContainer.style.fontSize = `${baseSize}px`;
-    testContainer.style.lineHeight = "1.6";
-    testContainer.style.wordBreak = "break-word";
-    document.body.appendChild(testContainer);
-
-    const pages: string[] = [];
-    const PAGE_RENDER_SAFETY_PX = 12;
-    let curPageContainer = document.createElement("div");
-
-    const nodes = Array.from(measuringSandbox.childNodes);
-
-    for (const node of nodes) {
-      const isManualBreak =
-        node.nodeType === Node.ELEMENT_NODE &&
-        ((node as HTMLElement).classList?.contains("doc-page-break") ||
-          (node as HTMLElement).style?.pageBreakBefore === "always" ||
-          (node as HTMLElement).style?.breakBefore === "page");
-
-      if (isManualBreak) {
-        if (curPageContainer.childNodes.length > 0) {
-          pages.push(curPageContainer.innerHTML);
-          curPageContainer = document.createElement("div");
+          return;
         }
-        continue;
-      }
 
-      const clone = node.cloneNode(true);
-      curPageContainer.appendChild(clone);
+        const cleanHtml =
+          sanitizeRichHtml(
+            rawHtml
+          )
+            .replace(
+              /--- PAGE BREAK[\s\S]*?---/gi,
+              ""
+            )
+            .replace(
+              /✂/g,
+              ""
+            );
 
-      testContainer.innerHTML = curPageContainer.innerHTML;
-      const totalH = testContainer.scrollHeight - 112; // exclude top + bottom padding
+        /*
+         * =====================================================
+         * ONE TYPOGRAPHIC MODEL FOR PAGINATION
+         * =====================================================
+         *
+         * Explicit rules are important because the measuring
+         * sandbox lives inside the Tailwind application while
+         * the final PDF lives inside an isolated iframe.
+         *
+         * Tailwind resets heading defaults. The PDF iframe does
+         * not. Without explicit matching rules the paginator can
+         * underestimate a page and the final fixed A4 renderer
+         * clips text.
+         */
+        const measurementStyle =
+          document.createElement(
+            "style"
+          );
 
-      if (
-        totalH > USABLE_PAGE_HEIGHT_PX - PAGE_RENDER_SAFETY_PX &&
-        curPageContainer.childNodes.length > 1
-      ) {
-        curPageContainer.removeChild(clone);
-        pages.push(curPageContainer.innerHTML);
+        measurementStyle.textContent = `
+          .text-to-pdf-measure p {
+            margin: 0 0 6px 0;
+          }
 
-        curPageContainer = document.createElement("div");
-        curPageContainer.appendChild(clone);
-        testContainer.innerHTML = curPageContainer.innerHTML;
-      }
-    }
+          .text-to-pdf-measure h1 {
+            font-size: 2em;
+            line-height: 1.2;
+            margin: 0.67em 0;
+            font-weight: 700;
+          }
 
-    if (curPageContainer.childNodes.length > 0) {
-      pages.push(curPageContainer.innerHTML);
-    }
+          .text-to-pdf-measure h2 {
+            font-size: 1.5em;
+            line-height: 1.25;
+            margin: 0.83em 0;
+            font-weight: 700;
+          }
 
-    document.body.removeChild(measuringSandbox);
-    document.body.removeChild(testContainer);
-    measurementStyle.remove();
+          .text-to-pdf-measure h3 {
+            font-size: 1.25em;
+            line-height: 1.3;
+            margin: 1em 0;
+            font-weight: 700;
+          }
 
-    setPagesHtml(pages.length > 0 ? pages : [""]);
-  }, []);
+          .text-to-pdf-measure h4 {
+            font-size: 1.1em;
+            line-height: 1.35;
+            margin: 1em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-measure h5,
+          .text-to-pdf-measure h6 {
+            font-size: 1em;
+            line-height: 1.4;
+            margin: 1em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-measure table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: inherit;
+          }
+
+          .text-to-pdf-measure th,
+          .text-to-pdf-measure td {
+            border: 1px solid #d4d4d8;
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+          }
+
+          .text-to-pdf-measure th {
+            font-weight: 600;
+            background: #f4f4f5;
+          }
+
+          .text-to-pdf-measure ul {
+            list-style-type: disc;
+            padding-left: 28px;
+            margin: 8px 0;
+          }
+
+          .text-to-pdf-measure ol {
+            list-style-type: decimal;
+            padding-left: 28px;
+            margin: 8px 0;
+          }
+
+          .text-to-pdf-measure li {
+            display: list-item;
+            margin-bottom: 4px;
+          }
+
+          .text-to-pdf-measure blockquote {
+            margin: 12px 0 12px 24px;
+            padding-left: 12px;
+            border-left: 3px solid #d4d4d8;
+          }
+
+          .text-to-pdf-measure pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            margin: 10px 0;
+          }
+
+          .text-to-pdf-measure img {
+            max-width: 100%;
+            max-height: 850px;
+            height: auto;
+            object-fit: contain;
+          }
+
+          .text-to-pdf-measure hr {
+            border: none;
+            border-top: 1px solid #e4e4e7;
+            margin: 16px 0;
+          }
+
+          .text-to-pdf-measure [style*="font-size"] {
+            line-height: 1.35;
+          }
+
+          .text-to-pdf-measure font[size="1"] { font-size: 10px !important; }
+          .text-to-pdf-measure font[size="2"] { font-size: 12px !important; }
+          .text-to-pdf-measure font[size="3"] { font-size: 14px !important; }
+          .text-to-pdf-measure font[size="4"] { font-size: 16px !important; }
+          .text-to-pdf-measure font[size="5"] { font-size: 18px !important; }
+          .text-to-pdf-measure font[size="6"] { font-size: 24px !important; }
+          .text-to-pdf-measure font[size="7"] { font-size: 32px !important; }
+        `;
+
+        document.head
+          .appendChild(
+            measurementStyle
+          );
+
+
+        const testContainer =
+          document.createElement(
+            "div"
+          );
+
+        testContainer.className =
+          "text-to-pdf-measure";
+
+        testContainer.style.position =
+          "absolute";
+
+        testContainer.style.left =
+          "-9999px";
+
+        testContainer.style.top =
+          "0";
+
+        testContainer.style.width =
+          `${A4_WIDTH_PX}px`;
+
+        testContainer.style.padding =
+          "56px 64px";
+
+        testContainer.style.boxSizing =
+          "border-box";
+
+        testContainer.style.fontFamily =
+          font;
+
+        testContainer.style.fontSize =
+          `${baseSize}px`;
+
+        testContainer.style.lineHeight =
+          "1.6";
+
+        testContainer.style.wordBreak =
+          "break-word";
+
+        document.body.appendChild(
+          testContainer
+        );
+
+
+        const source =
+          document.createElement(
+            "div"
+          );
+
+        source.innerHTML =
+          cleanHtml;
+
+
+        /*
+         * Foreign editors frequently copy the entire document
+         * inside one or more layout DIV/SPAN wrappers.
+         *
+         * The old paginator interpreted that wrapper as one
+         * indivisible page block. Unwrap only containers that
+         * contain real block-level document children.
+         */
+        const blockTags =
+          new Set([
+            "p",
+            "div",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "ul",
+            "ol",
+            "blockquote",
+            "pre",
+            "table",
+            "hr",
+          ]);
+
+        const blocks:
+          Node[] =
+          [];
+
+
+        const collectBlocks =
+          (
+            node:
+              Node
+          ) => {
+            if (
+              node.nodeType ===
+              Node.TEXT_NODE
+            ) {
+              const value =
+                node.textContent
+                  ?.trim();
+
+              if (value) {
+                const paragraph =
+                  document.createElement(
+                    "p"
+                  );
+
+                paragraph.textContent =
+                  value;
+
+                blocks.push(
+                  paragraph
+                );
+              }
+
+              return;
+            }
+
+
+            if (
+              node.nodeType !==
+              Node.ELEMENT_NODE
+            ) {
+              return;
+            }
+
+
+            const element =
+              node as HTMLElement;
+
+            const tag =
+              element.tagName
+                .toLowerCase();
+
+            const hasBlockChildren =
+              Array.from(
+                element.children
+              ).some(
+                (child) =>
+                  blockTags.has(
+                    child.tagName
+                      .toLowerCase()
+                  )
+              );
+
+
+            if (
+              (
+                tag === "div" ||
+                tag === "span"
+              ) &&
+              hasBlockChildren
+            ) {
+              for (
+                const child of
+                Array.from(
+                  element.childNodes
+                )
+              ) {
+                collectBlocks(
+                  child
+                );
+              }
+
+              return;
+            }
+
+
+            blocks.push(
+              element.cloneNode(
+                true
+              )
+            );
+          };
+
+
+        for (
+          const node of
+          Array.from(
+            source.childNodes
+          )
+        ) {
+          collectBlocks(
+            node
+          );
+        }
+
+
+        const PAGE_LIMIT =
+          USABLE_PAGE_HEIGHT_PX -
+          12;
+
+        const pages:
+          string[] =
+          [];
+
+        let currentPage =
+          document.createElement(
+            "div"
+          );
+
+
+        const measuredHeight =
+          (
+            html:
+              string
+          ) => {
+            testContainer.innerHTML =
+              html;
+
+            /*
+             * Remove our A4 top/bottom padding from the measured
+             * scroll height.
+             */
+            return (
+              testContainer
+                .scrollHeight -
+              112
+            );
+          };
+
+
+        const pageFits =
+          (
+            container:
+              HTMLElement
+          ) =>
+            measuredHeight(
+              container.innerHTML
+            ) <=
+            PAGE_LIMIT;
+
+
+        const isMeaningful =
+          (
+            html:
+              string
+          ) => {
+            const probe =
+              document.createElement(
+                "div"
+              );
+
+            probe.innerHTML =
+              html;
+
+            if (
+              probe.textContent
+                ?.trim()
+            ) {
+              return true;
+            }
+
+            return Boolean(
+              probe.querySelector(
+                "img[src], table, hr, ul, ol"
+              )
+            );
+          };
+
+
+        const pushCurrentPage =
+          () => {
+            const html =
+              currentPage.innerHTML;
+
+            if (
+              isMeaningful(
+                html
+              )
+            ) {
+              pages.push(
+                html
+              );
+            }
+
+            currentPage =
+              document.createElement(
+                "div"
+              );
+          };
+
+
+        /*
+         * Emergency splitter for an individual element that is
+         * itself taller than a complete A4 content area.
+         *
+         * This prevents any single pasted paragraph/container
+         * from ever disappearing below overflow:hidden.
+         */
+        const splitOversizedTextBlock =
+          (
+            element:
+              HTMLElement
+          ) => {
+            const value =
+              (
+                element.textContent ||
+                ""
+              )
+                .replace(
+                  /\s+/g,
+                  " "
+                )
+                .trim();
+
+            if (!value) {
+              /*
+               * Non-text atomic elements (image/hr/etc.) use the
+               * document CSS sizing rules.
+               */
+              currentPage.appendChild(
+                element.cloneNode(
+                  true
+                )
+              );
+
+              return;
+            }
+
+
+            const words =
+              value.split(
+                " "
+              );
+
+            let offset =
+              0;
+
+
+            while (
+              offset <
+              words.length
+            ) {
+              let low =
+                1;
+
+              let high =
+                words.length -
+                offset;
+
+              let best =
+                1;
+
+
+              while (
+                low <=
+                high
+              ) {
+                const mid =
+                  Math.floor(
+                    (
+                      low +
+                      high
+                    ) /
+                      2
+                  );
+
+                const candidate =
+                  element.cloneNode(
+                    false
+                  ) as HTMLElement;
+
+                candidate.textContent =
+                  words
+                    .slice(
+                      offset,
+                      offset +
+                        mid
+                    )
+                    .join(
+                      " "
+                    );
+
+                if (
+                  measuredHeight(
+                    candidate.outerHTML
+                  ) <=
+                  PAGE_LIMIT
+                ) {
+                  best =
+                    mid;
+
+                  low =
+                    mid + 1;
+                } else {
+                  high =
+                    mid - 1;
+                }
+              }
+
+
+              const fragment =
+                element.cloneNode(
+                  false
+                ) as HTMLElement;
+
+              fragment.textContent =
+                words
+                  .slice(
+                    offset,
+                    offset +
+                      best
+                  )
+                  .join(
+                    " "
+                  );
+
+              currentPage.appendChild(
+                fragment
+              );
+
+              offset +=
+                best;
+
+              if (
+                offset <
+                words.length
+              ) {
+                pushCurrentPage();
+              }
+            }
+          };
+
+
+        const appendBlock =
+          (
+            node:
+              Node
+          ) => {
+            if (
+              node.nodeType !==
+              Node.ELEMENT_NODE
+            ) {
+              return;
+            }
+
+            const element =
+              node as HTMLElement;
+
+            const isManualBreak =
+              element.classList
+                ?.contains(
+                  "doc-page-break"
+                ) ||
+              element.style
+                ?.pageBreakBefore ===
+                "always" ||
+              element.style
+                ?.breakBefore ===
+                "page";
+
+
+            if (
+              isManualBreak
+            ) {
+              pushCurrentPage();
+              return;
+            }
+
+
+            const clone =
+              element.cloneNode(
+                true
+              );
+
+
+            currentPage.appendChild(
+              clone
+            );
+
+
+            if (
+              pageFits(
+                currentPage
+              )
+            ) {
+              return;
+            }
+
+
+            currentPage.removeChild(
+              clone
+            );
+
+
+            /*
+             * Finish the previous page first, then retry this
+             * semantic block on a clean A4 page.
+             */
+            if (
+              isMeaningful(
+                currentPage.innerHTML
+              )
+            ) {
+              pushCurrentPage();
+            }
+
+
+            const freshClone =
+              element.cloneNode(
+                true
+              );
+
+            currentPage.appendChild(
+              freshClone
+            );
+
+
+            if (
+              pageFits(
+                currentPage
+              )
+            ) {
+              return;
+            }
+
+
+            /*
+             * Even an empty page cannot contain this block.
+             * Never clip it: split it.
+             */
+            currentPage.removeChild(
+              freshClone
+            );
+
+
+            /*
+             * A remaining generic wrapper can still be safely
+             * decomposed into its semantic children.
+             */
+            const tag =
+              element.tagName
+                .toLowerCase();
+
+            if (
+              (
+                tag === "div" ||
+                tag === "span"
+              ) &&
+              element.childNodes
+                .length >
+                1
+            ) {
+              for (
+                const child of
+                Array.from(
+                  element.childNodes
+                )
+              ) {
+                if (
+                  child.nodeType ===
+                  Node.ELEMENT_NODE
+                ) {
+                  appendBlock(
+                    child
+                  );
+                } else if (
+                  child.textContent
+                    ?.trim()
+                ) {
+                  const paragraph =
+                    document.createElement(
+                      "p"
+                    );
+
+                  paragraph.textContent =
+                    child.textContent;
+
+                  appendBlock(
+                    paragraph
+                  );
+                }
+              }
+
+              return;
+            }
+
+
+            splitOversizedTextBlock(
+              element
+            );
+          };
+
+
+        for (
+          const block of
+          blocks
+        ) {
+          appendBlock(
+            block
+          );
+        }
+
+
+        pushCurrentPage();
+
+
+        testContainer.remove();
+        measurementStyle.remove();
+
+
+        /*
+         * No structural/whitespace-only page is allowed into the
+         * preview or final PDF.
+         */
+        setPagesHtml(
+          pages.length >
+            0
+            ? pages
+            : [""]
+        );
+      },
+      []
+    );
 
   // 4. Update preview scale responsive to mobile screen width
   const updateScale = useCallback(() => {
@@ -641,6 +1418,61 @@ export const TextToPdf: React.FC<any> = () => {
                   position: relative;
                 }
                 p { margin: 0 0 6px 0; }
+
+                h1 {
+                  font-size: 2em;
+                  line-height: 1.2;
+                  margin: 0.67em 0;
+                  font-weight: 700;
+                }
+
+                h2 {
+                  font-size: 1.5em;
+                  line-height: 1.25;
+                  margin: 0.83em 0;
+                  font-weight: 700;
+                }
+
+                h3 {
+                  font-size: 1.25em;
+                  line-height: 1.3;
+                  margin: 1em 0;
+                  font-weight: 700;
+                }
+
+                h4 {
+                  font-size: 1.1em;
+                  line-height: 1.35;
+                  margin: 1em 0;
+                  font-weight: 700;
+                }
+
+                h5, h6 {
+                  font-size: 1em;
+                  line-height: 1.4;
+                  margin: 1em 0;
+                  font-weight: 700;
+                }
+
+                blockquote {
+                  margin: 12px 0 12px 24px;
+                  padding-left: 12px;
+                  border-left: 3px solid #d4d4d8;
+                }
+
+                pre {
+                  white-space: pre-wrap;
+                  overflow-wrap: anywhere;
+                  margin: 10px 0;
+                }
+
+                img {
+                  max-width: 100%;
+                  max-height: 850px;
+                  height: auto;
+                  object-fit: contain;
+                }
+
                 table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: inherit; }
                 th, td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; }
                 th { background-color: #f4f4f5; font-weight: 600; }
@@ -1052,6 +1884,109 @@ export const TextToPdf: React.FC<any> = () => {
         </div>
 
         <p className="text-xs text-zinc-400">Your draft is saved in this browser. Clear the document to remove the saved draft.</p>
+        {/*
+          Canonical document styles shared by editor + live preview.
+          These neutralize Tailwind's heading reset so what the user
+          edits, previews and downloads has the same typography.
+        */}
+        <style>{`
+          .text-to-pdf-document-surface p {
+            margin: 0 0 6px 0;
+          }
+
+          .text-to-pdf-document-surface h1 {
+            font-size: 2em;
+            line-height: 1.2;
+            margin: 0.67em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-document-surface h2 {
+            font-size: 1.5em;
+            line-height: 1.25;
+            margin: 0.83em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-document-surface h3 {
+            font-size: 1.25em;
+            line-height: 1.3;
+            margin: 1em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-document-surface h4 {
+            font-size: 1.1em;
+            line-height: 1.35;
+            margin: 1em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-document-surface h5,
+          .text-to-pdf-document-surface h6 {
+            font-size: 1em;
+            line-height: 1.4;
+            margin: 1em 0;
+            font-weight: 700;
+          }
+
+          .text-to-pdf-document-surface table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: inherit;
+          }
+
+          .text-to-pdf-document-surface th,
+          .text-to-pdf-document-surface td {
+            border: 1px solid #d4d4d8;
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+          }
+
+          .text-to-pdf-document-surface th {
+            background: #f4f4f5;
+            font-weight: 600;
+          }
+
+          .text-to-pdf-document-surface ul {
+            list-style-type: disc;
+            padding-left: 28px;
+            margin: 8px 0;
+          }
+
+          .text-to-pdf-document-surface ol {
+            list-style-type: decimal;
+            padding-left: 28px;
+            margin: 8px 0;
+          }
+
+          .text-to-pdf-document-surface li {
+            display: list-item;
+            margin-bottom: 4px;
+          }
+
+          .text-to-pdf-document-surface blockquote {
+            margin: 12px 0 12px 24px;
+            padding-left: 12px;
+            border-left: 3px solid #d4d4d8;
+          }
+
+          .text-to-pdf-document-surface pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            margin: 10px 0;
+          }
+
+          .text-to-pdf-document-surface img {
+            max-width: 100%;
+            max-height: 850px;
+            height: auto;
+            object-fit: contain;
+          }
+        `}</style>
+
         {/* Input Editor */}
         <div className="relative w-full rounded-xl overflow-hidden bg-white shadow-inner">
           <div
@@ -1061,14 +1996,56 @@ export const TextToPdf: React.FC<any> = () => {
             onKeyUp={syncContent}
             onPaste={(event) => {
               event.preventDefault();
-              const rich = event.clipboardData.getData('text/html');
-              if (rich) document.execCommand('insertHTML', false, sanitizeRichHtml(rich));
-              else document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+
+              const rich =
+                event.clipboardData
+                  .getData(
+                    'text/html'
+                  );
+
+              if (rich) {
+                document.execCommand(
+                  'insertHTML',
+                  false,
+                  normalizeTextPdfPaste(
+                    rich
+                  )
+                );
+              } else {
+                document.execCommand(
+                  'insertText',
+                  false,
+                  event.clipboardData
+                    .getData(
+                      'text/plain'
+                    )
+                );
+              }
+
+              /*
+               * Pasting another application's typography must
+               * not leave the toolbar displaying a foreign/stale
+               * 32pt size. Return it to this document's actual
+               * base typing size.
+               */
+              setToolbarFontSize(
+                fontSize
+              );
+
               syncContent();
             }}
-            style={{ fontFamily: selectedFont, color: "#18181b" }}
+            style={{
+              fontFamily:
+                selectedFont,
+              fontSize:
+                `${fontSize}px`,
+              lineHeight:
+                "1.6",
+              color:
+                "#18181b",
+            }}
             data-placeholder="Start typing your document here..."
-            className="relative z-0 w-full min-h-[360px] max-h-[540px] overflow-y-auto text-zinc-900 p-8 sm:p-12 focus:outline-none text-left text-sm sm:text-base leading-relaxed break-words select-text cursor-text [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_li]:my-1"
+            className="text-to-pdf-document-surface relative z-0 w-full min-h-[360px] max-h-[540px] overflow-y-auto text-zinc-900 p-8 sm:p-12 focus:outline-none text-left break-words select-text cursor-text"
           />
         </div>
       </div>
@@ -1178,7 +2155,13 @@ export const TextToPdf: React.FC<any> = () => {
 
                 {/* Page Content */}
                 {hasContent ? (
-                  <div dangerouslySetInnerHTML={{ __html: pageHtml }} />
+                  <div
+                    className="text-to-pdf-document-surface"
+                    dangerouslySetInnerHTML={{
+                      __html:
+                        pageHtml,
+                    }}
+                  />
                 ) : (
                   <p className="text-zinc-400 italic text-sm select-none">
                     Type your text above to see it appear here live...
