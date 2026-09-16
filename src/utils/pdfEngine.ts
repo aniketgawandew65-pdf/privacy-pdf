@@ -9511,168 +9511,372 @@ export interface OcrProgress {
   progress: number;
 }
 
+export type OcrSearchPageData = {
+  pageNumber: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  words: Array<{
+    text: string;
+    x0: number;
+    x1: number;
+    y0: number;
+    y1: number;
+  }>;
+};
+
+
+export interface OcrSearchRecovery {
+  readPage?: (
+    pageNumber: number
+  ) => Promise<
+    OcrSearchPageData |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber: number,
+    pageData: OcrSearchPageData
+  ) => Promise<void>;
+}
+
+
 export async function ocrPDFToSearchable(
   file: File,
   language: string = 'eng',
   onProgress?: (
     p: OcrProgress
-  ) => void
+  ) => void,
+  recovery: OcrSearchRecovery = {}
 ): Promise<Uint8Array> {
-  if (
-    !pdfjsLib
-      .GlobalWorkerOptions
-      .workerSrc
-  ) {
-    try {
-    } catch (_) {
-    }
-  }
+  /*
+   * =========================================================
+   * TWO-PHASE SEARCHABLE OCR
+   * =========================================================
+   *
+   * OLD:
+   *   150 MB pdf-lib document
+   *   + PDF.js
+   *   + Tesseract WASM
+   *   + 2x canvas
+   *   all alive during the complete OCR run.
+   *
+   * NEW:
+   *
+   * PHASE 1
+   *   PDF.js + Tesseract only.
+   *   Each completed page's compact word coordinates are
+   *   persisted atomically.
+   *
+   * PHASE 2
+   *   PDF.js + Tesseract are completely destroyed.
+   *   Only then is the original PDF opened by pdf-lib and the
+   *   invisible searchable text layer applied.
+   *
+   * Original visual PDF content remains untouched.
+   */
+
+  const yieldToBrowser =
+    (
+      delay = 0
+    ) =>
+      new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            delay
+          )
+      );
 
 
-  onProgress?.({
-    status:
-      'Initializing Local OCR Engine...',
-    progress: 10,
-  });
+  const isValidPageData =
+    (
+      value:
+        any,
+
+      pageNumber:
+        number
+    ): value is OcrSearchPageData =>
+      Boolean(
+        value &&
+        value.pageNumber ===
+          pageNumber &&
+        Number.isFinite(
+          value.viewportWidth
+        ) &&
+        value.viewportWidth >
+          0 &&
+        Number.isFinite(
+          value.viewportHeight
+        ) &&
+        value.viewportHeight >
+          0 &&
+        Array.isArray(
+          value.words
+        )
+      );
 
 
-  const worker =
-    await createWorker(
-      language,
-      1,
-      {
-        workerPath:
-          '/tessdata/worker.min.js',
+  /*
+   * Pages are kept in JavaScript only if persistent storage
+   * is unavailable. Normal iPhone/Android recovery uses IDB.
+   */
+  const memoryPages =
+    new Map<
+      number,
+      OcrSearchPageData
+    >();
 
-        corePath:
-          '/tessdata/tesseract-core-simd-lstm.wasm.js',
 
-        langPath:
-          '/tessdata',
+  let activePage =
+    0;
 
-        gzip: true,
+  let totalPagesForProgress =
+    1;
 
-        logger: (m) => {
-          if (
-            m.status ===
-              'recognizing text' &&
-            onProgress
-          ) {
+
+  const createOcrWorker =
+    async () =>
+      await createWorker(
+        language,
+        1,
+        {
+          workerPath:
+            '/tessdata/worker.min.js',
+
+          corePath:
+            '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+          langPath:
+            '/tessdata',
+
+          gzip:
+            true,
+
+          logger: (m) => {
+            if (
+              m.status !==
+                'recognizing text' ||
+              !onProgress ||
+              activePage <=
+                0
+            ) {
+              return;
+            }
+
+            /*
+             * Document-level progress instead of resetting
+             * the percentage inside every OCR page.
+             */
+            const completedBefore =
+              Math.max(
+                0,
+                activePage -
+                  1
+              );
+
+            const withinPage =
+              Math.max(
+                0,
+                Math.min(
+                  1,
+                  Number(
+                    m.progress ||
+                    0
+                  )
+                )
+              );
+
+            const fraction =
+              (
+                completedBefore +
+                withinPage
+              ) /
+              Math.max(
+                1,
+                totalPagesForProgress
+              );
+
             onProgress({
               status:
-                'Recognizing text...',
+                `Recognizing page ${activePage} of ${totalPagesForProgress}...`,
 
               progress:
                 Math.min(
-                  95,
-                  Math.round(
-                    m.progress *
-                      85
-                  ) + 10
+                  90,
+                  10 +
+                    Math.round(
+                      fraction *
+                        80
+                    )
                 ),
             });
-          }
-        },
-      }
-    );
-
-  let workerTerminated =
-    false;
-
-
-  let loadedPdf:
-    | {
-        pdf: any;
-        dispose: () => Promise<void>;
-      }
-    | null = null;
-
-
-  try {
-    /*
-     * pdf-lib still needs one complete source read because
-     * this tool preserves the original PDF and overlays an
-     * invisible searchable text layer.
-     *
-     * PDF.js now reads from the browser-backed File instead
-     * of receiving a second complete Uint8Array copy.
-     */
-    let sourceBuffer:
-      | ArrayBuffer
-      | null =
-        await file.arrayBuffer();
-
-
-    const pdfLibDoc =
-      await PDFDocument.load(
-        sourceBuffer,
-        {
-          ignoreEncryption: true,
+          },
         }
       );
 
 
+  let worker:
+    any =
+    null;
+
+  let loadedPdf:
+    | Awaited<
+        ReturnType<
+          typeof loadPdfJsFromBlob
+        >
+      >
+    | null =
+      null;
+
+  let pdfJsDoc:
+    any =
+      null;
+
+
+  const ensureWorker =
+    async () => {
+      if (!worker) {
+        worker =
+          await createOcrWorker();
+      }
+
+      return worker;
+    };
+
+
+  const destroyOcrEngines =
+    async () => {
+      if (worker) {
+        try {
+          await worker.terminate();
+        } catch (_) {}
+
+        worker =
+          null;
+      }
+
+      if (loadedPdf) {
+        try {
+          await loadedPdf.dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+
+        pdfJsDoc =
+          null;
+      }
+    };
+
+
+  onProgress?.({
+    status:
+      'Preparing local OCR recovery...',
+    progress:
+      5,
+  });
+
+
+  try {
     /*
-     * Drop our explicit ArrayBuffer reference as soon as
-     * pdf-lib has parsed the source.
+     * =======================================================
+     * PHASE 1 — PAGE OCR + ATOMIC CHECKPOINTS
+     * =======================================================
      */
-    sourceBuffer = null;
-
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
-
 
     loadedPdf =
       await loadPdfJsFromBlob(
         file,
         {
-          stopAtErrors: false,
+          stopAtErrors:
+            false,
         }
       );
 
-
-    const pdfJsDoc =
+    pdfJsDoc =
       loadedPdf.pdf;
-
-
-    const helveticaFont =
-      await pdfLibDoc.embedFont(
-        StandardFonts.Helvetica
-      );
-
 
     const totalPages =
       pdfJsDoc.numPages;
 
+    totalPagesForProgress =
+      totalPages;
+
+
+    const HARD_CHUNK_PAGES =
+      4;
+
+    let freshPagesSinceRecycle =
+      0;
+
 
     for (
       let pageNum = 1;
-      pageNum <= totalPages;
+      pageNum <=
+      totalPages;
       pageNum++
     ) {
+      /*
+       * Recovery check BEFORE PDF.js render or Tesseract.
+       */
+      if (
+        recovery.readPage
+      ) {
+        try {
+          const cached =
+            await recovery.readPage(
+              pageNum
+            );
+
+          if (
+            isValidPageData(
+              cached,
+              pageNum
+            )
+          ) {
+            /*
+             * Do not emit fake page 1 -> N progress for cached
+             * pages. The UI jumps directly to the first page
+             * that actually needs work.
+             */
+            await yieldToBrowser();
+
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read Searchable OCR page ${pageNum} checkpoint:`,
+            recoveryReadError
+          );
+        }
+      }
+
+
+      activePage =
+        pageNum;
+
+
       onProgress?.({
         status:
-          'Scanning Page ' +
-          pageNum +
-          ' of ' +
-          totalPages +
-          '...',
+          `Scanning Page ${pageNum} of ${totalPages}...`,
 
         progress:
+          10 +
           Math.round(
             (
               (
-                pageNum - 1
+                pageNum -
+                1
               ) /
-              totalPages
+              Math.max(
+                1,
+                totalPages
+              )
             ) *
-              85
-          ) + 10,
+              80
+          ),
       });
 
 
@@ -9689,20 +9893,31 @@ export async function ocrPDFToSearchable(
 
 
       try {
+        /*
+         * IMPORTANT:
+         * Existing OCR quality is preserved exactly at 2.0x.
+         */
         const viewport =
           pdfJsPage.getViewport({
-            scale: 2.0,
+            scale:
+              2.0,
           });
 
 
         canvas.width =
-          Math.floor(
-            viewport.width
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
           );
 
         canvas.height =
-          Math.floor(
-            viewport.height
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
           );
 
 
@@ -9710,16 +9925,28 @@ export async function ocrPDFToSearchable(
           canvas.getContext(
             '2d',
             {
-              alpha: false,
+              alpha:
+                false,
             }
           );
 
 
         if (!ctx) {
           throw new Error(
-            'Canvas rendering context unavailable'
+            `Canvas rendering context unavailable for page ${pageNum}.`
           );
         }
+
+
+        ctx.fillStyle =
+          '#ffffff';
+
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
 
 
         await (
@@ -9733,8 +9960,7 @@ export async function ocrPDFToSearchable(
 
 
         /*
-         * Preserve the existing dark-mode detection and
-         * inversion behavior.
+         * Preserve existing dark-scan detection/inversion.
          */
         const imgData =
           ctx.getImageData(
@@ -9745,7 +9971,7 @@ export async function ocrPDFToSearchable(
           );
 
 
-        const d =
+        const pixels =
           imgData.data;
 
 
@@ -9761,17 +9987,22 @@ export async function ocrPDFToSearchable(
 
         for (
           let i = 0;
-          i < d.length;
+          i <
+          pixels.length;
           i +=
             4 *
             sampleStep
         ) {
           totalBrightness +=
-            d[i] *
+            pixels[i] *
               0.299 +
-            d[i + 1] *
+            pixels[
+              i + 1
+            ] *
               0.587 +
-            d[i + 2] *
+            pixels[
+              i + 2
+            ] *
               0.114;
 
           sampleCount++;
@@ -9792,20 +10023,29 @@ export async function ocrPDFToSearchable(
         ) {
           for (
             let i = 0;
-            i < d.length;
+            i <
+            pixels.length;
             i += 4
           ) {
-            d[i] =
+            pixels[i] =
               255 -
-              d[i];
+              pixels[i];
 
-            d[i + 1] =
+            pixels[
+              i + 1
+            ] =
               255 -
-              d[i + 1];
+              pixels[
+                i + 1
+              ];
 
-            d[i + 2] =
+            pixels[
+              i + 2
+            ] =
               255 -
-              d[i + 2];
+              pixels[
+                i + 2
+              ];
           }
 
 
@@ -9817,44 +10057,25 @@ export async function ocrPDFToSearchable(
         }
 
 
+        const ocrWorker =
+          await ensureWorker();
+
+
         const {
           data,
         } =
-          await worker.recognize(
+          await ocrWorker.recognize(
             canvas
           );
 
 
-        const pdfLibPage =
-          pdfLibDoc.getPage(
-            pageNum - 1
-          );
-
-
-        const {
-          width:
-            pageWidth,
-          height:
-            pageHeight,
-        } =
-          pdfLibPage.getSize();
-
-
-        const scaleX =
-          pageWidth /
-          viewport.width;
-
-        const scaleY =
-          pageHeight /
-          viewport.height;
-
-
         /*
-         * Universal word extraction hierarchy
-         * for Tesseract v4/v5 compatibility.
+         * Same Tesseract v4/v5 word fallback hierarchy as the
+         * current implementation.
          */
-        let words:
-          any[] = [];
+        let rawWords:
+          any[] =
+          [];
 
 
         if (
@@ -9866,7 +10087,7 @@ export async function ocrPDFToSearchable(
             .words.length >
             0
         ) {
-          words =
+          rawWords =
             (data as any)
               .words;
         } else if (
@@ -9875,123 +10096,195 @@ export async function ocrPDFToSearchable(
               ?.blocks
           )
         ) {
-          words =
+          rawWords =
             (data as any)
               .blocks
               .flatMap(
                 (
-                  b: any
+                  block:
+                    any
                 ) =>
-                  b.paragraphs ??
+                  block.paragraphs ??
                   []
               )
               .flatMap(
                 (
-                  p: any
+                  paragraph:
+                    any
                 ) =>
-                  p.lines ??
+                  paragraph.lines ??
                   []
               )
               .flatMap(
                 (
-                  l: any
+                  line:
+                    any
                 ) =>
-                  l.words ??
+                  line.words ??
                   []
               );
         }
 
 
-        for (
-          const word of
-          words
-        ) {
-          if (
-            !word ||
-            !word.text ||
-            !word.bbox
-          ) {
-            continue;
-          }
+        const words =
+          rawWords
+            .map(
+              (
+                word:
+                  any
+              ) => {
+                if (
+                  !word ||
+                  !word.text ||
+                  !word.bbox
+                ) {
+                  return null;
+                }
 
 
-          const clean =
-            word.text
-              .replace(
-                /[^ -~ -ÿ]/g,
-                ''
-              )
-              .trim();
-
-
-          if (!clean) {
-            continue;
-          }
-
-
-          const box =
-            word.bbox;
-
-
-          const posX =
-            box.x0 *
-            scaleX;
-
-
-          const posY =
-            pageHeight -
-            box.y1 *
-              scaleY;
-
-
-          const wordHeight =
-            (
-              box.y1 -
-              box.y0
-            ) *
-            scaleY;
-
-
-          pdfLibPage.drawText(
-            clean,
-            {
-              x:
-                Math.max(
-                  0,
-                  posX
-                ),
-
-              y:
-                Math.max(
-                  0,
-                  posY
-                ),
-
-              size:
-                Math.max(
-                  4,
-                  Math.round(
-                    wordHeight *
-                      0.85
+                const clean =
+                  String(
+                    word.text
                   )
-                ),
+                    .replace(
+                      /[^ -~ -ÿ]/g,
+                      ''
+                    )
+                    .trim();
 
-              font:
-                helveticaFont,
 
-              color:
-                rgb(
-                  0,
-                  0,
-                  0
-                ),
+                if (!clean) {
+                  return null;
+                }
 
-              opacity:
-                0.01,
-            }
+
+                const box =
+                  word.bbox;
+
+
+                return {
+                  text:
+                    clean,
+
+                  x0:
+                    Number(
+                      box.x0 ||
+                      0
+                    ),
+
+                  x1:
+                    Number(
+                      box.x1 ||
+                      0
+                    ),
+
+                  y0:
+                    Number(
+                      box.y0 ||
+                      0
+                    ),
+
+                  y1:
+                    Number(
+                      box.y1 ||
+                      0
+                    ),
+                };
+              }
+            )
+            .filter(
+              (
+                word
+              ): word is {
+                text: string;
+                x0: number;
+                x1: number;
+                y0: number;
+                y1: number;
+              } =>
+                Boolean(
+                  word &&
+                  Number.isFinite(
+                    word.x0
+                  ) &&
+                  Number.isFinite(
+                    word.x1
+                  ) &&
+                  Number.isFinite(
+                    word.y0
+                  ) &&
+                  Number.isFinite(
+                    word.y1
+                  )
+                )
+            );
+
+
+        const pageData:
+          OcrSearchPageData = {
+            pageNumber:
+              pageNum,
+
+            viewportWidth:
+              viewport.width,
+
+            viewportHeight:
+              viewport.height,
+
+            words,
+          };
+
+
+        /*
+         * Persist only after the complete page OCR has
+         * succeeded.
+         *
+         * If Safari dies during this page, only this page is
+         * repeated.
+         */
+        let persisted =
+          false;
+
+
+        if (
+          recovery.writePage
+        ) {
+          try {
+            await recovery.writePage(
+              pageNum,
+              pageData
+            );
+
+            persisted =
+              true;
+          } catch (
+            recoveryWriteError
+          ) {
+            console.warn(
+              `Unable to save Searchable OCR page ${pageNum} checkpoint:`,
+              recoveryWriteError
+            );
+          }
+        }
+
+
+        /*
+         * Browsers without persistent IDB still work normally.
+         */
+        if (!persisted) {
+          memoryPages.set(
+            pageNum,
+            pageData
           );
         }
+
+
+        freshPagesSinceRecycle +=
+          1;
       } finally {
+        /*
+         * Release native pixel/page memory immediately.
+         */
         canvas.width =
           1;
 
@@ -10009,71 +10302,350 @@ export async function ocrPDFToSearchable(
         } catch (_) {}
       }
 
-      /*
-       * OCR pages are memory-heavy: rendered pixels,
-       * Tesseract recognition data, and PDF.js page state.
-       * Yield before starting the next page so completed
-       * page temporaries can be reclaimed.
-       */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
+
+      await yieldToBrowser(
+        25
       );
+
+
+      /*
+       * =====================================================
+       * HARD MOBILE MEMORY BOUNDARY
+       * =====================================================
+       *
+       * Every four newly OCRed pages completely destroy:
+       * - Tesseract WASM heap
+       * - PDF.js document
+       * - PDF.js worker/cache
+       *
+       * Then reopen the same browser-backed File.
+       *
+       * OCR resolution and recognition settings do not change.
+       */
+      if (
+        freshPagesSinceRecycle >=
+          HARD_CHUNK_PAGES &&
+        pageNum <
+          totalPages
+      ) {
+        await destroyOcrEngines();
+
+        await yieldToBrowser(
+          150
+        );
+
+        loadedPdf =
+          await loadPdfJsFromBlob(
+            file,
+            {
+              stopAtErrors:
+                false,
+            }
+          );
+
+        pdfJsDoc =
+          loadedPdf.pdf;
+
+        freshPagesSinceRecycle =
+          0;
+      }
+    }
+
+
+    /*
+     * =======================================================
+     * PHASE BOUNDARY
+     * =======================================================
+     *
+     * OCR is fully complete.
+     *
+     * Destroy BOTH memory-heavy engines BEFORE loading the
+     * complete original PDF into pdf-lib.
+     */
+    await destroyOcrEngines();
+
+    activePage =
+      0;
+
+
+    onProgress?.({
+      status:
+        'Preparing searchable text layer...',
+      progress:
+        92,
+    });
+
+
+    /*
+     * Give WebKit a real opportunity to release the worker,
+     * canvas and PDF.js native allocations.
+     */
+    await yieldToBrowser(
+      300
+    );
+
+
+    /*
+     * =======================================================
+     * PHASE 2 — ORIGINAL PDF + INVISIBLE TEXT LAYER
+     * =======================================================
+     *
+     * This is the only phase where pdf-lib owns the complete
+     * source PDF.
+     *
+     * Tesseract and PDF.js are no longer alive.
+     */
+    let sourceBuffer:
+      | ArrayBuffer
+      | null =
+        await file.arrayBuffer();
+
+
+    const pdfLibDoc =
+      await PDFDocument.load(
+        sourceBuffer,
+        {
+          ignoreEncryption:
+            true,
+        }
+      );
+
+
+    sourceBuffer =
+      null;
+
+
+    await yieldToBrowser(
+      100
+    );
+
+
+    const helveticaFont =
+      await pdfLibDoc.embedFont(
+        StandardFonts.Helvetica
+      );
+
+
+    const outputTotalPages =
+      pdfLibDoc.getPageCount();
+
+
+    const readCompletedPage =
+      async (
+        pageNum:
+          number
+      ): Promise<
+        OcrSearchPageData
+      > => {
+        const inMemory =
+          memoryPages.get(
+            pageNum
+          );
+
+        if (
+          isValidPageData(
+            inMemory,
+            pageNum
+          )
+        ) {
+          return inMemory;
+        }
+
+
+        if (
+          recovery.readPage
+        ) {
+          const stored =
+            await recovery.readPage(
+              pageNum
+            );
+
+          if (
+            isValidPageData(
+              stored,
+              pageNum
+            )
+          ) {
+            return stored;
+          }
+        }
+
+
+        throw new Error(
+          `Missing completed OCR data for page ${pageNum}.`
+        );
+      };
+
+
+    for (
+      let pageNum = 1;
+      pageNum <=
+      outputTotalPages;
+      pageNum++
+    ) {
+      onProgress?.({
+        status:
+          `Building searchable page ${pageNum} of ${outputTotalPages}...`,
+
+        progress:
+          Math.min(
+            98,
+            92 +
+              Math.round(
+                (
+                  pageNum /
+                  Math.max(
+                    1,
+                    outputTotalPages
+                  )
+                ) *
+                  6
+              )
+          ),
+      });
+
+
+      const pageData =
+        await readCompletedPage(
+          pageNum
+        );
+
+
+      const pdfLibPage =
+        pdfLibDoc.getPage(
+          pageNum -
+            1
+        );
+
+
+      const {
+        width:
+          pageWidth,
+        height:
+          pageHeight,
+      } =
+        pdfLibPage.getSize();
+
+
+      const scaleX =
+        pageWidth /
+        pageData.viewportWidth;
+
+
+      const scaleY =
+        pageHeight /
+        pageData.viewportHeight;
+
+
+      /*
+       * EXACT existing invisible text-layer math.
+       */
+      for (
+        const word of
+        pageData.words
+      ) {
+        const posX =
+          word.x0 *
+          scaleX;
+
+
+        const posY =
+          pageHeight -
+          word.y1 *
+            scaleY;
+
+
+        const wordHeight =
+          (
+            word.y1 -
+            word.y0
+          ) *
+          scaleY;
+
+
+        pdfLibPage.drawText(
+          word.text,
+          {
+            x:
+              Math.max(
+                0,
+                posX
+              ),
+
+            y:
+              Math.max(
+                0,
+                posY
+              ),
+
+            size:
+              Math.max(
+                4,
+                Math.round(
+                  wordHeight *
+                    0.85
+                )
+              ),
+
+            font:
+              helveticaFont,
+
+            color:
+              rgb(
+                0,
+                0,
+                0
+              ),
+
+            opacity:
+              0.01,
+          }
+        );
+      }
+
+
+      /*
+       * Do not retain the fallback page after it has been
+       * embedded into the pdf-lib page.
+       */
+      memoryPages.delete(
+        pageNum
+      );
+
+
+      if (
+        pageNum %
+          8 ===
+        0
+      ) {
+        await yieldToBrowser(
+          20
+        );
+      }
     }
 
 
     onProgress?.({
       status:
         'Finalizing Searchable PDF...',
-
-      progress: 98,
+      progress:
+        99,
     });
 
 
-    /*
-     * OCR is completely finished and every searchable word
-     * has already been written into pdfLibDoc.
-     *
-     * Release the browser-backed PDF.js source and the
-     * Tesseract WASM worker before allocating the complete
-     * serialized searchable PDF.
-     */
-    if (loadedPdf) {
-      await loadedPdf.dispose();
-      loadedPdf = null;
-    }
-
-    if (!workerTerminated) {
-      await worker.terminate();
-      workerTerminated =
-        true;
-    }
-
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
+    await yieldToBrowser(
+      50
     );
 
 
     return await pdfLibDoc.save({
-      useObjectStreams: false,
+      useObjectStreams:
+        false,
     });
   } finally {
-    if (loadedPdf) {
-      await loadedPdf.dispose();
-    }
+    await destroyOcrEngines();
 
-    if (!workerTerminated) {
-      await worker.terminate();
-      workerTerminated =
-        true;
-    }
+    memoryPages.clear();
   }
 }
 

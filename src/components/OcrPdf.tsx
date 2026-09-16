@@ -17,6 +17,23 @@ import {
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
+import {
+  clearProcessingRecovery,
+  digestText,
+  exclusivelyProcess,
+  localContentId,
+} from '../utils/localProcessing';
+
+import {
+  saveWorkspaceFiles,
+} from '../utils/localWorkspace';
+
+import {
+  clearOcrSearchPages,
+  readOcrSearchPage,
+  writeOcrSearchPage,
+} from '../utils/ocrSearchPageStore';
+
 interface OcrPdfProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
@@ -25,6 +42,94 @@ interface OcrPdfProps {
 const SUPPORTED_LANGUAGES = [
   { code: 'eng', label: 'English (Installed Offline)' },
 ];
+
+const OCR_RESUME_KEY =
+  'oneinto1-searchable-ocr-resume-v1';
+
+type OcrResumeMarker = {
+  name: string;
+  size: number;
+  lastModified: number;
+  language: string;
+};
+
+const readOcrResumeMarker =
+  (): OcrResumeMarker | null => {
+    try {
+      const raw =
+        sessionStorage.getItem(
+          OCR_RESUME_KEY
+        );
+
+      if (!raw) {
+        return null;
+      }
+
+      return JSON.parse(
+        raw
+      ) as OcrResumeMarker;
+    } catch {
+      return null;
+    }
+  };
+
+const writeOcrResumeMarker =
+  (
+    file: File,
+    language: string
+  ) => {
+    try {
+      sessionStorage.setItem(
+        OCR_RESUME_KEY,
+        JSON.stringify({
+          name:
+            file.name,
+          size:
+            file.size,
+          lastModified:
+            file.lastModified ||
+            0,
+          language,
+        } satisfies OcrResumeMarker)
+      );
+    } catch {}
+  };
+
+const clearOcrResumeMarker =
+  () => {
+    try {
+      sessionStorage.removeItem(
+        OCR_RESUME_KEY
+      );
+    } catch {}
+  };
+
+const markerMatchesFile =
+  (
+    marker:
+      OcrResumeMarker |
+      null,
+
+    file:
+      File,
+
+    language:
+      string
+  ) =>
+    Boolean(
+      marker &&
+      marker.name ===
+        file.name &&
+      marker.size ===
+        file.size &&
+      marker.lastModified ===
+        (
+          file.lastModified ||
+          0
+        ) &&
+      marker.language ===
+        language
+    );
 
 export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   const [language, setLanguage] = useState('eng');
@@ -35,6 +140,19 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Same-JS-process duplicate protection.
+   *
+   * Browser-process recovery is handled by the persistent
+   * per-page checkpoints below.
+   */
+  const processingInFlightRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   // Pre-warm offline files into browser cache on initial mount
@@ -58,6 +176,9 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
 
   useEffect(() => {
     if (!file) {
+      resumeAttemptedRef.current =
+        false;
+
       setPageCount(0);
       revokeDownloadUrl();
       setErrorMessage(null);
@@ -82,30 +203,272 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  const handleRunOcr = async () => {
-    if (!file) return;
-    setIsProcessing(true);
-    setErrorMessage(null);
-    revokeDownloadUrl();
+  const handleRunOcr =
+    async () => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
 
-    try {
-      const outputBytes = await ocrPDFToSearchable(file, language, (progress) => {
-        setProgressInfo(progress);
-      });
+      processingInFlightRef.current =
+        true;
 
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-    } catch (err: any) {
-      console.error('OCR Error:', err);
-      setErrorMessage(err?.message || String(err) || 'Failed to OCR document.');
-    } finally {
-      setIsProcessing(false);
-      setProgressInfo(null);
-    }
-  };
+      setIsProcessing(
+        true
+      );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeDownloadUrl();
+
+      /*
+       * This tiny marker contains no document bytes/text.
+       * It only tells the restored OCR screen that an
+       * interrupted job should continue automatically.
+       */
+      writeOcrResumeMarker(
+        file,
+        language
+      );
+
+      let cacheIdentity:
+        string |
+        null =
+          null;
+
+      try {
+        const outputBytes =
+          await exclusivelyProcess(
+            async () => {
+              /*
+               * Ensure the large source PDF survives a
+               * Safari/WebKit WebContent restart.
+               */
+              await saveWorkspaceFiles(
+                [
+                  file,
+                ]
+              );
+
+              setProgressInfo({
+                status:
+                  'Preparing local OCR recovery...',
+                progress:
+                  5,
+              });
+
+              const sourceIdentity =
+                await localContentId(
+                  file
+                );
+
+              cacheIdentity =
+                await digestText(
+                  JSON.stringify(
+                    [
+                      'searchable-ocr-v1',
+                      sourceIdentity,
+                      language,
+                      2.0,
+                    ]
+                  )
+                );
+
+              return await ocrPDFToSearchable(
+                file,
+                language,
+                (
+                  progress
+                ) => {
+                  setProgressInfo(
+                    progress
+                  );
+                },
+                {
+                  readPage:
+                    async (
+                      pageNumber
+                    ) =>
+                      await readOcrSearchPage(
+                        cacheIdentity!,
+                        pageNumber
+                      ),
+
+                  writePage:
+                    async (
+                      pageNumber,
+                      pageData
+                    ) => {
+                      await writeOcrSearchPage(
+                        cacheIdentity!,
+                        pageNumber,
+                        pageData
+                      );
+                    },
+                }
+              );
+            }
+          );
+
+
+        const blob =
+          new Blob(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+        createUrl(
+          blob
+        );
+
+
+        /*
+         * The complete searchable PDF now exists.
+         * Recovery is no longer needed for this job.
+         */
+        clearOcrResumeMarker();
+
+        clearProcessingRecovery();
+
+
+        if (
+          cacheIdentity
+        ) {
+          void clearOcrSearchPages(
+            cacheIdentity
+          ).catch(
+            (
+              recoveryError
+            ) => {
+              console.warn(
+                'Unable to clear completed Searchable OCR recovery data:',
+                recoveryError
+              );
+            }
+          );
+        }
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'OCR Error:',
+          err
+        );
+
+        /*
+         * IMPORTANT:
+         * Keep both the job marker and page checkpoints.
+         * A browser-process restart/retry resumes instead of
+         * throwing completed work away.
+         */
+        setErrorMessage(
+          err?.message ||
+          String(err) ||
+          'Processing was interrupted. Reopen this tool to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressInfo(
+          null
+        );
+      }
+    };
+
+  /*
+   * ==========================================================
+   * AUTOMATIC SAFARI/WEBKIT PROCESS-RESTART RESUME
+   * ==========================================================
+   *
+   * When App.tsx restores the OPFS-backed source File, this
+   * component sees the job marker and relaunches the engine.
+   *
+   * The engine itself skips every page already stored in IDB,
+   * so the visible progress jumps to the first unfinished page.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const marker =
+        readOcrResumeMarker();
+
+      if (
+        !markerMatchesFile(
+          marker,
+          file,
+          language
+        )
+      ) {
+        return;
+      }
+
+      resumeAttemptedRef.current =
+        true;
+
+      const timer =
+        window.setTimeout(
+          () => {
+            void handleRunOcr();
+          },
+          100
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      language,
+    ]
+  );
+
 
   const handleClear = () => {
     if (isProcessing) return;
+
+    clearOcrResumeMarker();
+
+    clearProcessingRecovery();
+
+    void clearOcrSearchPages()
+      .catch(
+        (
+          recoveryError
+        ) => {
+          console.warn(
+            'Unable to clear Searchable OCR recovery records:',
+            recoveryError
+          );
+        }
+      );
+
+    resumeAttemptedRef.current =
+      false;
+
     onFileChange(null);
     revokeDownloadUrl();
     setErrorMessage(null);
@@ -113,7 +476,19 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div
+      aria-busy={
+        isProcessing
+          ? true
+          : undefined
+      }
+      data-processing-active={
+        isProcessing
+          ? 'true'
+          : undefined
+      }
+      className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl"
+    >
       {!file ? (
         <div
           role="button"
