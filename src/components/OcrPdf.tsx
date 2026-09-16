@@ -22,17 +22,20 @@ import {
   digestText,
   exclusivelyProcess,
   localContentId,
+  preserveProcessingWorkspace,
 } from '../utils/localProcessing';
-
-import {
-  saveWorkspaceFiles,
-} from '../utils/localWorkspace';
 
 import {
   clearOcrSearchPages,
   readOcrSearchPage,
   writeOcrSearchPage,
 } from '../utils/ocrSearchPageStore';
+
+import {
+  clearOcrSearchJobSource,
+  restoreOcrSearchJobSource,
+  saveOcrSearchJobSource,
+} from '../utils/ocrSearchJobStore';
 
 interface OcrPdfProps {
   file: File | null;
@@ -153,6 +156,15 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
   const resumeAttemptedRef =
     useRef(false);
 
+  /*
+   * Separate from the OCR-run resume guard.
+   *
+   * This guard prevents repeated IndexedDB/OPFS restoration
+   * attempts while the component is mounted with file=null.
+   */
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   // Pre-warm offline files into browser cache on initial mount
@@ -203,6 +215,103 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
+  /*
+   * ==========================================================
+   * DURABLE INPUT RESTORATION
+   * ==========================================================
+   *
+   * Safari can recreate its WebContent process while OCR is
+   * running.
+   *
+   * Page checkpoints already survive in IndexedDB.
+   * This restores the missing source File automatically from
+   * OPFS even when sessionStorage itself was lost/recreated.
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
+      }
+
+
+      durableRestoreAttemptedRef.current =
+        true;
+
+
+      let cancelled =
+        false;
+
+
+      void (
+        async () => {
+          try {
+            const restored =
+              await restoreOcrSearchJobSource();
+
+
+            if (
+              cancelled ||
+              !restored
+            ) {
+              return;
+            }
+
+
+            /*
+             * Recreate the lightweight session markers used by
+             * the existing auto-resume + global wake-lock layers.
+             */
+            preserveProcessingWorkspace();
+
+
+            writeOcrResumeMarker(
+              restored.file,
+              restored.language
+            );
+
+
+            setLanguage(
+              restored.language
+            );
+
+
+            /*
+             * This repopulates App.tsx sharedFiles.
+             *
+             * The normal OCR resume effect then sees the restored
+             * File and automatically continues from the first
+             * unfinished IndexedDB page checkpoint.
+             */
+            onFileChange(
+              restored.file
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted Searchable OCR job:',
+              error
+            );
+          }
+        }
+      )();
+
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+
   const handleRunOcr =
     async () => {
       if (
@@ -245,13 +354,17 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
           await exclusivelyProcess(
             async () => {
               /*
-               * Ensure the large source PDF survives a
-               * Safari/WebKit WebContent restart.
+               * Durable restart recovery.
+               *
+               * The complete source is written to a dedicated
+               * OPFS recovery location. Metadata is published
+               * to IndexedDB only after that write succeeds.
+               *
+               * This does NOT change OCR bytes or output.
                */
-              await saveWorkspaceFiles(
-                [
-                  file,
-                ]
+              await saveOcrSearchJobSource(
+                file,
+                language
               );
 
               setProgressInfo({
@@ -338,6 +451,8 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
         clearOcrResumeMarker();
 
         clearProcessingRecovery();
+
+        await clearOcrSearchJobSource();
 
 
         if (
@@ -453,6 +568,18 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
     clearOcrResumeMarker();
 
     clearProcessingRecovery();
+
+    void clearOcrSearchJobSource()
+      .catch(
+        (
+          recoveryError
+        ) => {
+          console.warn(
+            'Unable to clear durable Searchable OCR source:',
+            recoveryError
+          );
+        }
+      );
 
     void clearOcrSearchPages()
       .catch(
