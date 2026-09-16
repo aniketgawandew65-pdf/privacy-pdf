@@ -1,3 +1,6 @@
 node_modules
 dist
 repomix-output.xml
+.env
+.env.local
+.env.*.local
