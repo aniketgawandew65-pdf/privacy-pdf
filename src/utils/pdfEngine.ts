@@ -5984,7 +5984,11 @@ export async function fillAndFlattenPDF(
     form.flatten();
   }
 
-  return await pdfDoc.save({ useObjectStreams: true });
+  return await pdfDoc.save({
+    // Classic xref tables are larger but substantially more compatible
+    // after flattening very large AcroForms on Safari/iOS and desktop readers.
+    useObjectStreams: false,
+  });
 }
 
 
