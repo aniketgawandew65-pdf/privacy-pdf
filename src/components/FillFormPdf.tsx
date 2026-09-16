@@ -30,6 +30,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
   const [isLoadingFields, setIsLoadingFields] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [outputBlob, setOutputBlob] = useState<Blob | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
@@ -79,6 +80,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
 
   const handleFieldChange = (name: string, value: string | boolean) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
+    setOutputBlob(null);
     revokeDownloadUrl();
   };
 
@@ -91,6 +93,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
     try {
       const outputBytes = await fillAndFlattenPDF(file, formData, flatten);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
+      setOutputBlob(blob);
       createUrl(blob);
     } catch (err: any) {
       console.error('Failed to fill form:', err);
@@ -100,10 +103,59 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
     }
   };
 
+  const handleDownload = async () => {
+    if (!file || !downloadUrl || !outputBlob) return;
+
+    const outputName = `filled_${file.name}`;
+
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      const outputFile = new File(
+        [outputBlob],
+        outputName,
+        { type: 'application/pdf', lastModified: Date.now() }
+      );
+
+      const shareNavigator = navigator as Navigator & {
+        canShare?: (data: { files?: File[] }) => boolean;
+        share?: (data: { files?: File[]; title?: string }) => Promise<void>;
+      };
+
+      try {
+        if (
+          shareNavigator.share &&
+          (!shareNavigator.canShare ||
+            shareNavigator.canShare({ files: [outputFile] }))
+        ) {
+          await shareNavigator.share({
+            files: [outputFile],
+            title: outputName,
+          });
+          return;
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        console.warn('iOS file share failed; using download fallback:', err);
+      }
+    }
+
+    const anchor = document.createElement('a');
+    anchor.href = downloadUrl;
+    anchor.download = outputName;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  };
+
   const handleClear = () => {
     onFileChange(null);
     setFields([]);
     setFormData({});
+    setOutputBlob(null);
     revokeDownloadUrl();
     setErrorMessage(null);
   };
@@ -293,14 +345,14 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
                 <CheckCircle2 className="w-4 h-4" /> Form Processed & Saved Successfully
               </div>
-              <a
-                href={downloadUrl}
-                download={`filled_${file.name}`}
+              <button
+                type="button"
+                onClick={() => void handleDownload()}
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
                 <span>Download Filled PDF</span>
-              </a>
+              </button>
             </div>
           )}
         </div>
