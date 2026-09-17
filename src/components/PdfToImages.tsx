@@ -12,6 +12,10 @@ import {
 } from 'lucide-react';
 import { pdfToImages } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 type OutputFormat = 'jpg' | 'png' | 'webp';
 
@@ -33,6 +37,7 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBuildingZip, setIsBuildingZip] = useState(false);
   const [progressText, setProgressText] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,10 +76,21 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
   const resetOutput = () => {
     setImages([]);
     revokeZipUrl();
+    setErrorMessage(null);
   };
 
   const handleConvert = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
 
     setIsProcessing(true);
     setProgressText(
@@ -92,6 +108,12 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
 
       setImages(extractedImages);
 
+      if (extractedImages.length > 0) {
+        commitTaskCredit();
+      } else {
+        setErrorMessage('No PDF pages could be converted.');
+      }
+
       /*
        * Do not build the ZIP here.
        *
@@ -100,8 +122,11 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
        * explicitly asks to download all pages.
        */
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('PDF to image conversion error:', err);
+      setErrorMessage(
+        err?.message || 'Could not convert this PDF to images.'
+      );
     } finally {
       setIsProcessing(false);
       setProgressText('');
@@ -363,6 +388,12 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {errorMessage && (
+            <div className="p-3 rounded-xl border border-red-900/50 bg-red-950/20 text-xs text-red-300">
+              {errorMessage}
+            </div>
+          )}
 
           <div className="p-3 rounded-xl bg-zinc-950/70 border border-zinc-800">
             <label className="text-xs text-zinc-400 font-medium block mb-2">
