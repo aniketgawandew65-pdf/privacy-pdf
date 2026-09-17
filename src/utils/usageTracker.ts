@@ -152,19 +152,29 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   }
 
   const usage = getDailyUsage();
+  const activeBonusAccount =
+    getActiveGoogleBonus();
 
   if (usage.tier === 'anonymous' && usage.anonymousRemaining > 0) {
+    const freeFileLimitMb =
+      activeBonusAccount
+        ? MAX_GOOGLE_BONUS_FILE_SIZE_MB
+        : MAX_FREE_FILE_SIZE_MB;
+
     if (fileSizeBytes !== undefined) {
       const sizeInMb = fileSizeBytes / (1024 * 1024);
 
-      if (sizeInMb > MAX_FREE_FILE_SIZE_MB) {
+      if (sizeInMb > freeFileLimitMb) {
         return {
           allowed: false,
           reason: 'FILE_SIZE_LIMIT',
           errorMessage:
-            `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in with Google for 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
-            `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
+            activeBonusAccount
+              ? `Signed-in free tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+                `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+              : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+                `Sign in to unlock 2 bonus tasks and files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
+                `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
         };
       }
     }
@@ -181,7 +191,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
           allowed: false,
           reason: 'FILE_SIZE_LIMIT',
           errorMessage:
-            `Google bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+            `Bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
             `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
         };
       }
@@ -193,9 +203,9 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   return {
     allowed: false,
     reason: 'DAILY_LIMIT',
-    errorMessage: getActiveGoogleBonus()
-      ? 'You have used all 2 Google bonus tasks. Upgrade to Pro to continue.'
-      : `You have used today's ${MAX_FREE_DAILY_TASKS} no-signup tasks. Sign in with Google for 2 additional free tasks.`,
+    errorMessage: activeBonusAccount
+      ? 'You have used all 2 bonus tasks. Upgrade to Pro to continue.'
+      : `You have used today's ${MAX_FREE_DAILY_TASKS} no-signup tasks. Sign in to unlock 2 bonus tasks.`,
   };
 }
 

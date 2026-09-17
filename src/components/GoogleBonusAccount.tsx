@@ -428,7 +428,7 @@ export function GoogleBonusAccount() {
             </div>
 
             <div className="text-[10px] text-emerald-400">
-              {account.bonusRemaining} Google bonus task
+              {account.bonusRemaining} bonus task
               {account.bonusRemaining ===
               1
                 ? ''
