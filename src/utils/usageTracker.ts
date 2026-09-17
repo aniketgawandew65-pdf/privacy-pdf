@@ -1,9 +1,15 @@
 import { safeStorage, safeSessionStorage } from './safeStorage';
 import { getLicenseStatus } from './license';
+import {
+  GOOGLE_BONUS_FILE_SIZE_MB,
+  consumeGoogleBonus,
+  getActiveGoogleBonus,
+} from './googleBonus';
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
 const MAX_FREE_DAILY_TASKS = 2;
 export const MAX_FREE_FILE_SIZE_MB = 10;
+export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = GOOGLE_BONUS_FILE_SIZE_MB;
 export const MAX_PRO_FILE_SIZE_MB = 150;
 
 interface DailyUsageRecord {
@@ -64,16 +70,61 @@ function getTodayString(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-export function getDailyUsage(): { count: number; remaining: number; max: number; isPro: boolean } {
+export function getDailyUsage(): {
+  count: number;
+  remaining: number;
+  max: number;
+  isPro: boolean;
+  tier: 'pro' | 'anonymous' | 'google';
+  anonymousRemaining: number;
+  bonusRemaining: number;
+} {
   const { isPro } = getLicenseStatus();
+
   if (isPro) {
-    return { count: 0, remaining: Infinity, max: Infinity, isPro: true };
+    return {
+      count: 0,
+      remaining: Infinity,
+      max: Infinity,
+      isPro: true,
+      tier: 'pro',
+      anonymousRemaining: Infinity,
+      bonusRemaining: Infinity,
+    };
   }
 
   const today = getTodayString();
   const record = readUsage(today);
-  const remaining = Math.max(0, MAX_FREE_DAILY_TASKS - record.count);
-  return { count: record.count, remaining, max: MAX_FREE_DAILY_TASKS, isPro: false };
+  const anonymousRemaining = Math.max(
+    0,
+    MAX_FREE_DAILY_TASKS - record.count
+  );
+
+  if (anonymousRemaining > 0) {
+    return {
+      count: record.count,
+      remaining: anonymousRemaining,
+      max: MAX_FREE_DAILY_TASKS,
+      isPro: false,
+      tier: 'anonymous',
+      anonymousRemaining,
+      bonusRemaining:
+        getActiveGoogleBonus()?.bonusRemaining ?? 0,
+    };
+  }
+
+  const google = getActiveGoogleBonus();
+  const bonusRemaining = google?.bonusRemaining ?? 0;
+
+  return {
+    count: google?.bonusUsed ?? 0,
+    remaining: bonusRemaining,
+    max: google ? 2 : 0,
+    isPro: false,
+    tier: google ? 'google' : 'anonymous',
+    anonymousRemaining: 0,
+    bonusRemaining,
+  };
 }
 
 export function checkActionAllowed(fileSizeBytes?: number): {
@@ -83,37 +134,69 @@ export function checkActionAllowed(fileSizeBytes?: number): {
 } {
   const { isPro } = getLicenseStatus();
 
-  // 1. File Size Verification
-  if (fileSizeBytes !== undefined) {
-    const sizeInMb = fileSizeBytes / (1024 * 1024);
-    const maxAllowedMb = isPro ? MAX_PRO_FILE_SIZE_MB : MAX_FREE_FILE_SIZE_MB;
-
-    if (sizeInMb > maxAllowedMb) {
-      return {
-        allowed: false,
-        reason: 'FILE_SIZE_LIMIT',
-        errorMessage: isPro
-          ? `File exceeds the maximum Pro upload limit of ${MAX_PRO_FILE_SIZE_MB}MB.`
-          : `Free tier is limited to ${MAX_FREE_FILE_SIZE_MB}MB per file. Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
-      };
-    }
-  }
-
-  // 2. Daily Task Count Verification
   if (isPro) {
+    if (fileSizeBytes !== undefined) {
+      const sizeInMb = fileSizeBytes / (1024 * 1024);
+
+      if (sizeInMb > MAX_PRO_FILE_SIZE_MB) {
+        return {
+          allowed: false,
+          reason: 'FILE_SIZE_LIMIT',
+          errorMessage:
+            `File exceeds the maximum Pro upload limit of ${MAX_PRO_FILE_SIZE_MB}MB.`,
+        };
+      }
+    }
+
     return { allowed: true };
   }
 
-  const { count } = getDailyUsage();
-  if (count >= MAX_FREE_DAILY_TASKS) {
-    return {
-      allowed: false,
-      reason: 'DAILY_LIMIT',
-      errorMessage: `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in with Google for 2 additional free tasks, or upgrade to Pro.`,
-    };
+  const usage = getDailyUsage();
+
+  if (usage.tier === 'anonymous' && usage.anonymousRemaining > 0) {
+    if (fileSizeBytes !== undefined) {
+      const sizeInMb = fileSizeBytes / (1024 * 1024);
+
+      if (sizeInMb > MAX_FREE_FILE_SIZE_MB) {
+        return {
+          allowed: false,
+          reason: 'FILE_SIZE_LIMIT',
+          errorMessage:
+            `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+            `Sign in with Google for 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
+            `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
+        };
+      }
+    }
+
+    return { allowed: true };
   }
 
-  return { allowed: true };
+  if (usage.bonusRemaining > 0) {
+    if (fileSizeBytes !== undefined) {
+      const sizeInMb = fileSizeBytes / (1024 * 1024);
+
+      if (sizeInMb > MAX_GOOGLE_BONUS_FILE_SIZE_MB) {
+        return {
+          allowed: false,
+          reason: 'FILE_SIZE_LIMIT',
+          errorMessage:
+            `Google bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
+        };
+      }
+    }
+
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    reason: 'DAILY_LIMIT',
+    errorMessage: getActiveGoogleBonus()
+      ? 'You have used all 2 Google bonus tasks. Upgrade to Pro to continue.'
+      : `You have used today's ${MAX_FREE_DAILY_TASKS} no-signup tasks. Sign in with Google for 2 additional free tasks.`,
+  };
 }
 
 export function recordActionExecution(): void {
@@ -122,5 +205,18 @@ export function recordActionExecution(): void {
 
   const today = getTodayString();
   const record = readUsage(today);
-  persistUsage({ date: today, count: record.count + 1 });
+
+  if (record.count < MAX_FREE_DAILY_TASKS) {
+    persistUsage({
+      date: today,
+      count: record.count + 1,
+    });
+    return;
+  }
+
+  const google = getActiveGoogleBonus();
+
+  if (google && google.bonusRemaining > 0) {
+    consumeGoogleBonus();
+  }
 }
