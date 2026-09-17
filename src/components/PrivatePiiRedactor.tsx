@@ -17,6 +17,10 @@ import {
 } from '../utils/mobileOcrEngine';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from "../utils/taskCreditGate";
+import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
@@ -4180,6 +4184,17 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const createRedactedCopy = async () => {
     if (!file || selectedCount === 0 || !scanComplete || isRedacting) return;
 
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          "This task is not available on your current plan."
+      );
+      return;
+    }
+
     pendingRedactedPdfRef.current = null;
     redactorSessionCache.pendingRedactedPdf = null;
 
@@ -4208,6 +4223,8 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       }
 
       if (completed) {
+        commitTaskCredit();
+
         setStatus(
           "Final safety verification passed. Redacted copy created locally and downloaded."
         );
