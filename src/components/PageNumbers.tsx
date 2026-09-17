@@ -138,8 +138,8 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                 }}
                 className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
                   position === 'bottom-center'
-                    ? 'bg-zinc-800 border-emerald-500/50 text-emerald-400'
-                    : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-white dark:bg-zinc-950 border-zinc-400 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400'
                 }`}
               >
                 Bottom Center
@@ -152,8 +152,8 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                 }}
                 className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
                   position === 'bottom-right'
-                    ? 'bg-zinc-800 border-emerald-500/50 text-emerald-400'
-                    : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-white dark:bg-zinc-950 border-zinc-400 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400'
                 }`}
               >
                 Bottom Right
