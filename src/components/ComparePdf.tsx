@@ -12,6 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  GitCompare,
 } from 'lucide-react';
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
@@ -20,6 +21,10 @@ import {
   restoreToolWorkspaceFiles,
   clearToolWorkspace,
 } from '../utils/localWorkspace';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 
 type DiffViewMode = 'overlay' | 'split';
@@ -44,6 +49,9 @@ export const ComparePdf: React.FC = () => {
 
   const [isRendering, setIsRendering] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [comparisonStarted, setComparisonStarted] = useState(false);
+
+  const comparisonChargePendingRef = useRef(false);
 
   const canvasSplitARef = useRef<HTMLCanvasElement>(null);
   const canvasSplitBRef = useRef<HTMLCanvasElement>(null);
@@ -351,6 +359,41 @@ export const ComparePdf: React.FC = () => {
 
   const maxPages = Math.max(pageCountA, pageCountB);
 
+  useEffect(() => {
+    setComparisonStarted(false);
+    comparisonChargePendingRef.current = false;
+    setCurrentPage(1);
+  }, [fileA, fileB]);
+
+  const handleStartComparison = () => {
+    if (
+      !fileA ||
+      !fileB ||
+      !pdfDocA ||
+      !pdfDocB
+    ) {
+      return;
+    }
+
+    const creditCheck =
+      checkTaskCredit([
+        fileA,
+        fileB,
+      ]);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
+    setErrorMessage(null);
+    comparisonChargePendingRef.current = true;
+    setComparisonStarted(true);
+  };
+
   // Render Diff Canvas
   const renderComparison = useCallback(async () => {
     if (!pdfDocA || !pdfDocB) return;
@@ -359,6 +402,7 @@ export const ComparePdf: React.FC = () => {
 
     let pageA: any = null;
     let pageB: any = null;
+    let didRender = false;
 
     try {
       pageA =
@@ -390,6 +434,7 @@ export const ComparePdf: React.FC = () => {
           const ctxA = canvasA.getContext('2d');
           if (ctxA) {
             await pageA.render({ canvasContext: ctxA, viewport: viewportA }).promise;
+            didRender = true;
           }
         }
 
@@ -400,6 +445,7 @@ export const ComparePdf: React.FC = () => {
           const ctxB = canvasB.getContext('2d');
           if (ctxB) {
             await pageB.render({ canvasContext: ctxB, viewport: viewportB }).promise;
+            didRender = true;
           }
         }
       } else {
@@ -441,11 +487,26 @@ export const ComparePdf: React.FC = () => {
           mainCtx.globalCompositeOperation = 'source-over';
           mainCtx.globalAlpha = 1.0;
 
+          didRender = true;
+
           offCanvasA.width = 0;
           offCanvasA.height = 0;
           offCanvasB.width = 0;
           offCanvasB.height = 0;
         }
+      }
+
+      if (!didRender) {
+        throw new Error(
+          'Comparison preview could not be rendered.'
+        );
+      }
+
+      if (
+        comparisonChargePendingRef.current
+      ) {
+        commitTaskCredit();
+        comparisonChargePendingRef.current = false;
       }
     } catch (err: any) {
       console.error(
@@ -457,6 +518,13 @@ export const ComparePdf: React.FC = () => {
         err.message ||
           'Error rendering document comparison.'
       );
+
+      if (
+        comparisonChargePendingRef.current
+      ) {
+        comparisonChargePendingRef.current = false;
+        setComparisonStarted(false);
+      }
     } finally {
       if (pageA) {
         try {
@@ -479,10 +547,19 @@ export const ComparePdf: React.FC = () => {
   }, [pdfDocA, pdfDocB, currentPage, pageCountA, pageCountB, viewMode, overlayOpacity]);
 
   useEffect(() => {
-    if (pdfDocA && pdfDocB) {
-      renderComparison();
+    if (
+      comparisonStarted &&
+      pdfDocA &&
+      pdfDocB
+    ) {
+      void renderComparison();
     }
-  }, [renderComparison, pdfDocA, pdfDocB]);
+  }, [
+    comparisonStarted,
+    renderComparison,
+    pdfDocA,
+    pdfDocB,
+  ]);
 
   return (
     <div className="w-full max-w-5xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
@@ -580,6 +657,31 @@ export const ComparePdf: React.FC = () => {
       {/* Comparison Canvas & Controls */}
       {fileA && fileB && (
         <div className="space-y-4">
+          {!comparisonStarted && (
+            <button
+              type="button"
+              onClick={handleStartComparison}
+              disabled={
+                !pdfDocA ||
+                !pdfDocB ||
+                isRendering
+              }
+              className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 text-sm"
+            >
+              {(!pdfDocA || !pdfDocB) ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Preparing PDFs...</span>
+                </>
+              ) : (
+                <>
+                  <GitCompare className="w-4 h-4" />
+                  <span>Compare PDFs</span>
+                </>
+              )}
+            </button>
+          )}
+
           {/* Controls Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-zinc-950/70 rounded-xl border border-zinc-800">
             {/* View Mode Toggle */}
