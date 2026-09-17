@@ -11398,99 +11398,481 @@ export async function repairPDF(
 
 export type DarkModeFilter = 'invert' | 'oled' | 'sepia';
 
-export interface DarkModeOptions {
-  filter: DarkModeFilter;
-  onProgress?: (current: number, total: number) => void;
+export interface DarkModeRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber:
+      number,
+
+    pageBlob:
+      Blob
+  ) => Promise<void>;
 }
 
-export async function invertPDF(
-  file: File,
-  options: DarkModeOptions
-): Promise<Uint8Array> {
-  const {
-    filter = 'invert',
-    onProgress,
-  } = options;
+export interface DarkModeOptions {
+  filter: DarkModeFilter;
 
+  onProgress?: (
+    current:
+      number,
 
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
+    total:
+      number
+  ) => void;
+
+  recovery?:
+    DarkModeRecoveryHooks;
+}
+
+const DARK_MODE_MAX_TILE_PIXELS =
+  600_000;
+
+const DARK_MODE_MAX_RENDER_DIMENSION =
+  2048;
+
+const yieldDarkModeBrowser =
+  async () =>
+    await new Promise<void>(
+      (
+        resolve
+      ) =>
+        setTimeout(
+          resolve,
+          0
+        )
     );
 
+const transformDarkModeCanvas =
+  (
+    ctx:
+      CanvasRenderingContext2D,
 
-  const pdfDoc =
-    loadedPdf.pdf;
+    width:
+      number,
 
+    height:
+      number,
+
+    filter:
+      DarkModeFilter
+  ) => {
+    /*
+     * The old implementation called getImageData() for the
+     * complete 2x page. On iPhone that temporarily creates
+     * another full-size RGBA allocation.
+     *
+     * Process small horizontal strips instead. Pixel output is
+     * unchanged, but temporary memory stays bounded.
+     */
+    const tileHeight =
+      Math.max(
+        1,
+        Math.min(
+          height,
+          Math.floor(
+            DARK_MODE_MAX_TILE_PIXELS /
+              Math.max(
+                1,
+                width
+              )
+          )
+        )
+      );
+
+    for (
+      let y = 0;
+      y < height;
+      y += tileHeight
+    ) {
+      const currentHeight =
+        Math.min(
+          tileHeight,
+          height - y
+        );
+
+      const imgData =
+        ctx.getImageData(
+          0,
+          y,
+          width,
+          currentHeight
+        );
+
+      const data =
+        imgData.data;
+
+      for (
+        let i = 0;
+        i < data.length;
+        i += 4
+      ) {
+        const r =
+          data[i];
+
+        const g =
+          data[
+            i + 1
+          ];
+
+        const b =
+          data[
+            i + 2
+          ];
+
+        if (
+          filter ===
+          'invert'
+        ) {
+          data[i] =
+            255 - r;
+
+          data[
+            i + 1
+          ] =
+            255 - g;
+
+          data[
+            i + 2
+          ] =
+            255 - b;
+        } else if (
+          filter ===
+          'oled'
+        ) {
+          const luminance =
+            0.299 * r +
+            0.587 * g +
+            0.114 * b;
+
+          if (
+            luminance >
+            210
+          ) {
+            data[i] =
+              0;
+
+            data[
+              i + 1
+            ] =
+              0;
+
+            data[
+              i + 2
+            ] =
+              0;
+          } else if (
+            luminance <
+            80
+          ) {
+            data[i] =
+              225;
+
+            data[
+              i + 1
+            ] =
+              225;
+
+            data[
+              i + 2
+            ] =
+              225;
+          } else {
+            data[i] =
+              255 - r;
+
+            data[
+              i + 1
+            ] =
+              255 - g;
+
+            data[
+              i + 2
+            ] =
+              255 - b;
+          }
+        } else {
+          const tr =
+            0.393 * r +
+            0.769 * g +
+            0.189 * b;
+
+          const tg =
+            0.349 * r +
+            0.686 * g +
+            0.168 * b;
+
+          const tb =
+            0.272 * r +
+            0.534 * g +
+            0.131 * b;
+
+          data[i] =
+            Math.min(
+              255,
+              tr
+            );
+
+          data[
+            i + 1
+          ] =
+            Math.min(
+              255,
+              tg
+            );
+
+          data[
+            i + 2
+          ] =
+            Math.min(
+              255,
+              tb
+            );
+        }
+      }
+
+      ctx.putImageData(
+        imgData,
+        0,
+        y
+      );
+    }
+  };
+
+export async function invertPDF(
+  file:
+    File,
+
+  options:
+    DarkModeOptions
+): Promise<Uint8Array> {
+  const {
+    filter =
+      'invert',
+
+    onProgress,
+
+    recovery,
+  } =
+    options;
+
+  const recoveryEnabled =
+    Boolean(
+      recovery
+        ?.readPage &&
+      recovery
+        ?.writePage
+    );
+
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
+
+  const reopenSource =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        await loadedPdf
+          .dispose();
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldDarkModeBrowser();
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+    };
 
   try {
     const totalPages =
       pdfDoc.numPages;
 
+    if (
+      totalPages <
+      1
+    ) {
+      throw new Error(
+        'This PDF has no pages.'
+      );
+    }
 
-    const outputDoc =
-      await PDFDocument.create();
+    /*
+     * Without persistent recovery we retain the ordinary
+     * one-pass output document.
+     *
+     * With recovery enabled, transformed JPEG pages are written
+     * to OPFS first. We intentionally do NOT keep all transformed
+     * pages inside pdf-lib while the expensive render phase runs.
+     */
+    const directOutput =
+      recoveryEnabled
+        ? null
+        : await PDFDocument
+            .create();
 
+    let freshPagesSinceRecycle =
+      0;
 
+    /*
+     * ========================================================
+     * PHASE 1 — TRANSFORM + CHECKPOINT
+     * ========================================================
+     */
     for (
       let pageNum = 1;
-      pageNum <= totalPages;
+      pageNum <=
+      totalPages;
       pageNum++
     ) {
+      if (
+        recoveryEnabled &&
+        recovery
+          ?.readPage
+      ) {
+        try {
+          const cached =
+            await recovery
+              .readPage(
+                pageNum
+              );
+
+          if (
+            cached &&
+            cached.size >
+              3
+          ) {
+            /*
+             * No fake page 1 -> N progress after a restart.
+             * Resume visibly begins at the first missing page.
+             */
+            await yieldDarkModeBrowser();
+
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read Dark Mode page ${pageNum} checkpoint:`,
+            recoveryReadError
+          );
+        }
+      }
+
       onProgress?.(
         pageNum,
         totalPages
       );
 
-
       const page =
-        await pdfDoc.getPage(
-          pageNum
-        );
-
+        await pdfDoc
+          .getPage(
+            pageNum
+          );
 
       const canvas =
         document.createElement(
           'canvas'
         );
 
-
       try {
-        const viewport =
+        const original =
           page.getViewport({
-            scale: 2.0,
+            scale:
+              1.0,
           });
 
+        /*
+         * Standard A4/Letter pages still render at the original
+         * 2.0x quality. Exceptionally large pages are capped so
+         * one canvas cannot exhaust mobile Safari.
+         */
+        const maxDimension =
+          Math.max(
+            original.width,
+            original.height
+          );
+
+        const renderScale =
+          Math.min(
+            2.0,
+            DARK_MODE_MAX_RENDER_DIMENSION /
+              Math.max(
+                1,
+                maxDimension
+              )
+          );
+
+        const viewport =
+          page.getViewport({
+            scale:
+              renderScale,
+          });
 
         canvas.width =
-          Math.floor(
-            viewport.width
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
           );
 
         canvas.height =
-          Math.floor(
-            viewport.height
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
           );
-
 
         const ctx =
           canvas.getContext(
             '2d',
             {
-              alpha: false,
+              alpha:
+                false,
             }
           );
 
-
         if (!ctx) {
           throw new Error(
-            'Canvas rendering context unavailable'
+            `Canvas rendering context unavailable for page ${pageNum}.`
           );
         }
-
 
         await (
           page.render({
@@ -11501,133 +11883,12 @@ export async function invertPDF(
           } as any) as any
         ).promise;
 
-
-        const imgData =
-          ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-
-        const data =
-          imgData.data;
-
-
-        for (
-          let i = 0;
-          i < data.length;
-          i += 4
-        ) {
-          const r =
-            data[i];
-
-          const g =
-            data[i + 1];
-
-          const b =
-            data[i + 2];
-
-
-          if (
-            filter ===
-            'invert'
-          ) {
-            data[i] =
-              255 - r;
-
-            data[i + 1] =
-              255 - g;
-
-            data[i + 2] =
-              255 - b;
-          } else if (
-            filter ===
-            'oled'
-          ) {
-            const luminance =
-              0.299 * r +
-              0.587 * g +
-              0.114 * b;
-
-
-            if (
-              luminance >
-              210
-            ) {
-              data[i] = 10;
-              data[i + 1] = 10;
-              data[i + 2] = 10;
-            } else if (
-              luminance <
-              80
-            ) {
-              data[i] =
-                225;
-
-              data[i + 1] =
-                225;
-
-              data[i + 2] =
-                225;
-            } else {
-              data[i] =
-                255 - r;
-
-              data[i + 1] =
-                255 - g;
-
-              data[i + 2] =
-                255 - b;
-            }
-          } else if (
-            filter ===
-            'sepia'
-          ) {
-            const tr =
-              0.393 * r +
-              0.769 * g +
-              0.189 * b;
-
-            const tg =
-              0.349 * r +
-              0.686 * g +
-              0.168 * b;
-
-            const tb =
-              0.272 * r +
-              0.534 * g +
-              0.131 * b;
-
-
-            data[i] =
-              Math.min(
-                255,
-                tr
-              );
-
-            data[i + 1] =
-              Math.min(
-                255,
-                tg
-              );
-
-            data[i + 2] =
-              Math.min(
-                255,
-                tb
-              );
-          }
-        }
-
-
-        ctx.putImageData(
-          imgData,
-          0,
-          0
+        transformDarkModeCanvas(
+          ctx,
+          canvas.width,
+          canvas.height,
+          filter
         );
-
 
         const jpegBlob =
           await new Promise<Blob>(
@@ -11636,15 +11897,19 @@ export async function invertPDF(
               reject
             ) => {
               canvas.toBlob(
-                (blob) => {
-                  if (blob) {
+                (
+                  blob
+                ) => {
+                  if (
+                    blob
+                  ) {
                     resolve(
                       blob
                     );
                   } else {
                     reject(
                       new Error(
-                        'Canvas buffer conversion failed'
+                        `Unable to encode Dark Mode page ${pageNum}.`
                       )
                     );
                   }
@@ -11655,41 +11920,51 @@ export async function invertPDF(
             }
           );
 
+        if (
+          recoveryEnabled &&
+          recovery
+            ?.writePage
+        ) {
+          /*
+           * Atomic per-page checkpoint before moving on.
+           */
+          await recovery
+            .writePage(
+              pageNum,
+              jpegBlob
+            );
+        } else if (
+          directOutput
+        ) {
+          const jpegBytes =
+            await jpegBlob
+              .arrayBuffer();
 
-        const jpegBytes =
-          await jpegBlob.arrayBuffer();
+          const image =
+            await directOutput
+              .embedJpg(
+                jpegBytes
+              );
 
+          const newPage =
+            directOutput
+              .addPage([
+                original.width,
+                original.height,
+              ]);
 
-        const embeddedImg =
-          await outputDoc.embedJpg(
-            jpegBytes
+          newPage.drawImage(
+            image,
+            {
+              x: 0,
+              y: 0,
+              width:
+                original.width,
+              height:
+                original.height,
+            }
           );
-
-
-        const unscaled =
-          page.getViewport({
-            scale: 1.0,
-          });
-
-
-        const newPage =
-          outputDoc.addPage([
-            unscaled.width,
-            unscaled.height,
-          ]);
-
-
-        newPage.drawImage(
-          embeddedImg,
-          {
-            x: 0,
-            y: 0,
-            width:
-              unscaled.width,
-            height:
-              unscaled.height,
-          }
-        );
+        }
       } finally {
         canvas.width =
           1;
@@ -11697,57 +11972,216 @@ export async function invertPDF(
         canvas.height =
           1;
 
-
         try {
           canvas.remove();
         } catch (_) {}
-
 
         try {
           page.cleanup();
         } catch (_) {}
       }
 
+      freshPagesSinceRecycle++;
+
       /*
-       * Give the browser an opportunity to reclaim
-       * completed page pixel/JPEG memory before the
-       * next dark-mode page is processed.
+       * Same idea as Searchable OCR:
+       * periodically destroy PDF.js caches instead of allowing
+       * a long 80+ page document to accumulate them.
        */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      if (
+        freshPagesSinceRecycle >=
+          2 &&
+        pageNum <
+          totalPages
+      ) {
+        await reopenSource();
+
+        freshPagesSinceRecycle =
+          0;
+      } else {
+        await yieldDarkModeBrowser();
+      }
     }
 
+    /*
+     * Ordinary fallback path when OPFS recovery is unavailable.
+     */
+    if (
+      !recoveryEnabled
+    ) {
+      if (
+        loadedPdf
+      ) {
+        await loadedPdf
+          .dispose();
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldDarkModeBrowser();
+
+      return await directOutput!
+        .save({
+          useObjectStreams:
+            true,
+        });
+    }
 
     /*
-     * All transformed pages are already embedded in
-     * outputDoc. Release the original PDF.js source before
-     * allocating the complete serialized dark-mode PDF.
+     * ========================================================
+     * PHASE 2 — ASSEMBLE FROM SMALL COMPRESSED CHECKPOINTS
+     * ========================================================
+     *
+     * The expensive canvases are completely gone before pdf-lib
+     * begins accumulating the final document.
      */
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf
+        .dispose();
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
+      loadedPdf =
+        null;
+    }
 
+    await yieldDarkModeBrowser();
 
-    return await outputDoc.save({
-      useObjectStreams: true,
-    });
+    const outputDoc =
+      await PDFDocument
+        .create();
+
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+    pdfDoc =
+      loadedPdf.pdf;
+
+    let assemblyPagesSinceRecycle =
+      0;
+
+    for (
+      let pageNum = 1;
+      pageNum <=
+      totalPages;
+      pageNum++
+    ) {
+      const pageBlob =
+        await recovery
+          ?.readPage?.(
+            pageNum
+          );
+
+      if (
+        !pageBlob ||
+        pageBlob.size <
+          4
+      ) {
+        throw new Error(
+          `Recovery page ${pageNum} is missing. Retry the conversion.`
+        );
+      }
+
+      const page =
+        await pdfDoc
+          .getPage(
+            pageNum
+          );
+
+      try {
+        const original =
+          page.getViewport({
+            scale:
+              1.0,
+          });
+
+        const jpegBytes =
+          await pageBlob
+            .arrayBuffer();
+
+        const image =
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
+
+        const newPage =
+          outputDoc
+            .addPage([
+              original.width,
+              original.height,
+            ]);
+
+        newPage.drawImage(
+          image,
+          {
+            x: 0,
+            y: 0,
+            width:
+              original.width,
+            height:
+              original.height,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      assemblyPagesSinceRecycle++;
+
+      if (
+        assemblyPagesSinceRecycle >=
+          8 &&
+        pageNum <
+          totalPages
+      ) {
+        await reopenSource();
+
+        assemblyPagesSinceRecycle =
+          0;
+      } else {
+        await yieldDarkModeBrowser();
+      }
+    }
+
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf
+        .dispose();
+
+      loadedPdf =
+        null;
+    }
+
+    await yieldDarkModeBrowser();
+
+    return await outputDoc
+      .save({
+        useObjectStreams:
+          true,
+      });
   } finally {
-    /*
-     * dispose() is idempotent and still protects
-     * all earlier error paths.
-     */
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
   }
 }
 

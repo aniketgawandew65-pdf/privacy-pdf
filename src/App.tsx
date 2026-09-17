@@ -459,18 +459,21 @@ export default function App() {
     if (!workspaceReady) return;
 
     /*
-     * Searchable OCR owns a dedicated durable OPFS recovery
-     * source while processing.
+     * Searchable OCR and Dark Mode own dedicated durable OPFS
+     * recovery sources while processing.
      *
-     * After Safari recreates the page, OcrPdf restores that
-     * exact source. Do not immediately copy the same ~150 MB
-     * file into the generic workspace a second time.
-     *
-     * Other tools keep the existing generic workspace behavior.
+     * After Safari recreates the page, do not immediately copy
+     * the same large source into the generic workspace again.
+     * This mirrors the mobile-memory protection already proven
+     * by Searchable OCR.
      */
     if (
-      location.pathname ===
-        '/ocr-pdf' &&
+      (
+        location.pathname ===
+          '/ocr-pdf' ||
+        location.pathname ===
+          '/dark-mode-pdf'
+      ) &&
       hasRecoverableProcessing()
     ) {
       return;

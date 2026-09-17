@@ -20,6 +20,22 @@ import {
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+
+import {
+  clearDarkModeRecovery,
+  darkModeJobMatchesFile,
+  readDarkModeJobMeta,
+  readDarkModePage,
+  restoreDarkModeJobSource,
+  saveDarkModeJobSource,
+  writeDarkModePage,
+} from '../utils/darkModeRecovery';
+
 interface DarkModePdfProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
@@ -36,8 +52,24 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const recoveryFilterRef =
+    useRef<DarkModeFilter | null>(null);
 
   const previewObjectUrlRef =
     useRef<string | null>(null);
@@ -185,9 +217,9 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
                     0.114 * b;
 
                   if (lum > 210) {
-                    data[i] = 12;
-                    data[i + 1] = 12;
-                    data[i + 2] = 12;
+                    data[i] = 0;
+                    data[i + 1] = 0;
+                    data[i + 2] = 0;
                   } else if (
                     lum < 80
                   ) {
@@ -357,43 +389,451 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
     };
   }, [file, filter]);
 
-  const handleConvert = async () => {
-    if (!file) return;
+  /*
+   * ==========================================================
+   * DURABLE SOURCE RESTORE
+   * ==========================================================
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
+      }
 
-    const creditCheck = checkTaskCredit(file);
+      durableRestoreAttemptedRef.current =
+        true;
 
-    if (!creditCheck.allowed) {
-      setErrorMessage(
-        creditCheck.errorMessage ||
-          'This task is not available on your current plan.'
+      let cancelled =
+        false;
+
+      /*
+       * Mark preview as busy before the restored File enters the
+       * component so automatic processing cannot overlap page-1
+       * preview rendering.
+       */
+      setIsLoadingPreview(
+        true
       );
-      return;
-    }
-    setIsProcessing(true);
-    setErrorMessage(null);
-    revokeDownloadUrl();
 
-    try {
-      const outputBytes = await invertPDF(file, {
-        filter,
-        onProgress: (curr, total) => {
-          setProgressText(`Converting page ${curr} of ${total} to dark mode...`);
-        },
-      });
+      void (
+        async () => {
+          try {
+            const restored =
+              await restoreDarkModeJobSource();
 
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-      commitTaskCredit();
-    } catch (err: any) {
-      console.error('Dark mode conversion error:', err);
-      setErrorMessage(err.message || 'Failed to invert PDF colors.');
-    } finally {
-      setIsProcessing(false);
-      setProgressText('');
-    }
-  };
+            if (
+              cancelled ||
+              !restored
+            ) {
+              if (
+                !cancelled
+              ) {
+                setIsLoadingPreview(
+                  false
+                );
+              }
+
+              return;
+            }
+
+            recoveryFilterRef.current =
+              restored.filter;
+
+            setFilter(
+              restored.filter
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+
+            onFileChange(
+              restored.file
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted Dark Mode job:',
+              error
+            );
+
+            if (
+              !cancelled
+            ) {
+              setIsLoadingPreview(
+                false
+              );
+            }
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+  /*
+   * App.tsx may already have restored the source from the generic
+   * workspace. In that case inspect the durable Dark Mode job and
+   * recover its selected filter without making another file copy.
+   */
+  useEffect(
+    () => {
+      if (
+        !file
+      ) {
+        checkedRecoveryFileRef.current =
+          null;
+
+        recoveryFilterRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        return;
+      }
+
+      if (
+        checkedRecoveryFileRef.current ===
+        file
+      ) {
+        return;
+      }
+
+      checkedRecoveryFileRef.current =
+        file;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const meta =
+              await readDarkModeJobMeta();
+
+            if (
+              cancelled ||
+              !darkModeJobMatchesFile(
+                meta,
+                file
+              )
+            ) {
+              return;
+            }
+
+            recoveryFilterRef.current =
+              meta!.filter;
+
+            setFilter(
+              meta!.filter
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to inspect interrupted Dark Mode job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+    ]
+  );
+
+  const handleConvert =
+    async (
+      forcedFilter?:
+        DarkModeFilter
+    ) => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
+
+      const activeFilter =
+        forcedFilter ||
+        filter;
+
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+      if (
+        !creditCheck.allowed
+      ) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+
+        return;
+      }
+
+      processingInFlightRef.current =
+        true;
+
+      setIsProcessing(
+        true
+      );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeDownloadUrl();
+
+      try {
+        const outputBytes =
+          await exclusivelyProcess(
+            async () => {
+              let recoveryEnabled =
+                false;
+
+              try {
+                await saveDarkModeJobSource(
+                  file,
+                  activeFilter
+                );
+
+                recoveryEnabled =
+                  true;
+              } catch (
+                recoveryError
+              ) {
+                /*
+                 * The actual PDF tool still works if OPFS is
+                 * unavailable; only restart-resume is disabled.
+                 */
+                console.warn(
+                  'Dark Mode restart recovery unavailable:',
+                  recoveryError
+                );
+              }
+
+              return await invertPDF(
+                file,
+                {
+                  filter:
+                    activeFilter,
+
+                  onProgress:
+                    (
+                      curr,
+                      total
+                    ) => {
+                      setProgressText(
+                        `Converting page ${curr} of ${total} to dark mode...`
+                      );
+                    },
+
+                  recovery:
+                    recoveryEnabled
+                      ? {
+                          readPage:
+                            readDarkModePage,
+
+                          writePage:
+                            writeDarkModePage,
+                        }
+                      : undefined,
+                }
+              );
+            }
+          );
+
+        const blob =
+          new Blob(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+        createUrl(
+          blob
+        );
+
+        /*
+         * Final output exists. Now and only now:
+         * - clear restart data
+         * - clear the global processing marker
+         * - consume one task
+         */
+        await clearDarkModeRecovery();
+
+        clearProcessingRecovery();
+
+        setRecoveryReady(
+          false
+        );
+
+        recoveryFilterRef.current =
+          null;
+
+        resumeAttemptedRef.current =
+          false;
+
+        commitTaskCredit();
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'Dark mode conversion error:',
+          err
+        );
+
+        /*
+         * Keep checkpoints after interruption/error.
+         */
+        setErrorMessage(
+          err?.message ||
+            String(err) ||
+            'Processing was interrupted. Reopen Dark Mode to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressText(
+          ''
+        );
+      }
+    };
+
+  /*
+   * ==========================================================
+   * AUTOMATIC SAFARI PROCESS-RESTART RESUME
+   * ==========================================================
+   *
+   * Wait until the page-1 preview has fully released its PDF.js
+   * document/canvas. Then resume using the durable filter.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        !recoveryReady ||
+        isLoadingPreview ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const resumeFilter =
+        recoveryFilterRef.current;
+
+      if (
+        !resumeFilter
+      ) {
+        return;
+      }
+
+      resumeAttemptedRef.current =
+        true;
+
+      const timer =
+        window.setTimeout(
+          () => {
+            void handleConvert(
+              resumeFilter
+            );
+          },
+          250
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      recoveryReady,
+      isLoadingPreview,
+      filter,
+    ]
+  );
+
 
   const handleClear = () => {
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+    clearProcessingRecovery();
+
+    void clearDarkModeRecovery()
+      .catch(
+        (
+          recoveryError
+        ) => {
+          console.warn(
+            'Unable to clear Dark Mode recovery data:',
+            recoveryError
+          );
+        }
+      );
+
+    recoveryFilterRef.current =
+      null;
+
+    checkedRecoveryFileRef.current =
+      null;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    resumeAttemptedRef.current =
+      false;
+
+    setRecoveryReady(
+      false
+    );
+
     onFileChange(null);
     setPreviewUrl(null);
     setZoomLevel(1);
@@ -420,7 +860,19 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
   ];
 
   return (
-    <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div
+      aria-busy={
+        isProcessing
+          ? true
+          : undefined
+      }
+      data-processing-active={
+        isProcessing
+          ? 'true'
+          : undefined
+      }
+      className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl"
+    >
       {!file ? (
         <div
           role="button"
@@ -491,11 +943,34 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
                 <button
                   key={opt.id}
                   type="button"
+                  disabled={isProcessing}
                   onClick={() => {
+                    if (
+                      isProcessing ||
+                      opt.id === filter
+                    ) {
+                      return;
+                    }
+
+                    clearProcessingRecovery();
+
+                    void clearDarkModeRecovery()
+                      .catch(() => {});
+
+                    recoveryFilterRef.current =
+                      null;
+
+                    resumeAttemptedRef.current =
+                      false;
+
+                    setRecoveryReady(
+                      false
+                    );
+
                     setFilter(opt.id);
                     revokeDownloadUrl();
                   }}
-                  className={`p-3 text-left rounded-xl border transition-all cursor-pointer ${
+                  className={`p-3 text-left rounded-xl border transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                     filter === opt.id
                       ? 'border-emerald-500 bg-emerald-950/40'
                       : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
@@ -560,8 +1035,15 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
               </div>
 
               {/* 4-Way Scroll / Pan Preview Window */}
-              <div className="w-full h-80 bg-zinc-950/90 rounded-lg border border-zinc-800/90 overflow-auto scrollbar-thin p-4 shadow-inner flex">
-                <div className="min-w-full min-h-full m-auto flex items-center justify-center">
+              <div
+                className="w-full h-80 bg-zinc-950/90 rounded-lg border border-zinc-800/90 overflow-auto overscroll-contain scrollbar-thin p-4 shadow-inner"
+                style={{
+                  WebkitOverflowScrolling:
+                    'touch',
+                }}
+              >
+                <div className="min-w-full min-h-full flex">
+
                   {isLoadingPreview ? (
                     <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
                   ) : (
@@ -572,7 +1054,7 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
                         width: `${Math.round(200 * zoomLevel)}px`,
                         maxWidth: 'none',
                       }}
-                      className="rounded border border-zinc-700/80 shadow-2xl object-contain transition-all duration-150 select-none"
+                      className="block max-w-none shrink-0 m-auto rounded border border-zinc-700/80 shadow-2xl object-contain transition-all duration-150 select-none"
                     />
                   )}
                 </div>
@@ -591,7 +1073,9 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
           {/* Action Trigger / Download */}
           {!downloadUrl ? (
             <button
-              onClick={handleConvert}
+              onClick={() => {
+                void handleConvert();
+              }}
               disabled={isProcessing}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
