@@ -1,16 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Trash2, ArrowUp, ArrowDown, Files, Sparkles, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, Trash2, ArrowUp, ArrowDown, Files, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { getLicenseStatus } from '../utils/license';
 import { ProModal } from './ProModal';
 import { mergePDFs } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface MergerProps {
   files: File[];
   onFilesChange: (files: File[]) => void;
 }
 
-const FREE_BATCH_LIMIT = 3;
 const PRO_TOTAL_SIZE_LIMIT_MB = 150;
 const PRO_TOTAL_SIZE_LIMIT_BYTES = PRO_TOTAL_SIZE_LIMIT_MB * 1024 * 1024;
 
@@ -46,13 +49,6 @@ export function Merger({ files, onFilesChange }: MergerProps) {
     );
 
     const combined = [...files, ...addedList];
-
-    if (!isPro && combined.length > FREE_BATCH_LIMIT) {
-      setIsProModalOpen(true);
-      onFilesChange(combined.slice(0, FREE_BATCH_LIMIT));
-      revokeDownloadUrl();
-      return;
-    }
 
     onFilesChange(combined);
     revokeDownloadUrl();
@@ -91,16 +87,21 @@ export function Merger({ files, onFilesChange }: MergerProps) {
   const handleMerge = async () => {
     if (files.length < 2) return;
 
-    if (!isPro && files.length > FREE_BATCH_LIMIT) {
-      setIsProModalOpen(true);
-      return;
-    }
-
     const totalBytes = getTotalSizeBytes(files);
 
     if (totalBytes > PRO_TOTAL_SIZE_LIMIT_BYTES) {
       setErrorMessage(
         `Merge limit exceeded. Your files total ${formatSizeMB(totalBytes)} MB. This tool supports up to ${PRO_TOTAL_SIZE_LIMIT_MB} MB total per merge. Remove some files and try again.`
+      );
+      return;
+    }
+
+    const creditCheck = checkTaskCredit(totalBytes);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This merge is not available on your current plan.'
       );
       return;
     }
@@ -114,6 +115,9 @@ export function Merger({ files, onFilesChange }: MergerProps) {
       const mergedBytes = await mergePDFs(files);
       const blob = new Blob([mergedBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+
+      // Successful result = exactly one task credit.
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Failed to merge PDFs:', err);
       setErrorMessage(err.message || 'Error merging files. One of the documents may be password protected.');
@@ -156,26 +160,10 @@ export function Merger({ files, onFilesChange }: MergerProps) {
         </p>
         <p className="text-xs text-zinc-500 mt-1">
           {isPro
-            ? `Pro Active: Unlimited files • Max ${PRO_TOTAL_SIZE_LIMIT_MB} MB total`
-            : `Free Tier: Up to ${FREE_BATCH_LIMIT} files`}
+            ? `Pro Active • Max ${PRO_TOTAL_SIZE_LIMIT_MB} MB total`
+            : 'Task size depends on your current free tier'}
         </p>
       </div>
-
-      {/* Paywall Banner if non-Pro reaches limit */}
-      {!isPro && files.length >= FREE_BATCH_LIMIT && (
-        <div className="flex items-center justify-between p-3 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
-            <span>Free limit reached (max {FREE_BATCH_LIMIT} files).</span>
-          </div>
-          <button
-            onClick={() => setIsProModalOpen(true)}
-            className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-black font-semibold transition text-[11px]"
-          >
-            Upgrade Pro
-          </button>
-        </div>
-      )}
 
       {/* Selected File List */}
       {files.length > 0 && (

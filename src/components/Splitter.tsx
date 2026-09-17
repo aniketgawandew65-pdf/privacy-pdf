@@ -12,6 +12,10 @@ import {
 } from 'lucide-react';
 import { splitPDF, splitPdfToZip, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface SplitterProps {
   file: File | null;
@@ -89,6 +93,17 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
 
   const handleSplit = async () => {
     if (!file || pageCount === 0) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This split is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -112,6 +127,9 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
         const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
         createUrl(blob);
       }
+
+      // Successful range extraction or burst = one task credit.
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Split error:', err);
       setErrorMessage(err.message || 'Failed to split PDF.');
