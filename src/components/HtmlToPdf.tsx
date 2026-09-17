@@ -14,6 +14,10 @@ import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
+import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
   clearToolWorkspace,
@@ -448,6 +452,19 @@ export const HtmlToPdf: React.FC = () => {
         }
       }
 
+      const creditCheck =
+        checkTaskCredit(
+          file || undefined
+        );
+
+      if (!creditCheck.allowed) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+        return;
+      }
+
       setIsProcessing(
         true
       );
@@ -539,6 +556,8 @@ export const HtmlToPdf: React.FC = () => {
         createUrl(
           blob
         );
+
+        commitTaskCredit();
       } catch (
         err: any
       ) {
