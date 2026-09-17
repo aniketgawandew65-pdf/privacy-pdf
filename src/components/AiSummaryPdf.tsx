@@ -19,6 +19,10 @@ import {
   Settings2,
 } from 'lucide-react';
 import { extractTextFromPDF } from '../utils/pdfEngine';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface AiSummaryPdfProps {
   file: File | null;
@@ -222,6 +226,22 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
       return;
     }
 
+    if (!file) {
+      setErrorMessage('No PDF is currently loaded.');
+      return;
+    }
+
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     const endpoint = isCustomLocal
       ? customEndpointUrl.trim() || providerConfig.endpoint
       : providerConfig.endpoint;
@@ -389,6 +409,12 @@ ${contextText}`;
           }
         }
       }
+
+      if (!assistantReply.trim()) {
+        throw new Error('AI provider returned an empty response.');
+      }
+
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Streaming error:', err);
       setErrorMessage(err.message || 'Stream connection interrupted.');
