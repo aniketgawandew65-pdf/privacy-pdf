@@ -25,6 +25,7 @@ import {
   clearProcessingRecovery,
   digestText,
   exclusivelyProcess,
+  hasRecoverableProcessing,
   localContentId,
 } from '../utils/localProcessing';
 
@@ -41,6 +42,11 @@ import {
 import {
   useObjectUrl,
 } from '../utils/useObjectUrl';
+
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 
 interface PdfToMarkdownProps {
@@ -228,6 +234,17 @@ export const PdfToMarkdown:
           return;
         }
 
+        const creditCheck =
+          checkTaskCredit(file);
+
+        if (!creditCheck.allowed) {
+          setErrorMessage(
+            creditCheck.errorMessage ||
+              'This task is not available on your current plan.'
+          );
+          return;
+        }
+
         lastAutoStartedJobRef.current =
           extractionJobKey;
 
@@ -243,6 +260,9 @@ export const PdfToMarkdown:
         );
 
         revokeDownloadUrl();
+
+        let completed =
+          false;
 
         try {
           /*
@@ -382,6 +402,9 @@ export const PdfToMarkdown:
             createUrl(
               blob
             );
+
+            completed =
+              true;
           }
 
           /*
@@ -391,6 +414,10 @@ export const PdfToMarkdown:
            * processing marker is no longer needed.
            */
           clearProcessingRecovery();
+
+          if (completed) {
+            commitTaskCredit();
+          }
         } catch (
           err:
             any
@@ -418,6 +445,9 @@ export const PdfToMarkdown:
           extractionInFlightRef.current =
             false;
 
+          lastAutoStartedJobRef.current =
+            null;
+
           setIsExtracting(
             false
           );
@@ -431,29 +461,38 @@ export const PdfToMarkdown:
 
     useEffect(
       () => {
+        lastAutoStartedJobRef.current =
+          null;
+
+        setMdResult(
+          null
+        );
+
+        revokeDownloadUrl();
+
+        setErrorMessage(
+          null
+        );
+
+        setProgressStatus(
+          ''
+        );
+
         if (!file) {
-          lastAutoStartedJobRef.current =
-            null;
-
-          setMdResult(
-            null
-          );
-
-          revokeDownloadUrl();
-
-          setErrorMessage(
-            null
-          );
-
           return;
         }
 
-        void handleExtraction();
-
         /*
-         * Deliberately depend on logical identity rather than
-         * the File object reference.
+         * Normal upload/settings changes do NOT start a task.
+         *
+         * Only an interrupted browser-recoverable job resumes
+         * automatically using its saved page checkpoints.
          */
+        if (
+          hasRecoverableProcessing()
+        ) {
+          void handleExtraction();
+        }
       },
       [
         fileIdentity,
@@ -728,6 +767,22 @@ export const PdfToMarkdown:
                 </span>
               </label>
             </div>
+
+
+            {!isExtracting && !mdResult && (
+              <button
+                type="button"
+                onClick={() =>
+                  void handleExtraction()
+                }
+                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 text-sm"
+              >
+                <FileCode className="w-4 h-4" />
+                <span>
+                  Convert to Markdown
+                </span>
+              </button>
+            )}
 
 
             {isExtracting ? (
