@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
+import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
   clearToolWorkspace,
@@ -262,6 +266,16 @@ export function CompressImage() {
       return;
     }
 
+    const creditCheck = checkTaskCredit(files);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setProgress(0);
@@ -346,6 +360,11 @@ export function CompressImage() {
       }
 
       setResults(completed);
+
+      if (completed.length > 0) {
+        commitTaskCredit();
+      }
+
       setProgress(100);
       setStatus(
         `${completed.length} image${
