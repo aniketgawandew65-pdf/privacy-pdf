@@ -13,6 +13,10 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { rotatePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface RotatePdfProps {
   file: File | null;
@@ -176,6 +180,17 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
 
   const handleRotate = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This rotate task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -184,6 +199,8 @@ export const RotatePdf: React.FC<RotatePdfProps> = ({ file, onFileChange }) => {
       const bytes = await rotatePDF(file, rotationAngle);
       const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Rotate error:', err);
       setErrorMessage(err.message || 'Failed to rotate PDF.');

@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Trash2 } from 'lucide-react';
 import { removePagesFromPDF, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface RemovePagesProps {
   file: File | null;
@@ -73,6 +77,16 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
       return;
     }
 
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     revokeDownloadUrl();
 
@@ -80,6 +94,8 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
       const outputBytes = await removePagesFromPDF(file, pagesToRemove);
       const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+
+      commitTaskCredit();
     } catch (err) {
       console.error(err);
       setError('Failed to process PDF.');
