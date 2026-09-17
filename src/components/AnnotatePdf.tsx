@@ -37,6 +37,10 @@ import {
 } from '../utils/pdfEngine';
 
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 
 interface AnnotatePdfProps {
@@ -1540,6 +1544,18 @@ React.FC<AnnotatePdfProps> = ({
       return;
     }
 
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+
+      return;
+    }
+
     setIsProcessing(true);
 
     setErrorMessage(null);
@@ -1566,6 +1582,8 @@ React.FC<AnnotatePdfProps> = ({
         );
 
       createUrl(blob);
+
+      commitTaskCredit();
 
     } catch (error: any) {
 
