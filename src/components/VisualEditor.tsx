@@ -26,6 +26,10 @@ import {
   type VisualOverlayItem,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface VisualEditorProps {
   file: File | null;
@@ -387,7 +391,19 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   };
 
   const handleApplyChanges = async () => {
-    if (!file) return;
+    if (!file || items.length === 0) return;
+
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -396,6 +412,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
       const outputBytes = await applyVisualOverlays(file, items);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Export error:', err);
       setErrorMessage(err.message || 'Failed to save modifications.');
