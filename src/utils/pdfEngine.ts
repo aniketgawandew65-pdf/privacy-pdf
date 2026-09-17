@@ -839,136 +839,685 @@ export async function rotatePDF(
   });
 }
 
-export type PdfImageFormat = 'jpg' | 'png' | 'webp';
+export type PdfImageFormat =
+  'jpg' |
+  'png' |
+  'webp';
 
-export async function pdfToImages(
-  file: File,
-  format: PdfImageFormat = 'jpg',
-  quality: number = 0.9
-): Promise<Blob[]> {
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file
+export interface PdfToImagesRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber:
+      number,
+
+    pageBlob:
+      Blob
+  ) => Promise<void>;
+}
+
+export interface PdfToImagesOptions {
+  onProgress?: (
+    current:
+      number,
+
+    total:
+      number
+  ) => void;
+
+  recovery?:
+    PdfToImagesRecoveryHooks;
+}
+
+const PDF_IMAGE_MAX_RENDER_DIMENSION =
+  2048;
+
+const yieldPdfImageBrowser =
+  async () =>
+    await new Promise<void>(
+      (
+        resolve
+      ) =>
+        setTimeout(
+          resolve,
+          0
+        )
     );
 
-  const pdfDoc =
-    loadedPdf.pdf;
+export async function pdfToImages(
+  file:
+    File,
 
-  const imageBlobs: Blob[] = [];
+  format:
+    PdfImageFormat =
+      'jpg',
+
+  quality:
+    number =
+      0.9,
+
+  options:
+    PdfToImagesOptions =
+      {}
+): Promise<Blob[]> {
+  const {
+    onProgress,
+    recovery,
+  } =
+    options;
+
+  const recoveryEnabled =
+    Boolean(
+      recovery
+        ?.readPage &&
+      recovery
+        ?.writePage
+    );
 
   const mimeType =
-    format === 'png'
+    format ===
+      'png'
       ? 'image/png'
-      : format === 'webp'
+      : format ===
+          'webp'
         ? 'image/webp'
         : 'image/jpeg';
 
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
+
+  const totalPages =
+    pdfDoc.numPages;
+
+  const directBlobs:
+    Blob[] =
+      [];
+
+  const reopenSource =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        await loadedPdf
+          .dispose();
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldPdfImageBrowser();
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+    };
+
+  const encodePage =
+    async (
+      page:
+        any,
+
+      pageNum:
+        number
+    ): Promise<Blob> => {
+      const original =
+        page.getViewport({
+          scale:
+            1.0,
+        });
+
+      const maxDimension =
+        Math.max(
+          original.width,
+          original.height
+        );
+
+      const normalScale =
+        Math.min(
+          2.0,
+          PDF_IMAGE_MAX_RENDER_DIMENSION /
+            Math.max(
+              1,
+              maxDimension
+            )
+        );
+
+      /*
+       * Normal output keeps the existing 2x resolution for
+       * standard pages.
+       *
+       * If WebKit refuses to encode a page under memory
+       * pressure, retry that page once at a smaller scale rather
+       * than failing the entire 80+ page conversion.
+       */
+      const scales =
+        [
+          normalScale,
+          Math.min(
+            normalScale,
+            1.5
+          ),
+        ].filter(
+          (
+            value,
+            index,
+            values
+          ) =>
+            index === 0 ||
+            Math.abs(
+              value -
+              values[0]
+            ) >
+              0.01
+        );
+
+      for (
+        let attempt = 0;
+        attempt <
+          scales.length;
+        attempt++
+      ) {
+        const viewport =
+          page.getViewport({
+            scale:
+              scales[
+                attempt
+              ],
+          });
+
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
+
+        try {
+          canvas.width =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.width
+              )
+            );
+
+          canvas.height =
+            Math.max(
+              1,
+              Math.floor(
+                viewport.height
+              )
+            );
+
+          const ctx =
+            canvas.getContext(
+              '2d',
+              {
+                alpha:
+                  false,
+              }
+            );
+
+          if (!ctx) {
+            throw new Error(
+              'Failed to create canvas rendering context'
+            );
+          }
+
+          ctx.fillStyle =
+            '#ffffff';
+
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          await (
+            page.render({
+              canvasContext:
+                ctx as any,
+
+              viewport,
+
+              canvas,
+            } as any) as any
+          ).promise;
+
+          /*
+           * Safari/WebKit can accept image/webp in canvas.toBlob()
+           * but still return another image format.
+           *
+           * JPG/PNG keep their existing native path.
+           *
+           * WebP first tries the browser encoder. If the produced
+           * bytes are not an actual RIFF/WEBP file, fall back to
+           * local libwebp WASM so the user always receives a real
+           * .webp image.
+           */
+          const isRealWebpBlob =
+            async (
+              blob:
+                Blob |
+                null
+            ): Promise<boolean> => {
+              if (
+                !blob ||
+                blob.size <
+                  12
+              ) {
+                return false;
+              }
+
+              const head =
+                new Uint8Array(
+                  await blob
+                    .slice(
+                      0,
+                      12
+                    )
+                    .arrayBuffer()
+                );
+
+              return (
+                String.fromCharCode(
+                  head[0],
+                  head[1],
+                  head[2],
+                  head[3]
+                ) ===
+                  'RIFF' &&
+                String.fromCharCode(
+                  head[8],
+                  head[9],
+                  head[10],
+                  head[11]
+                ) ===
+                  'WEBP'
+              );
+            };
+
+
+          let imageBlob:
+            Blob |
+            null =
+              null;
+
+
+          if (
+            format ===
+            'webp'
+          ) {
+            /*
+             * Fast native path first.
+             */
+            imageBlob =
+              await new Promise<
+                Blob |
+                null
+              >(
+                (
+                  resolve
+                ) => {
+                  canvas.toBlob(
+                    resolve,
+                    'image/webp',
+                    quality
+                  );
+                }
+              );
+
+
+            if (
+              !await isRealWebpBlob(
+                imageBlob
+              )
+            ) {
+              /*
+               * Safari fallback:
+               * encode locally with libwebp/WebAssembly.
+               *
+               * Dynamic import means JPG and PNG users never load
+               * the WebP encoder.
+               */
+              try {
+                const {
+                  encode,
+                } =
+                  await import(
+                    '@jsquash/webp'
+                  );
+
+                let imageData:
+                  ImageData |
+                  null =
+                    ctx.getImageData(
+                      0,
+                      0,
+                      canvas.width,
+                      canvas.height
+                    );
+
+                try {
+                  const encoded =
+                    await encode(
+                      imageData,
+                      {
+                        quality:
+                          Math.round(
+                            Math.max(
+                              0,
+                              Math.min(
+                                1,
+                                quality
+                              )
+                            ) *
+                              100
+                          ),
+                      } as any
+                    );
+
+                  imageBlob =
+                    new Blob(
+                      [
+                        encoded as BlobPart,
+                      ],
+                      {
+                        type:
+                          'image/webp',
+                      }
+                    );
+                } finally {
+                  /*
+                   * Drop the full RGBA copy before moving to the
+                   * next page.
+                   */
+                  imageData =
+                    null;
+                }
+              } catch (
+                webpError
+              ) {
+                console.warn(
+                  `Local WebP encoding failed for page ${pageNum}:`,
+                  webpError
+                );
+
+                imageBlob =
+                  null;
+              }
+            }
+
+
+            if (
+              await isRealWebpBlob(
+                imageBlob
+              )
+            ) {
+              return imageBlob!;
+            }
+          } else {
+            /*
+             * Existing JPG / PNG behavior remains unchanged.
+             */
+            imageBlob =
+              await new Promise<
+                Blob |
+                null
+              >(
+                (
+                  resolve
+                ) => {
+                  canvas.toBlob(
+                    resolve,
+                    mimeType,
+                    format ===
+                      'png'
+                      ? undefined
+                      : quality
+                  );
+                }
+              );
+
+
+            if (
+              imageBlob &&
+              imageBlob.size >
+                0
+            ) {
+              return imageBlob;
+            }
+          }
+        } finally {
+          /*
+           * Release the complete bitmap immediately, including
+           * before a lower-resolution retry.
+           */
+          canvas.width =
+            1;
+
+          canvas.height =
+            1;
+
+          try {
+            canvas.remove();
+          } catch (_) {}
+        }
+
+        await yieldPdfImageBrowser();
+      }
+
+      throw new Error(
+        `Failed to encode page ${pageNum} as ${format.toUpperCase()}`
+      );
+    };
+
   try {
+    let freshPagesSinceRecycle =
+      0;
+
     for (
       let pageNum = 1;
-      pageNum <= pdfDoc.numPages;
+      pageNum <=
+        totalPages;
       pageNum++
     ) {
+      if (
+        recoveryEnabled &&
+        recovery
+          ?.readPage
+      ) {
+        try {
+          const cached =
+            await recovery
+              .readPage(
+                pageNum
+              );
+
+          if (
+            cached &&
+            cached.size >
+              0
+          ) {
+            /*
+             * Already completed before Safari restarted.
+             * Do not replay fake page progress.
+             */
+            await yieldPdfImageBrowser();
+
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read PDF image page ${pageNum} checkpoint:`,
+            recoveryReadError
+          );
+        }
+      }
+
+      onProgress?.(
+        pageNum,
+        totalPages
+      );
+
       const page =
         await pdfDoc.getPage(
           pageNum
         );
 
-      const canvas =
-        document.createElement(
-          'canvas'
-        );
-
       try {
-        const viewport =
-          page.getViewport({
-            scale: 2.0,
-          });
-
-        canvas.width =
-          Math.floor(
-            viewport.width
-          );
-
-        canvas.height =
-          Math.floor(
-            viewport.height
-          );
-
-        const ctx =
-          canvas.getContext(
-            '2d',
-            {
-              alpha: false,
-            }
-          );
-
-        if (!ctx) {
-          throw new Error(
-            'Failed to create canvas rendering context'
-          );
-        }
-
-        ctx.fillStyle =
-          '#ffffff';
-
-        ctx.fillRect(
-          0,
-          0,
-          canvas.width,
-          canvas.height
-        );
-
-        await (
-          page.render({
-            canvasContext:
-              ctx as any,
-            viewport,
-          } as any) as any
-        ).promise;
-
-        /*
-         * Keep encoded image bytes as Blob data.
-         *
-         * Avoid base64/Data URLs, which expand the encoded
-         * image in JavaScript memory and then require callers
-         * to convert it back into binary data.
-         */
         const imageBlob =
-          await new Promise<Blob | null>(
-            (resolve) => {
-              canvas.toBlob(
-                resolve,
-                mimeType,
-                format === 'png'
-                  ? undefined
-                  : quality
-              );
-            }
+          await encodePage(
+            page,
+            pageNum
           );
 
-        if (!imageBlob) {
-          throw new Error(
-            `Failed to encode page ${pageNum} as ${format.toUpperCase()}`
+        if (
+          recoveryEnabled &&
+          recovery
+            ?.writePage
+        ) {
+          /*
+           * Finish the durable page checkpoint before proceeding
+           * to the next page.
+           */
+          await recovery
+            .writePage(
+              pageNum,
+              imageBlob
+            );
+        } else {
+          directBlobs.push(
+            imageBlob
           );
         }
-
-        imageBlobs.push(
-          imageBlob
-        );
       } finally {
-        canvas.width = 1;
-        canvas.height = 1;
-
         try {
           page.cleanup();
         } catch (_) {}
       }
+
+      freshPagesSinceRecycle++;
+
+      /*
+       * Prevent PDF.js page/image caches from accumulating across
+       * a long 150 MB / 86-page conversion.
+       */
+      if (
+        freshPagesSinceRecycle >=
+          2 &&
+        pageNum <
+          totalPages
+      ) {
+        await reopenSource();
+
+        freshPagesSinceRecycle =
+          0;
+      } else {
+        await yieldPdfImageBrowser();
+      }
     }
 
-    return imageBlobs;
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf
+        .dispose();
+
+      loadedPdf =
+        null;
+    }
+
+    await yieldPdfImageBrowser();
+
+    if (
+      !recoveryEnabled
+    ) {
+      return directBlobs;
+    }
+
+    /*
+     * Conversion canvases and PDF.js are gone now.
+     * Return lightweight file-backed Blob references from OPFS.
+     */
+    const completedBlobs:
+      Blob[] =
+      [];
+
+    for (
+      let pageNum = 1;
+      pageNum <=
+        totalPages;
+      pageNum++
+    ) {
+      const blob =
+        await recovery
+          ?.readPage?.(
+            pageNum
+          );
+
+      if (
+        !blob ||
+        blob.size ===
+          0
+      ) {
+        throw new Error(
+          `Converted page ${pageNum} is missing. Retry the conversion.`
+        );
+      }
+
+      completedBlobs.push(
+        blob
+      );
+
+      await yieldPdfImageBrowser();
+    }
+
+    return completedBlobs;
   } finally {
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
   }
 }
 

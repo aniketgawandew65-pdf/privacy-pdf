@@ -11,6 +11,21 @@ import {
   Archive,
 } from 'lucide-react';
 import { pdfToImages } from '../utils/pdfEngine';
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+import {
+  clearPdfToImagesRecovery,
+  finalizePdfToImagesRecovery,
+  pdfToImagesJobMatchesFile,
+  readPdfToImagesJobMeta,
+  readPdfToImagesPage,
+  restorePdfToImagesJobSource,
+  savePdfToImagesJobSource,
+  writePdfToImagesPage,
+} from '../utils/pdfToImagesRecovery';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import {
   checkTaskCredit,
@@ -40,6 +55,27 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const recoverySettingsRef =
+    useRef<{
+      format: OutputFormat;
+      quality: number;
+    } | null>(null);
+
+  const [recoveryReady, setRecoveryReady] =
+    useState(false);
 
   const {
     url: zipUrl,
@@ -79,59 +115,447 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
     setErrorMessage(null);
   };
 
-  const handleConvert = async () => {
-    if (!file) return;
+  const discardPdfToImagesRecovery =
+    () => {
+      clearProcessingRecovery();
 
-    const creditCheck = checkTaskCredit(file);
+      void clearPdfToImagesRecovery()
+        .catch(
+          () => {}
+        );
 
-    if (!creditCheck.allowed) {
-      setErrorMessage(
-        creditCheck.errorMessage ||
-          'This task is not available on your current plan.'
+      recoverySettingsRef.current =
+        null;
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
       );
-      return;
-    }
+    };
 
-    setIsProcessing(true);
-    setProgressText(
-      `Converting PDF pages to ${outputFormat.toUpperCase()}...`
-    );
 
-    resetOutput();
-
-    try {
-      const extractedImages = await pdfToImages(
-        file,
-        outputFormat,
-        quality / 100
-      );
-
-      setImages(extractedImages);
-
-      if (extractedImages.length > 0) {
-        commitTaskCredit();
-      } else {
-        setErrorMessage('No PDF pages could be converted.');
+  /*
+   * Safari may recreate the page after WebKit memory pressure.
+   * Restore the exact source PDF and conversion settings.
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
       }
 
-      /*
-       * Do not build the ZIP here.
-       *
-       * Keep conversion memory limited to the page-image
-       * Blobs. The archive is generated only if the user
-       * explicitly asks to download all pages.
-       */
+      durableRestoreAttemptedRef.current =
+        true;
 
-    } catch (err: any) {
-      console.error('PDF to image conversion error:', err);
-      setErrorMessage(
-        err?.message || 'Could not convert this PDF to images.'
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const restored =
+              await restorePdfToImagesJobSource();
+
+            if (
+              cancelled ||
+              !restored
+            ) {
+              return;
+            }
+
+            recoverySettingsRef.current =
+              {
+                format:
+                  restored.format,
+                quality:
+                  restored.quality,
+              };
+
+            setOutputFormat(
+              restored.format
+            );
+
+            setQuality(
+              restored.quality
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+
+            onFileChange(
+              restored.file
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted PDF to Image job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+
+  /*
+   * If App restored the source first, reconnect it to the
+   * dedicated PDF-to-Image recovery job.
+   */
+  useEffect(
+    () => {
+      if (
+        !file
+      ) {
+        checkedRecoveryFileRef.current =
+          null;
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        return;
+      }
+
+      if (
+        checkedRecoveryFileRef.current ===
+        file
+      ) {
+        return;
+      }
+
+      checkedRecoveryFileRef.current =
+        file;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const meta =
+              await readPdfToImagesJobMeta();
+
+            if (
+              cancelled ||
+              !pdfToImagesJobMatchesFile(
+                meta,
+                file
+              )
+            ) {
+              return;
+            }
+
+            recoverySettingsRef.current =
+              {
+                format:
+                  meta!.format,
+                quality:
+                  meta!.quality,
+              };
+
+            setOutputFormat(
+              meta!.format
+            );
+
+            setQuality(
+              meta!.quality
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to inspect interrupted PDF to Image job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+    ]
+  );
+
+
+  const handleConvert =
+    async (
+      forcedSettings?:
+        {
+          format:
+            OutputFormat;
+          quality:
+            number;
+        }
+    ) => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
+
+      const activeSettings =
+        forcedSettings || {
+          format:
+            outputFormat,
+          quality,
+        };
+
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+      if (
+        !creditCheck.allowed
+      ) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+
+        return;
+      }
+
+      processingInFlightRef.current =
+        true;
+
+      setIsProcessing(
+        true
       );
-    } finally {
-      setIsProcessing(false);
-      setProgressText('');
-    }
-  };
+
+      setProgressText(
+        `Preparing ${activeSettings.format.toUpperCase()} conversion...`
+      );
+
+      resetOutput();
+
+      try {
+        const extractedImages =
+          await exclusivelyProcess(
+            async () => {
+              let recoveryEnabled =
+                false;
+
+              try {
+                await savePdfToImagesJobSource(
+                  file,
+                  activeSettings.format,
+                  activeSettings.quality
+                );
+
+                recoveryEnabled =
+                  true;
+              } catch (
+                recoveryError
+              ) {
+                console.warn(
+                  'PDF to Image restart recovery unavailable:',
+                  recoveryError
+                );
+              }
+
+              return await pdfToImages(
+                file,
+                activeSettings.format,
+                activeSettings.quality /
+                  100,
+                {
+                  onProgress:
+                    (
+                      current,
+                      total
+                    ) => {
+                      setProgressText(
+                        `Converting page ${current} of ${total} to ${activeSettings.format.toUpperCase()}...`
+                      );
+                    },
+
+                  recovery:
+                    recoveryEnabled
+                      ? {
+                          readPage:
+                            (
+                              pageNumber
+                            ) =>
+                              readPdfToImagesPage(
+                                pageNumber,
+                                activeSettings.format
+                              ),
+
+                          writePage:
+                            (
+                              pageNumber,
+                              pageBlob
+                            ) =>
+                              writePdfToImagesPage(
+                                pageNumber,
+                                activeSettings.format,
+                                pageBlob
+                              ),
+                        }
+                      : undefined,
+                }
+              );
+            }
+          );
+
+        setImages(
+          extractedImages
+        );
+
+        if (
+          extractedImages.length >
+          0
+        ) {
+          /*
+           * Finished output exists before the task is charged.
+           */
+          /*
+           * Keep the completed page image files alive for the
+           * preview, Save buttons and ZIP download.
+           *
+           * Only the active recovery metadata/source PDF are
+           * removed here.
+           */
+          await finalizePdfToImagesRecovery();
+
+          clearProcessingRecovery();
+
+          recoverySettingsRef.current =
+            null;
+
+          setRecoveryReady(
+            false
+          );
+
+          resumeAttemptedRef.current =
+            false;
+
+          commitTaskCredit();
+        } else {
+          setErrorMessage(
+            'No PDF pages could be converted.'
+          );
+        }
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'PDF to image conversion error:',
+          err
+        );
+
+        /*
+         * Keep completed page checkpoints after interruption.
+         */
+        setErrorMessage(
+          err?.message ||
+            'Processing was interrupted. Reopen PDF to Image to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressText(
+          ''
+        );
+      }
+    };
+
+
+  /*
+   * Resume from the first missing page after Safari recreates
+   * the process.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        !recoveryReady ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const settings =
+        recoverySettingsRef.current;
+
+      if (
+        !settings
+      ) {
+        return;
+      }
+
+      const timer =
+        window.setTimeout(
+          () => {
+            if (
+              resumeAttemptedRef.current
+            ) {
+              return;
+            }
+
+            resumeAttemptedRef.current =
+              true;
+
+            void handleConvert(
+              settings
+            );
+          },
+          250
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      recoveryReady,
+    ]
+  );
+
 
   const handleDownloadZip = async () => {
     if (
@@ -304,6 +728,23 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
   };
 
   const handleClear = () => {
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+    discardPdfToImagesRecovery();
+
+    processingInFlightRef.current =
+      false;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    checkedRecoveryFileRef.current =
+      null;
+
     onFileChange(null);
     resetOutput();
   };
@@ -406,8 +847,22 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
                   <button
                     key={format}
                     type="button"
+                    disabled={
+                      isProcessing
+                    }
                     onClick={() => {
-                      setOutputFormat(format);
+                      if (
+                        isProcessing
+                      ) {
+                        return;
+                      }
+
+                      discardPdfToImagesRecovery();
+
+                      setOutputFormat(
+                        format
+                      );
+
                       resetOutput();
                     }}
                     className={`py-2 rounded-lg text-xs font-semibold transition ${
@@ -438,8 +893,24 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
                   max="100"
                   step="1"
                   value={quality}
+                  disabled={
+                    isProcessing
+                  }
                   onChange={(e) => {
-                    setQuality(Number(e.target.value));
+                    if (
+                      isProcessing
+                    ) {
+                      return;
+                    }
+
+                    discardPdfToImagesRecovery();
+
+                    setQuality(
+                      Number(
+                        e.target.value
+                      )
+                    );
+
                     resetOutput();
                   }}
                   className="w-full accent-emerald-500"
@@ -450,7 +921,9 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
 
           {images.length === 0 ? (
             <button
-              onClick={handleConvert}
+              onClick={() => {
+                void handleConvert();
+              }}
               disabled={isProcessing}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
             >
@@ -513,6 +986,8 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
                     <img
                       src={imgUrl}
                       alt={`Page ${index + 1}`}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-auto object-contain rounded-lg"
                     />
 

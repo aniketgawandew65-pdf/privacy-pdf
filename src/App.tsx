@@ -459,8 +459,9 @@ export default function App() {
     if (!workspaceReady) return;
 
     /*
-     * Searchable OCR, Dark Mode and B&W / Grayscale own
-     * dedicated durable OPFS recovery sources while processing.
+     * Searchable OCR, Dark Mode, B&W / Grayscale and PDF to
+     * Image own dedicated durable OPFS recovery sources while
+     * processing.
      *
      * After Safari recreates the page, do not immediately copy
      * the same large source into the generic workspace again.
@@ -472,7 +473,9 @@ export default function App() {
         location.pathname ===
           '/dark-mode-pdf' ||
         location.pathname ===
-          '/grayscale-pdf'
+          '/grayscale-pdf' ||
+        location.pathname ===
+          '/pdf-to-image'
       ) &&
       hasRecoverableProcessing()
     ) {
