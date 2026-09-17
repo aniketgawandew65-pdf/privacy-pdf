@@ -18,6 +18,10 @@ import {
 import { imagesToPDF } from '../utils/pdfEngine';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
+import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
   clearToolWorkspace,
@@ -322,6 +326,16 @@ export const ImageToPdf: React.FC = () => {
       return;
     }
 
+    const creditCheck = checkTaskCredit(images);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
 
@@ -340,6 +354,7 @@ export const ImageToPdf: React.FC = () => {
         );
 
         setPdfUrl(URL.createObjectURL(blob));
+        commitTaskCredit();
         return;
       }
 
@@ -366,6 +381,7 @@ export const ImageToPdf: React.FC = () => {
       }
 
       setConverted(results);
+      commitTaskCredit();
 
       /*
        * Do not build a ZIP automatically.
