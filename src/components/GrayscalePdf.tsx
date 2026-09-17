@@ -14,21 +14,53 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
-import { convertToGrayscalePDF } from '../utils/pdfEngine';
+import {
+  convertToGrayscalePDF,
+  type GrayscaleMode,
+} from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+
+import {
+  clearGrayscaleRecovery,
+  grayscaleJobMatchesFile,
+  readGrayscaleJobMeta,
+  readGrayscalePage,
+  restoreGrayscaleJobSource,
+  saveGrayscaleJobSource,
+  writeGrayscalePage,
+} from '../utils/grayscaleRecovery';
+
 interface GrayscalePdfProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
 }
 
+type GrayscaleRecoverySettings = {
+  mode: GrayscaleMode;
+  threshold: number;
+};
+
 export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }) => {
-  const [mode, setMode] = useState<'grayscale' | 'pure-bw'>('grayscale');
+  const [mode, setMode] = useState<GrayscaleMode>('grayscale');
   const [threshold, setThreshold] = useState<number>(135);
+
+  /*
+   * Keep the slider responsive, but do not reopen/render a large
+   * PDF for every tiny finger movement on mobile Safari.
+   */
+  const [previewThreshold, setPreviewThreshold] =
+    useState<number>(135);
+
   const [totalPages, setTotalPages] = useState<number>(0);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -38,13 +70,60 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const previewBusyRef =
+    useRef(false);
+
+  const recoverySettingsRef =
+    useRef<GrayscaleRecoverySettings | null>(null);
 
   const previewObjectUrlRef =
     useRef<string | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  /*
+   * Threshold sliders fire many input events while a finger moves.
+   *
+   * On a ~150 MB PDF, reopening PDF.js for every event can create
+   * several overlapping large preview jobs and make iOS Safari
+   * terminate/restart the page.
+   *
+   * The displayed threshold number changes immediately; only the
+   * expensive visual preview waits until the user pauses.
+   */
+  useEffect(() => {
+    const timer =
+      window.setTimeout(
+        () => {
+          setPreviewThreshold(
+            threshold
+          );
+        },
+        350
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [threshold]);
 
   // Generate real-time preview of page 1
   useEffect(() => {
@@ -57,6 +136,9 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
         previewObjectUrlRef.current =
           null;
       }
+
+      previewBusyRef.current =
+        false;
 
       setPreviewUrl(null);
       setTotalPages(0);
@@ -86,6 +168,10 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     }
 
     setPreviewUrl(null);
+
+    previewBusyRef.current =
+      true;
+
     setIsLoadingPreview(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -174,7 +260,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
                 const val =
                   mode === 'pure-bw'
                     ? (
-                        gray < threshold
+                        gray < previewThreshold
                           ? 0
                           : 255
                       )
@@ -267,6 +353,9 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
           disposePdf = null;
         }
 
+        previewBusyRef.current =
+          false;
+
         if (isMounted) {
           setIsLoadingPreview(
             false
@@ -300,46 +389,494 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
           null;
       }
     };
-  }, [file, mode, threshold]);
+  }, [file, mode, previewThreshold]);
 
-  const handleConvert = async () => {
-    if (!file) return;
+  /*
+   * ==========================================================
+   * DURABLE SOURCE RESTORE AFTER SAFARI/WEBKIT RESTART
+   * ==========================================================
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
+      }
 
-    const creditCheck = checkTaskCredit(file);
+      durableRestoreAttemptedRef.current =
+        true;
 
-    if (!creditCheck.allowed) {
-      setErrorMessage(
-        creditCheck.errorMessage ||
-          'This task is not available on your current plan.'
+      let cancelled =
+        false;
+
+      previewBusyRef.current =
+        true;
+
+      setIsLoadingPreview(
+        true
       );
-      return;
-    }
-    setIsProcessing(true);
-    setErrorMessage(null);
-    revokeDownloadUrl();
 
-    try {
-      const outputBytes = await convertToGrayscalePDF(file, {
-        mode,
-        threshold,
-        onProgress: (curr, total) => {
-          setProgressText(`Converting page ${curr} of ${total}...`);
-        },
-      });
+      void (
+        async () => {
+          try {
+            const restored =
+              await restoreGrayscaleJobSource();
 
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-      commitTaskCredit();
-    } catch (err: any) {
-      console.error('Grayscale error:', err);
-      setErrorMessage(err.message || 'Failed to convert PDF to grayscale.');
-    } finally {
-      setIsProcessing(false);
-      setProgressText('');
-    }
-  };
+            if (
+              cancelled ||
+              !restored
+            ) {
+              if (
+                !cancelled
+              ) {
+                previewBusyRef.current =
+                  false;
+
+                setIsLoadingPreview(
+                  false
+                );
+              }
+
+              return;
+            }
+
+            const settings:
+              GrayscaleRecoverySettings =
+                {
+                  mode:
+                    restored.mode,
+
+                  threshold:
+                    restored.threshold,
+                };
+
+            recoverySettingsRef.current =
+              settings;
+
+            setMode(
+              restored.mode
+            );
+
+            setThreshold(
+              restored.threshold
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+
+            onFileChange(
+              restored.file
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted Grayscale job:',
+              error
+            );
+
+            if (
+              !cancelled
+            ) {
+              previewBusyRef.current =
+                false;
+
+              setIsLoadingPreview(
+                false
+              );
+            }
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+  /*
+   * App.tsx may restore the same source through the generic
+   * workspace first. Recover the dedicated conversion settings.
+   */
+  useEffect(
+    () => {
+      if (
+        !file
+      ) {
+        checkedRecoveryFileRef.current =
+          null;
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        return;
+      }
+
+      if (
+        checkedRecoveryFileRef.current ===
+        file
+      ) {
+        return;
+      }
+
+      checkedRecoveryFileRef.current =
+        file;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const meta =
+              await readGrayscaleJobMeta();
+
+            if (
+              cancelled ||
+              !grayscaleJobMatchesFile(
+                meta,
+                file
+              )
+            ) {
+              return;
+            }
+
+            const settings:
+              GrayscaleRecoverySettings =
+                {
+                  mode:
+                    meta!.mode,
+
+                  threshold:
+                    meta!.threshold,
+                };
+
+            recoverySettingsRef.current =
+              settings;
+
+            setMode(
+              meta!.mode
+            );
+
+            setThreshold(
+              meta!.threshold
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to inspect interrupted Grayscale job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+    ]
+  );
+
+  const handleConvert =
+    async (
+      forcedSettings?:
+        GrayscaleRecoverySettings
+    ) => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
+
+      const activeSettings:
+        GrayscaleRecoverySettings =
+          forcedSettings || {
+            mode,
+            threshold,
+          };
+
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+      if (
+        !creditCheck.allowed
+      ) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+
+        return;
+      }
+
+      processingInFlightRef.current =
+        true;
+
+      setIsProcessing(
+        true
+      );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeDownloadUrl();
+
+      try {
+        const outputBytes =
+          await exclusivelyProcess(
+            async () => {
+              let recoveryEnabled =
+                false;
+
+              try {
+                await saveGrayscaleJobSource(
+                  file,
+                  activeSettings.mode,
+                  activeSettings.threshold
+                );
+
+                recoveryEnabled =
+                  true;
+              } catch (
+                recoveryError
+              ) {
+                console.warn(
+                  'Grayscale restart recovery unavailable:',
+                  recoveryError
+                );
+              }
+
+              return await convertToGrayscalePDF(
+                file,
+                {
+                  mode:
+                    activeSettings.mode,
+
+                  threshold:
+                    activeSettings.threshold,
+
+                  onProgress:
+                    (
+                      curr,
+                      total
+                    ) => {
+                      setProgressText(
+                        `Converting page ${curr} of ${total}...`
+                      );
+                    },
+
+                  recovery:
+                    recoveryEnabled
+                      ? {
+                          readPage:
+                            readGrayscalePage,
+
+                          writePage:
+                            writeGrayscalePage,
+                        }
+                      : undefined,
+                }
+              );
+            }
+          );
+
+        const blob =
+          new Blob(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+        createUrl(
+          blob
+        );
+
+        /*
+         * Complete output exists: clear recovery, then charge.
+         */
+        await clearGrayscaleRecovery();
+
+        clearProcessingRecovery();
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        resumeAttemptedRef.current =
+          false;
+
+        commitTaskCredit();
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'Grayscale error:',
+          err
+        );
+
+        /*
+         * Keep source and finished page checkpoints after an
+         * interruption so reopening can continue.
+         */
+        setErrorMessage(
+          err?.message ||
+            String(err) ||
+            'Processing was interrupted. Reopen B&W / Grayscale to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressText(
+          ''
+        );
+      }
+    };
+
+  /*
+   * Resume only after the live page-1 preview has released its
+   * PDF.js document and canvas.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        !recoveryReady ||
+        isLoadingPreview ||
+        previewBusyRef.current ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const settings =
+        recoverySettingsRef.current;
+
+      if (
+        !settings
+      ) {
+        return;
+      }
+
+      const timer =
+        window.setTimeout(
+          () => {
+            if (
+              previewBusyRef.current ||
+              resumeAttemptedRef.current
+            ) {
+              return;
+            }
+
+            resumeAttemptedRef.current =
+              true;
+
+            void handleConvert(
+              settings
+            );
+          },
+          250
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      recoveryReady,
+      isLoadingPreview,
+      mode,
+      threshold,
+    ]
+  );
+
+  const discardGrayscaleRecovery =
+    () => {
+      clearProcessingRecovery();
+
+      void clearGrayscaleRecovery()
+        .catch(
+          () => {}
+        );
+
+      recoverySettingsRef.current =
+        null;
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
+      );
+    };
+
 
   const handleClear = () => {
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+    discardGrayscaleRecovery();
+
+    processingInFlightRef.current =
+      false;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    checkedRecoveryFileRef.current =
+      null;
+
+    previewBusyRef.current =
+      false;
+
     onFileChange(null);
     setPreviewUrl(null);
     setZoomLevel(1);
@@ -360,7 +897,19 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+    <div
+      aria-busy={
+        isProcessing
+          ? true
+          : undefined
+      }
+      data-processing-active={
+        isProcessing
+          ? 'true'
+          : undefined
+      }
+      className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl"
+    >
       {!file ? (
         <div
           role="button"
@@ -427,7 +976,17 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              disabled={isProcessing}
               onClick={() => {
+                if (
+                  isProcessing ||
+                  mode === 'grayscale'
+                ) {
+                  return;
+                }
+
+                discardGrayscaleRecovery();
+
                 setMode('grayscale');
                 revokeDownloadUrl();
               }}
@@ -442,7 +1001,17 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
             </button>
             <button
               type="button"
+              disabled={isProcessing}
               onClick={() => {
+                if (
+                  isProcessing ||
+                  mode === 'pure-bw'
+                ) {
+                  return;
+                }
+
+                discardGrayscaleRecovery();
+
                 setMode('pure-bw');
                 revokeDownloadUrl();
               }}
@@ -469,8 +1038,20 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
                 min="50"
                 max="200"
                 value={threshold}
+                disabled={isProcessing}
                 onChange={(e) => {
-                  setThreshold(Number(e.target.value));
+                  if (
+                    isProcessing
+                  ) {
+                    return;
+                  }
+
+                  setThreshold(
+                    Number(
+                      e.target.value
+                    )
+                  );
+
                   revokeDownloadUrl();
                 }}
                 className="w-full accent-emerald-400 cursor-pointer"
@@ -527,8 +1108,14 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
               </div>
 
               {/* 4-Way Scroll / Pan Preview Window */}
-              <div className="w-full h-80 bg-zinc-950/90 rounded-lg border border-zinc-800/90 overflow-auto scrollbar-thin p-4 shadow-inner flex">
-                <div className="min-w-full min-h-full m-auto flex items-center justify-center">
+              <div
+                className="w-full h-80 bg-zinc-950/90 rounded-lg border border-zinc-800/90 overflow-auto overscroll-contain scrollbar-thin p-4 shadow-inner"
+                style={{
+                  WebkitOverflowScrolling:
+                    'touch',
+                }}
+              >
+                <div className="min-w-full min-h-full flex">
                   {isLoadingPreview ? (
                     <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
                   ) : (
@@ -539,7 +1126,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
                         width: `${Math.round(200 * zoomLevel)}px`,
                         maxWidth: 'none',
                       }}
-                      className="rounded border border-zinc-700/80 shadow-2xl object-contain transition-all duration-150 select-none"
+                      className="block max-w-none shrink-0 m-auto rounded border border-zinc-700/80 shadow-2xl object-contain transition-all duration-150 select-none"
                     />
                   )}
                 </div>
@@ -558,7 +1145,9 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
           {/* Action Trigger */}
           {!downloadUrl ? (
             <button
-              onClick={handleConvert}
+              onClick={() => {
+                void handleConvert();
+              }}
               disabled={isProcessing}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
             >

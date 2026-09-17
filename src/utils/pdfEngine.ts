@@ -6963,46 +6963,299 @@ export async function createFillablePDF(
   }
 }
 
-export interface GrayscaleOptions {
-  mode: 'grayscale' | 'pure-bw';
-  threshold?: number;
-  onProgress?: (current: number, total: number) => void;
+export type GrayscaleMode =
+  'grayscale' |
+  'pure-bw';
+
+export interface GrayscaleRecoveryHooks {
+  readPage?: (
+    pageNumber: number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber: number,
+    pageBlob: Blob
+  ) => Promise<void>;
 }
+
+export interface GrayscaleOptions {
+  mode: GrayscaleMode;
+  threshold?: number;
+
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void;
+
+  recovery?:
+    GrayscaleRecoveryHooks;
+}
+
+const GRAYSCALE_MAX_TILE_PIXELS =
+  600_000;
+
+const GRAYSCALE_MAX_RENDER_DIMENSION =
+  2048;
+
+const yieldGrayscaleBrowser =
+  async () =>
+    await new Promise<void>(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          0
+        )
+    );
+
+const transformGrayscaleCanvas =
+  (
+    ctx:
+      CanvasRenderingContext2D,
+
+    width:
+      number,
+
+    height:
+      number,
+
+    mode:
+      GrayscaleMode,
+
+    threshold:
+      number
+  ) => {
+    /*
+     * Process small strips instead of cloning the complete
+     * 2x page into one huge RGBA ImageData allocation.
+     */
+    const tileHeight =
+      Math.max(
+        1,
+        Math.min(
+          height,
+          Math.floor(
+            GRAYSCALE_MAX_TILE_PIXELS /
+              Math.max(
+                1,
+                width
+              )
+          )
+        )
+      );
+
+    for (
+      let y = 0;
+      y < height;
+      y += tileHeight
+    ) {
+      const currentHeight =
+        Math.min(
+          tileHeight,
+          height - y
+        );
+
+      const imgData =
+        ctx.getImageData(
+          0,
+          y,
+          width,
+          currentHeight
+        );
+
+      const data =
+        imgData.data;
+
+      for (
+        let i = 0;
+        i < data.length;
+        i += 4
+      ) {
+        const gray =
+          0.299 *
+            data[i] +
+          0.587 *
+            data[
+              i + 1
+            ] +
+          0.114 *
+            data[
+              i + 2
+            ];
+
+        const value =
+          mode ===
+            'pure-bw'
+            ? (
+                gray <
+                threshold
+                  ? 0
+                  : 255
+              )
+            : gray;
+
+        data[i] =
+          value;
+
+        data[
+          i + 1
+        ] =
+          value;
+
+        data[
+          i + 2
+        ] =
+          value;
+      }
+
+      ctx.putImageData(
+        imgData,
+        0,
+        y
+      );
+    }
+  };
 
 export async function convertToGrayscalePDF(
   file: File,
   options: GrayscaleOptions
 ): Promise<Uint8Array> {
   const {
-    mode = 'grayscale',
-    threshold = 135,
-    onProgress,
-  } = options;
+    mode =
+      'grayscale',
 
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
+    threshold =
+      135,
+
+    onProgress,
+
+    recovery,
+  } =
+    options;
+
+  const recoveryEnabled =
+    Boolean(
+      recovery?.readPage &&
+      recovery?.writePage
     );
 
-  const pdfDoc =
-    loadedPdf.pdf;
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
+
+  const reopenSource =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        await loadedPdf.dispose();
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldGrayscaleBrowser();
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+    };
 
   try {
     const totalPages =
       pdfDoc.numPages;
 
-    const outputDoc =
-      await PDFDocument.create();
+    if (
+      totalPages <
+      1
+    ) {
+      throw new Error(
+        'This PDF has no pages.'
+      );
+    }
 
+    /*
+     * When recovery is enabled, transformed pages are first
+     * stored as local JPEG checkpoints instead of building the
+     * whole pdf-lib output while large canvases are alive.
+     */
+    const directOutput =
+      recoveryEnabled
+        ? null
+        : await PDFDocument.create();
 
+    let freshPagesSinceRecycle =
+      0;
+
+    /*
+     * ========================================================
+     * PHASE 1 — TRANSFORM + CHECKPOINT
+     * ========================================================
+     */
     for (
       let pageNum = 1;
       pageNum <= totalPages;
       pageNum++
     ) {
+      if (
+        recoveryEnabled &&
+        recovery?.readPage
+      ) {
+        try {
+          const cached =
+            await recovery.readPage(
+              pageNum
+            );
+
+          if (
+            cached &&
+            cached.size >
+              3
+          ) {
+            /*
+             * Already completed before Safari restarted.
+             * Skip directly to the first unfinished page.
+             */
+            await yieldGrayscaleBrowser();
+
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read Grayscale page ${pageNum} checkpoint:`,
+            recoveryReadError
+          );
+        }
+      }
+
       onProgress?.(
         pageNum,
         totalPages
@@ -7019,107 +7272,84 @@ export async function convertToGrayscalePDF(
         );
 
       try {
+        const original =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const maxDimension =
+          Math.max(
+            original.width,
+            original.height
+          );
+
+        /*
+         * Normal A4/Letter pages retain 2x rendering.
+         * Very large pages are capped for mobile Safari.
+         */
+        const renderScale =
+          Math.min(
+            2.0,
+            GRAYSCALE_MAX_RENDER_DIMENSION /
+              Math.max(
+                1,
+                maxDimension
+              )
+          );
+
         const viewport =
           page.getViewport({
-            scale: 2.0,
+            scale:
+              renderScale,
           });
 
         canvas.width =
-          Math.floor(
-            viewport.width
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
           );
 
         canvas.height =
-          Math.floor(
-            viewport.height
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
           );
 
         const ctx =
           canvas.getContext(
             '2d',
             {
-              alpha: false,
+              alpha:
+                false,
             }
           );
 
         if (!ctx) {
           throw new Error(
-            'Canvas rendering context unavailable'
+            `Canvas rendering context unavailable for page ${pageNum}.`
           );
         }
-
 
         await (
           page.render({
             canvasContext:
               ctx as any,
+
             viewport,
           } as any) as any
         ).promise;
 
-
-        const imgData =
-          ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-        const data =
-          imgData.data;
-
-
-        for (
-          let i = 0;
-          i < data.length;
-          i += 4
-        ) {
-          const gray =
-            0.299 *
-              data[i] +
-            0.587 *
-              data[i + 1] +
-            0.114 *
-              data[i + 2];
-
-          if (
-            mode ===
-            'pure-bw'
-          ) {
-            const val =
-              gray <
-              threshold
-                ? 0
-                : 255;
-
-            data[i] =
-              val;
-
-            data[i + 1] =
-              val;
-
-            data[i + 2] =
-              val;
-          } else {
-            data[i] =
-              gray;
-
-            data[i + 1] =
-              gray;
-
-            data[i + 2] =
-              gray;
-          }
-        }
-
-
-        ctx.putImageData(
-          imgData,
-          0,
-          0
+        transformGrayscaleCanvas(
+          ctx,
+          canvas.width,
+          canvas.height,
+          mode,
+          threshold
         );
-
 
         const jpegBlob =
           await new Promise<Blob>(
@@ -7129,12 +7359,16 @@ export async function convertToGrayscalePDF(
             ) => {
               canvas.toBlob(
                 (blob) => {
-                  if (blob) {
-                    resolve(blob);
+                  if (
+                    blob
+                  ) {
+                    resolve(
+                      blob
+                    );
                   } else {
                     reject(
                       new Error(
-                        'Failed to encode page'
+                        `Unable to encode Grayscale page ${pageNum}.`
                       )
                     );
                   }
@@ -7145,43 +7379,49 @@ export async function convertToGrayscalePDF(
             }
           );
 
-
-        const jpegBytes =
-          await jpegBlob.arrayBuffer();
-
-        const embeddedImage =
-          await outputDoc.embedJpg(
-            jpegBytes
+        if (
+          recoveryEnabled &&
+          recovery?.writePage
+        ) {
+          await recovery.writePage(
+            pageNum,
+            jpegBlob
           );
+        } else if (
+          directOutput
+        ) {
+          const jpegBytes =
+            await jpegBlob.arrayBuffer();
 
+          const embeddedImage =
+            await directOutput.embedJpg(
+              jpegBytes
+            );
 
-        const unscaledViewport =
-          page.getViewport({
-            scale: 1.0,
-          });
+          const newPage =
+            directOutput.addPage([
+              original.width,
+              original.height,
+            ]);
 
-
-        const newPage =
-          outputDoc.addPage([
-            unscaledViewport.width,
-            unscaledViewport.height,
-          ]);
-
-
-        newPage.drawImage(
-          embeddedImage,
-          {
-            x: 0,
-            y: 0,
-            width:
-              unscaledViewport.width,
-            height:
-              unscaledViewport.height,
-          }
-        );
+          newPage.drawImage(
+            embeddedImage,
+            {
+              x: 0,
+              y: 0,
+              width:
+                original.width,
+              height:
+                original.height,
+            }
+          );
+        }
       } finally {
-        canvas.width = 1;
-        canvas.height = 1;
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
 
         try {
           canvas.remove();
@@ -7192,45 +7432,188 @@ export async function convertToGrayscalePDF(
         } catch (_) {}
       }
 
+      freshPagesSinceRecycle++;
+
       /*
-       * Allow the browser to reclaim the completed
-       * page's temporary pixel/JPEG memory before
-       * processing the next page.
+       * Hard memory boundary every two newly-rendered pages.
        */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      if (
+        freshPagesSinceRecycle >=
+          2 &&
+        pageNum <
+          totalPages
+      ) {
+        await reopenSource();
+
+        freshPagesSinceRecycle =
+          0;
+      } else {
+        await yieldGrayscaleBrowser();
+      }
     }
 
+    /*
+     * OPFS unavailable: ordinary one-pass result.
+     */
+    if (
+      !recoveryEnabled
+    ) {
+      if (
+        loadedPdf
+      ) {
+        await loadedPdf.dispose();
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldGrayscaleBrowser();
+
+      return await directOutput!.save({
+        useObjectStreams:
+          true,
+      });
+    }
 
     /*
-     * All converted pages are already embedded in the
-     * output document. Release the original PDF.js source
-     * before serializing the complete grayscale PDF.
+     * ========================================================
+     * PHASE 2 — BUILD FINAL PDF FROM CHECKPOINTS
+     * ========================================================
      */
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf.dispose();
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
+      loadedPdf =
+        null;
+    }
+
+    await yieldGrayscaleBrowser();
+
+    const outputDoc =
+      await PDFDocument.create();
+
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+    pdfDoc =
+      loadedPdf.pdf;
+
+    let assemblyPagesSinceRecycle =
+      0;
+
+    for (
+      let pageNum = 1;
+      pageNum <= totalPages;
+      pageNum++
+    ) {
+      const pageBlob =
+        await recovery?.readPage?.(
+          pageNum
+        );
+
+      if (
+        !pageBlob ||
+        pageBlob.size <
+          4
+      ) {
+        throw new Error(
+          `Recovery page ${pageNum} is missing. Retry the conversion.`
+        );
+      }
+
+      const page =
+        await pdfDoc.getPage(
+          pageNum
+        );
+
+      try {
+        const original =
+          page.getViewport({
+            scale: 1.0,
+          });
+
+        const jpegBytes =
+          await pageBlob.arrayBuffer();
+
+        const image =
+          await outputDoc.embedJpg(
+            jpegBytes
+          );
+
+        const newPage =
+          outputDoc.addPage([
+            original.width,
+            original.height,
+          ]);
+
+        newPage.drawImage(
+          image,
+          {
+            x: 0,
+            y: 0,
+            width:
+              original.width,
+            height:
+              original.height,
+          }
+        );
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+      assemblyPagesSinceRecycle++;
+
+      if (
+        assemblyPagesSinceRecycle >=
+          8 &&
+        pageNum <
+          totalPages
+      ) {
+        await reopenSource();
+
+        assemblyPagesSinceRecycle =
+          0;
+      } else {
+        await yieldGrayscaleBrowser();
+      }
+    }
+
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf.dispose();
+
+      loadedPdf =
+        null;
+    }
+
+    await yieldGrayscaleBrowser();
 
     return await outputDoc.save({
-      useObjectStreams: true,
+      useObjectStreams:
+        true,
     });
   } finally {
-    /*
-     * dispose() is idempotent and also protects
-     * errors before final serialization.
-     */
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf.dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
   }
 }
 
