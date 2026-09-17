@@ -20,6 +20,33 @@ interface EditMetadataProps {
   onFileChange: (file: File | null) => void;
 }
 
+type MetadataDraft = {
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+};
+
+/*
+ * Intentionally module-memory only.
+ *
+ * This keeps metadata fields when the user navigates away from
+ * this tool and comes back during the same app session.
+ *
+ * A real browser hard refresh creates a fresh JS runtime, so the
+ * draft disappears exactly as requested.
+ */
+const metadataDrafts =
+  new Map<string, MetadataDraft>();
+
+const metadataDraftKey =
+  (file: File) =>
+    [
+      file.name,
+      file.size,
+      file.lastModified || 0,
+    ].join(':');
+
 export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }) => {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -43,19 +70,104 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
       return;
     }
 
+    const draftKey =
+      metadataDraftKey(file);
+
+    const existingDraft =
+      metadataDrafts.get(
+        draftKey
+      );
+
+    /*
+     * The user already worked on this exact file during the
+     * current app session. Restore their latest values instead
+     * of rereading the untouched original PDF.
+     */
+    if (existingDraft) {
+      setTitle(
+        existingDraft.title
+      );
+
+      setAuthor(
+        existingDraft.author
+      );
+
+      setSubject(
+        existingDraft.subject
+      );
+
+      setKeywords(
+        existingDraft.keywords
+      );
+
+      setIsLoading(false);
+      setError(null);
+
+      if (downloadUrl) {
+        URL.revokeObjectURL(
+          downloadUrl
+        );
+      }
+
+      setDownloadUrl(null);
+
+      return;
+    }
+
     let isMounted = true;
     setIsLoading(true);
     setError(null);
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+
+    if (downloadUrl) {
+      URL.revokeObjectURL(
+        downloadUrl
+      );
+    }
+
     setDownloadUrl(null);
 
     getPDFMetadata(file)
       .then((meta) => {
         if (!isMounted) return;
-        setTitle(meta.title || '');
-        setAuthor(meta.author || '');
-        setSubject(meta.subject || '');
-        setKeywords(meta.keywords || '');
+
+        const draft: MetadataDraft = {
+          title:
+            meta.title || '',
+
+          author:
+            meta.author || '',
+
+          subject:
+            meta.subject || '',
+
+          keywords:
+            meta.keywords || '',
+        };
+
+        /*
+         * Even original metadata is remembered so navigating
+         * away/back never causes the fields to flash/reset.
+         */
+        metadataDrafts.set(
+          draftKey,
+          draft
+        );
+
+        setTitle(
+          draft.title
+        );
+
+        setAuthor(
+          draft.author
+        );
+
+        setSubject(
+          draft.subject
+        );
+
+        setKeywords(
+          draft.keywords
+        );
       })
       .catch((err: any) => {
         console.warn('Metadata read notice:', err);
@@ -68,6 +180,37 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
       isMounted = false;
     };
   }, [file]);
+
+  const persistMetadataDraft = (
+    next:
+      Partial<MetadataDraft>
+  ) => {
+    if (!file) {
+      return;
+    }
+
+    const key =
+      metadataDraftKey(file);
+
+    const current =
+      metadataDrafts.get(
+        key
+      ) || {
+        title,
+        author,
+        subject,
+        keywords,
+      };
+
+    metadataDrafts.set(
+      key,
+      {
+        ...current,
+        ...next,
+      }
+    );
+  };
+
 
   const handleSave = async () => {
     if (!file) return;
@@ -83,6 +226,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
 
     setIsProcessing(true);
     setError(null);
+
+    /*
+     * Preserve exactly what is being written into the PDF.
+     */
+    persistMetadataDraft({
+      title,
+      author,
+      subject,
+      keywords,
+    });
 
     try {
       const outputBytes = await updatePDFMetadata(file, {
@@ -115,7 +268,20 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
   };
 
   const handleClear = () => {
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    if (file) {
+      metadataDrafts.delete(
+        metadataDraftKey(
+          file
+        )
+      );
+    }
+
+    if (downloadUrl) {
+      URL.revokeObjectURL(
+        downloadUrl
+      );
+    }
+
     onFileChange(null);
     setDownloadUrl(null);
     setError(null);
@@ -198,7 +364,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                     type="text"
                     value={title}
                     onChange={(e) => {
-                      setTitle(e.target.value);
+                      const value =
+                        e.target.value;
+
+                      setTitle(value);
+
+                      persistMetadataDraft({
+                        title:
+                          value,
+                      });
+
                       setDownloadUrl(null);
                     }}
                     placeholder="Document Title"
@@ -212,7 +387,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                     type="text"
                     value={author}
                     onChange={(e) => {
-                      setAuthor(e.target.value);
+                      const value =
+                        e.target.value;
+
+                      setAuthor(value);
+
+                      persistMetadataDraft({
+                        author:
+                          value,
+                      });
+
                       setDownloadUrl(null);
                     }}
                     placeholder="Author name"
@@ -226,7 +410,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                     type="text"
                     value={subject}
                     onChange={(e) => {
-                      setSubject(e.target.value);
+                      const value =
+                        e.target.value;
+
+                      setSubject(value);
+
+                      persistMetadataDraft({
+                        subject:
+                          value,
+                      });
+
                       setDownloadUrl(null);
                     }}
                     placeholder="Document subject or summary"
@@ -240,7 +433,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                     type="text"
                     value={keywords}
                     onChange={(e) => {
-                      setKeywords(e.target.value);
+                      const value =
+                        e.target.value;
+
+                      setKeywords(value);
+
+                      persistMetadataDraft({
+                        keywords:
+                          value,
+                      });
+
                       setDownloadUrl(null);
                     }}
                     placeholder="e.g. statement, financial, 2026 (comma separated)"
