@@ -16,6 +16,10 @@ import {
   type OcrProgress,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 import {
   clearProcessingRecovery,
@@ -321,6 +325,19 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
         return;
       }
 
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+      if (!creditCheck.allowed) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+        return;
+      }
+
       processingInFlightRef.current =
         true;
 
@@ -473,6 +490,8 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
         clearProcessingRecovery();
 
         await clearOcrSearchJobSource();
+
+        commitTaskCredit();
 
 
         if (
