@@ -12,6 +12,11 @@ export const MAX_FREE_FILE_SIZE_MB = 10;
 export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = GOOGLE_BONUS_FILE_SIZE_MB;
 export const MAX_PRO_FILE_SIZE_MB = 150;
 
+export type TaskCreditTier =
+  | 'pro'
+  | 'anonymous'
+  | 'google';
+
 interface DailyUsageRecord {
   date: string; // YYYY-MM-DD
   count: number;
@@ -131,102 +136,193 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   allowed: boolean;
   reason?: 'DAILY_LIMIT' | 'FILE_SIZE_LIMIT';
   errorMessage?: string;
+  creditTier?: TaskCreditTier;
 } {
   const { isPro } = getLicenseStatus();
 
-  if (isPro) {
-    if (fileSizeBytes !== undefined) {
-      const sizeInMb = fileSizeBytes / (1024 * 1024);
+  const sizeInMb =
+    fileSizeBytes === undefined
+      ? undefined
+      : fileSizeBytes / (1024 * 1024);
 
-      if (sizeInMb > MAX_PRO_FILE_SIZE_MB) {
-        return {
-          allowed: false,
-          reason: 'FILE_SIZE_LIMIT',
-          errorMessage:
-            `File exceeds the maximum Pro upload limit of ${MAX_PRO_FILE_SIZE_MB}MB.`,
-        };
-      }
+  if (isPro) {
+    if (
+      sizeInMb !== undefined &&
+      sizeInMb > MAX_PRO_FILE_SIZE_MB
+    ) {
+      return {
+        allowed: false,
+        reason: 'FILE_SIZE_LIMIT',
+        errorMessage:
+          `File exceeds the maximum Pro upload limit of ${MAX_PRO_FILE_SIZE_MB}MB.`,
+      };
     }
 
-    return { allowed: true };
+    return {
+      allowed: true,
+      creditTier: 'pro',
+    };
   }
 
   const usage = getDailyUsage();
-  const activeBonusAccount =
+  const bonusAccount =
     getActiveGoogleBonus();
 
-  if (usage.tier === 'anonymous' && usage.anonymousRemaining > 0) {
-    const freeFileLimitMb =
-      activeBonusAccount
-        ? MAX_GOOGLE_BONUS_FILE_SIZE_MB
-        : MAX_FREE_FILE_SIZE_MB;
+  const bonusRemaining =
+    bonusAccount?.bonusRemaining ?? 0;
 
-    if (fileSizeBytes !== undefined) {
-      const sizeInMb = fileSizeBytes / (1024 * 1024);
-
-      if (sizeInMb > freeFileLimitMb) {
-        return {
-          allowed: false,
-          reason: 'FILE_SIZE_LIMIT',
-          errorMessage:
-            activeBonusAccount
-              ? `Signed-in free tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
-                `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
-              : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-                `Sign in to unlock 2 bonus tasks and files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
-                `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
-        };
-      }
-    }
-
-    return { allowed: true };
+  /*
+   * Anything above 25 MB requires Pro.
+   */
+  if (
+    sizeInMb !== undefined &&
+    sizeInMb > MAX_GOOGLE_BONUS_FILE_SIZE_MB
+  ) {
+    return {
+      allowed: false,
+      reason: 'FILE_SIZE_LIMIT',
+      errorMessage:
+        bonusAccount
+          ? `Bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+          : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+            `Sign in to unlock 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
+            `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
+    };
   }
 
-  if (usage.bonusRemaining > 0) {
-    if (fileSizeBytes !== undefined) {
-      const sizeInMb = fileSizeBytes / (1024 * 1024);
-
-      if (sizeInMb > MAX_GOOGLE_BONUS_FILE_SIZE_MB) {
-        return {
-          allowed: false,
-          reason: 'FILE_SIZE_LIMIT',
-          errorMessage:
-            `Bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
-            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
-        };
-      }
+  /*
+   * Files above 10 MB can NEVER consume a daily anonymous
+   * credit. They require an available bonus credit.
+   */
+  if (
+    sizeInMb !== undefined &&
+    sizeInMb > MAX_FREE_FILE_SIZE_MB
+  ) {
+    if (bonusRemaining > 0) {
+      return {
+        allowed: true,
+        creditTier: 'google',
+      };
     }
 
-    return { allowed: true };
+    return {
+      allowed: false,
+      reason: 'FILE_SIZE_LIMIT',
+      errorMessage:
+        bonusAccount
+          ? `Your bonus tasks are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+          : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+            `Sign in to unlock 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
+    };
+  }
+
+  /*
+   * Files up to 10 MB consume daily credits first.
+   */
+  if (usage.anonymousRemaining > 0) {
+    return {
+      allowed: true,
+      creditTier: 'anonymous',
+    };
+  }
+
+  /*
+   * Once daily credits are gone, bonus credits can also
+   * handle files up to 10 MB.
+   */
+  if (bonusRemaining > 0) {
+    return {
+      allowed: true,
+      creditTier: 'google',
+    };
   }
 
   return {
     allowed: false,
     reason: 'DAILY_LIMIT',
-    errorMessage: activeBonusAccount
-      ? 'You have used all 2 bonus tasks. Upgrade to Pro to continue.'
-      : `You have used today's ${MAX_FREE_DAILY_TASKS} no-signup tasks. Sign in to unlock 2 bonus tasks.`,
+    errorMessage:
+      bonusAccount
+        ? 'You have used all available free and bonus tasks. Upgrade to Pro to continue.'
+        : `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in to unlock 2 bonus tasks.`,
   };
 }
 
-export function recordActionExecution(): void {
+export function recordActionExecution(
+  creditTier?: TaskCreditTier
+): void {
   const { isPro } = getLicenseStatus();
-  if (isPro) return;
+
+  if (
+    isPro ||
+    creditTier === 'pro'
+  ) {
+    return;
+  }
 
   const today = getTodayString();
   const record = readUsage(today);
 
-  if (record.count < MAX_FREE_DAILY_TASKS) {
+  /*
+   * When the gate selected the bonus tier, consume the
+   * account-specific bonus credit directly.
+   */
+  if (creditTier === 'google') {
+    const google =
+      getActiveGoogleBonus();
+
+    if (
+      google &&
+      google.bonusRemaining > 0
+    ) {
+      consumeGoogleBonus();
+    }
+
+    return;
+  }
+
+  /*
+   * When the gate selected the daily tier, consume only
+   * the daily credit.
+   */
+  if (creditTier === 'anonymous') {
+    if (
+      record.count <
+      MAX_FREE_DAILY_TASKS
+    ) {
+      persistUsage({
+        date: today,
+        count: record.count + 1,
+      });
+    }
+
+    return;
+  }
+
+  /*
+   * Backward-safe fallback for any legacy caller that
+   * commits without an explicit checked tier.
+   */
+  if (
+    record.count <
+    MAX_FREE_DAILY_TASKS
+  ) {
     persistUsage({
       date: today,
       count: record.count + 1,
     });
+
     return;
   }
 
-  const google = getActiveGoogleBonus();
+  const google =
+    getActiveGoogleBonus();
 
-  if (google && google.bonusRemaining > 0) {
+  if (
+    google &&
+    google.bonusRemaining > 0
+  ) {
     consumeGoogleBonus();
   }
 }

@@ -511,34 +511,26 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       {!isPro && (
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 sm:pb-4 mb-4 sm:mb-5 border-b border-zinc-800 text-xs">
           <div className="space-y-1">
-            {dailyStats.tier === 'google' ? (
-              <div className="text-zinc-400">
+            <div className="text-zinc-400">
+              Daily Free Tasks:{' '}
+              <strong className="text-zinc-200">
+                {dailyStats.anonymousRemaining} of 2 remaining
+              </strong>
+              {' '}• Up to 10 MB
+            </div>
+
+            {hasBonusAccount ? (
+              <div className="text-emerald-400">
                 Bonus Tasks:{' '}
-                <strong className="text-zinc-200">
-                  {dailyStats.remaining} of 2 remaining
+                <strong>
+                  {dailyStats.bonusRemaining} of 2 remaining
                 </strong>
                 {' '}• Up to 25 MB
               </div>
             ) : (
-              <>
-                <div className="text-zinc-400">
-                  Daily Free Tasks:{' '}
-                  <strong className="text-zinc-200">
-                    {dailyStats.anonymousRemaining} of 2 remaining
-                  </strong>
-                  {' '}• Up to {hasBonusAccount ? '25 MB' : '10 MB'}
-                </div>
-
-                {hasBonusAccount ? (
-                  <div className="text-emerald-400">
-                    + {dailyStats.bonusRemaining} bonus tasks available • Up to 25 MB
-                  </div>
-                ) : (
-                  <div className="text-emerald-400">
-                    Sign in to unlock 2 bonus tasks • Up to 25 MB
-                  </div>
-                )}
-              </>
+              <div className="text-emerald-400">
+                Sign in to unlock 2 bonus tasks • Up to 25 MB
+              </div>
             )}
           </div>
 
@@ -588,7 +580,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             Tap or drop PDF files to compress
           </p>
           <p className="text-xs text-zinc-500 mt-1">
-            Single or multi-file batch • Max {isPro ? '150 MB' : hasBonusAccount ? '25 MB' : '10 MB'}
+            Single or multi-file batch • Max {isPro ? '150 MB' : dailyStats.bonusRemaining > 0 ? '25 MB' : '10 MB'}
           </p>
         </div>
       )}

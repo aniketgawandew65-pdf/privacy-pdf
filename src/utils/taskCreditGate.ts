@@ -1,13 +1,27 @@
 import {
   checkActionAllowed,
   recordActionExecution,
+  type TaskCreditTier,
 } from './usageTracker';
 
 export interface TaskCreditResult {
   allowed: boolean;
   reason?: 'DAILY_LIMIT' | 'FILE_SIZE_LIMIT';
   errorMessage?: string;
+  creditTier?: TaskCreditTier;
 }
+
+/*
+ * The application performs one active local task at a time.
+ * Batch processing is also serial by default.
+ *
+ * Keep the tier selected by the immediately preceding
+ * entitlement check so a successful task charges exactly
+ * that tier.
+ */
+let pendingCreditTier:
+  | TaskCreditTier
+  | undefined;
 
 /**
  * Check entitlement immediately before a real tool operation starts.
@@ -24,20 +38,36 @@ export function checkTaskCredit(
     | null
     | undefined
 ): TaskCreditResult {
-  let totalBytes: number | undefined;
+  let totalBytes:
+    | number
+    | undefined;
 
   if (typeof input === 'number') {
-    totalBytes = Math.max(0, input);
+    totalBytes =
+      Math.max(0, input);
   } else if (Array.isArray(input)) {
-    totalBytes = input.reduce(
-      (sum, item) => sum + item.size,
-      0
-    );
+    totalBytes =
+      input.reduce(
+        (sum, item) =>
+          sum + item.size,
+        0
+      );
   } else if (input) {
-    totalBytes = input.size;
+    totalBytes =
+      input.size;
   }
 
-  return checkActionAllowed(totalBytes);
+  const result =
+    checkActionAllowed(
+      totalBytes
+    );
+
+  pendingCreditTier =
+    result.allowed
+      ? result.creditTier
+      : undefined;
+
+  return result;
 }
 
 /**
@@ -47,7 +77,15 @@ export function checkTaskCredit(
  * successfully enough to produce its intended result.
  */
 export function commitTaskCredit(): void {
-  recordActionExecution();
+  const creditTier =
+    pendingCreditTier;
+
+  pendingCreditTier =
+    undefined;
+
+  recordActionExecution(
+    creditTier
+  );
 }
 
 /**
@@ -77,20 +115,23 @@ export async function runWithTaskCredit<T>(
       errorMessage: string;
     }
 > {
-  const check = checkTaskCredit(input);
+  const check =
+    checkTaskCredit(input);
 
   if (!check.allowed) {
     return {
       ok: false,
       blocked: true,
-      reason: check.reason,
+      reason:
+        check.reason,
       errorMessage:
         check.errorMessage ||
         'This task is not available on your current plan.',
     };
   }
 
-  const result = await operation();
+  const result =
+    await operation();
 
   commitTaskCredit();
 
