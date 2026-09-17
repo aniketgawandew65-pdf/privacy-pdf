@@ -15,6 +15,10 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { reorderAndProcessPDF, type PageConfig } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface OrganizePdfProps {
   file: File | null;
@@ -319,6 +323,16 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
 
   const handleApply = async () => {
     if (!file || pages.length === 0) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -332,6 +346,7 @@ export const OrganizePdf: React.FC<OrganizePdfProps> = ({ file, onFileChange }) 
       const bytes = await reorderAndProcessPDF(file, config);
       const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Organize export error:', err);
       setErrorMessage(err.message || 'Failed to save organized PDF.');

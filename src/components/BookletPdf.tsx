@@ -13,6 +13,10 @@ import {
   getPDFPageCount,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface BookletPdfProps {
   file: File | null;
@@ -58,6 +62,16 @@ export const BookletPdf: React.FC<BookletPdfProps> = ({ file, onFileChange }) =>
 
   const handleGenerateBooklet = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -73,6 +87,7 @@ export const BookletPdf: React.FC<BookletPdfProps> = ({ file, onFileChange }) =>
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Booklet creation error:', err);
       setErrorMessage(err.message || 'Failed to generate booklet layout.');

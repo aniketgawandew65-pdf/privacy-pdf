@@ -16,6 +16,10 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { addWatermarkToPDF, type WatermarkOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface WatermarkProps {
   file: File | null;
@@ -218,6 +222,16 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
 
   const handleApplyWatermark = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     if (watermarkType === 'text' && !text.trim()) {
       setError('Please enter watermark text.');
       return;
@@ -248,6 +262,7 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       const outputBytes = await addWatermarkToPDF(file, opts);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err) {
       console.error(err);
       setError((err as any)?.message || String(err));

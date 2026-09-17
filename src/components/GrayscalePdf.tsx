@@ -16,6 +16,10 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { convertToGrayscalePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface GrayscalePdfProps {
   file: File | null;
@@ -300,6 +304,16 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
 
   const handleConvert = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -315,6 +329,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Grayscale error:', err);
       setErrorMessage(err.message || 'Failed to convert PDF to grayscale.');

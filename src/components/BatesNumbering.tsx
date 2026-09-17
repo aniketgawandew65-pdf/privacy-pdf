@@ -15,6 +15,10 @@ import {
   type BatesPosition,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface BatesNumberingProps {
   file: File | null;
@@ -64,6 +68,16 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
 
   const handleApplyBates = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -83,6 +97,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Bates Stamping error:', err);
       setErrorMessage(err.message || 'Failed to apply Bates numbering.');

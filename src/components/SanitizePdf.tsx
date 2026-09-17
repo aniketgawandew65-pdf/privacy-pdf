@@ -12,6 +12,10 @@ import {
 } from 'lucide-react';
 import { sanitizePDF } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface SanitizePdfProps {
   file: File | null;
@@ -27,6 +31,16 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
 
   const handleSanitize = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -35,6 +49,7 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
       const outputBytes = await sanitizePDF(file);
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err) {
       console.error('Sanitize error:', err);
       setErrorMessage('Failed to sanitize PDF. The document may be corrupted or password-protected.');

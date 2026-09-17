@@ -17,6 +17,10 @@ import {
   type ResizeFitMode,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface ResizePdfProps {
   file: File | null;
@@ -63,6 +67,16 @@ export const ResizePdf: React.FC<ResizePdfProps> = ({ file, onFileChange }) => {
 
   const handleResize = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -79,6 +93,7 @@ export const ResizePdf: React.FC<ResizePdfProps> = ({ file, onFileChange }) => {
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Resize error:', err);
       setErrorMessage(err.message || 'Failed to resize PDF.');
