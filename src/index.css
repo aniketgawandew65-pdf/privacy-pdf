@@ -24,7 +24,7 @@
 }
 :root {font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202023;background:#fafaf9;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
 * {box-sizing:border-box}
-body {margin:0;min-width:320px;overflow-x:hidden}
+body {margin:0;min-width:320px}
 button,input,select,textarea {font:inherit}
 button,a,input,select,textarea { -webkit-tap-highlight-color:transparent }
 button:not(:disabled),summary {cursor:pointer}
@@ -131,33 +131,23 @@ a {text-decoration:none}
 .pro-active {padding:18px;border:1px solid #ddd;border-radius:12px;margin:20px 0;font-size:14px}.pro-active p {font-size:12px;color:#666}
 @media(max-width:700px){
  .site-header,.site-main,.site-footer {width:calc(100% - 32px)}
- .site-header {height:64px;gap:6px;width:calc(100% - 24px);justify-content:flex-start}
- .brand {font-size:18px;gap:7px;letter-spacing:-.7px;flex-shrink:0}
- .brand img {width:28px;height:32px}
- .header-actions {gap:3px;margin-left:auto;flex-shrink:0}
- .quiet-button,.primary-button {min-height:40px;padding:8px 10px}
- .tools-toggle {width:40px;min-width:40px;padding:0;gap:0}
- .tools-toggle svg:first-child {display:block}
- .tools-toggle span,.tools-toggle svg:last-child {display:none}
+ .site-header {height:auto;min-height:72px;gap:8px;flex-wrap:wrap;padding:8px 0 10px}
+ .brand {font-size:20px;gap:8px}
+ .brand img {width:30px;height:35px}
+ .header-actions {gap:4px;margin-left:auto}
+ .quiet-button,.primary-button {padding:10px 12px}
+ .tools-toggle {gap:6px}
+ .tools-toggle svg:first-child {display:none}
  .install-button {display:none}
- .pro-button {font-size:11px;white-space:nowrap;min-width:auto;padding-inline:11px}
- .pro-button svg {display:none}
- .google-account-loading {width:40px;height:40px;justify-content:center}
- .google-account-loading span {display:none}
- .google-signin-wrap {flex-shrink:0;min-width:40px}
- .google-signin-wrap > div:first-child {min-width:40px}
- .google-signin-wrap [role="alert"] {position:absolute;right:12px;top:66px;width:220px;z-index:30;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px}
-
- .page-intro {padding:24px 4px 20px}
- .home-intro h1 {font-size:38px;letter-spacing:-1.8px;margin-top:13px}
- .page-intro h1 {line-height:1.1}
- .page-intro p {font-size:13px;max-width:340px;line-height:1.55}
- .eyebrow {font-size:9px;letter-spacing:1.5px}
- .quick-tools {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;overflow:visible;margin:0 auto 18px;padding:0;gap:8px}
- .quick-tools::-webkit-scrollbar {display:none}
- .quick-tool {width:100%;min-width:0;justify-content:flex-start;padding:10px 12px;font-size:12px;white-space:nowrap}
- .more-tools {position:static;background:#fff;box-shadow:none}
-
+ .pro-button {font-size:12px;white-space:nowrap}
+ .site-header > :last-child {
+   flex:0 0 100%;
+   width:100%;
+   justify-content:center !important;
+   align-items:center !important;
+ }
+ .page-intro {padding:30px 5px 22px}.home-intro h1 {font-size:40px;letter-spacing:-1.9px}.page-intro h1 {line-height:1.14}.page-intro p {font-size:13px;max-width:350px}.eyebrow {font-size:9px;letter-spacing:1.6px}
+ .quick-tools {justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:-16px;padding-inline:16px;gap:5px;padding-bottom:5px;margin-bottom:18px}.quick-tools::-webkit-scrollbar {display:none}.quick-tool {flex-shrink:0;padding:10px;font-size:12px}.more-tools {position:sticky;right:0;background:#fafaf9;box-shadow:-10px 0 12px #fafaf9}
  .tool-workspace > div {padding:20px 16px}.tool-workspace [class*="text-xs"] {line-height:1.55}.tool-workspace input:not([type=range]):not([type=checkbox]):not([type=radio]),.tool-workspace select,.tool-workspace textarea {font-size:16px}
  .directory-grid {grid-template-columns:repeat(2,minmax(0,1fr))}.tool-directory {padding:18px 14px}.directory-heading h2 {font-size:19px}.directory-card {padding:13px 10px;gap:8px}.directory-card span {display:none}.directory-card svg:last-child {display:none}
  .category-tabs {gap:5px}.category-tabs button {font-size:11px;padding:8px}.workspace-note {font-size:10px;gap:5px;padding:0 6px}.workspace-note svg {flex-shrink:0}
@@ -420,15 +410,4 @@ a {text-decoration:none}
   .pro-plan-grid{
     grid-template-columns:1fr;
   }
-}
-
-
-@media(max-width:380px){
-  .site-header {width:calc(100% - 20px);gap:4px}
-  .brand {font-size:17px;gap:5px}
-  .brand img {width:26px;height:30px}
-  .tools-toggle {width:38px;min-width:38px}
-  .pro-button {padding-inline:8px;font-size:10px}
-  .home-intro h1 {font-size:35px}
-  .quick-tool {font-size:11px;padding-inline:10px}
 }

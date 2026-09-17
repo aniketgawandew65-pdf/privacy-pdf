@@ -145,15 +145,6 @@ export function GoogleBonusAccount() {
   const [loading, setLoading] =
     useState(true);
 
-  const [compact, setCompact] =
-    useState(
-      () =>
-        typeof window !== 'undefined' &&
-        window.matchMedia(
-          '(max-width: 700px)'
-        ).matches
-    );
-
   const [authError, setAuthError] =
     useState<string | null>(
       null
@@ -165,30 +156,6 @@ export function GoogleBonusAccount() {
         getActiveGoogleBonus()
       );
     };
-
-  useEffect(() => {
-    const media =
-      window.matchMedia(
-        '(max-width: 700px)'
-      );
-
-    const syncCompact = () =>
-      setCompact(media.matches);
-
-    syncCompact();
-
-    media.addEventListener?.(
-      'change',
-      syncCompact
-    );
-
-    return () => {
-      media.removeEventListener?.(
-        'change',
-        syncCompact
-      );
-    };
-  }, []);
 
   useEffect(() => {
     const unsubscribe =
@@ -385,20 +352,13 @@ export function GoogleBonusAccount() {
 
         window.google.accounts.id.renderButton(
           buttonRef.current,
-          compact
-            ? {
-                type: 'icon',
-                theme: 'outline',
-                size: 'large',
-                shape: 'circle',
-              }
-            : {
-                type: 'standard',
-                theme: 'outline',
-                size: 'medium',
-                text: 'continue_with',
-                shape: 'pill',
-              }
+          {
+            type: 'standard',
+            theme: 'outline',
+            size: 'medium',
+            text: 'continue_with',
+            shape: 'pill',
+          }
         );
       } catch (error) {
         if (!cancelled) {
@@ -420,7 +380,6 @@ export function GoogleBonusAccount() {
     account,
     online,
     loading,
-    compact,
   ]);
 
   const handleLogout =
@@ -444,7 +403,7 @@ export function GoogleBonusAccount() {
 
   if (loading && !account) {
     return (
-      <div className="google-account-loading flex items-center gap-2 text-xs text-zinc-400">
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
         <Loader2
           size={14}
           className="animate-spin"
@@ -524,7 +483,7 @@ export function GoogleBonusAccount() {
   }
 
   return (
-    <div className="google-signin-wrap flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1">
       <div ref={buttonRef} />
 
       {authError && (
