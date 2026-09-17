@@ -20,6 +20,10 @@ import {
   type ExtractedImage,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface ExtractImagesProps {
   file: File | null;
@@ -75,6 +79,17 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
 
   const handleScanAndExtract = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsScanning(true);
     setErrorMessage(null);
     revokeZipUrl();
@@ -91,6 +106,7 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
         setProgressText('Bundling images into ZIP archive...');
         const zipBlob = await packageImagesToZip(results, file.name);
         createUrl(zipBlob);
+        commitTaskCredit();
       }
     } catch (err: any) {
       console.error('Image extraction error:', err);
