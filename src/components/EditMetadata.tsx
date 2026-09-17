@@ -10,6 +10,10 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getPDFMetadata, updatePDFMetadata } from '../utils/pdfEngine';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface EditMetadataProps {
   file: File | null;
@@ -67,6 +71,16 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
 
   const handleSave = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -91,6 +105,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Metadata update failure:', err);
       setError('Could not update metadata on this file.');

@@ -1,6 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Hash, AlertCircle } from 'lucide-react';
 import { addPageNumbersToPDF } from '../utils/pdfEngine';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface PageNumbersProps {
   file: File | null;
@@ -16,6 +20,16 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
 
   const handleApplyNumbers = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -32,6 +46,7 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
+      commitTaskCredit();
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Failed to add page numbers to this document.');

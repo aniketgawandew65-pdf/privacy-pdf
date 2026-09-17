@@ -1,6 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Unlock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { unlockPDF } from '../utils/pdfEngine';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface UnlockPdfProps {
   file: File | null;
@@ -24,6 +28,15 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
       return;
     }
 
+    const creditCheck = checkTaskCredit(file);
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setDownloadUrl(null);
@@ -34,6 +47,7 @@ export const UnlockPdf: React.FC<UnlockPdfProps> = ({ file, onFileChange }) => {
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
+      commitTaskCredit();
     } catch (err: any) {
       console.error(err);
       setDownloadUrl(null);
