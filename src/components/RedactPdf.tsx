@@ -29,6 +29,10 @@ import {
   redactPDFToFile,
 } from '../utils/streamingRedact';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 import { verifyFinishedPdf } from '../utils/pdfSafetyVerifier';
 
 interface RedactPdfProps {
@@ -560,6 +564,17 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       return;
     }
 
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -601,6 +616,7 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       if (!verification.passed) throw new Error('Final verification could not confirm every blackout. Download was blocked; review the rectangles and retry.');
       setManualCheckStatus('All applied blackouts passed final verification.');
       createUrl(redactedFile);
+      commitTaskCredit();
       });
     } catch (err: any) {
       console.error(
