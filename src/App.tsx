@@ -459,9 +459,9 @@ export default function App() {
     if (!workspaceReady) return;
 
     /*
-     * Searchable OCR, Dark Mode, B&W / Grayscale, PDF to Image
-     * and PDF to Text own dedicated durable OPFS recovery
-     * sources while processing.
+     * Searchable OCR, Dark Mode, B&W / Grayscale, PDF to Image,
+     * PDF to Text and PDF to CSV own dedicated durable OPFS
+     * recovery sources while processing.
      *
      * After Safari recreates the page, do not immediately copy
      * the same large source into the generic workspace again.
@@ -477,7 +477,9 @@ export default function App() {
         location.pathname ===
           '/pdf-to-image' ||
         location.pathname ===
-          '/pdf-to-text'
+          '/pdf-to-text' ||
+        location.pathname ===
+          '/pdf-to-csv'
       ) &&
       hasRecoverableProcessing()
     ) {
@@ -663,7 +665,11 @@ export default function App() {
           ) ||
           document.visibilityState !==
             'visible' ||
-          wakeLock ||
+          (
+            wakeLock &&
+            wakeLock.released !==
+              true
+          ) ||
           requestInFlight
         ) {
           return;
@@ -917,10 +923,22 @@ export default function App() {
             document.visibilityState ===
               'visible'
           ) {
+            /*
+             * Safari may leave a released sentinel object
+             * non-null. Treat released === true exactly like
+             * having no lock at all.
+             */
             if (
-              !wakeLock &&
+              (
+                !wakeLock ||
+                wakeLock.released ===
+                  true
+              ) &&
               !requestInFlight
             ) {
+              wakeLock =
+                null;
+
               void requestWakeLock();
             }
           } else if (

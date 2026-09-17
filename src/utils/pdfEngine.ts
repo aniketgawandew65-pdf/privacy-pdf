@@ -14963,228 +14963,322 @@ export async function deskewPDF(
   }
 }
 
-export interface TableExtractOptions {
-  yTolerance?: number;
-  minColumnGap?: number;
-  delimiter?: ',' | ';' | '\t';
-  onProgress?: (current: number, total: number) => void;
-}
-
 export interface ExtractedTableResult {
   csv: string;
   rows: string[][];
   totalRows: number;
 }
 
+export interface TablePageRecoveryData {
+  digitalCompleted: boolean;
+  digitalRows: string[][];
+  digitalItemCount: number;
+  ocrCompleted: boolean;
+  ocrRows: string[][];
+}
+
+export interface TableExtractRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    TablePageRecoveryData |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber:
+      number,
+
+    checkpoint:
+      TablePageRecoveryData
+  ) => Promise<void>;
+}
+
 export interface TableExtractOptions {
   delimiter?: ',' | ';' | '\t';
   yTolerance?: number;
   minColumnGap?: number;
-  onProgress?: (current: number, total: number) => void;
+  onProgress?: (
+    current:
+      number,
+
+    total:
+      number
+  ) => void;
+
+  recovery?:
+    TableExtractRecoveryHooks;
 }
 
+
 export async function extractTableFromPDF(
-  file: File,
-  options: TableExtractOptions = {}
+  file:
+    File,
+
+  options:
+    TableExtractOptions =
+      {}
 ): Promise<ExtractedTableResult> {
   const {
     yTolerance = 4,
     minColumnGap = 12,
     delimiter = ',',
     onProgress,
+    recovery,
   } = options;
 
 
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
-    );
-
-
-  const pdfDoc =
-    loadedPdf.pdf;
-
-
-  try {
-    const totalPages =
-      pdfDoc.numPages;
-
-
-    interface RawItem {
-      str: string;
-      x: number;
-      y: number;
-      width: number;
-    }
-
-
-    interface Chunk {
-      str: string;
-      x: number;
-      width: number;
-      endX: number;
-    }
-
-
-    const allRows:
-      string[][] = [];
-
-
-    let isScannedDoc =
-      true;
-
-
-    /*
-     * Step 1:
-     * Rapid digital text-layer scan.
-     */
-    for (
-      let pageNum = 1;
-      pageNum <= totalPages;
-      pageNum++
-    ) {
-      onProgress?.(
-        pageNum,
-        totalPages
+  const yieldToBrowser =
+    async (
+      delay =
+        0
+    ) =>
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            delay
+          )
       );
 
 
-      const page =
-        await pdfDoc.getPage(
-          pageNum
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
+
+
+  const totalPages =
+    pdfDoc.numPages;
+
+
+  const memoryCheckpoints =
+    new Map<
+      number,
+      TablePageRecoveryData
+    >();
+
+
+  const readCheckpoint =
+    async (
+      pageNumber:
+        number
+    ): Promise<
+      TablePageRecoveryData |
+      null
+    > => {
+      const memory =
+        memoryCheckpoints.get(
+          pageNumber
         );
 
+      if (memory) {
+        return memory;
+      }
 
-      try {
-        const textContent =
-          await page.getTextContent();
+      if (
+        recovery?.readPage
+      ) {
+        try {
+          const stored =
+            await recovery.readPage(
+              pageNumber
+            );
 
+          if (stored) {
+            memoryCheckpoints.set(
+              pageNumber,
+              stored
+            );
 
-        const items:
-          RawItem[] = [];
-
-
-        for (
-          const item of
-          textContent.items as any[]
+            return stored;
+          }
+        } catch (
+          error
         ) {
+          console.warn(
+            `Unable to read PDF to CSV page ${pageNumber} checkpoint:`,
+            error
+          );
+        }
+      }
+
+      return null;
+    };
+
+
+  const writeCheckpoint =
+    async (
+      pageNumber:
+        number,
+
+      checkpoint:
+        TablePageRecoveryData
+    ) => {
+      memoryCheckpoints.set(
+        pageNumber,
+        checkpoint
+      );
+
+      if (
+        recovery?.writePage
+      ) {
+        try {
+          await recovery.writePage(
+            pageNumber,
+            checkpoint
+          );
+        } catch (
+          error
+        ) {
+          console.warn(
+            `Unable to save PDF to CSV page ${pageNumber} checkpoint:`,
+            error
+          );
+        }
+      }
+    };
+
+
+  const reopenPdf =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        try {
+          await loadedPdf.dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldToBrowser(
+        40
+      );
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+    };
+
+
+  interface RawItem {
+    str: string;
+    x: number;
+    y: number;
+    width: number;
+  }
+
+
+  interface Chunk {
+    str: string;
+    x: number;
+    width: number;
+    endX: number;
+  }
+
+
+  const parseDigitalItems =
+    (
+      items:
+        RawItem[]
+    ): string[][] => {
+      if (
+        items.length ===
+          0
+      ) {
+        return [];
+      }
+
+
+      items.sort(
+        (
+          a,
+          b
+        ) => {
           if (
-            !item.str ||
-            !item.str.trim()
+            Math.abs(
+              b.y -
+                a.y
+            ) >
+            yTolerance
           ) {
-            continue;
+            return (
+              b.y -
+              a.y
+            );
           }
 
-
-          items.push({
-            str:
-              item.str,
-
-            x:
-              item.transform[4],
-
-            y:
-              item.transform[5],
-
-            width:
-              item.width || 0,
-          });
+          return (
+            a.x -
+            b.x
+          );
         }
+      );
 
 
+      const lines:
+        RawItem[][] =
+          [];
+
+      let currentLine:
+        RawItem[] =
+          [];
+
+      let currentY:
+        number |
+        null =
+          null;
+
+
+      for (
+        const item of
+        items
+      ) {
         if (
-          items.length > 5
+          currentY ===
+            null ||
+          Math.abs(
+            item.y -
+              currentY
+          ) <=
+            yTolerance
         ) {
-          isScannedDoc =
-            false;
-        }
-
-
-        if (
-          items.length >
-          0
-        ) {
-          items.sort(
-            (
-              a,
-              b
-            ) => {
-              if (
-                Math.abs(
-                  b.y -
-                    a.y
-                ) >
-                yTolerance
-              ) {
-                return (
-                  b.y -
-                  a.y
-                );
-              }
-
-              return (
-                a.x -
-                b.x
-              );
-            }
+          currentLine.push(
+            item
           );
 
-
-          const lines:
-            RawItem[][] = [];
-
-
-          let currentLine:
-            RawItem[] = [];
-
-
-          let currentY:
-            number | null =
-              null;
-
-
-          for (
-            const item of
-            items
-          ) {
-            if (
-              currentY ===
-                null ||
-              Math.abs(
-                item.y -
-                  currentY
-              ) <=
-                yTolerance
-            ) {
-              currentLine.push(
-                item
-              );
-
-              currentY =
-                item.y;
-            } else {
-              if (
-                currentLine.length >
-                0
-              ) {
-                lines.push(
-                  currentLine
-                );
-              }
-
-              currentLine = [
-                item,
-              ];
-
-              currentY =
-                item.y;
-            }
-          }
-
-
+          currentY =
+            item.y;
+        } else {
           if (
             currentLine.length >
             0
@@ -15194,113 +15288,88 @@ export async function extractTableFromPDF(
             );
           }
 
+          currentLine = [
+            item,
+          ];
 
-          const lineChunks:
-            Chunk[][] = [];
+          currentY =
+            item.y;
+        }
+      }
 
 
-          const multiChunkXStarts:
-            number[] = [];
+      if (
+        currentLine.length >
+        0
+      ) {
+        lines.push(
+          currentLine
+        );
+      }
 
 
-          for (
-            const line of
-            lines
+      const lineChunks:
+        Chunk[][] =
+          [];
+
+      const multiChunkXStarts:
+        number[] =
+          [];
+
+
+      for (
+        const line of
+        lines
+      ) {
+        line.sort(
+          (
+            a,
+            b
+          ) =>
+            a.x -
+            b.x
+        );
+
+
+        const chunks:
+          Chunk[] =
+            [];
+
+        let currentChunkText =
+          '';
+
+        let chunkStartX =
+          -1;
+
+        let lastRightEdge =
+          -1;
+
+
+        for (
+          const item of
+          line
+        ) {
+          if (
+            lastRightEdge ===
+            -1
           ) {
-            line.sort(
-              (
-                a,
-                b
-              ) =>
-                a.x -
-                b.x
-            );
+            currentChunkText =
+              item.str;
 
+            chunkStartX =
+              item.x;
 
-            const chunks:
-              Chunk[] = [];
-
-
-            let currentChunkText =
-              '';
-
-
-            let chunkStartX =
-              -1;
-
-
-            let lastRightEdge =
-              -1;
-
-
-            for (
-              const item of
-              line
-            ) {
-              if (
-                lastRightEdge ===
-                -1
-              ) {
-                currentChunkText =
-                  item.str;
-
-                chunkStartX =
-                  item.x;
-
-                lastRightEdge =
-                  item.x +
-                  item.width;
-              } else {
-                const gap =
-                  item.x -
-                  lastRightEdge;
-
-
-                if (
-                  gap >
-                  minColumnGap
-                ) {
-                  chunks.push({
-                    str:
-                      currentChunkText.trim(),
-
-                    x:
-                      chunkStartX,
-
-                    width:
-                      lastRightEdge -
-                      chunkStartX,
-
-                    endX:
-                      lastRightEdge,
-                  });
-
-
-                  currentChunkText =
-                    item.str;
-
-                  chunkStartX =
-                    item.x;
-                } else {
-                  currentChunkText +=
-                    (
-                      gap > 2
-                        ? ' '
-                        : ''
-                    ) +
-                    item.str;
-                }
-
-
-                lastRightEdge =
-                  item.x +
-                  item.width;
-              }
-            }
-
+            lastRightEdge =
+              item.x +
+              item.width;
+          } else {
+            const gap =
+              item.x -
+              lastRightEdge;
 
             if (
-              currentChunkText.trim()
+              gap >
+              minColumnGap
             ) {
               chunks.push({
                 str:
@@ -15316,336 +15385,1439 @@ export async function extractTableFromPDF(
                 endX:
                   lastRightEdge,
               });
+
+              currentChunkText =
+                item.str;
+
+              chunkStartX =
+                item.x;
+            } else {
+              currentChunkText +=
+                (
+                  gap > 2
+                    ? ' '
+                    : ''
+                ) +
+                item.str;
             }
 
+            lastRightEdge =
+              item.x +
+              item.width;
+          }
+        }
 
-            if (
-              chunks.length >
-              0
+
+        if (
+          currentChunkText.trim()
+        ) {
+          chunks.push({
+            str:
+              currentChunkText.trim(),
+
+            x:
+              chunkStartX,
+
+            width:
+              lastRightEdge -
+              chunkStartX,
+
+            endX:
+              lastRightEdge,
+          });
+        }
+
+
+        if (
+          chunks.length >
+          0
+        ) {
+          lineChunks.push(
+            chunks
+          );
+
+          if (
+            chunks.length >=
+            2
+          ) {
+            for (
+              const chunk of
+              chunks
             ) {
-              lineChunks.push(
-                chunks
+              multiChunkXStarts.push(
+                chunk.x
+              );
+            }
+          }
+        }
+      }
+
+
+      multiChunkXStarts.sort(
+        (
+          a,
+          b
+        ) =>
+          a -
+          b
+      );
+
+
+      const clusters:
+        number[][] =
+          [];
+
+
+      for (
+        const x of
+        multiChunkXStarts
+      ) {
+        if (
+          clusters.length ===
+            0 ||
+          x -
+            clusters[
+              clusters.length -
+                1
+            ][
+              clusters[
+                clusters.length -
+                  1
+              ].length -
+                1
+            ] >
+            minColumnGap *
+              1.5
+        ) {
+          clusters.push([
+            x,
+          ]);
+        } else {
+          clusters[
+            clusters.length -
+              1
+          ].push(
+            x
+          );
+        }
+      }
+
+
+      const columnCenters =
+        clusters
+          .filter(
+            (
+              cluster
+            ) =>
+              cluster.length >=
+              1
+          )
+          .map(
+            (
+              cluster
+            ) =>
+              cluster.reduce(
+                (
+                  sum,
+                  value
+                ) =>
+                  sum +
+                  value,
+                0
+              ) /
+              cluster.length
+          );
+
+
+      const boundaries:
+        number[] =
+          [];
+
+
+      for (
+        let index = 0;
+        index <
+        columnCenters.length -
+          1;
+        index++
+      ) {
+        boundaries.push(
+          (
+            columnCenters[
+              index
+            ] +
+            columnCenters[
+              index +
+                1
+            ]
+          ) /
+            2
+        );
+      }
+
+
+      const pageRows:
+        string[][] =
+          [];
+
+
+      for (
+        const chunks of
+        lineChunks
+      ) {
+        if (
+          columnCenters.length >=
+          2
+        ) {
+          const row =
+            new Array(
+              columnCenters.length
+            ).fill(
+              ''
+            );
+
+
+          for (
+            const chunk of
+            chunks
+          ) {
+            let colIndex =
+              boundaries.findIndex(
+                (
+                  boundary
+                ) =>
+                  chunk.x <
+                  boundary
               );
 
-
-              if (
-                chunks.length >=
-                2
-              ) {
-                for (
-                  const ch of
-                  chunks
-                ) {
-                  multiChunkXStarts.push(
-                    ch.x
-                  );
-                }
-              }
+            if (
+              colIndex ===
+              -1
+            ) {
+              colIndex =
+                columnCenters.length -
+                1;
             }
+
+
+            row[
+              colIndex
+            ] =
+              row[
+                colIndex
+              ]
+                ? row[
+                    colIndex
+                  ] +
+                  ' ' +
+                  chunk.str
+                : chunk.str;
           }
 
 
-          /*
-           * Step 2:
-           * Calculate global column intervals.
-           */
-          multiChunkXStarts.sort(
+          const nonBlankIndices =
+            row
+              .map(
+                (
+                  value,
+                  index
+                ) =>
+                  value.trim()
+                    ? index
+                    : -1
+              )
+              .filter(
+                (
+                  index
+                ) =>
+                  index !==
+                  -1
+              );
+
+
+          const isNumeric =
+            (
+              value:
+                string
+            ) =>
+              /^[\d,.-]+$/.test(
+                value
+                  .trim()
+                  .replace(
+                    /[A-Za-z]/g,
+                    ''
+                  )
+              );
+
+
+          const hasDateOrNumber =
+            row.some(
+              (
+                cell
+              ) =>
+                /\d{2}-[A-Za-z]{3}-\d{4}/.test(
+                  cell
+                ) ||
+                (
+                  isNumeric(
+                    cell
+                  ) &&
+                  cell.includes(
+                    '.'
+                  )
+                )
+            );
+
+
+          if (
+            nonBlankIndices.length ===
+              1 &&
+            !hasDateOrNumber &&
+            pageRows.length >
+              0
+          ) {
+            const contIndex =
+              nonBlankIndices[
+                0
+              ];
+
+            pageRows[
+              pageRows.length -
+                1
+            ][
+              contIndex
+            ] =
+              (
+                pageRows[
+                  pageRows.length -
+                    1
+                ][
+                  contIndex
+                ] +
+                ' ' +
+                row[
+                  contIndex
+                ]
+              ).trim();
+          } else {
+            pageRows.push(
+              row
+            );
+          }
+        } else {
+          pageRows.push(
+            chunks.map(
+              (
+                chunk
+              ) =>
+                chunk.str
+            )
+          );
+        }
+      }
+
+
+      return pageRows;
+    };
+
+
+  /*
+   * ==========================================================
+   * POSITION-AWARE OCR TABLE RECONSTRUCTION
+   * ==========================================================
+   *
+   * The previous OCR fallback used data.text, which permanently
+   * discarded word X/Y coordinates. That turned a visible
+   * 4-column table into one giant CSV cell.
+   *
+   * We now use the app's proven structured hOCR / block output
+   * and reconstruct columns from repeated horizontal anchors.
+   */
+  const parsePositionedOcrLines =
+    (
+      lines:
+        ReturnType<
+          typeof extractMobileOcrLines
+        >,
+
+      renderScale:
+        number
+    ): string[][] => {
+      type OcrChunk = {
+        text: string;
+        x0: number;
+        x1: number;
+        y0: number;
+        y1: number;
+      };
+
+
+      /*
+       * minColumnGap is expressed in PDF/UI space while OCR
+       * coordinates are rendered pixels.
+       *
+       * Do not require the entire configured gap here: scanned
+       * tables frequently have visibly separate columns whose
+       * OCR word boxes finish closer together than expected.
+       */
+      const minimumGapThreshold =
+        Math.max(
+          8,
+          minColumnGap *
+            renderScale *
+            0.55
+        );
+
+
+      /*
+       * Words separated by ordinary spaces stay in one chunk.
+       * A genuinely large horizontal gap starts another possible
+       * table column.
+       */
+      const chunkedLines:
+        OcrChunk[][] =
+          [];
+
+
+      for (
+        const rawLine of
+        lines
+      ) {
+        const words =
+          [...rawLine]
+            .filter(
+              (
+                word
+              ) =>
+                Boolean(
+                  word.text?.trim()
+                ) &&
+                Number.isFinite(
+                  word.x0
+                ) &&
+                Number.isFinite(
+                  word.x1
+                ) &&
+                Number.isFinite(
+                  word.y0
+                ) &&
+                Number.isFinite(
+                  word.y1
+                )
+            )
+            .sort(
+              (
+                a,
+                b
+              ) =>
+                a.x0 -
+                b.x0
+            );
+
+
+        if (
+          words.length ===
+          0
+        ) {
+          continue;
+        }
+
+
+        /*
+         * Ordinary spaces inside prose are usually small and
+         * consistent. Table-column gaps are outliers.
+         *
+         * Use the line's median normal word gap so we can split
+         * real columns without splitting every word in a
+         * paragraph.
+         */
+        const positiveGaps:
+          number[] =
+            [];
+
+
+        for (
+          let index = 1;
+          index <
+            words.length;
+          index++
+        ) {
+          const gap =
+            words[index].x0 -
+            words[index - 1].x1;
+
+          if (
+            gap >
+            0
+          ) {
+            positiveGaps.push(
+              gap
+            );
+          }
+        }
+
+
+        positiveGaps.sort(
+          (
+            a,
+            b
+          ) =>
+            a -
+            b
+        );
+
+
+        const medianGap =
+          positiveGaps.length
+            ? positiveGaps[
+                Math.floor(
+                  positiveGaps.length /
+                    2
+                )
+              ]
+            : 0;
+
+
+        const lineGapThreshold =
+          Math.max(
+            minimumGapThreshold,
+
+            medianGap >
+              0
+              ? Math.min(
+                  minColumnGap *
+                    renderScale,
+                  medianGap *
+                    2.6
+                )
+              : minimumGapThreshold
+          );
+
+
+        const chunks:
+          OcrChunk[] =
+            [];
+
+
+        let current:
+          OcrChunk = {
+            text:
+              words[0].text
+                .trim(),
+
+            x0:
+              words[0].x0,
+
+            x1:
+              words[0].x1,
+
+            y0:
+              words[0].y0,
+
+            y1:
+              words[0].y1,
+          };
+
+
+        for (
+          let index = 1;
+          index <
+            words.length;
+          index++
+        ) {
+          const word =
+            words[index];
+
+          const gap =
+            word.x0 -
+            current.x1;
+
+
+          if (
+            gap >
+            lineGapThreshold
+          ) {
+            chunks.push(
+              current
+            );
+
+            current = {
+              text:
+                word.text.trim(),
+
+              x0:
+                word.x0,
+
+              x1:
+                word.x1,
+
+              y0:
+                word.y0,
+
+              y1:
+                word.y1,
+            };
+          } else {
+            current = {
+              ...current,
+
+              text:
+                (
+                  current.text +
+                  ' ' +
+                  word.text.trim()
+                )
+                  .replace(
+                    /\s+/g,
+                    ' '
+                  )
+                  .trim(),
+
+              x1:
+                Math.max(
+                  current.x1,
+                  word.x1
+                ),
+
+              y0:
+                Math.min(
+                  current.y0,
+                  word.y0
+                ),
+
+              y1:
+                Math.max(
+                  current.y1,
+                  word.y1
+                ),
+            };
+          }
+        }
+
+
+        chunks.push(
+          current
+        );
+
+
+        chunkedLines.push(
+          chunks
+        );
+      }
+
+
+      if (
+        chunkedLines.length ===
+        0
+      ) {
+        return [];
+      }
+
+
+      /*
+       * Table columns repeat at nearly the same X position over
+       * several rows. Paragraph gaps normally do not.
+       *
+       * Build candidate column anchors only from multi-chunk
+       * lines, then keep anchors seen repeatedly.
+       */
+      const starts =
+        chunkedLines
+          .filter(
+            (
+              chunks
+            ) =>
+              chunks.length >=
+                2 &&
+              chunks.length <=
+                8
+          )
+          .flatMap(
+            (
+              chunks
+            ) =>
+              chunks
+                .filter(
+                  (
+                    chunk
+                  ) =>
+                    /[\p{L}\p{N}]/u.test(
+                      chunk.text
+                    )
+                )
+                .map(
+                  (
+                    chunk
+                  ) =>
+                    chunk.x0
+                )
+          )
+          .sort(
             (
               a,
               b
             ) =>
-              a - b
+              a -
+              b
           );
 
 
-          const clusters:
-            number[][] = [];
+      /*
+       * Keep OCR drift tolerance, but do not merge genuinely
+       * different neighbouring table columns.
+       */
+      const clusterTolerance =
+        Math.max(
+          12,
+          minColumnGap *
+            renderScale *
+            1.1
+        );
 
 
-          for (
-            const x of
-            multiChunkXStarts
-          ) {
-            if (
-              clusters.length ===
-                0 ||
-              x -
-                clusters[
-                  clusters.length -
-                    1
-                ][
-                  clusters[
-                    clusters.length -
-                      1
-                  ].length - 1
-                ] >
-                minColumnGap *
-                  1.5
-            ) {
-              clusters.push([
-                x,
-              ]);
-            } else {
-              clusters[
-                clusters.length -
-                  1
-              ].push(
-                x
-              );
-            }
-          }
+      const clusters:
+        number[][] =
+          [];
 
 
-          const columnCenters =
-            clusters
-              .filter(
-                (cluster) =>
-                  cluster.length >=
-                  1
-              )
+      for (
+        const x of
+        starts
+      ) {
+        const last =
+          clusters[
+            clusters.length -
+              1
+          ];
+
+
+        if (
+          !last
+        ) {
+          clusters.push([
+            x,
+          ]);
+
+          continue;
+        }
+
+
+        const center =
+          last.reduce(
+            (
+              sum,
+              value
+            ) =>
+              sum +
+              value,
+            0
+          ) /
+          last.length;
+
+
+        if (
+          Math.abs(
+            x -
+            center
+          ) <=
+          clusterTolerance
+        ) {
+          last.push(
+            x
+          );
+        } else {
+          clusters.push([
+            x,
+          ]);
+        }
+      }
+
+
+      /*
+       * Repeated anchors are much more likely to represent real
+       * table columns than random gaps inside paragraphs.
+       */
+      /*
+       * Real table columns repeat across rows.
+       *
+       * Rank by recurrence first and cap at eight columns.
+       * This prevents noisy scans/forms from generating
+       * pathological 25/27/30/31-column CSV rows.
+       */
+      let columnAnchors =
+        clusters
+          .filter(
+            (
+              cluster
+            ) =>
+              cluster.length >=
+              2
+          )
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              b.length -
+              a.length
+          )
+          .slice(
+            0,
+            8
+          )
+          .map(
+            (
+              cluster
+            ) =>
+              cluster.reduce(
+                (
+                  sum,
+                  value
+                ) =>
+                  sum +
+                  value,
+                0
+              ) /
+              cluster.length
+          )
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              a -
+              b
+          );
+
+
+      /*
+       * A real table requires at least two stable columns.
+       *
+       * If a tiny table only appears once, preserve direct
+       * chunk separation instead of flattening it back into a
+       * single string.
+       */
+      const hasStableTable =
+        columnAnchors.length >=
+        2;
+
+
+      const rows:
+        string[][] =
+          [];
+
+
+      for (
+        const chunks of
+        chunkedLines
+      ) {
+        /*
+         * A legitimate PDF table in this tool is bounded to a
+         * practical maximum of eight reconstructed columns.
+         *
+         * OCR lines with 9+ chunks are almost always decorative
+         * borders, fragmented bilingual forms or scan noise.
+         * Preserve their readable text without creating dozens
+         * of fake spreadsheet columns.
+         */
+        if (
+          chunks.length >
+          8
+        ) {
+          rows.push([
+            chunks
               .map(
-                (cluster) =>
-                  cluster.reduce(
-                    (
-                      sum,
-                      value
-                    ) =>
-                      sum +
-                      value,
-                    0
-                  ) /
-                  cluster.length
-              );
+                (
+                  chunk
+                ) =>
+                  chunk.text
+              )
+              .join(
+                ' '
+              )
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim(),
+          ]);
+
+          continue;
+        }
 
 
-          const boundaries:
-            number[] = [];
+        if (
+          !hasStableTable
+        ) {
+          rows.push(
+            chunks.map(
+              (
+                chunk
+              ) =>
+                chunk.text
+            )
+          );
+
+          continue;
+        }
+
+
+        /*
+         * Paragraph line:
+         * keep it in one cell rather than forcing normal prose
+         * across all table columns.
+         */
+        if (
+          chunks.length ===
+          1
+        ) {
+          rows.push([
+            chunks[0].text,
+          ]);
+
+          continue;
+        }
+
+
+        const row =
+          new Array(
+            columnAnchors.length
+          ).fill(
+            ''
+          );
+
+
+        let mappedCount =
+          0;
+
+
+        for (
+          const chunk of
+          chunks
+        ) {
+          let bestIndex =
+            -1;
+
+          let bestDistance =
+            Infinity;
 
 
           for (
-            let cIdx = 0;
-            cIdx <
-            columnCenters.length -
-              1;
-            cIdx++
+            let index = 0;
+            index <
+              columnAnchors.length;
+            index++
           ) {
-            boundaries.push(
-              (
-                columnCenters[
-                  cIdx
-                ] +
-                columnCenters[
-                  cIdx + 1
+            const distance =
+              Math.abs(
+                chunk.x0 -
+                columnAnchors[
+                  index
                 ]
-              ) / 2
-            );
+              );
+
+            if (
+              distance <
+              bestDistance
+            ) {
+              bestDistance =
+                distance;
+
+              bestIndex =
+                index;
+            }
           }
 
 
           /*
-           * Step 3:
-           * Map chunks to structured columns.
+           * Allow some OCR drift but do not force unrelated
+           * paragraph fragments into a table column.
            */
-          const pageRows:
-            string[][] = [];
-
-
-          for (
-            const chunks of
-            lineChunks
+          if (
+            bestIndex >=
+              0 &&
+            bestDistance <=
+              clusterTolerance *
+                2.25
           ) {
-            if (
-              columnCenters.length >=
-              2
-            ) {
-              const row =
-                new Array(
-                  columnCenters.length
-                ).fill(
-                  ''
-                );
-
-
-              for (
-                const ch of
-                chunks
-              ) {
-                let colIdx =
-                  boundaries.findIndex(
-                    (boundary) =>
-                      ch.x <
-                      boundary
-                  );
-
-
-                if (
-                  colIdx ===
-                  -1
-                ) {
-                  colIdx =
-                    columnCenters.length -
-                    1;
-                }
-
-
-                row[colIdx] =
-                  row[colIdx]
-                    ? row[colIdx] +
-                      ' ' +
-                      ch.str
-                    : ch.str;
-              }
-
-
-              const nonBlankIndices =
-                row
-                  .map(
-                    (
-                      value,
-                      index
-                    ) =>
-                      value.trim()
-                        ? index
-                        : -1
-                  )
-                  .filter(
-                    (index) =>
-                      index !==
-                      -1
-                  );
-
-
-              const isNumeric =
-                (
-                  value: string
-                ) =>
-                  /^[\d,.-]+$/.test(
-                    value
-                      .trim()
-                      .replace(
-                        /[A-Za-z]/g,
-                        ''
-                      )
-                  );
-
-
-              const hasDateOrNumber =
-                row.some(
-                  (cell) =>
-                    /\d{2}-[A-Za-z]{3}-\d{4}/.test(
-                      cell
-                    ) ||
-                    (
-                      isNumeric(
-                        cell
-                      ) &&
-                      cell.includes(
-                        '.'
-                      )
-                    )
-                );
-
-
-              if (
-                nonBlankIndices.length ===
-                  1 &&
-                !hasDateOrNumber &&
-                pageRows.length >
-                  0
-              ) {
-                const contIdx =
-                  nonBlankIndices[0];
-
-
-                pageRows[
-                  pageRows.length -
-                    1
-                ][contIdx] =
-                  (
-                    pageRows[
-                      pageRows.length -
-                        1
-                    ][contIdx] +
+            row[
+              bestIndex
+            ] =
+              row[
+                bestIndex
+              ]
+                ? (
+                    row[
+                      bestIndex
+                    ] +
                     ' ' +
-                    row[contIdx]
-                  ).trim();
-              } else {
-                pageRows.push(
-                  row
-                );
-              }
-            } else {
-              pageRows.push(
-                chunks.map(
-                  (chunk) =>
-                    chunk.str
-                )
+                    chunk.text
+                  )
+                    .replace(
+                      /\s+/g,
+                      ' '
+                    )
+                    .trim()
+                : chunk.text;
+
+            mappedCount++;
+          }
+        }
+
+
+        if (
+          mappedCount >=
+          2
+        ) {
+          rows.push(
+            row
+          );
+        } else {
+          /*
+           * This line does not behave like a table row.
+           * Preserve its readable text without inventing columns.
+           */
+          rows.push([
+            chunks
+              .map(
+                (
+                  chunk
+                ) =>
+                  chunk.text
+              )
+              .join(
+                ' '
+              )
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim(),
+          ]);
+        }
+      }
+
+
+      /*
+       * Remove only completely blank rows.
+       * Empty cells inside a table row are meaningful and stay.
+       */
+      return rows
+        .filter(
+          (
+            row
+          ) =>
+            row.some(
+              (
+                cell
+              ) =>
+                cell.trim()
+            )
+        )
+        .map(
+          (
+            row
+          ) => {
+            const populated =
+              row.filter(
+                (
+                  cell
+                ) =>
+                  cell.trim()
               );
+
+
+            /*
+             * A single meaningful OCR fragment is prose/label
+             * data, not an eight-column table row.
+             */
+            if (
+              populated.length <=
+              1
+            ) {
+              return [
+                populated[0] ||
+                  '',
+              ];
             }
+
+
+            return row;
+          }
+        );
+    };
+
+
+  const fallbackOcrTextRows =
+    (
+      text:
+        string
+    ): string[][] =>
+      text
+        .split(
+          '\n'
+        )
+        .map(
+          (
+            line
+          ) =>
+            line
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim()
+        )
+        .filter(
+          Boolean
+        )
+        .map(
+          (
+            line
+          ) => [
+            line,
+          ]
+        );
+
+
+  try {
+    const digitalRows:
+      string[][] =
+        [];
+
+    let freshDigitalPages =
+      0;
+
+
+    /*
+     * ========================================================
+     * PHASE 1 — DIGITAL TEXT / COORDINATE EXTRACTION
+     * ========================================================
+     */
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        totalPages;
+      pageNumber++
+    ) {
+      const cached =
+        await readCheckpoint(
+          pageNumber
+        );
+
+      if (
+        cached?.digitalCompleted
+      ) {
+        digitalRows.push(
+          ...cached.digitalRows
+        );
+
+        await yieldToBrowser();
+
+        continue;
+      }
+
+
+      onProgress?.(
+        pageNumber,
+        totalPages
+      );
+
+
+      const page =
+        await pdfDoc.getPage(
+          pageNumber
+        );
+
+      let pageRows:
+        string[][] =
+          [];
+
+      let itemCount =
+        0;
+
+
+      try {
+        const textContent =
+          await page.getTextContent();
+
+
+        const items:
+          RawItem[] =
+            [];
+
+
+        for (
+          const item of
+          textContent.items as
+            any[]
+        ) {
+          if (
+            !item.str ||
+            !item.str.trim()
+          ) {
+            continue;
           }
 
+          items.push({
+            str:
+              item.str,
 
-          allRows.push(
-            ...pageRows
-          );
+            x:
+              item.transform[
+                4
+              ],
+
+            y:
+              item.transform[
+                5
+              ],
+
+            width:
+              item.width ||
+              0,
+          });
         }
+
+
+        itemCount =
+          items.length;
+
+
+        pageRows =
+          parseDigitalItems(
+            items
+          );
       } finally {
         try {
           page.cleanup();
         } catch (_) {}
       }
-    }
 
 
-    /*
-     * Step 4:
-     * OCR fallback for scanned documents.
-     */
-    if (
-      isScannedDoc ||
-      allRows.length === 0
-    ) {
-      onProgress?.(
-        1,
-        totalPages
+      const checkpoint:
+        TablePageRecoveryData = {
+          digitalCompleted:
+            true,
+
+          digitalRows:
+            pageRows,
+
+          digitalItemCount:
+            itemCount,
+
+          ocrCompleted:
+            cached?.ocrCompleted ??
+            false,
+
+          ocrRows:
+            cached?.ocrRows ??
+            [],
+        };
+
+
+      await writeCheckpoint(
+        pageNumber,
+        checkpoint
       );
 
 
-      const ocrWorker =
-        await createWorker(
-          'eng',
-          1,
-          {
-            workerPath:
-              '/tessdata/worker.min.js',
+      digitalRows.push(
+        ...pageRows
+      );
 
-            corePath:
-              '/tessdata/tesseract-core-simd-lstm.wasm.js',
 
-            langPath:
-              '/tessdata',
+      freshDigitalPages +=
+        1;
 
-            gzip: true,
-          }
+
+      /*
+       * Long scanned PDFs keep decoded image/font caches inside
+       * PDF.js even when page.cleanup() is called.
+       *
+       * Completely reopen the browser-backed source every two
+       * newly processed pages.
+       */
+      if (
+        freshDigitalPages >=
+          2 &&
+        pageNumber <
+          totalPages
+      ) {
+        await reopenPdf();
+
+        freshDigitalPages =
+          0;
+      } else {
+        await yieldToBrowser();
+      }
+    }
+
+
+    let finalRows:
+      string[][] =
+        digitalRows;
+
+
+    /*
+     * Determine OCR needs page-by-page.
+     *
+     * This makes mixed PDFs reliable too:
+     * - digital page -> keep its coordinate extraction
+     * - scanned/image page -> OCR only that page
+     */
+    const pagesNeedingOcr:
+      number[] =
+        [];
+
+
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        totalPages;
+      pageNumber++
+    ) {
+      const checkpoint =
+        await readCheckpoint(
+          pageNumber
         );
+
+
+      if (
+        !checkpoint ||
+        checkpoint.digitalItemCount <=
+          5 ||
+        checkpoint.digitalRows.length ===
+          0
+      ) {
+        pagesNeedingOcr.push(
+          pageNumber
+        );
+      }
+    }
+
+
+    if (
+      pagesNeedingOcr.length >
+      0
+    ) {
+      /*
+       * Release all PDF.js phase-1 caches before OCR starts.
+       */
+      await reopenPdf();
+
+      let ocrWorker:
+        any =
+          null;
+
+      let freshOcrPages =
+        0;
+
+      let ocrWorkerPages =
+        0;
+
+
+      const destroyOcrWorker =
+        async () => {
+          if (
+            !ocrWorker
+          ) {
+            return;
+          }
+
+          try {
+            await ocrWorker
+              .terminate();
+          } catch (_) {}
+
+          ocrWorker =
+            null;
+
+          ocrWorkerPages =
+            0;
+
+          await yieldToBrowser(
+            60
+          );
+        };
+
+
+      const ensureOcrWorker =
+        async () => {
+          if (
+            ocrWorker &&
+            ocrWorkerPages >=
+              2
+          ) {
+            await destroyOcrWorker();
+          }
+
+          if (
+            !ocrWorker
+          ) {
+            ocrWorker =
+              await createWorker(
+                'eng',
+                1,
+                {
+                  workerPath:
+                    '/tessdata/worker.min.js',
+
+                  corePath:
+                    '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+                  langPath:
+                    '/tessdata',
+
+                  gzip:
+                    true,
+                }
+              );
+          }
+
+          return ocrWorker;
+        };
 
 
       try {
         for (
-          let pageNum = 1;
-          pageNum <= totalPages;
-          pageNum++
+          const pageNumber of
+          pagesNeedingOcr
         ) {
+          const existing =
+            await readCheckpoint(
+              pageNumber
+            );
+
+
+          if (
+            existing?.ocrCompleted
+          ) {
+            await yieldToBrowser();
+
+            continue;
+          }
+
+
           onProgress?.(
-            pageNum,
+            pageNumber,
             totalPages
           );
 
 
+          const worker =
+            await ensureOcrWorker();
+
+
           const page =
             await pdfDoc.getPage(
-              pageNum
+              pageNumber
             );
+
+
+          let pageOcrRows:
+            string[][] =
+              [];
 
 
           const canvas =
@@ -15655,20 +16827,52 @@ export async function extractTableFromPDF(
 
 
           try {
+            const baseViewport =
+              page.getViewport({
+                scale:
+                  1.0,
+              });
+
+
+            const maxDimension =
+              Math.max(
+                baseViewport.width,
+                baseViewport.height
+              );
+
+
+            const safeScale =
+              Math.min(
+                1.5,
+                2048 /
+                  Math.max(
+                    1,
+                    maxDimension
+                  )
+              );
+
+
             const viewport =
               page.getViewport({
-                scale: 1.5,
+                scale:
+                  safeScale,
               });
 
 
             canvas.width =
-              Math.floor(
-                viewport.width
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.width
+                )
               );
 
             canvas.height =
-              Math.floor(
-                viewport.height
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.height
+                )
               );
 
 
@@ -15676,76 +16880,91 @@ export async function extractTableFromPDF(
               canvas.getContext(
                 '2d',
                 {
-                  alpha: false,
+                  alpha:
+                    false,
                 }
               );
 
 
-            if (ctx) {
-              await (
-                page.render({
-                  canvasContext:
-                    ctx as any,
-
-                  viewport,
-                } as any) as any
-              ).promise;
+            if (!ctx) {
+              throw new Error(
+                `Canvas rendering context unavailable for page ${pageNumber}.`
+              );
+            }
 
 
-              const {
-                data,
-              } =
-                await ocrWorker.recognize(
-                  canvas
+            ctx.fillStyle =
+              '#ffffff';
+
+            ctx.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
+
+            await (
+              page.render({
+                canvasContext:
+                  ctx as any,
+
+                viewport,
+
+                canvas,
+              } as any) as any
+            ).promise;
+
+
+            /*
+             * Request structured OCR output.
+             *
+             * recognizeMobileOcrTile() explicitly asks Tesseract
+             * for hOCR / blocks. extractMobileOcrLines() then
+             * returns actual word bounding boxes instead of a
+             * flattened text string.
+             */
+            const {
+              data,
+            } =
+              await recognizeMobileOcrTile(
+                worker,
+                canvas
+              );
+
+
+            ocrWorkerPages +=
+              1;
+
+
+            const positionedLines =
+              extractMobileOcrLines(
+                data
+              );
+
+
+            pageOcrRows =
+              parsePositionedOcrLines(
+                positionedLines,
+                safeScale
+              );
+
+
+            /*
+             * Very old/unusual Tesseract fallback:
+             * readability is better than dropping the page.
+             */
+            if (
+              pageOcrRows.length ===
+                0
+            ) {
+              pageOcrRows =
+                fallbackOcrTextRows(
+                  String(
+                    data?.text ||
+                    ''
+                  )
                 );
-
-
-              if (
-                data?.text
-              ) {
-                const rawLines =
-                  data.text.split(
-                    '\n'
-                  );
-
-
-                for (
-                  const line of
-                  rawLines
-                ) {
-                  const text =
-                    line.trim();
-
-
-                  if (!text) {
-                    continue;
-                  }
-
-
-                  const parts =
-                    text
-                      .split(
-                        /\s{3,}|\t/
-                      )
-                      .map(
-                        (part) =>
-                          part.trim()
-                      )
-                      .filter(
-                        Boolean
-                      );
-
-
-                  allRows.push(
-                    parts.length >
-                      0
-                      ? parts
-                      : [
-                          text,
-                        ]
-                  );
-                }
-              }
             }
           } finally {
             canvas.width =
@@ -15754,34 +16973,236 @@ export async function extractTableFromPDF(
             canvas.height =
               1;
 
-
             try {
               canvas.remove();
             } catch (_) {}
-
 
             try {
               page.cleanup();
             } catch (_) {}
           }
+
+
+          const checkpoint:
+            TablePageRecoveryData = {
+              digitalCompleted:
+                existing?.digitalCompleted ??
+                true,
+
+              digitalRows:
+                existing?.digitalRows ??
+                [],
+
+              digitalItemCount:
+                existing?.digitalItemCount ??
+                0,
+
+              ocrCompleted:
+                true,
+
+              ocrRows:
+                pageOcrRows,
+            };
+
+
+          await writeCheckpoint(
+            pageNumber,
+            checkpoint
+          );
+
+
+          freshOcrPages +=
+            1;
+
+
+          /*
+           * Hard mobile boundary:
+           * destroy PDF.js and Tesseract after every two newly
+           * OCRed pages so Safari can reclaim native/WASM heaps.
+           */
+          if (
+            freshOcrPages >=
+              2 &&
+            pageNumber !==
+              pagesNeedingOcr[
+                pagesNeedingOcr.length -
+                  1
+              ]
+          ) {
+            await destroyOcrWorker();
+
+            await reopenPdf();
+
+            freshOcrPages =
+              0;
+          } else {
+            await yieldToBrowser(
+              30
+            );
+          }
         }
       } finally {
-        await ocrWorker.terminate();
+        await destroyOcrWorker();
+      }
+
+
+      /*
+       * Reassemble in original page order.
+       *
+       * Digital pages keep their original coordinate parser.
+       * Scanned pages use the new positioned OCR parser.
+       */
+      finalRows =
+        [];
+
+
+      for (
+        let pageNumber = 1;
+        pageNumber <=
+          totalPages;
+        pageNumber++
+      ) {
+        const checkpoint =
+          await readCheckpoint(
+            pageNumber
+          );
+
+
+        if (!checkpoint) {
+          continue;
+        }
+
+
+        const needsOcr =
+          checkpoint.digitalItemCount <=
+            5 ||
+          checkpoint.digitalRows.length ===
+            0;
+
+
+        if (
+          needsOcr &&
+          checkpoint.ocrCompleted
+        ) {
+          finalRows.push(
+            ...checkpoint.ocrRows
+          );
+        } else {
+          finalRows.push(
+            ...checkpoint.digitalRows
+          );
+        }
       }
     }
 
 
     /*
-     * Step 5:
-     * Format CSV with clean escaping.
+     * CSV / semicolon CSV / TSV formatting.
      */
+    /*
+     * FINAL PDF-TO-CSV STRUCTURE SAFETY BOUNDARY
+     *
+     * Some PDFs expose normal prose as 25-31 independent
+     * positioned text fragments.
+     *
+     * These are PDF text-layer fragments, not real spreadsheet
+     * columns.
+     *
+     * Normal tables are preserved.
+     */
+    finalRows =
+      finalRows
+        .filter(
+          (
+            row
+          ) =>
+            row.some(
+              (
+                cell
+              ) =>
+                String(
+                  cell ?? ''
+                ).trim()
+            )
+        )
+        .map(
+          (
+            row
+          ) => {
+            const populated =
+              row
+                .map(
+                  (
+                    cell
+                  ) =>
+                    String(
+                      cell ?? ''
+                    ).trim()
+                )
+                .filter(
+                  Boolean
+                );
+
+
+            /*
+             * Rows wider than eight physical cells but with no
+             * more than eight actual values are usually empty
+             * coordinate spacer columns.
+             *
+             * Remove those empty spacer columns.
+             */
+            if (
+              row.length >
+                8 &&
+              populated.length <=
+                8
+            ) {
+              return populated;
+            }
+
+
+            /*
+             * The observed pathological prose rows contain
+             * 25-31 PDF coordinate slots and 9-15 tiny text
+             * fragments.
+             *
+             * A row this fragmented is prose/text-layer noise,
+             * not a sensible table row.
+             *
+             * Preserve all text, but as one readable cell.
+             */
+            if (
+              row.length >=
+                20 &&
+              populated.length >
+                8
+            ) {
+              return [
+                populated
+                  .join(
+                    ' '
+                  )
+                  .replace(
+                    /\s+/g,
+                    ' '
+                  )
+                  .trim(),
+              ];
+            }
+
+
+            return row;
+          }
+        );
+
+
     const escapeCell =
       (
-        value: string
+        value:
+          string
       ): string => {
         const clean =
           value.trim();
-
 
         if (
           clean.includes(
@@ -15807,14 +17228,15 @@ export async function extractTableFromPDF(
           );
         }
 
-
         return clean;
       };
 
 
     const csvLines =
-      allRows.map(
-        (row) =>
+      finalRows.map(
+        (
+          row
+        ) =>
           row
             .map(
               escapeCell
@@ -15833,13 +17255,25 @@ export async function extractTableFromPDF(
 
     return {
       csv,
+
       rows:
-        allRows,
+        finalRows,
+
       totalRows:
-        allRows.length,
+        finalRows.length,
     };
   } finally {
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
   }
 }
 

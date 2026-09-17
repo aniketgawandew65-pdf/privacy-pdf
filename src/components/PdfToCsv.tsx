@@ -11,6 +11,21 @@ import {
 import { extractTableFromPDF, type ExtractedTableResult } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+import {
+  clearPdfToCsvRecovery,
+  pdfToCsvJobMatchesFile,
+  readPdfToCsvJobMeta,
+  readPdfToCsvPage,
+  restorePdfToCsvJobSource,
+  savePdfToCsvJobSource,
+  writePdfToCsvPage,
+  type PdfToCsvSettings,
+} from '../utils/pdfToCsvRecovery';
+import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
@@ -31,54 +46,742 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const recoverySettingsRef =
+    useRef<PdfToCsvSettings | null>(
+      null
+    );
+
+  const [recoveryReady, setRecoveryReady] =
+    useState(false);
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  const parseDocument = async () => {
-    if (!file) return;
+  /*
+   * ==========================================================
+   * PDF -> CSV DIRECT SCREEN WAKE LOCK
+   * ==========================================================
+   *
+   * The global wake-lock controller remains untouched.
+   *
+   * PDF -> CSV performs long OCR / PDF.js recycle phases, so
+   * hold an explicit sentinel for this operation from the
+   * Extract CSV user gesture until processing actually ends.
+   */
+  const csvWakeLockRef =
+    useRef<any>(
+      null
+    );
+
+  const csvWakeRetryRef =
+    useRef<number | null>(
+      null
+    );
+
+
+  const acquireCsvWakeLock =
+    async () => {
+      if (
+        document.visibilityState !==
+        'visible'
+      ) {
+        return;
+      }
+
+      const current =
+        csvWakeLockRef.current;
+
+      if (
+        current &&
+        current.released !==
+          true
+      ) {
+        return;
+      }
+
+      const wakeLockApi =
+        (
+          navigator as any
+        ).wakeLock;
+
+      if (
+        !wakeLockApi ||
+        typeof wakeLockApi.request !==
+          'function'
+      ) {
+        return;
+      }
+
+      csvWakeLockRef.current =
+        null;
+
+      try {
+        const sentinel =
+          await wakeLockApi.request(
+            'screen'
+          );
+
+        csvWakeLockRef.current =
+          sentinel;
+
+        sentinel
+          ?.addEventListener?.(
+            'release',
+            () => {
+              if (
+                csvWakeLockRef.current ===
+                sentinel
+              ) {
+                csvWakeLockRef.current =
+                  null;
+              }
+            },
+            {
+              once: true,
+            }
+          );
+      } catch (_) {
+        csvWakeLockRef.current =
+          null;
+      }
+    };
+
+
+  const startCsvWakeGuard =
+    async () => {
+      /*
+       * First request happens directly from the Extract CSV
+       * click before the heavy OCR work begins.
+       */
+      await acquireCsvWakeLock();
+
+      if (
+        csvWakeRetryRef.current !==
+        null
+      ) {
+        window.clearInterval(
+          csvWakeRetryRef.current
+        );
+      }
+
+      csvWakeRetryRef.current =
+        window.setInterval(
+          () => {
+            const current =
+              csvWakeLockRef.current;
+
+            if (
+              !current ||
+              current.released ===
+                true
+            ) {
+              csvWakeLockRef.current =
+                null;
+
+              void acquireCsvWakeLock();
+            }
+          },
+          1000
+        );
+    };
+
+
+  const stopCsvWakeGuard =
+    async () => {
+      if (
+        csvWakeRetryRef.current !==
+        null
+      ) {
+        window.clearInterval(
+          csvWakeRetryRef.current
+        );
+
+        csvWakeRetryRef.current =
+          null;
+      }
+
+      const current =
+        csvWakeLockRef.current;
+
+      csvWakeLockRef.current =
+        null;
+
+      if (
+        current &&
+        typeof current.release ===
+          'function'
+      ) {
+        try {
+          await current.release();
+        } catch (_) {}
+      }
+    };
+
+
+  useEffect(
+    () => {
+      const handleVisibility =
+        () => {
+          if (
+            document.visibilityState ===
+              'visible' &&
+            processingInFlightRef.current
+          ) {
+            void acquireCsvWakeLock();
+          }
+        };
+
+      document.addEventListener(
+        'visibilitychange',
+        handleVisibility
+      );
+
+      return () => {
+        document.removeEventListener(
+          'visibilitychange',
+          handleVisibility
+        );
+
+        if (
+          csvWakeRetryRef.current !==
+          null
+        ) {
+          window.clearInterval(
+            csvWakeRetryRef.current
+          );
+
+          csvWakeRetryRef.current =
+            null;
+        }
+
+        const current =
+          csvWakeLockRef.current;
+
+        csvWakeLockRef.current =
+          null;
+
+        if (
+          current &&
+          typeof current.release ===
+            'function'
+        ) {
+          void current
+            .release()
+            .catch(
+              () => {}
+            );
+        }
+      };
+    },
+    []
+  );
+
+
+  const discardPdfToCsvRecovery =
+    () => {
+      clearProcessingRecovery();
+
+      void clearPdfToCsvRecovery()
+        .catch(
+          () => {}
+        );
+
+      recoverySettingsRef.current =
+        null;
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
+      );
+    };
+
+
+  /*
+   * Safari may recreate the page while a large 86-page
+   * extraction is running. Restore the exact browser-local
+   * source and parsing settings.
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
+      }
+
+      durableRestoreAttemptedRef.current =
+        true;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const restored =
+              await restorePdfToCsvJobSource();
+
+            if (
+              cancelled ||
+              !restored
+            ) {
+              return;
+            }
+
+            recoverySettingsRef.current =
+              restored.settings;
+
+            setDelimiter(
+              restored.settings
+                .delimiter
+            );
+
+            setYTolerance(
+              restored.settings
+                .yTolerance
+            );
+
+            setMinColumnGap(
+              restored.settings
+                .minColumnGap
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+
+            onFileChange(
+              restored.file
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted PDF to CSV job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+
+  /*
+   * The generic workspace may already contain the same source
+   * when this component mounts. Reconnect it to its dedicated
+   * CSV checkpoint job.
+   */
+  useEffect(
+    () => {
+      if (
+        !file
+      ) {
+        checkedRecoveryFileRef.current =
+          null;
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        return;
+      }
+
+      if (
+        checkedRecoveryFileRef.current ===
+        file
+      ) {
+        return;
+      }
+
+      checkedRecoveryFileRef.current =
+        file;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const meta =
+              await readPdfToCsvJobMeta();
+
+            if (
+              cancelled ||
+              !meta ||
+              !pdfToCsvJobMatchesFile(
+                meta,
+                file
+              )
+            ) {
+              return;
+            }
+
+            const settings:
+              PdfToCsvSettings = {
+                delimiter:
+                  meta.delimiter,
+
+                yTolerance:
+                  meta.yTolerance,
+
+                minColumnGap:
+                  meta.minColumnGap,
+              };
+
+            recoverySettingsRef.current =
+              settings;
+
+            setDelimiter(
+              settings.delimiter
+            );
+
+            setYTolerance(
+              settings.yTolerance
+            );
+
+            setMinColumnGap(
+              settings.minColumnGap
+            );
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to inspect interrupted PDF to CSV job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+    ]
+  );
+
+
+  const parseDocument = async (
+    forcedSettings?:
+      PdfToCsvSettings
+  ) => {
+    if (
+      !file ||
+      processingInFlightRef.current
+    ) {
+      return;
+    }
+
+    const activeSettings:
+      PdfToCsvSettings =
+        forcedSettings || {
+          delimiter,
+          yTolerance,
+          minColumnGap,
+        };
+
 
     const creditCheck =
-      checkTaskCredit(file);
+      checkTaskCredit(
+        file
+      );
 
-    if (!creditCheck.allowed) {
+
+    if (
+      !creditCheck.allowed
+    ) {
       setErrorMessage(
         creditCheck.errorMessage ||
           'This task is not available on your current plan.'
       );
+
       return;
     }
 
-    setIsProcessing(true);
-    setErrorMessage(null);
+
+    /*
+     * Acquire from the actual Extract CSV user gesture.
+     */
+    await startCsvWakeGuard();
+
+    processingInFlightRef.current =
+      true;
+
+    setIsProcessing(
+      true
+    );
+
+    setErrorMessage(
+      null
+    );
+
+    setProgressText(
+      'Preparing CSV extraction...'
+    );
+
     revokeDownloadUrl();
 
-    try {
-      const result = await extractTableFromPDF(file, {
-        delimiter,
-        yTolerance,
-        minColumnGap,
-        onProgress: (curr, total) => {
-          setProgressText(`Analyzing page ${curr} of ${total} coordinates...`);
-        },
-      });
 
-      if (result.totalRows === 0) {
-        setErrorMessage('No tabular data detected. If this is a scanned document, use "OCR Searchable" first.');
-        setTableData(null);
+    try {
+      const result =
+        await exclusivelyProcess(
+          async () => {
+            let recoveryEnabled =
+              false;
+
+            try {
+              await savePdfToCsvJobSource(
+                file,
+                activeSettings
+              );
+
+              recoveryEnabled =
+                true;
+            } catch (
+              recoveryError
+            ) {
+              console.warn(
+                'PDF to CSV restart recovery unavailable:',
+                recoveryError
+              );
+            }
+
+
+            return await extractTableFromPDF(
+              file,
+              {
+                delimiter:
+                  activeSettings.delimiter,
+
+                yTolerance:
+                  activeSettings.yTolerance,
+
+                minColumnGap:
+                  activeSettings.minColumnGap,
+
+                onProgress:
+                  (
+                    current,
+                    total
+                  ) => {
+                    setProgressText(
+                      `Analyzing page ${current} of ${total} coordinates...`
+                    );
+                  },
+
+                recovery:
+                  recoveryEnabled
+                    ? {
+                        readPage:
+                          readPdfToCsvPage,
+
+                        writePage:
+                          writePdfToCsvPage,
+                      }
+                    : undefined,
+              }
+            );
+          }
+        );
+
+
+      if (
+        result.totalRows ===
+          0
+      ) {
+        setErrorMessage(
+          'No tabular data detected. If this is a scanned document, use "OCR Searchable" first.'
+        );
+
+        setTableData(
+          null
+        );
       } else {
-        setTableData(result);
-        const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8;' });
-        createUrl(blob);
+        setTableData(
+          result
+        );
+
+
+        const isTsv =
+          activeSettings.delimiter ===
+          '\t';
+
+
+        /*
+         * UTF-8 BOM improves Excel handling for names,
+         * addresses and non-ASCII text.
+         *
+         * Tab mode is a genuine TSV rather than a .csv file
+         * containing tabs.
+         */
+        const blob =
+          new Blob(
+            [
+              '\uFEFF',
+              result.csv,
+            ],
+            {
+              type:
+                isTsv
+                  ? 'text/tab-separated-values;charset=utf-8;'
+                  : 'text/csv;charset=utf-8;',
+            }
+          );
+
+
+        createUrl(
+          blob
+        );
+
+
+        /*
+         * Final usable CSV exists before charging the task.
+         */
+        await clearPdfToCsvRecovery();
+
+        clearProcessingRecovery();
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        resumeAttemptedRef.current =
+          false;
+
         commitTaskCredit();
       }
-    } catch (err: any) {
-      console.error('Table parsing error:', err);
-      setErrorMessage(err.message || 'Failed to extract tables from document.');
-      setTableData(null);
+    } catch (
+      err:
+        any
+    ) {
+      console.error(
+        'Table parsing error:',
+        err
+      );
+
+
+      /*
+       * Keep source and completed-page checkpoints intact.
+       */
+      setErrorMessage(
+        err?.message ||
+          'Processing was interrupted. Reopen PDF to CSV to continue from the last completed page.'
+      );
+
+      setTableData(
+        null
+      );
     } finally {
-      setIsProcessing(false);
-      setProgressText('');
+      processingInFlightRef.current =
+        false;
+
+      await stopCsvWakeGuard();
+
+      setIsProcessing(
+        false
+      );
+
+      setProgressText(
+        ''
+      );
     }
   };
+
+
+  /*
+   * After Safari/WebKit recreates the page, automatically
+   * continue the interrupted extraction once.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        !recoveryReady ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const settings =
+        recoverySettingsRef.current;
+
+      if (!settings) {
+        return;
+      }
+
+      const timer =
+        window.setTimeout(
+          () => {
+            if (
+              resumeAttemptedRef.current
+            ) {
+              return;
+            }
+
+            resumeAttemptedRef.current =
+              true;
+
+            void parseDocument(
+              settings
+            );
+          },
+          250
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      recoveryReady,
+    ]
+  );
+
 
   useEffect(() => {
     setTableData(null);
@@ -88,6 +791,23 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
   }, [file, delimiter, yTolerance, minColumnGap]);
 
   const handleClear = () => {
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+    discardPdfToCsvRecovery();
+
+    processingInFlightRef.current =
+      false;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    checkedRecoveryFileRef.current =
+      null;
+
     onFileChange(null);
     setTableData(null);
     revokeDownloadUrl();
@@ -113,6 +833,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
             if (dropped && dropped.type === 'application/pdf') {
+              discardPdfToCsvRecovery();
               onFileChange(dropped);
             }
           }}
@@ -129,6 +850,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
             onChange={(e) => {
               const selected = e.target.files?.[0];
               if (selected && selected.type === 'application/pdf') {
+                discardPdfToCsvRecovery();
                 onFileChange(selected);
               }
               e.target.value = '';
@@ -164,12 +886,22 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               <label className="text-zinc-300 font-medium block mb-1.5">Delimiter</label>
               <select
                 value={delimiter}
-                onChange={(e) => setDelimiter(e.target.value as any)}
+                disabled={isProcessing}
+                onChange={(e) => {
+                  if (isProcessing) return;
+
+                  discardPdfToCsvRecovery();
+
+                  setDelimiter(
+                    e.target.value as
+                      ',' | ';' | '\t'
+                  );
+                }}
                 className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-emerald-500"
               >
                 <option value=",">Comma (Standard CSV)</option>
                 <option value=";">Semicolon (;)</option>
-                <option value="&#9;">Tab (TSV / Excel Paste)</option>
+                <option value={'\t'}>Tab (TSV / Excel Paste)</option>
               </select>
             </div>
 
@@ -184,7 +916,19 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
                 max="10"
                 step="1"
                 value={yTolerance}
-                onChange={(e) => setYTolerance(parseInt(e.target.value, 10))}
+                disabled={isProcessing}
+                onChange={(e) => {
+                  if (isProcessing) return;
+
+                  discardPdfToCsvRecovery();
+
+                  setYTolerance(
+                    parseInt(
+                      e.target.value,
+                      10
+                    )
+                  );
+                }}
                 className="w-full accent-emerald-400 cursor-pointer"
               />
             </div>
@@ -200,7 +944,19 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
                 max="30"
                 step="2"
                 value={minColumnGap}
-                onChange={(e) => setMinColumnGap(parseInt(e.target.value, 10))}
+                disabled={isProcessing}
+                onChange={(e) => {
+                  if (isProcessing) return;
+
+                  discardPdfToCsvRecovery();
+
+                  setMinColumnGap(
+                    parseInt(
+                      e.target.value,
+                      10
+                    )
+                  );
+                }}
                 className="w-full accent-emerald-400 cursor-pointer"
               />
             </div>
@@ -279,11 +1035,15 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               </div>
               <a
                 href={downloadUrl}
-                download={`${file.name.replace(/\.[^/.]+$/, '')}.csv`}
+                download={`${file.name.replace(/\.[^/.]+$/, '')}.${delimiter === '\t' ? 'tsv' : 'csv'}`}
                 className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 text-sm"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
-                <span>Download CSV / Excel Table</span>
+                <span>
+                  {delimiter === '\t'
+                    ? 'Download TSV / Excel Table'
+                    : 'Download CSV / Excel Table'}
+                </span>
               </a>
             </div>
           )}
