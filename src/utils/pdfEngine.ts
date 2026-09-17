@@ -11398,9 +11398,30 @@ export async function repairPDF(
 
 export type DarkModeFilter = 'invert' | 'oled' | 'sepia';
 
+export interface DarkModeRecoveryHooks {
+  readPage?: (
+    pageNumber: number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber: number,
+    pageBlob: Blob
+  ) => Promise<void>;
+}
+
 export interface DarkModeOptions {
   filter: DarkModeFilter;
-  onProgress?: (current: number, total: number) => void;
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void;
+
+  recovery?:
+    DarkModeRecoveryHooks;
 }
 
 export async function invertPDF(
@@ -11410,8 +11431,8 @@ export async function invertPDF(
   const {
     filter = 'invert',
     onProgress,
+    recovery,
   } = options;
-
 
   const loadedPdf =
     await loadPdfJsFromBlob(
@@ -11421,263 +11442,330 @@ export async function invertPDF(
       }
     );
 
-
   const pdfDoc =
     loadedPdf.pdf;
-
 
   try {
     const totalPages =
       pdfDoc.numPages;
 
-
     const outputDoc =
       await PDFDocument.create();
-
 
     for (
       let pageNum = 1;
       pageNum <= totalPages;
       pageNum++
     ) {
-      onProgress?.(
-        pageNum,
-        totalPages
-      );
-
-
       const page =
         await pdfDoc.getPage(
           pageNum
         );
 
-
-      const canvas =
-        document.createElement(
-          'canvas'
-        );
-
-
       try {
-        const viewport =
-          page.getViewport({
-            scale: 2.0,
-          });
-
-
-        canvas.width =
-          Math.floor(
-            viewport.width
-          );
-
-        canvas.height =
-          Math.floor(
-            viewport.height
-          );
-
-
-        const ctx =
-          canvas.getContext(
-            '2d',
-            {
-              alpha: false,
-            }
-          );
-
-
-        if (!ctx) {
-          throw new Error(
-            'Canvas rendering context unavailable'
-          );
-        }
-
-
-        await (
-          page.render({
-            canvasContext:
-              ctx as any,
-
-            viewport,
-          } as any) as any
-        ).promise;
-
-
-        const imgData =
-          ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
-
-
-        const data =
-          imgData.data;
-
-
-        for (
-          let i = 0;
-          i < data.length;
-          i += 4
-        ) {
-          const r =
-            data[i];
-
-          const g =
-            data[i + 1];
-
-          const b =
-            data[i + 2];
-
-
-          if (
-            filter ===
-            'invert'
-          ) {
-            data[i] =
-              255 - r;
-
-            data[i + 1] =
-              255 - g;
-
-            data[i + 2] =
-              255 - b;
-          } else if (
-            filter ===
-            'oled'
-          ) {
-            const luminance =
-              0.299 * r +
-              0.587 * g +
-              0.114 * b;
-
-
-            if (
-              luminance >
-              210
-            ) {
-              data[i] = 10;
-              data[i + 1] = 10;
-              data[i + 2] = 10;
-            } else if (
-              luminance <
-              80
-            ) {
-              data[i] =
-                225;
-
-              data[i + 1] =
-                225;
-
-              data[i + 2] =
-                225;
-            } else {
-              data[i] =
-                255 - r;
-
-              data[i + 1] =
-                255 - g;
-
-              data[i + 2] =
-                255 - b;
-            }
-          } else if (
-            filter ===
-            'sepia'
-          ) {
-            const tr =
-              0.393 * r +
-              0.769 * g +
-              0.189 * b;
-
-            const tg =
-              0.349 * r +
-              0.686 * g +
-              0.168 * b;
-
-            const tb =
-              0.272 * r +
-              0.534 * g +
-              0.131 * b;
-
-
-            data[i] =
-              Math.min(
-                255,
-                tr
-              );
-
-            data[i + 1] =
-              Math.min(
-                255,
-                tg
-              );
-
-            data[i + 2] =
-              Math.min(
-                255,
-                tb
-              );
-          }
-        }
-
-
-        ctx.putImageData(
-          imgData,
-          0,
-          0
-        );
-
-
-        const jpegBlob =
-          await new Promise<Blob>(
-            (
-              resolve,
-              reject
-            ) => {
-              canvas.toBlob(
-                (blob) => {
-                  if (blob) {
-                    resolve(
-                      blob
-                    );
-                  } else {
-                    reject(
-                      new Error(
-                        'Canvas buffer conversion failed'
-                      )
-                    );
-                  }
-                },
-                'image/jpeg',
-                0.9
-              );
-            }
-          );
-
-
-        const jpegBytes =
-          await jpegBlob.arrayBuffer();
-
-
-        const embeddedImg =
-          await outputDoc.embedJpg(
-            jpegBytes
-          );
-
-
         const unscaled =
           page.getViewport({
             scale: 1.0,
           });
 
+        let jpegBlob:
+          Blob |
+          null =
+            null;
+
+        /*
+         * Browser-restart recovery:
+         * reuse a completely transformed page when present.
+         */
+        if (
+          recovery
+            ?.readPage
+        ) {
+          try {
+            jpegBlob =
+              (
+                await recovery
+                  .readPage(
+                    pageNum
+                  )
+              ) ||
+              null;
+          } catch (
+            cacheError
+          ) {
+            console.warn(
+              `Unable to restore Dark Mode page ${pageNum}:`,
+              cacheError
+            );
+
+            jpegBlob =
+              null;
+          }
+        }
+
+        if (!jpegBlob) {
+          /*
+           * Only show progress for pages that actually need
+           * transforming. After a Safari restart this therefore
+           * jumps directly to the first unfinished page.
+           */
+          onProgress?.(
+            pageNum,
+            totalPages
+          );
+
+          const viewport =
+            page.getViewport({
+              scale: 2.0,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+          try {
+            canvas.width =
+              Math.floor(
+                viewport.width
+              );
+
+            canvas.height =
+              Math.floor(
+                viewport.height
+              );
+
+            const ctx =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha: false,
+                }
+              );
+
+            if (!ctx) {
+              throw new Error(
+                'Canvas rendering context unavailable'
+              );
+            }
+
+            await (
+              page.render({
+                canvasContext:
+                  ctx as any,
+
+                viewport,
+              } as any) as any
+            ).promise;
+
+            const imgData =
+              ctx.getImageData(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+              );
+
+            const data =
+              imgData.data;
+
+            for (
+              let i = 0;
+              i < data.length;
+              i += 4
+            ) {
+              const r =
+                data[i];
+
+              const g =
+                data[i + 1];
+
+              const b =
+                data[i + 2];
+
+              if (
+                filter ===
+                'invert'
+              ) {
+                data[i] =
+                  255 - r;
+
+                data[i + 1] =
+                  255 - g;
+
+                data[i + 2] =
+                  255 - b;
+              } else if (
+                filter ===
+                'oled'
+              ) {
+                const luminance =
+                  0.299 * r +
+                  0.587 * g +
+                  0.114 * b;
+
+                if (
+                  luminance >
+                  210
+                ) {
+                  data[i] = 10;
+                  data[i + 1] = 10;
+                  data[i + 2] = 10;
+                } else if (
+                  luminance <
+                  80
+                ) {
+                  data[i] =
+                    225;
+
+                  data[i + 1] =
+                    225;
+
+                  data[i + 2] =
+                    225;
+                } else {
+                  data[i] =
+                    255 - r;
+
+                  data[i + 1] =
+                    255 - g;
+
+                  data[i + 2] =
+                    255 - b;
+                }
+              } else if (
+                filter ===
+                'sepia'
+              ) {
+                const tr =
+                  0.393 * r +
+                  0.769 * g +
+                  0.189 * b;
+
+                const tg =
+                  0.349 * r +
+                  0.686 * g +
+                  0.168 * b;
+
+                const tb =
+                  0.272 * r +
+                  0.534 * g +
+                  0.131 * b;
+
+                data[i] =
+                  Math.min(
+                    255,
+                    tr
+                  );
+
+                data[i + 1] =
+                  Math.min(
+                    255,
+                    tg
+                  );
+
+                data[i + 2] =
+                  Math.min(
+                    255,
+                    tb
+                  );
+              }
+            }
+
+            ctx.putImageData(
+              imgData,
+              0,
+              0
+            );
+
+            jpegBlob =
+              await new Promise<Blob>(
+                (
+                  resolve,
+                  reject
+                ) => {
+                  canvas.toBlob(
+                    (blob) => {
+                      if (blob) {
+                        resolve(
+                          blob
+                        );
+                      } else {
+                        reject(
+                          new Error(
+                            'Canvas buffer conversion failed'
+                          )
+                        );
+                      }
+                    },
+                    'image/jpeg',
+                    0.9
+                  );
+                }
+              );
+          } finally {
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
+          }
+
+          /*
+           * Publish the page checkpoint only after the JPEG
+           * is completely generated.
+           */
+          if (
+            jpegBlob &&
+            recovery
+              ?.writePage
+          ) {
+            try {
+              await recovery
+                .writePage(
+                  pageNum,
+                  jpegBlob
+                );
+            } catch (
+              cacheError
+            ) {
+              /*
+               * Recovery storage failure must never prevent
+               * the actual PDF tool from working.
+               */
+              console.warn(
+                `Unable to checkpoint Dark Mode page ${pageNum}:`,
+                cacheError
+              );
+            }
+          }
+        }
+
+        if (!jpegBlob) {
+          throw new Error(
+            `Unable to generate Dark Mode page ${pageNum}.`
+          );
+        }
+
+        const jpegBytes =
+          await jpegBlob
+            .arrayBuffer();
+
+        const embeddedImg =
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
 
         const newPage =
           outputDoc.addPage([
             unscaled.width,
             unscaled.height,
           ]);
-
 
         newPage.drawImage(
           embeddedImg,
@@ -11691,27 +11779,14 @@ export async function invertPDF(
           }
         );
       } finally {
-        canvas.width =
-          1;
-
-        canvas.height =
-          1;
-
-
-        try {
-          canvas.remove();
-        } catch (_) {}
-
-
         try {
           page.cleanup();
         } catch (_) {}
       }
 
       /*
-       * Give the browser an opportunity to reclaim
-       * completed page pixel/JPEG memory before the
-       * next dark-mode page is processed.
+       * Allow Safari to reclaim page/canvas/JPEG temporaries
+       * before continuing.
        */
       await new Promise<void>(
         (resolve) =>
@@ -11722,12 +11797,6 @@ export async function invertPDF(
       );
     }
 
-
-    /*
-     * All transformed pages are already embedded in
-     * outputDoc. Release the original PDF.js source before
-     * allocating the complete serialized dark-mode PDF.
-     */
     await loadedPdf.dispose();
 
     await new Promise<void>(
@@ -11738,15 +11807,10 @@ export async function invertPDF(
         )
     );
 
-
     return await outputDoc.save({
       useObjectStreams: true,
     });
   } finally {
-    /*
-     * dispose() is idempotent and still protects
-     * all earlier error paths.
-     */
     await loadedPdf.dispose();
   }
 }
