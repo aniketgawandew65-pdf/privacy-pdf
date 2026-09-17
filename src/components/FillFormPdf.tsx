@@ -16,6 +16,10 @@ import {
   type FormFieldData,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface FillFormPdfProps {
   file: File | null;
@@ -86,6 +90,17 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
 
   const handleProcessForm = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -95,6 +110,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       setOutputBlob(blob);
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Failed to fill form:', err);
       setErrorMessage(err.message || 'Failed to process form.');
