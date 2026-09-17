@@ -11,6 +11,10 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { extractTextFromPDF } from '../utils/pdfEngine';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface PdfToTextProps {
   file: File | null;
@@ -27,6 +31,17 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
 
   const handleProcess = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMsg(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setProgressMsg('Analyzing document...');
     setExtractedText('');
@@ -36,7 +51,13 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
       const result = await extractTextFromPDF(file, (status) => {
         setProgressMsg(status);
       });
+      if (!result.trim()) {
+        setErrorMsg('No readable text was found in this PDF.');
+        return;
+      }
+
       setExtractedText(result);
+      commitTaskCredit();
     } catch (err: any) {
       console.error('Text extraction failed:', err);
       setErrorMsg(err.message || 'Failed to convert PDF to text.');
