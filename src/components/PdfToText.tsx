@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Upload,
   FileText,
@@ -11,6 +11,20 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { extractTextFromPDF } from '../utils/pdfEngine';
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+import {
+  clearPdfToTextRecovery,
+  pdfToTextJobMatchesFile,
+  readPdfToTextJobMeta,
+  readPdfToTextPage,
+  restorePdfToTextJobSource,
+  savePdfToTextJobSource,
+  writePdfToTextPage,
+} from '../utils/pdfToTextRecovery';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -29,43 +43,370 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const [recoveryReady, setRecoveryReady] =
+    useState(false);
+
+
+  const discardPdfToTextRecovery =
+    () => {
+      clearProcessingRecovery();
+
+      void clearPdfToTextRecovery()
+        .catch(
+          () => {}
+        );
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
+      );
+    };
+
+
+  /*
+   * Restore the exact source PDF after Safari/WebKit recreates
+   * the page during a large extraction.
+   */
+  useEffect(
+    () => {
+      if (
+        file ||
+        durableRestoreAttemptedRef.current
+      ) {
+        return;
+      }
+
+      durableRestoreAttemptedRef.current =
+        true;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const restored =
+              await restorePdfToTextJobSource();
+
+            if (
+              cancelled ||
+              !restored
+            ) {
+              return;
+            }
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+
+            onFileChange(
+              restored
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to restore interrupted PDF to Text job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+      onFileChange,
+    ]
+  );
+
+
+  /*
+   * App.tsx may restore the same source through its normal
+   * workspace before this component mounts.
+   */
+  useEffect(
+    () => {
+      if (
+        !file
+      ) {
+        checkedRecoveryFileRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        return;
+      }
+
+      if (
+        checkedRecoveryFileRef.current ===
+        file
+      ) {
+        return;
+      }
+
+      checkedRecoveryFileRef.current =
+        file;
+
+      let cancelled =
+        false;
+
+      void (
+        async () => {
+          try {
+            const meta =
+              await readPdfToTextJobMeta();
+
+            if (
+              cancelled ||
+              !pdfToTextJobMatchesFile(
+                meta,
+                file
+              )
+            ) {
+              return;
+            }
+
+            preserveProcessingWorkspace();
+
+            setRecoveryReady(
+              true
+            );
+          } catch (
+            error
+          ) {
+            console.warn(
+              'Unable to inspect interrupted PDF to Text job:',
+              error
+            );
+          }
+        }
+      )();
+
+      return () => {
+        cancelled =
+          true;
+      };
+    },
+    [
+      file,
+    ]
+  );
+
+
   const handleProcess = async () => {
-    if (!file) return;
+    if (
+      !file ||
+      processingInFlightRef.current
+    ) {
+      return;
+    }
 
-    const creditCheck = checkTaskCredit(file);
+    const creditCheck =
+      checkTaskCredit(
+        file
+      );
 
-    if (!creditCheck.allowed) {
+    if (
+      !creditCheck.allowed
+    ) {
       setErrorMsg(
         creditCheck.errorMessage ||
           'This task is not available on your current plan.'
       );
+
       return;
     }
 
-    setIsProcessing(true);
-    setProgressMsg('Analyzing document...');
-    setExtractedText('');
-    setErrorMsg(null);
+    processingInFlightRef.current =
+      true;
+
+    setIsProcessing(
+      true
+    );
+
+    setProgressMsg(
+      'Analyzing document...'
+    );
+
+    setExtractedText(
+      ''
+    );
+
+    setErrorMsg(
+      null
+    );
 
     try {
-      const result = await extractTextFromPDF(file, (status) => {
-        setProgressMsg(status);
-      });
-      if (!result.trim()) {
-        setErrorMsg('No readable text was found in this PDF.');
+      const result =
+        await exclusivelyProcess(
+          async () => {
+            let recoveryEnabled =
+              false;
+
+            try {
+              await savePdfToTextJobSource(
+                file
+              );
+
+              recoveryEnabled =
+                true;
+            } catch (
+              recoveryError
+            ) {
+              console.warn(
+                'PDF to Text restart recovery unavailable:',
+                recoveryError
+              );
+            }
+
+            return await extractTextFromPDF(
+              file,
+              (
+                status
+              ) => {
+                setProgressMsg(
+                  status
+                );
+              },
+              recoveryEnabled
+                ? {
+                    readPage:
+                      readPdfToTextPage,
+
+                    writePage:
+                      writePdfToTextPage,
+                  }
+                : {}
+            );
+          }
+        );
+
+      if (
+        !result.trim()
+      ) {
+        setErrorMsg(
+          'No readable text was found in this PDF.'
+        );
+
         return;
       }
 
-      setExtractedText(result);
+      setExtractedText(
+        result
+      );
+
+      /*
+       * Finished output exists before the task is charged.
+       */
+      await clearPdfToTextRecovery();
+
+      clearProcessingRecovery();
+
+      setRecoveryReady(
+        false
+      );
+
+      resumeAttemptedRef.current =
+        false;
+
       commitTaskCredit();
-    } catch (err: any) {
-      console.error('Text extraction failed:', err);
-      setErrorMsg(err.message || 'Failed to convert PDF to text.');
+    } catch (
+      err:
+        any
+    ) {
+      console.error(
+        'Text extraction failed:',
+        err
+      );
+
+      /*
+       * Keep source + completed page checkpoints so reopening
+       * continues from the first unfinished page.
+       */
+      setErrorMsg(
+        err?.message ||
+          'Processing was interrupted. Reopen PDF to Text to continue from the last completed page.'
+      );
     } finally {
-      setIsProcessing(false);
-      setProgressMsg('');
+      processingInFlightRef.current =
+        false;
+
+      setIsProcessing(
+        false
+      );
+
+      setProgressMsg(
+        ''
+      );
     }
   };
+
+
+  /*
+   * Resume automatically after Safari restores the large source.
+   */
+  useEffect(
+    () => {
+      if (
+        !file ||
+        !recoveryReady ||
+        resumeAttemptedRef.current
+      ) {
+        return;
+      }
+
+      const timer =
+        window.setTimeout(
+          () => {
+            if (
+              resumeAttemptedRef.current
+            ) {
+              return;
+            }
+
+            resumeAttemptedRef.current =
+              true;
+
+            void handleProcess();
+          },
+          250
+        );
+
+      return () => {
+        window.clearTimeout(
+          timer
+        );
+      };
+    },
+    [
+      file,
+      recoveryReady,
+    ]
+  );
+
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(extractedText);
@@ -92,6 +433,9 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
         className="hidden"
         onChange={(e) => {
           const selected = e.target.files?.[0] || null;
+
+          discardPdfToTextRecovery();
+
           onFileChange(selected);
           setExtractedText('');
           setErrorMsg(null);
@@ -114,6 +458,8 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
             if (dropped && dropped.type === 'application/pdf') {
+              discardPdfToTextRecovery();
+
               onFileChange(dropped);
               setExtractedText('');
               setErrorMsg(null);
@@ -138,7 +484,25 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
           </div>
           <button
             type="button"
+            disabled={isProcessing}
             onClick={() => {
+              if (
+                isProcessing
+              ) {
+                return;
+              }
+
+              discardPdfToTextRecovery();
+
+              processingInFlightRef.current =
+                false;
+
+              durableRestoreAttemptedRef.current =
+                false;
+
+              checkedRecoveryFileRef.current =
+                null;
+
               onFileChange(null);
               setExtractedText('');
               setErrorMsg(null);
@@ -164,7 +528,9 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
       {file && !extractedText && (
         <button
           type="button"
-          onClick={handleProcess}
+          onClick={() => {
+            void handleProcess();
+          }}
           disabled={isProcessing}
           className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-xs font-semibold flex items-center justify-center gap-2 transition shadow-md shadow-emerald-500/20 cursor-pointer"
         >

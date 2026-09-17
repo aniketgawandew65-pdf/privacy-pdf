@@ -3243,97 +3243,500 @@ export async function addPageNumbersToPDF(
   }
 }
 
-export async function extractTextFromPDF(
-  file: File,
-  onProgress?: (status: string) => void
-): Promise<string> {
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
-    );
+export type PdfToTextRecoveryPage = {
+  completed: true;
+  text: string;
+};
 
-  const pdfDoc =
-    loadedPdf.pdf;
+export interface PdfToTextRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    PdfToTextRecoveryPage |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber:
+      number,
+
+    text:
+      string
+  ) => Promise<void>;
+}
+
+export async function extractTextFromPDF(
+  file:
+    File,
+
+  onProgress?:
+    (
+      status:
+        string
+    ) => void,
+
+  recovery:
+    PdfToTextRecoveryHooks =
+      {}
+): Promise<string> {
+  const yieldToBrowser =
+    async (
+      delay =
+        0
+    ) =>
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            delay
+          )
+      );
+
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
 
   const totalPages =
     pdfDoc.numPages;
 
-  let fullDocumentText = '';
-  let ocrWorker: any = null;
+  let fullDocumentText =
+    '';
+
+  let ocrWorker:
+    any =
+      null;
+
+  let ocrPagesSinceRecycle =
+    0;
+
+  let freshPdfPagesSinceRecycle =
+    0;
+
+  /*
+   * Keeping OCR/PDF.js caches alive for many pages was the
+   * source of Safari process recreation on large scanned PDFs.
+   */
+  const OCR_WORKER_PAGE_LIMIT =
+    2;
+
+  const PDFJS_PAGE_LIMIT =
+    2;
+
+  const destroyOcrWorker =
+    async () => {
+      if (
+        ocrWorker
+      ) {
+        try {
+          await ocrWorker
+            .terminate();
+        } catch (_) {}
+
+        ocrWorker =
+          null;
+
+        ocrPagesSinceRecycle =
+          0;
+
+        await yieldToBrowser(
+          20
+        );
+      }
+    };
+
+  const reopenPdf =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        try {
+          await loadedPdf
+            .dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldToBrowser(
+        20
+      );
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+
+      freshPdfPagesSinceRecycle =
+        0;
+    };
+
+  const ensureOcrWorker =
+    async () => {
+      if (
+        ocrWorker &&
+        ocrPagesSinceRecycle >=
+          OCR_WORKER_PAGE_LIMIT
+      ) {
+        await destroyOcrWorker();
+      }
+
+      if (
+        !ocrWorker
+      ) {
+        ocrWorker =
+          await createWorker(
+            'eng',
+            1,
+            {
+              workerPath:
+                '/tessdata/worker.min.js',
+
+              corePath:
+                '/tessdata/tesseract-core-simd-lstm.wasm.js',
+
+              langPath:
+                '/tessdata',
+
+              gzip:
+                true,
+            }
+          );
+      }
+
+      return ocrWorker;
+    };
 
   try {
-    for (let i = 1; i <= totalPages; i++) {
-      onProgress?.(`Processing page ${i} of ${totalPages}...`);
-      const page = await pdfDoc.getPage(i);
-      const textContent = await page.getTextContent();
+    for (
+      let i = 1;
+      i <= totalPages;
+      i++
+    ) {
+      /*
+       * Recovery check happens BEFORE opening/rendering the page.
+       * Safari restart therefore jumps directly to the first
+       * unfinished page rather than repeating page 1.
+       */
+      if (
+        recovery.readPage
+      ) {
+        try {
+          const cached =
+            await recovery
+              .readPage(
+                i
+              );
 
-      const digitalText = textContent.items
-        .map((item: any) => item.str || '')
-        .filter(Boolean)
-        .join(' ')
-        .trim();
+          if (
+            cached?.completed
+          ) {
+            fullDocumentText +=
+              cached.text;
 
-      // If page has substantial digital text, use it
-      if (digitalText.length > 50) {
-        fullDocumentText += `--- Page ${i} ---\n${digitalText}\n\n`;
-      } else {
-        // Page is an image, screenshot, or flat scan -> Run Page-Level OCR
-        onProgress?.(`Page ${i} is visual/scanned. Running OCR...`);
+            await yieldToBrowser();
 
-        if (!ocrWorker) {
-          ocrWorker = await createWorker('eng', 1, {
-            workerPath: '/tessdata/worker.min.js',
-            corePath: '/tessdata/tesseract-core-simd-lstm.wasm.js',
-            langPath: '/tessdata',
-            gzip: true,
-          });
+            continue;
+          }
+        } catch (
+          recoveryReadError
+        ) {
+          console.warn(
+            `Unable to read PDF to Text page ${i} checkpoint:`,
+            recoveryReadError
+          );
         }
+      }
 
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d", { alpha: false });
-      canvas.style.position = "fixed";
-      canvas.style.left = "-9999px";
-      canvas.style.opacity = "0";
-      document.body.appendChild(canvas);
+      onProgress?.(
+        `Processing page ${i} of ${totalPages}...`
+      );
 
-        if (ctx) {
-          await (page.render({ canvasContext: ctx as any, viewport } as any)).promise;
-          const { data } = await ocrWorker.recognize(canvas);
-          const scannedText = data?.text?.trim() || '';
+      const page =
+        await pdfDoc
+          .getPage(
+            i
+          );
 
-          if (scannedText) {
-            fullDocumentText += `--- Page ${i} (Scanned / OCR) ---\n${scannedText}\n\n`;
-          } else if (digitalText) {
-            fullDocumentText += `--- Page ${i} ---\n${digitalText}\n\n`;
+      let pageOutput =
+        '';
+
+      try {
+        const textContent =
+          await page
+            .getTextContent();
+
+        const digitalText =
+          textContent.items
+            .map(
+              (
+                item:
+                  any
+              ) =>
+                item.str ||
+                ''
+            )
+            .filter(
+              Boolean
+            )
+            .join(
+              ' '
+            )
+            .trim();
+
+        /*
+         * Same existing behaviour:
+         * sufficiently substantial selectable text does not run
+         * through OCR.
+         */
+        if (
+          digitalText.length >
+          50
+        ) {
+          pageOutput =
+            `--- Page ${i} ---\n${digitalText}\n\n`;
+        } else {
+          onProgress?.(
+            `Page ${i} of ${totalPages} is visual/scanned. Running OCR...`
+          );
+
+          const worker =
+            await ensureOcrWorker();
+
+          const originalViewport =
+            page.getViewport({
+              scale:
+                1.0,
+            });
+
+          const maxDimension =
+            Math.max(
+              originalViewport.width,
+              originalViewport.height
+            );
+
+          /*
+           * 1.6x is the same mobile OCR quality territory already
+           * used by the app's shared OCR architecture.
+           *
+           * 2048px ceiling prevents unusually large PDF pages
+           * from creating a giant Safari bitmap.
+           */
+          const renderScale =
+            Math.min(
+              MOBILE_OCR_SCALE,
+              2048 /
+                Math.max(
+                  1,
+                  maxDimension
+                )
+            );
+
+          const viewport =
+            page.getViewport({
+              scale:
+                renderScale,
+            });
+
+          const canvas =
+            document.createElement(
+              'canvas'
+            );
+
+          try {
+            canvas.width =
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.width
+                )
+              );
+
+            canvas.height =
+              Math.max(
+                1,
+                Math.floor(
+                  viewport.height
+                )
+              );
+
+            const ctx =
+              canvas.getContext(
+                '2d',
+                {
+                  alpha:
+                    false,
+                }
+              );
+
+            if (!ctx) {
+              throw new Error(
+                `Canvas rendering context unavailable for page ${i}.`
+              );
+            }
+
+            ctx.fillStyle =
+              '#ffffff';
+
+            ctx.fillRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
+            await (
+              page.render({
+                canvasContext:
+                  ctx as any,
+
+                viewport,
+
+                canvas,
+              } as any) as any
+            ).promise;
+
+            const {
+              data,
+            } =
+              await worker
+                .recognize(
+                  canvas
+                );
+
+            ocrPagesSinceRecycle +=
+              1;
+
+            const scannedText =
+              String(
+                data?.text ||
+                ''
+              ).trim();
+
+            if (
+              scannedText
+            ) {
+              pageOutput =
+                `--- Page ${i} (Scanned / OCR) ---\n${scannedText}\n\n`;
+            } else if (
+              digitalText
+            ) {
+              pageOutput =
+                `--- Page ${i} ---\n${digitalText}\n\n`;
+            }
+          } finally {
+            canvas.width =
+              1;
+
+            canvas.height =
+              1;
+
+            try {
+              canvas.remove();
+            } catch (_) {}
           }
         }
-
-        canvas.width = 1;
-        canvas.height = 1;
-
+      } finally {
         try {
-          canvas.remove();
+          page.cleanup();
         } catch (_) {}
       }
 
-      page.cleanup();
+      /*
+       * Atomic page checkpoint only after the page has completely
+       * finished extraction/OCR.
+       *
+       * Empty output is still a completed page and must not be
+       * repeated forever after a restart.
+       */
+      if (
+        recovery.writePage
+      ) {
+        try {
+          await recovery
+            .writePage(
+              i,
+              pageOutput
+            );
+        } catch (
+          recoveryWriteError
+        ) {
+          console.warn(
+            `Unable to save PDF to Text page ${i} checkpoint:`,
+            recoveryWriteError
+          );
+        }
+      }
+
+      fullDocumentText +=
+        pageOutput;
+
+      freshPdfPagesSinceRecycle +=
+        1;
+
+      /*
+       * Hard PDF.js cache boundary for large documents.
+       */
+      if (
+        freshPdfPagesSinceRecycle >=
+          PDFJS_PAGE_LIMIT &&
+        i <
+          totalPages
+      ) {
+        await reopenPdf();
+      } else {
+        await yieldToBrowser();
+      }
     }
+
+    return (
+      fullDocumentText
+        .trim() ||
+      'No readable text could be extracted.'
+    );
   } finally {
-    if (ocrWorker) {
-      await ocrWorker.terminate();
+    await destroyOcrWorker();
+
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
     }
-
-    await loadedPdf.dispose();
   }
-
-  return fullDocumentText.trim() || 'No readable text could be extracted.';
 }
+
 
 export interface PDFMetadata {
   title?: string;
