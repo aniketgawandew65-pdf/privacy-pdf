@@ -36,6 +36,10 @@ import {
   Type
 } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from "../utils/taskCreditGate";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
@@ -1528,6 +1532,21 @@ export const TextToPdf: React.FC<any> = () => {
       return;
     }
 
+    const inputBytes = new Blob(
+      [content],
+      { type: "text/html" }
+    ).size;
+
+    const creditCheck = checkTaskCredit(inputBytes);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          "This task is not available on your current plan."
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -1732,6 +1751,7 @@ export const TextToPdf: React.FC<any> = () => {
       const blob = new Blob([pdfBytes as any], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
+      commitTaskCredit();
     } catch (err: any) {
       if (document.body.contains(iframe)) {
         document.body.removeChild(iframe);
