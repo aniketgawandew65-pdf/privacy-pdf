@@ -13,6 +13,7 @@ import {
   Circle,
   Download,
   Highlighter,
+  Hand,
   Loader2,
   MousePointer2,
   PenTool,
@@ -53,6 +54,7 @@ interface AnnotatePdfProps {
 
 type Tool =
   | 'select'
+  | 'pan'
   | PdfAnnotationType;
 
 
@@ -649,7 +651,17 @@ React.FC<AnnotatePdfProps> = ({
       React.PointerEvent<HTMLDivElement>
   ) => {
 
+    if (tool === 'pan') {
+      return;
+    }
+
     if (tool === 'select') {
+      /*
+       * Select is annotation manipulation only.
+       * Page movement belongs exclusively to Pan.
+       */
+      event.preventDefault();
+
       setSelectedId(null);
       return;
     }
@@ -934,6 +946,25 @@ React.FC<AnnotatePdfProps> = ({
           : 1,
 
       strokeWidth,
+
+      /*
+       * Arrow keeps its real page-space start/end points so its
+       * direction is independent from its rectangular selection
+       * box.
+       */
+      points:
+        tool === 'arrow'
+          ? [
+              {
+                x: start.x,
+                y: start.y,
+              },
+              {
+                x: start.x,
+                y: start.y,
+              },
+            ]
+          : undefined,
     };
 
 
@@ -1003,6 +1034,26 @@ React.FC<AnnotatePdfProps> = ({
                     y: top,
                     width,
                     height,
+
+                    ...(annotation.type ===
+                    'arrow'
+                      ? {
+                          points: [
+                            {
+                              x:
+                                start.x,
+                              y:
+                                start.y,
+                            },
+                            {
+                              x:
+                                point.x,
+                              y:
+                                point.y,
+                            },
+                          ],
+                        }
+                      : {}),
                   }
                 : annotation
           )
@@ -1139,10 +1190,14 @@ React.FC<AnnotatePdfProps> = ({
               }
 
 
-              // PEN MOVE
+              // PEN / ARROW MOVE
               if (
-                annotation.type ===
-                  'pen' &&
+                (
+                  annotation.type ===
+                    'pen' ||
+                  annotation.type ===
+                    'arrow'
+                ) &&
                 annotation.points
               ) {
 
@@ -1288,6 +1343,205 @@ React.FC<AnnotatePdfProps> = ({
 
 
   // ============================================================
+  // ARROW ENDPOINT DIRECTION
+  // ============================================================
+
+  const handleArrowEndpointPointerDown = (
+    event:
+      React.PointerEvent,
+    item:
+      PdfAnnotationItem,
+    pointIndex:
+      0 | 1
+  ) => {
+    if (
+      tool !== 'select'
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    saveHistory();
+
+    const target =
+      event.currentTarget as
+        HTMLElement;
+
+    target.setPointerCapture?.(
+      event.pointerId
+    );
+
+    const fallbackPoints = [
+      {
+        x:
+          item.x,
+        y:
+          item.y,
+      },
+      {
+        x:
+          item.x +
+          item.width,
+        y:
+          item.y +
+          item.height,
+      },
+    ];
+
+    const onMove = (
+      moveEvent:
+        PointerEvent
+    ) => {
+      moveEvent.preventDefault();
+
+      const point =
+        getPoint(
+          moveEvent.clientX,
+          moveEvent.clientY
+        );
+
+      if (!point) {
+        return;
+      }
+
+      setAnnotations(
+        (
+          previous
+        ) =>
+          previous.map(
+            (
+              annotation
+            ) => {
+              if (
+                annotation.id !==
+                item.id
+              ) {
+                return annotation;
+              }
+
+              const existing =
+                annotation.points &&
+                annotation.points.length >=
+                  2
+                  ? annotation.points
+                  : fallbackPoints;
+
+              const points = [
+                {
+                  ...existing[0],
+                },
+                {
+                  ...existing[1],
+                },
+              ];
+
+              points[
+                pointIndex
+              ] = {
+                x:
+                  point.x,
+                y:
+                  point.y,
+              };
+
+              const minX =
+                Math.min(
+                  points[0].x,
+                  points[1].x
+                );
+
+              const maxX =
+                Math.max(
+                  points[0].x,
+                  points[1].x
+                );
+
+              const minY =
+                Math.min(
+                  points[0].y,
+                  points[1].y
+                );
+
+              const maxY =
+                Math.max(
+                  points[0].y,
+                  points[1].y
+                );
+
+              return {
+                ...annotation,
+
+                x:
+                  minX,
+
+                y:
+                  minY,
+
+                width:
+                  Math.max(
+                    0.005,
+                    maxX -
+                      minX
+                  ),
+
+                height:
+                  Math.max(
+                    0.005,
+                    maxY -
+                      minY
+                  ),
+
+                points,
+              };
+            }
+          )
+      );
+
+      revokeDownloadUrl();
+    };
+
+
+    const onUp = (
+      upEvent:
+        PointerEvent
+    ) => {
+      try {
+        target
+          .releasePointerCapture?.(
+            upEvent.pointerId
+          );
+      } catch {}
+
+      window.removeEventListener(
+        'pointermove',
+        onMove
+      );
+
+      window.removeEventListener(
+        'pointerup',
+        onUp
+      );
+    };
+
+
+    window.addEventListener(
+      'pointermove',
+      onMove,
+      {
+        passive: false,
+      }
+    );
+
+    window.addEventListener(
+      'pointerup',
+      onUp
+    );
+  };
+
+
+  // ============================================================
   // RESIZE
   // ============================================================
 
@@ -1303,12 +1557,6 @@ React.FC<AnnotatePdfProps> = ({
     event.preventDefault();
 
     event.stopPropagation();
-
-    if (
-      item.type === 'pen'
-    ) {
-      return;
-    }
 
     saveHistory();
 
@@ -1336,10 +1584,14 @@ React.FC<AnnotatePdfProps> = ({
       event.clientY;
 
     const minWidth =
-      0.015;
+      item.type === 'pen'
+        ? 0.005
+        : 0.015;
 
     const minHeight =
-      0.01;
+      item.type === 'pen'
+        ? 0.005
+        : 0.01;
 
 
     const onMove = (
@@ -1381,6 +1633,19 @@ React.FC<AnnotatePdfProps> = ({
               ) {
                 return annotation;
               }
+
+              const previousX =
+                annotation.x;
+
+              const previousY =
+                annotation.y;
+
+              const previousWidth =
+                annotation.width;
+
+              const previousHeight =
+                annotation.height;
+
 
               let x =
                 annotation.x;
@@ -1470,6 +1735,70 @@ React.FC<AnnotatePdfProps> = ({
 
                 height =
                   bottom - y;
+              }
+
+
+              /*
+               * Pen points are stored as normalized page
+               * coordinates, so resizing the selection box must
+               * scale those points into the new box as well.
+               *
+               * All other annotation types keep their existing
+               * resize behaviour unchanged.
+               */
+              if (
+                annotation.type ===
+                  'pen' &&
+                annotation.points?.length
+              ) {
+                const safePreviousWidth =
+                  Math.max(
+                    0.000001,
+                    previousWidth
+                  );
+
+                const safePreviousHeight =
+                  Math.max(
+                    0.000001,
+                    previousHeight
+                  );
+
+                const scaleX =
+                  width /
+                  safePreviousWidth;
+
+                const scaleY =
+                  height /
+                  safePreviousHeight;
+
+                return {
+                  ...annotation,
+                  x,
+                  y,
+                  width,
+                  height,
+
+                  points:
+                    annotation.points.map(
+                      (point) => ({
+                        x:
+                          x +
+                          (
+                            point.x -
+                            previousX
+                          ) *
+                            scaleX,
+
+                        y:
+                          y +
+                          (
+                            point.y -
+                            previousY
+                          ) *
+                            scaleY,
+                      })
+                    ),
+                };
               }
 
 
@@ -1916,8 +2245,16 @@ React.FC<AnnotatePdfProps> = ({
                         swatch
                       );
 
+                      /*
+                       * While drawing, color belongs only to the
+                       * next annotation.
+                       *
+                       * An existing annotation is recolored only
+                       * when the user is explicitly in Select mode.
+                       */
                       if (
-                        selected
+                        selected &&
+                        tool === 'select'
                       ) {
                         saveHistory();
 
@@ -1955,12 +2292,34 @@ React.FC<AnnotatePdfProps> = ({
                 type="color"
                 value={color}
 
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextColor =
+                    event.target.value;
+
                   setColor(
-                    event.target
-                      .value
-                  )
-                }
+                    nextColor
+                  );
+
+                  if (
+                    selected &&
+                    tool === 'select'
+                  ) {
+                    saveHistory();
+
+                    updateSelected({
+                      color:
+                        nextColor,
+
+                      ...(selected.type ===
+                      'highlight'
+                        ? {
+                            fillColor:
+                              nextColor,
+                          }
+                        : {}),
+                    });
+                  }
+                }}
 
                 className="w-7 h-7 bg-transparent cursor-pointer"
                 title="Custom color"
@@ -2007,6 +2366,30 @@ React.FC<AnnotatePdfProps> = ({
               </span>
 
             </label>
+
+
+            <div className="w-px h-6 bg-zinc-800" />
+
+
+            <button
+              type="button"
+              onClick={() =>
+                setTool(
+                  tool === 'pan'
+                    ? 'select'
+                    : 'pan'
+                )
+              }
+              className={`min-h-9 px-3 rounded-xl border flex items-center gap-2 text-xs font-medium transition ${
+                tool === 'pan'
+                  ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
+                  : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white'
+              }`}
+              title="Pan / move PDF page"
+            >
+              <Hand className="w-4 h-4" />
+              Pan
+            </button>
 
           </div>
 
@@ -2194,7 +2577,13 @@ React.FC<AnnotatePdfProps> = ({
         {/* WORKSPACE */}
         <div className="relative rounded-2xl border border-zinc-800 bg-zinc-950 overflow-hidden">
 
-          <div className="overflow-auto min-h-[620px] p-5 sm:p-8">
+          <div
+            className={`min-h-[620px] p-5 sm:p-8 ${
+              tool === 'pan'
+                ? 'overflow-auto'
+                : 'overflow-hidden'
+            }`}
+          >
 
             <div
               style={{
@@ -2242,17 +2631,22 @@ React.FC<AnnotatePdfProps> = ({
                   }
 
                   style={{
+                    /*
+                     * Lock the PDF while selecting/resizing/drawing.
+                     * Native page movement is enabled only when the
+                     * user explicitly chooses Pan.
+                     */
                     touchAction:
-                      tool ===
-                      'select'
+                      tool === 'pan'
                         ? 'pan-x pan-y'
                         : 'none',
 
                     cursor:
-                      tool ===
-                      'select'
-                        ? 'default'
-                        : 'crosshair',
+                      tool === 'pan'
+                        ? 'grab'
+                        : tool === 'select'
+                          ? 'default'
+                          : 'crosshair',
                   }}
 
                   className="absolute inset-0 select-none"
@@ -2352,14 +2746,60 @@ React.FC<AnnotatePdfProps> = ({
 
                                 touchAction:
                                   'none',
+
+                                zIndex:
+                                  isSelected
+                                    ? 30
+                                    : 10,
                               }}
 
                               className={`absolute ${
+                                tool ===
+                                'select'
+                                  ? 'cursor-move'
+                                  : ''
+                              } ${
                                 isSelected
                                   ? 'border border-emerald-500'
                                   : 'border border-transparent'
                               }`}
-                            />
+                            >
+
+                              {isSelected &&
+                                tool === 'select' &&
+                                resizeHandles.map(
+                                  (
+                                    handle
+                                  ) => (
+                                    <div
+                                      key={
+                                        handle.type
+                                      }
+
+                                      onPointerDown={(
+                                        event
+                                      ) =>
+                                        handleResizePointerDown(
+                                          event,
+                                          item,
+                                          handle.type
+                                        )
+                                      }
+
+                                      style={{
+                                        cursor:
+                                          handle.cursor,
+
+                                        touchAction:
+                                          'none',
+                                      }}
+
+                                      className={`absolute w-3 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-lg z-40 ${handle.className}`}
+                                    />
+                                  )
+                                )}
+
+                            </div>
 
                           </React.Fragment>
                         );
@@ -2490,57 +2930,271 @@ React.FC<AnnotatePdfProps> = ({
                           item.type ===
                           'arrow'
                         ) {
-                          content = (
-                            <svg
-                              viewBox="0 0 100 100"
-                              preserveAspectRatio="none"
-                              className="w-full h-full overflow-visible"
-                            >
+                          const arrowPoints =
+                            item.points &&
+                            item.points.length >=
+                              2
+                              ? item.points
+                              : [
+                                  {
+                                    x:
+                                      item.x,
+                                    y:
+                                      item.y,
+                                  },
+                                  {
+                                    x:
+                                      item.x +
+                                      item.width,
+                                    y:
+                                      item.y +
+                                      item.height,
+                                  },
+                                ];
 
-                              <defs>
-                                <marker
-                                  id={`arrow-${item.id}`}
-                                  markerWidth="7"
-                                  markerHeight="7"
-                                  refX="5"
-                                  refY="3.5"
-                                  orient="auto"
-                                >
-                                  <polygon
-                                    points="0 0, 7 3.5, 0 7"
-                                    fill={
+                          const safeWidth =
+                            Math.max(
+                              0.000001,
+                              item.width
+                            );
+
+                          const safeHeight =
+                            Math.max(
+                              0.000001,
+                              item.height
+                            );
+
+                          const startX =
+                            (
+                              (
+                                arrowPoints[0].x -
+                                item.x
+                              ) /
+                              safeWidth
+                            ) *
+                            100;
+
+                          const startY =
+                            (
+                              (
+                                arrowPoints[0].y -
+                                item.y
+                              ) /
+                              safeHeight
+                            ) *
+                            100;
+
+                          const endX =
+                            (
+                              (
+                                arrowPoints[1].x -
+                                item.x
+                              ) /
+                              safeWidth
+                            ) *
+                            100;
+
+                          const endY =
+                            (
+                              (
+                                arrowPoints[1].y -
+                                item.y
+                              ) /
+                              safeHeight
+                            ) *
+                            100;
+
+                          /*
+                           * Calculate direction using actual page
+                           * proportions so horizontal, vertical and
+                           * diagonal arrows all get the correct head.
+                           */
+                          const arrowAngle =
+                            Math.atan2(
+                              (
+                                arrowPoints[1].y -
+                                arrowPoints[0].y
+                              ) *
+                                pageSize.height,
+
+                              (
+                                arrowPoints[1].x -
+                                arrowPoints[0].x
+                              ) *
+                                pageSize.width
+                            ) *
+                            (
+                              180 /
+                              Math.PI
+                            );
+
+                          content = (
+                            <>
+                              <svg
+                                viewBox="0 0 100 100"
+                                preserveAspectRatio="none"
+                                className="w-full h-full overflow-visible"
+                              >
+
+                                <line
+                                  x1={
+                                    startX
+                                  }
+                                  y1={
+                                    startY
+                                  }
+                                  x2={
+                                    endX
+                                  }
+                                  y2={
+                                    endY
+                                  }
+
+                                  stroke={
+                                    item.color ||
+                                    '#ef4444'
+                                  }
+
+                                  strokeWidth={
+                                    Math.max(
+                                      1,
+                                      item.strokeWidth ||
+                                      2
+                                    )
+                                  }
+
+                                  vectorEffect="non-scaling-stroke"
+                                />
+
+                              </svg>
+
+
+                              {/*
+                               * Fixed pixel-size pointer.
+                               *
+                               * Unlike an SVG marker inside the
+                               * arrow's bounding box, this does not
+                               * collapse when the box is almost zero
+                               * height or width.
+                               */}
+                              <span
+                                style={{
+                                  position:
+                                    'absolute',
+
+                                  left:
+                                    `${endX}%`,
+
+                                  top:
+                                    `${endY}%`,
+
+                                  width:
+                                    0,
+
+                                  height:
+                                    0,
+
+                                  borderTop:
+                                    '6px solid transparent',
+
+                                  borderBottom:
+                                    '6px solid transparent',
+
+                                  borderLeft:
+                                    `12px solid ${
                                       item.color ||
                                       '#ef4444'
-                                    }
-                                  />
-                                </marker>
-                              </defs>
+                                    }`,
 
-                              <line
-                                x1="2"
-                                y1="2"
-                                x2="96"
-                                y2="96"
+                                  transform:
+                                    `translate(-6px, -6px) rotate(${arrowAngle}deg)`,
 
-                                stroke={
-                                  item.color ||
-                                  '#ef4444'
-                                }
+                                  transformOrigin:
+                                    '6px 6px',
 
-                                strokeWidth={
-                                  Math.max(
-                                    1,
-                                    item.strokeWidth ||
-                                    2
-                                  )
-                                }
+                                  pointerEvents:
+                                    'none',
 
-                                vectorEffect="non-scaling-stroke"
-
-                                markerEnd={`url(#arrow-${item.id})`}
+                                  zIndex:
+                                    35,
+                                }}
                               />
 
-                            </svg>
+
+                              {isSelected &&
+                                tool ===
+                                  'select' &&
+                                arrowPoints.map(
+                                  (
+                                    point,
+                                    index
+                                  ) => {
+                                    const handleX =
+                                      (
+                                        (
+                                          point.x -
+                                          item.x
+                                        ) /
+                                        safeWidth
+                                      ) *
+                                      100;
+
+                                    const handleY =
+                                      (
+                                        (
+                                          point.y -
+                                          item.y
+                                        ) /
+                                        safeHeight
+                                      ) *
+                                      100;
+
+                                    return (
+                                      <div
+                                        key={
+                                          index
+                                        }
+
+                                        onPointerDown={(
+                                          event
+                                        ) =>
+                                          handleArrowEndpointPointerDown(
+                                            event,
+                                            item,
+                                            index as
+                                              0 | 1
+                                          )
+                                        }
+
+                                        style={{
+                                          left:
+                                            `${handleX}%`,
+
+                                          top:
+                                            `${handleY}%`,
+
+                                          transform:
+                                            'translate(-50%, -50%)',
+
+                                          touchAction:
+                                            'none',
+                                        }}
+
+                                        className="absolute w-7 h-7 flex items-center justify-center z-50"
+                                      >
+                                        <span
+                                          className={`pointer-events-none block w-3.5 h-3.5 rounded-full border-2 border-emerald-500 shadow-lg ${
+                                            index ===
+                                            1
+                                              ? 'bg-emerald-500'
+                                              : 'bg-white'
+                                          }`}
+                                        />
+                                      </div>
+                                    );
+                                  }
+                                )}
+                            </>
                           );
                         }
 
@@ -2598,8 +3252,11 @@ React.FC<AnnotatePdfProps> = ({
 
 
                             {isSelected &&
+                              tool === 'select' &&
                               item.type !==
                                 'pen' &&
+                              item.type !==
+                                'arrow' &&
                               resizeHandles.map(
                                 (
                                   handle
@@ -2628,8 +3285,29 @@ React.FC<AnnotatePdfProps> = ({
                                         'none',
                                     }}
 
-                                    className={`absolute w-3 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-lg z-40 ${handle.className}`}
-                                  />
+                                    className={
+                                      item.type ===
+                                        'text'
+                                        ? `absolute w-6 h-6 z-40 flex items-center justify-center ${
+                                            handle.type ===
+                                            'nw'
+                                              ? '-top-3 -left-3'
+                                              : handle.type ===
+                                                  'ne'
+                                                ? '-top-3 -right-3'
+                                                : handle.type ===
+                                                    'se'
+                                                  ? '-bottom-3 -right-3'
+                                                  : '-bottom-3 -left-3'
+                                          }`
+                                        : `absolute w-3 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-lg z-40 ${handle.className}`
+                                    }
+                                  >
+                                    {item.type ===
+                                      'text' && (
+                                      <span className="pointer-events-none block w-3 h-3 bg-white border-2 border-emerald-500 rounded-full shadow-lg" />
+                                    )}
+                                  </div>
 
                                 )
                               )}

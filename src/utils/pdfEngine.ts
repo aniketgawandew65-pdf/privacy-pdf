@@ -21469,19 +21469,44 @@ async function drawFlattenedAnnotations(
       item.type ===
       'arrow'
     ) {
+      /*
+       * New arrows keep two normalized whole-page endpoints.
+       * Older arrows without points retain the original
+       * top-left -> bottom-right box behaviour.
+       */
+      const startPoint =
+        item.points?.[0];
+
+      const endPoint =
+        item.points?.[1];
+
       const startX =
-        x;
+        startPoint
+          ? startPoint.x *
+            pageWidth
+          : x;
 
       const startY =
-        y +
-        boxHeight;
+        startPoint
+          ? pageHeight -
+            startPoint.y *
+              pageHeight
+          : y +
+            boxHeight;
 
       const endX =
-        x +
-        boxWidth;
+        endPoint
+          ? endPoint.x *
+            pageWidth
+          : x +
+            boxWidth;
 
       const endY =
-        y;
+        endPoint
+          ? pageHeight -
+            endPoint.y *
+              pageHeight
+          : y;
 
       page.drawLine({
         start: {
