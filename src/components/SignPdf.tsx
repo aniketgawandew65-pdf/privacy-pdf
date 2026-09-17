@@ -29,6 +29,10 @@ import {
 } from '../utils/pdfjs';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface SignPdfProps {
   file: File | null;
@@ -619,6 +623,16 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
       return;
     }
 
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -633,6 +647,7 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
 
       const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
+      commitTaskCredit();
     } catch (err: any) {
       console.error(err);
       if (err.message === 'INCORRECT_PASSWORD') {
