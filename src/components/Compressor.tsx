@@ -17,7 +17,14 @@ import {
 import { getLicenseStatus } from '../utils/license';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import type { CompressionProgress } from '../utils/exactCompressor';
-import { checkActionAllowed, recordActionExecution, getDailyUsage } from '../utils/usageTracker';
+import {
+  getDailyUsage,
+  MAX_PRO_FILE_SIZE_MB,
+} from '../utils/usageTracker';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 import { ProModal } from './ProModal';
 import { useBatchQueue } from '../utils/useBatchQueue';
 import { BatchQueueDrawer } from './BatchQueueDrawer';
@@ -29,9 +36,6 @@ interface CompressorProps {
 }
 
 type CompressionLevel = 'recommended' | 'extreme' | 'target';
-
-const MAX_FREE_BYTES = 25 * 1024 * 1024;
-const MAX_PRO_BYTES = 150 * 1024 * 1024;
 
 export function Compressor({ file, onFileChange }: CompressorProps) {
   const { pathname } = useLocation();
@@ -146,26 +150,24 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const validateFiles = (files: File[]): boolean => {
     if (files.length === 0) return false;
 
-    const totalBytes = files.reduce((acc, f) => acc + f.size, 0);
-    const limit = isPro ? MAX_PRO_BYTES : MAX_FREE_BYTES;
-    const limitMB = isPro ? 150 : 25;
-    const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+    const hardLimitBytes =
+      MAX_PRO_FILE_SIZE_MB * 1024 * 1024;
 
-    if (totalBytes > limit) {
-      setErrorMessage(
-        isPro
-          ? `Total batch size (${totalMB} MB) exceeds the Pro limit of ${limitMB} MB.`
-          : `Total size (${totalMB} MB) exceeds the free 25 MB limit. Upgrade to Pro for up to 150 MB.`
+    const oversizedFile =
+      files.find(
+        (selectedFile) =>
+          selectedFile.size > hardLimitBytes
       );
-      setIsProModalOpen(true);
-      return false;
-    }
 
-    if (!isPro && files.length > dailyStats.remaining) {
+    if (oversizedFile) {
       setErrorMessage(
-        `You have ${dailyStats.remaining} free task(s) remaining today, but selected ${files.length} files.`
+        `${oversizedFile.name} exceeds the maximum supported file size of ${MAX_PRO_FILE_SIZE_MB} MB.`
       );
-      setIsProModalOpen(true);
+
+      if (!isPro) {
+        setIsProModalOpen(true);
+      }
+
       return false;
     }
 
@@ -183,12 +185,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
 
     if (files.length === 1) {
       setBatchFiles([]);
-      const check = checkActionAllowed(files[0].size);
-      if (!check.allowed) {
-        setErrorMessage(check.errorMessage || 'File exceeds upload limit.');
-        setIsProModalOpen(true);
-        return;
-      }
       onFileChange(files[0]);
     } else {
       onFileChange(null);
@@ -205,13 +201,36 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         input: { file: f, level, targetKb },
         run: async (input, signal) => {
           if (signal.aborted) throw new Error('Task aborted');
-          const { compressPDF } = await import('../utils/exactCompressor');
-          const outputBytes = await compressPDF(input.file, {
-            level: input.level,
-            targetKb: input.targetKb,
-          });
-          recordActionExecution();
-          return new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
+
+          const creditCheck =
+            checkTaskCredit(input.file);
+
+          if (!creditCheck.allowed) {
+            throw new Error(
+              creditCheck.errorMessage ||
+                'This task is not available on your current plan.'
+            );
+          }
+
+          const { compressPDF } =
+            await import('../utils/exactCompressor');
+
+          const outputBytes =
+            await compressPDF(input.file, {
+              level: input.level,
+              targetKb: input.targetKb,
+            });
+
+          const blob =
+            new Blob(
+              [outputBytes as BlobPart],
+              { type: 'application/pdf' }
+            );
+
+          commitTaskCredit();
+          syncState();
+
+          return blob;
         },
       }));
 
@@ -222,9 +241,14 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const handleCompress = async () => {
     if (!file) return;
 
-    const limitCheck = checkActionAllowed(file.size);
+    const limitCheck = checkTaskCredit(file);
+
     if (!limitCheck.allowed) {
-      setErrorMessage(limitCheck.errorMessage || 'Daily task limit reached.');
+      setErrorMessage(
+        limitCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+
       setIsProModalOpen(true);
       return;
     }
@@ -247,7 +271,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
       const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
       setCompressedSize(blob.size);
       createUrl(blob);
-      recordActionExecution();
+      commitTaskCredit();
       syncState();
     } catch (err) {
       console.error('Compression error:', err);
