@@ -20,6 +20,10 @@ import {
   loadPdfJsFromBlob,
   pdfjsLib,
 } from '../utils/pdfjs';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 // PDF.js worker setup
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -403,6 +407,17 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   // Export cropped PDF with physical MediaBox resizing
   const handleDownload = async () => {
     if (!file) return;
+
+    const creditCheck = checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     setDownloadUrl(null);
@@ -689,6 +704,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
         const fileName = (file.name.replace(/\.pdf$/i, "") || "document") + "_cropped.pdf";
         setDownloadUrl(url);
         setDownloadName(fileName);
+        commitTaskCredit();
       }
     } catch (err: any) {
       console.error("Crop error:", err);
