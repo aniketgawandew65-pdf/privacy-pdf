@@ -3,6 +3,9 @@ import { safeStorage } from './safeStorage';
 const ACTIVE_ACCOUNT_KEY =
   'oneintoone_google_bonus_active_v1';
 
+const LOGOUT_PENDING_KEY =
+  'oneintoone_google_bonus_logout_pending_v1';
+
 const CACHE_PREFIX =
   'oneintoone_google_bonus_v1:';
 
@@ -171,6 +174,12 @@ export function applyGoogleLogin(
     bonusUsed: number;
   }
 ): GoogleBonusState {
+  // A fresh successful Google login replaces any
+  // previously queued offline logout.
+  safeStorage.removeItem(
+    LOGOUT_PENDING_KEY
+  );
+
   const serverUsed =
     clampBonusUsed(
       input.bonusUsed
@@ -334,6 +343,40 @@ export async function syncGoogleBonusUsage():
 
 export async function restoreGoogleSession():
   Promise<GoogleBonusState | null> {
+  /*
+   * If the user deliberately logged out while offline,
+   * do NOT restore the old cached/server account.
+   *
+   * First chance we get online, clear the old HttpOnly
+   * cookie on the server and remain signed out.
+   */
+  if (
+    safeStorage.getItem(
+      LOGOUT_PENDING_KEY
+    ) === '1'
+  ) {
+    try {
+      const logoutResponse = await fetch(
+        '/api/auth/logout',
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+        }
+      );
+
+      if (logoutResponse.ok) {
+        safeStorage.removeItem(
+          LOGOUT_PENDING_KEY
+        );
+      }
+    } catch {
+      // Still offline. Remain locally signed out.
+    }
+
+    return null;
+  }
+
   try {
     const response = await fetch(
       '/api/auth/session',
@@ -386,24 +429,47 @@ export async function restoreGoogleSession():
 
 export async function logoutGoogleBonus():
   Promise<void> {
-  try {
-    await fetch(
-      '/api/auth/logout',
-      {
-        method: 'POST',
-        credentials: 'same-origin',
-      }
-    );
-  } catch {
-    // Logout must still stop local bonus
-    // access even when offline.
-  }
-
+  /*
+   * Stop local bonus access immediately, even if the
+   * device currently has no internet connection.
+   */
   safeStorage.removeItem(
     ACTIVE_ACCOUNT_KEY
   );
 
+  /*
+   * Keep a logout tombstone until the server confirms
+   * that the HttpOnly cookie has been cleared.
+   */
+  safeStorage.setItem(
+    LOGOUT_PENDING_KEY,
+    '1'
+  );
+
   notifyChange();
+
+  try {
+    const response = await fetch(
+      '/api/auth/logout',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      }
+    );
+
+    if (response.ok) {
+      safeStorage.removeItem(
+        LOGOUT_PENDING_KEY
+      );
+    }
+  } catch {
+    /*
+     * Expected when offline.
+     * The tombstone remains, so the old account cannot
+     * silently come back when the app is reopened.
+     */
+  }
 }
 
 export function subscribeGoogleBonus(
