@@ -16,6 +16,10 @@ import { imagesToPDF } from '../utils/pdfEngine';
 import heic2any from 'heic2any';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
+import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
   clearToolWorkspace,
@@ -589,6 +593,18 @@ export const ScanToPdf = () => {
       return;
     }
 
+    const creditCheck = checkTaskCredit(
+      pages.map((page) => page.file)
+    );
+
+    if (!creditCheck.allowed) {
+      setError(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
     clearDownload();
@@ -615,6 +631,8 @@ export const ScanToPdf = () => {
       setDownloadUrl(
         URL.createObjectURL(blob)
       );
+
+      commitTaskCredit();
     } catch (err) {
       console.error(err);
 
