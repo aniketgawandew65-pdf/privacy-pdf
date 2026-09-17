@@ -8,6 +8,7 @@ import { TOOLS_METADATA } from './seoConfig';
 import { TOOL_COPY } from './toolCopy';
 import { blogMeta, renderBlog, renderGuide } from './seoContent';
 import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
+import { GoogleBonusAccount } from './components/GoogleBonusAccount';
 import {
   Sliders,
   Files,
@@ -1355,7 +1356,8 @@ export default function App() {
           {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
           <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Admin Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
         </div>
-      </header>
+              <GoogleBonusAccount />
+</header>
 
       <main className="site-main">
         <section className={`page-intro ${isHome ? 'home-intro' : ''}`}>
