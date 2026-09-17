@@ -26,12 +26,18 @@ import {
   clearProcessingRecovery,
   digestText,
   exclusivelyProcess,
+  hasRecoverableProcessing,
   localContentId,
 } from '../utils/localProcessing';
 
 import {
   saveWorkspaceFiles,
 } from '../utils/localWorkspace';
+
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 import {
   clearUniversalPages,
@@ -316,6 +322,19 @@ export const DocumentDataExtractor:
           return;
         }
 
+        const creditCheck =
+          checkTaskCredit(
+            targetFile
+          );
+
+        if (!creditCheck.allowed) {
+          setError(
+            creditCheck.errorMessage ||
+              'This task is not available on your current plan.'
+          );
+          return;
+        }
+
         extractionInFlightRef.current =
           true;
 
@@ -478,6 +497,8 @@ export const DocumentDataExtractor:
           );
 
           clearProcessingRecovery();
+
+          commitTaskCredit();
         } catch (
           err: any
         ) {
@@ -535,14 +556,15 @@ export const DocumentDataExtractor:
         onFileChange(
           nextFile
         );
-
-        await runExtraction(
-          nextFile
-        );
       };
 
     useEffect(() => {
-      if (!file) return;
+      if (!file) {
+        setSections([]);
+        setError(null);
+        setStatus('');
+        return;
+      }
 
       if (
         extractorSessionCache.file ===
@@ -554,9 +576,17 @@ export const DocumentDataExtractor:
         return;
       }
 
-      void runExtraction(
-        file
-      );
+      setSections([]);
+      setError(null);
+      setStatus('');
+
+      if (
+        hasRecoverableProcessing()
+      ) {
+        void runExtraction(
+          file
+        );
+      }
     }, [file]);
 
     const updateCell = (
@@ -1083,6 +1113,23 @@ export const DocumentDataExtractor:
               {error}
             </div>
           )}
+
+          {file &&
+            !isProcessing &&
+            sections.length === 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  void runExtraction(
+                    file
+                  )
+                }
+                className="mt-4 w-full min-h-12 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Extract Data
+              </button>
+            )}
         </div>
 
         {sections.length >
