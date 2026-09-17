@@ -10,6 +10,10 @@ import {
 } from 'lucide-react';
 import { extractTableFromPDF, type ExtractedTableResult } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  checkTaskCredit,
+  commitTaskCredit,
+} from '../utils/taskCreditGate';
 
 interface PdfToCsvProps {
   file: File | null;
@@ -31,6 +35,18 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
 
   const parseDocument = async () => {
     if (!file) return;
+
+    const creditCheck =
+      checkTaskCredit(file);
+
+    if (!creditCheck.allowed) {
+      setErrorMessage(
+        creditCheck.errorMessage ||
+          'This task is not available on your current plan.'
+      );
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     revokeDownloadUrl();
@@ -52,6 +68,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
         setTableData(result);
         const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8;' });
         createUrl(blob);
+        commitTaskCredit();
       }
     } catch (err: any) {
       console.error('Table parsing error:', err);
@@ -64,13 +81,10 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
   };
 
   useEffect(() => {
-    if (!file) {
-      setTableData(null);
-      revokeDownloadUrl();
-      setErrorMessage(null);
-      return;
-    }
-    parseDocument();
+    setTableData(null);
+    revokeDownloadUrl();
+    setErrorMessage(null);
+    setProgressText('');
   }, [file, delimiter, yTolerance, minColumnGap]);
 
   const handleClear = () => {
@@ -191,6 +205,25 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               />
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => void parseDocument()}
+            disabled={isProcessing}
+            className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 text-sm"
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Extracting CSV...</span>
+              </>
+            ) : (
+              <>
+                <Table className="w-4 h-4" />
+                <span>Extract CSV</span>
+              </>
+            )}
+          </button>
 
           {/* Table Data Preview */}
           {isProcessing ? (
