@@ -20,6 +20,23 @@ import {
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+
+import {
+  batesJobMatchesFile,
+  clearBatesRecovery,
+  readBatesJobMeta,
+  readBatesPage,
+  restoreBatesJobSource,
+  saveBatesJobSource,
+  writeBatesPage,
+  type BatesRecoverySettings,
+} from '../utils/batesRecovery';
+
 interface BatesNumberingProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
@@ -37,9 +54,217 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const resumeAttemptedRef =
+    useRef(false);
+
+  const recoverySettingsRef =
+    useRef<BatesRecoverySettings | null>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  /*
+   * ==========================================================
+   * DURABLE BATES RESTORE AFTER SAFARI / WEBKIT RESTART
+   * ==========================================================
+   */
+  useEffect(() => {
+    if (
+      file ||
+      durableRestoreAttemptedRef.current
+    ) {
+      return;
+    }
+
+    durableRestoreAttemptedRef.current =
+      true;
+
+    let cancelled =
+      false;
+
+    void (
+      async () => {
+        try {
+          const restored =
+            await restoreBatesJobSource();
+
+          if (
+            cancelled ||
+            !restored
+          ) {
+            return;
+          }
+
+          recoverySettingsRef.current =
+            restored.settings;
+
+          setPrefix(
+            restored.settings.prefix
+          );
+
+          setSuffix(
+            restored.settings.suffix
+          );
+
+          setStartNumber(
+            restored.settings.startNumber
+          );
+
+          setDigits(
+            restored.settings.digits
+          );
+
+          setFontSize(
+            restored.settings.fontSize
+          );
+
+          setPosition(
+            restored.settings.position
+          );
+
+          preserveProcessingWorkspace();
+
+          setRecoveryReady(
+            true
+          );
+
+          onFileChange(
+            restored.file
+          );
+        } catch (
+          error
+        ) {
+          console.warn(
+            'Unable to restore interrupted Bates job:',
+            error
+          );
+        }
+      }
+    )();
+
+    return () => {
+      cancelled =
+        true;
+    };
+  }, [
+    file,
+    onFileChange,
+  ]);
+
+
+  /*
+   * App may still have the same in-memory File after a partial
+   * interruption. Detect an existing dedicated Bates job.
+   */
+  useEffect(() => {
+    if (!file) {
+      checkedRecoveryFileRef.current =
+        null;
+
+      recoverySettingsRef.current =
+        null;
+
+      setRecoveryReady(
+        false
+      );
+
+      return;
+    }
+
+    if (
+      checkedRecoveryFileRef.current ===
+      file
+    ) {
+      return;
+    }
+
+    checkedRecoveryFileRef.current =
+      file;
+
+    let cancelled =
+      false;
+
+    void (
+      async () => {
+        try {
+          const meta =
+            await readBatesJobMeta();
+
+          if (
+            cancelled ||
+            !batesJobMatchesFile(
+              meta,
+              file
+            )
+          ) {
+            return;
+          }
+
+          const settings =
+            meta!.settings;
+
+          recoverySettingsRef.current =
+            settings;
+
+          setPrefix(
+            settings.prefix
+          );
+
+          setSuffix(
+            settings.suffix
+          );
+
+          setStartNumber(
+            settings.startNumber
+          );
+
+          setDigits(
+            settings.digits
+          );
+
+          setFontSize(
+            settings.fontSize
+          );
+
+          setPosition(
+            settings.position
+          );
+
+          preserveProcessingWorkspace();
+
+          setRecoveryReady(
+            true
+          );
+        } catch (
+          error
+        ) {
+          console.warn(
+            'Unable to inspect Bates recovery:',
+            error
+          );
+        }
+      }
+    )();
+
+    return () => {
+      cancelled =
+        true;
+    };
+  }, [
+    file,
+  ]);
+
 
   useEffect(() => {
     if (!file) {
@@ -66,50 +291,287 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
     };
   }, [file]);
 
-  const handleApplyBates = async () => {
-    if (!file) return;
+  const handleApplyBates =
+    async (
+      forcedSettings?:
+        BatesRecoverySettings
+    ) => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
 
-    const creditCheck = checkTaskCredit(file);
 
-    if (!creditCheck.allowed) {
-      setErrorMessage(
-        creditCheck.errorMessage ||
-          'This task is not available on your current plan.'
+      const activeSettings:
+        BatesRecoverySettings =
+          forcedSettings || {
+            prefix,
+            suffix,
+            startNumber,
+            digits,
+            fontSize,
+            position,
+          };
+
+
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+
+      if (
+        !creditCheck.allowed
+      ) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+
+        return;
+      }
+
+
+      processingInFlightRef.current =
+        true;
+
+      setIsProcessing(
+        true
       );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeDownloadUrl();
+
+
+      try {
+        const outputBytes =
+          await exclusivelyProcess(
+            async () => {
+              let recoveryEnabled =
+                false;
+
+              try {
+                await saveBatesJobSource(
+                  file,
+                  activeSettings
+                );
+
+                recoveryEnabled =
+                  true;
+
+                recoverySettingsRef.current =
+                  activeSettings;
+
+                setRecoveryReady(
+                  true
+                );
+              } catch (
+                recoveryError
+              ) {
+                console.warn(
+                  'Bates restart recovery unavailable:',
+                  recoveryError
+                );
+              }
+
+
+              return await addBatesNumberingToPDF(
+                file,
+                {
+                  ...activeSettings,
+
+                  onProgress:
+                    (
+                      curr,
+                      total
+                    ) => {
+                      setProgressText(
+                        `Stamping page ${curr} of ${total}...`
+                      );
+                    },
+
+                  recovery:
+                    recoveryEnabled
+                      ? {
+                          readPage:
+                            readBatesPage,
+
+                          writePage:
+                            writeBatesPage,
+                        }
+                      : undefined,
+                }
+              );
+            }
+          );
+
+
+        const blob =
+          new Blob(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+
+        createUrl(
+          blob
+        );
+
+
+        /*
+         * Final PDF exists. Recovery can now be removed and
+         * the single successful task can be charged.
+         */
+        await clearBatesRecovery();
+
+        clearProcessingRecovery();
+
+        recoverySettingsRef.current =
+          null;
+
+        setRecoveryReady(
+          false
+        );
+
+        resumeAttemptedRef.current =
+          false;
+
+
+        commitTaskCredit();
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'Bates Stamping error:',
+          err
+        );
+
+        setErrorMessage(
+          err?.message ||
+            'Bates stamping was interrupted. Reopen the tool to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressText(
+          ''
+        );
+      }
+    };
+
+
+  /*
+   * Automatically resume a recoverable job after the restored
+   * file page-count probe has finished and released PDF.js.
+   */
+  useEffect(() => {
+    if (
+      !file ||
+      !recoveryReady ||
+      pageCount <=
+        0 ||
+      resumeAttemptedRef.current ||
+      processingInFlightRef.current
+    ) {
       return;
     }
-    setIsProcessing(true);
-    setErrorMessage(null);
-    revokeDownloadUrl();
 
-    try {
-      const outputBytes = await addBatesNumberingToPDF(file, {
-        prefix,
-        startNumber,
-        digits,
-        suffix,
-        position,
-        fontSize,
-        onProgress: (curr: number, total: number) => {
-          setProgressText(`Stamping page ${curr} of ${total}...`);
-        },
-      });
+    const settings =
+      recoverySettingsRef.current;
 
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-      commitTaskCredit();
-    } catch (err: any) {
-      console.error('Bates Stamping error:', err);
-      setErrorMessage(err.message || 'Failed to apply Bates numbering.');
-    } finally {
-      setIsProcessing(false);
-      setProgressText('');
+    if (!settings) {
+      return;
     }
-  };
+
+    const timer =
+      window.setTimeout(
+        () => {
+          if (
+            resumeAttemptedRef.current ||
+            processingInFlightRef.current
+          ) {
+            return;
+          }
+
+          resumeAttemptedRef.current =
+            true;
+
+          void handleApplyBates(
+            settings
+          );
+        },
+        250
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    file,
+    recoveryReady,
+    pageCount,
+  ]);
+
+
+  const discardBatesRecovery =
+    () => {
+      clearProcessingRecovery();
+
+      void clearBatesRecovery()
+        .catch(
+          () => {}
+        );
+
+      recoverySettingsRef.current =
+        null;
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
+      );
+    };
+
 
   const handleClear = () => {
+    if (isProcessing) {
+      return;
+    }
+
+    discardBatesRecovery();
+
+    processingInFlightRef.current =
+      false;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    checkedRecoveryFileRef.current =
+      null;
+
     onFileChange(null);
+
     revokeDownloadUrl();
+
     setErrorMessage(null);
   };
 
@@ -196,6 +658,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
               <input
                 type="text"
                 value={prefix}
+                disabled={isProcessing}
                 onChange={(e) => {
                   setPrefix(e.target.value);
                   revokeDownloadUrl();
@@ -209,6 +672,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
               <input
                 type="text"
                 value={suffix}
+                disabled={isProcessing}
                 onChange={(e) => {
                   setSuffix(e.target.value);
                   revokeDownloadUrl();
@@ -226,6 +690,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
                 type="number"
                 min="1"
                 value={startNumber}
+                disabled={isProcessing}
                 onChange={(e) => {
                   setStartNumber(Math.max(1, parseInt(e.target.value, 10) || 1));
                   revokeDownloadUrl();
@@ -240,6 +705,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
                 min="1"
                 max="12"
                 value={digits}
+                disabled={isProcessing}
                 onChange={(e) => {
                   setDigits(Math.min(12, Math.max(1, parseInt(e.target.value, 10) || 1)));
                   revokeDownloadUrl();
@@ -254,6 +720,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
                 min="6"
                 max="24"
                 value={fontSize}
+                disabled={isProcessing}
                 onChange={(e) => {
                   setFontSize(Math.max(6, parseInt(e.target.value, 10) || 10));
                   revokeDownloadUrl();
@@ -274,6 +741,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
                 <button
                   key={opt.id}
                   type="button"
+                  disabled={isProcessing}
                   onClick={() => {
                     setPosition(opt.id);
                     revokeDownloadUrl();
@@ -311,7 +779,9 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
           {/* Action Trigger */}
           {!downloadUrl ? (
             <button
-              onClick={handleApplyBates}
+              onClick={() => {
+                void handleApplyBates();
+              }}
               disabled={isProcessing || pageCount === 0}
               className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
             >

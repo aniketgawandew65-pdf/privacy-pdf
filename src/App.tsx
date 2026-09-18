@@ -477,7 +477,9 @@ export default function App() {
       location.pathname ===
         '/edit-pdf' ||
       location.pathname ===
-        '/visual-editor'
+        '/visual-editor' ||
+      location.pathname ===
+        '/bates-numbering'
     ) {
       return;
     }

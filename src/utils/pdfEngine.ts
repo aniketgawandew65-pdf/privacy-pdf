@@ -9569,16 +9569,42 @@ export type BatesPosition =
   | 'bottom-center'
   | 'bottom-right';
 
+export interface BatesRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
+
+  writePage?: (
+    pageNumber:
+      number,
+
+    blob:
+      Blob
+  ) => Promise<void>;
+}
+
 export interface BatesOptions {
   prefix?: string;
   suffix?: string;
   startNumber: number;
   digits?: number;
-  totalDigits?: number; // fallback support
+  totalDigits?: number;
   fontSize?: number;
   position?: BatesPosition;
-  onProgress?: (curr: number, total: number) => void;
+  onProgress?: (
+    curr: number,
+    total: number
+  ) => void;
+
+  recovery?:
+    BatesRecoveryHooks;
 }
+
 
 export async function addBatesNumberingToPDF(
   file: File,
@@ -9602,37 +9628,67 @@ export async function addBatesNumberingToPDF(
     );
 
   const fontSize =
-    options.fontSize || 10;
+    options.fontSize ||
+    10;
 
   const position =
     options.position ||
     'bottom-right';
 
+  const recovery =
+    options.recovery;
 
-  let loadedPdf:
-    | {
-        pdf: any;
-        dispose: () => Promise<void>;
-      }
-    | null =
-      await loadPdfJsFromBlob(
-        file,
-        {
-          stopAtErrors: false,
-        }
+
+  const yieldToBrowser =
+    async (
+      delay =
+        0
+    ) =>
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            delay
+          )
       );
 
 
-  /*
-   * Profile the document without creating a complete
-   * ArrayBuffer/Uint8Array source copy.
-   */
-  const profilePdf =
-    loadedPdf.pdf;
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
 
   const numPages =
-    profilePdf.numPages;
+    pdfDoc.numPages;
 
+
+  /*
+   * ----------------------------------------------------------
+   * FAST LOSSLESS VECTOR ROUTE
+   * ----------------------------------------------------------
+   *
+   * Keep the existing vector stamping behaviour for ordinary
+   * reasonably-sized digital PDFs.
+   *
+   * Very large files deliberately avoid a complete
+   * file.arrayBuffer() on mobile and use the bounded pipeline.
+   */
   const kbPerPage =
     (
       file.size /
@@ -9648,13 +9704,14 @@ export async function addBatesNumberingToPDF(
 
   try {
     const firstPage =
-      await profilePdf.getPage(
+      await pdfDoc.getPage(
         1
       );
 
     try {
       const textContent =
-        await firstPage.getTextContent();
+        await firstPage
+          .getTextContent();
 
       hasDenseDigitalText =
         textContent.items.length >
@@ -9671,22 +9728,34 @@ export async function addBatesNumberingToPDF(
 
 
   const isDigitalVector =
-    kbPerPage < 180 ||
+    kbPerPage <
+      180 ||
     (
       hasDenseDigitalText &&
-      kbPerPage < 400
+      kbPerPage <
+        400
     );
 
 
-  /*
-   * Native vector route for digital PDFs.
-   *
-   * Dispose PDF.js first so pdf-lib and PDF.js do not
-   * hold the large source at the same time.
-   */
-  if (isDigitalVector) {
+  const MAX_NATIVE_SOURCE_BYTES =
+    80 *
+    1024 *
+    1024;
+
+
+  if (
+    isDigitalVector &&
+    file.size <=
+      MAX_NATIVE_SOURCE_BYTES
+  ) {
     await loadedPdf.dispose();
-    loadedPdf = null;
+
+    loadedPdf =
+      null;
+
+    pdfDoc =
+      null;
+
 
     let vectorSource:
       | ArrayBuffer
@@ -9698,412 +9767,77 @@ export async function addBatesNumberingToPDF(
         await PDFDocument.load(
           vectorSource,
           {
-            ignoreEncryption: true,
+            ignoreEncryption:
+              true,
           }
         );
 
-      /*
-       * pdf-lib has parsed the document, so our separate
-       * complete source ArrayBuffer reference can go away
-       * before Bates stamping begins.
-       */
-      vectorSource = null;
+      vectorSource =
+        null;
 
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+      await yieldToBrowser();
 
       const pages =
         nativeDoc.getPages();
 
       const font =
         await nativeDoc.embedFont(
-          StandardFonts.HelveticaBold
+          StandardFonts
+            .HelveticaBold
         );
 
 
-      pages.forEach(
-        (
-          page,
-          idx
-        ) => {
-          options.onProgress?.(
-            idx + 1,
-            numPages
-          );
-
-          const pageNumStr =
-            String(
-              startNum + idx
-            ).padStart(
-              digits,
-              '0'
-            );
-
-          const stampText =
-            prefix +
-            pageNumStr +
-            suffix;
-
-          const {
-            width,
-            height,
-          } =
-            page.getSize();
-
-          const textWidth =
-            font.widthOfTextAtSize(
-              stampText,
-              fontSize
-            );
-
-          const textHeight =
-            font.heightAtSize(
-              fontSize
-            );
-
-          const marginX = 28;
-          const marginY = 24;
-
-          let posX =
-            marginX;
-
-          let posY =
-            marginY;
-
-
-          if (
-            position.includes(
-              'center'
-            )
-          ) {
-            posX =
-              (
-                width -
-                textWidth
-              ) / 2;
-          } else if (
-            position.includes(
-              'right'
-            )
-          ) {
-            posX =
-              width -
-              textWidth -
-              marginX;
-          }
-
-
-          if (
-            position.includes(
-              'top'
-            )
-          ) {
-            posY =
-              height -
-              marginY -
-              textHeight;
-          }
-
-
-          const padX = 6;
-          const padY = 3;
-
-          page.drawRectangle({
-            x:
-              posX -
-              padX,
-            y:
-              posY -
-              padY,
-            width:
-              textWidth +
-              padX * 2,
-            height:
-              textHeight +
-              padY * 2,
-            color:
-              rgb(
-                1,
-                1,
-                1
-              ),
-            opacity:
-              0.95,
-          });
-
-
-          page.drawText(
-            stampText,
-            {
-              x: posX,
-              y: posY,
-              size:
-                fontSize,
-              font,
-              color:
-                rgb(
-                  0,
-                  0,
-                  0
-                ),
-            }
-          );
-        }
-      );
-
-
-      return await nativeDoc.save({
-        useObjectStreams: false,
-      });
-    } catch (err) {
-      console.warn(
-        'Native vector route failed, falling back to canvas compositor:',
-        err
-      );
-    } finally {
-      vectorSource = null;
-    }
-
-
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
-    );
-
-
-    loadedPdf =
-      await loadPdfJsFromBlob(
-        file,
-        {
-          stopAtErrors: false,
-        }
-      );
-  }
-
-
-  /*
-   * Scanned/photo fallback.
-   *
-   * If the document was non-vector, reuse the PDF.js
-   * profile document instead of loading the source again.
-   */
-  if (!loadedPdf) {
-    loadedPdf =
-      await loadPdfJsFromBlob(
-        file,
-        {
-          stopAtErrors: false,
-        }
-      );
-  }
-
-
-  const pdfDoc =
-    loadedPdf.pdf;
-
-  try {
-    const newPdfDoc =
-      await PDFDocument.create();
-
-
-    for (
-      let i = 1;
-      i <= numPages;
-      i++
-    ) {
-      options.onProgress?.(
-        i,
-        numPages
-      );
-
-      const pageNumStr =
-        String(
-          startNum +
-            (
-              i - 1
-            )
-        ).padStart(
-          digits,
-          '0'
+      for (
+        let idx = 0;
+        idx < pages.length;
+        idx++
+      ) {
+        options.onProgress?.(
+          idx + 1,
+          numPages
         );
 
-      const stampText =
-        prefix +
-        pageNumStr +
-        suffix;
+        const page =
+          pages[idx];
 
+        const stampText =
+          prefix +
+          String(
+            startNum +
+              idx
+          ).padStart(
+            digits,
+            '0'
+          ) +
+          suffix;
 
-      const page =
-        await pdfDoc.getPage(
-          i
-        );
-
-      const compositeCanvas =
-        document.createElement(
-          'canvas'
-        );
-
-      try {
-        const renderedPage =
-          await renderPageAsJpg(
-            page,
-            2.5
-          );
-
-        let imgBytes =
-          renderedPage.imgBytes;
-
-        const pWidth =
-          renderedPage.width;
-
-        const pHeight =
-          renderedPage.height;
-
-
-        compositeCanvas.width =
-          pWidth;
-
-        compositeCanvas.height =
-          pHeight;
-
-
-        const ctx =
-          compositeCanvas.getContext(
-            '2d'
-          );
-
-        if (!ctx) {
-          throw new Error(
-            'Canvas rendering context unavailable'
-          );
-        }
-
-
-        const pageImg =
-          new Image();
-
-        const pageBlobUrl =
-          URL.createObjectURL(
-            new Blob(
-              [
-                imgBytes as unknown as BlobPart,
-              ],
-              {
-                type:
-                  'image/jpeg',
-              }
-            )
-          );
-
-
-        try {
-          await new Promise<void>(
-            (
-              resolve,
-              reject
-            ) => {
-              pageImg.onload =
-                () => {
-                  ctx.drawImage(
-                    pageImg,
-                    0,
-                    0,
-                    pWidth,
-                    pHeight
-                  );
-
-                  resolve();
-                };
-
-              pageImg.onerror =
-                () =>
-                  reject(
-                    new Error(
-                      'Failed to decode rendered PDF page.'
-                    )
-                  );
-
-              pageImg.src =
-                pageBlobUrl;
-            }
-          );
-        } finally {
-          URL.revokeObjectURL(
-            pageBlobUrl
-          );
-
-          /*
-           * The rendered page has already been painted onto
-           * compositeCanvas. Drop the Image's decoded source
-           * and our compressed JPEG byte reference before
-           * creating the stamped output image.
-           */
-          try {
-            pageImg.src = '';
-          } catch (_) {}
-
-          imgBytes =
-            new Uint8Array(0);
-        }
-
-
-        await new Promise<void>(
-          (resolve) =>
-            setTimeout(
-              resolve,
-              0
-            )
-        );
-
-
-        ctx.save();
-
-        const scaleNormalization =
-          pWidth / 540;
-
-        const finalFontSize =
-          fontSize *
-          scaleNormalization;
-
-        ctx.font =
-          'bold ' +
-          finalFontSize +
-          'px Helvetica, Arial, sans-serif';
-
-        ctx.fillStyle =
-          '#000000';
-
-
-        const metrics =
-          ctx.measureText(
-            stampText
-          );
+        const {
+          width,
+          height,
+        } =
+          page.getSize();
 
         const textWidth =
-          metrics.width;
+          font.widthOfTextAtSize(
+            stampText,
+            fontSize
+          );
 
         const textHeight =
-          finalFontSize;
+          font.heightAtSize(
+            fontSize
+          );
 
         const marginX =
-          pWidth * 0.05;
+          28;
 
         const marginY =
-          pHeight * 0.04;
+          24;
 
         let posX =
           marginX;
 
         let posY =
-          pHeight -
           marginY;
 
 
@@ -10114,16 +9848,452 @@ export async function addBatesNumberingToPDF(
         ) {
           posX =
             (
-              pWidth -
+              width -
               textWidth
-            ) / 2;
+            ) /
+            2;
         } else if (
           position.includes(
             'right'
           )
         ) {
           posX =
-            pWidth -
+            width -
+            textWidth -
+            marginX;
+        }
+
+
+        if (
+          position.includes(
+            'top'
+          )
+        ) {
+          posY =
+            height -
+            marginY -
+            textHeight;
+        }
+
+
+        const padX =
+          6;
+
+        const padY =
+          3;
+
+
+        page.drawRectangle({
+          x:
+            posX -
+            padX,
+
+          y:
+            posY -
+            padY,
+
+          width:
+            textWidth +
+            padX * 2,
+
+          height:
+            textHeight +
+            padY * 2,
+
+          color:
+            rgb(
+              1,
+              1,
+              1
+            ),
+
+          opacity:
+            0.95,
+        });
+
+
+        page.drawText(
+          stampText,
+          {
+            x:
+              posX,
+
+            y:
+              posY,
+
+            size:
+              fontSize,
+
+            font,
+
+            color:
+              rgb(
+                0,
+                0,
+                0
+              ),
+          }
+        );
+
+
+        if (
+          (
+            idx + 1
+          ) %
+            20 ===
+          0
+        ) {
+          await yieldToBrowser();
+        }
+      }
+
+
+      return await nativeDoc.save({
+        useObjectStreams:
+          false,
+      });
+    } catch (
+      error
+    ) {
+      console.warn(
+        'Native Bates route failed; using restart-safe raster pipeline:',
+        error
+      );
+    } finally {
+      vectorSource =
+        null;
+    }
+
+
+    await yieldToBrowser(
+      20
+    );
+
+
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+    pdfDoc =
+      loadedPdf.pdf;
+  }
+
+
+  /*
+   * ----------------------------------------------------------
+   * RESTART-SAFE LARGE / SCANNED PIPELINE
+   * ----------------------------------------------------------
+   *
+   * Old path:
+   *   PDF -> 2.5x JPEG -> Image decode -> second canvas
+   *       -> PNG -> keep every PNG inside pdf-lib
+   *
+   * New path:
+   *   PDF -> ONE bounded canvas -> stamp -> JPEG checkpoint
+   *
+   * Completed page JPEGs can live in OPFS, so Safari process
+   * recreation resumes from the first unfinished page.
+   */
+  if (
+    !loadedPdf
+  ) {
+    loadedPdf =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+    pdfDoc =
+      loadedPdf.pdf;
+  }
+
+
+  const memoryPages =
+    new Map<
+      number,
+      Blob
+    >();
+
+
+  let freshPagesSinceRecycle =
+    0;
+
+  const PDFJS_RECYCLE_LIMIT =
+    2;
+
+
+  const reopenPdf =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        try {
+          await loadedPdf
+            .dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldToBrowser(
+        20
+      );
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdfDoc =
+        loadedPdf.pdf;
+
+      freshPagesSinceRecycle =
+        0;
+    };
+
+
+  try {
+    /*
+     * PHASE 1:
+     * Create one durable stamped JPEG per source page.
+     */
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        numPages;
+      pageNumber++
+    ) {
+      let completedBlob:
+        | Blob
+        | null =
+          null;
+
+
+      if (
+        recovery?.readPage
+      ) {
+        try {
+          completedBlob =
+            (
+              await recovery
+                .readPage(
+                  pageNumber
+                )
+            ) ||
+            null;
+        } catch (_) {
+          completedBlob =
+            null;
+        }
+      } else {
+        completedBlob =
+          memoryPages.get(
+            pageNumber
+          ) ||
+          null;
+      }
+
+
+      if (
+        completedBlob
+      ) {
+        await yieldToBrowser();
+
+        continue;
+      }
+
+
+      options.onProgress?.(
+        pageNumber,
+        numPages
+      );
+
+
+      const page =
+        await pdfDoc.getPage(
+          pageNumber
+        );
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+      try {
+        const baseViewport =
+          page.getViewport({
+            scale:
+              1.0,
+          });
+
+        const maxDimension =
+          Math.max(
+            baseViewport.width,
+            baseViewport.height
+          );
+
+        /*
+         * 1.6x gives materially better text legibility than
+         * 1x while using only ~41% of the pixels of the old
+         * 2.5x Bates render.
+         */
+        const renderScale =
+          Math.min(
+            1.6,
+            1800 /
+              Math.max(
+                1,
+                maxDimension
+              )
+          );
+
+        const viewport =
+          page.getViewport({
+            scale:
+              renderScale,
+          });
+
+
+        canvas.width =
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
+          );
+
+        canvas.height =
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha:
+                false,
+            }
+          );
+
+        if (!ctx) {
+          throw new Error(
+            `Canvas rendering context unavailable for page ${pageNumber}.`
+          );
+        }
+
+
+        ctx.fillStyle =
+          '#ffffff';
+
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+
+            viewport,
+
+            canvas,
+          } as any) as any
+        ).promise;
+
+
+        /*
+         * Stamp using PDF-point values scaled into this
+         * temporary raster canvas.
+         */
+        const stampText =
+          prefix +
+          String(
+            startNum +
+              pageNumber -
+              1
+          ).padStart(
+            digits,
+            '0'
+          ) +
+          suffix;
+
+
+        const rasterFontSize =
+          fontSize *
+          renderScale;
+
+        ctx.save();
+
+        ctx.font =
+          `bold ${rasterFontSize}px Helvetica, Arial, sans-serif`;
+
+        ctx.textBaseline =
+          'alphabetic';
+
+        const textWidth =
+          ctx.measureText(
+            stampText
+          ).width;
+
+        const textHeight =
+          rasterFontSize;
+
+        const marginX =
+          28 *
+          renderScale;
+
+        const marginY =
+          24 *
+          renderScale;
+
+        let posX =
+          marginX;
+
+        let posY =
+          canvas.height -
+          marginY;
+
+
+        if (
+          position.includes(
+            'center'
+          )
+        ) {
+          posX =
+            (
+              canvas.width -
+              textWidth
+            ) /
+            2;
+        } else if (
+          position.includes(
+            'right'
+          )
+        ) {
+          posX =
+            canvas.width -
             textWidth -
             marginX;
         }
@@ -10140,24 +10310,36 @@ export async function addBatesNumberingToPDF(
         }
 
 
+        const padX =
+          6 *
+          renderScale;
+
+        const padY =
+          3 *
+          renderScale;
+
+
         ctx.fillStyle =
-          'rgba(255, 255, 255, 0.95)';
+          'rgba(255,255,255,0.95)';
 
         ctx.fillRect(
-          posX - 6,
+          posX -
+            padX,
+
           posY -
             textHeight -
-            4,
-          textWidth + 12,
-          textHeight + 8
+            padY,
+
+          textWidth +
+            padX * 2,
+
+          textHeight +
+            padY * 2
         );
 
 
         ctx.fillStyle =
           '#000000';
-
-        ctx.textBaseline =
-          'alphabetic';
 
         ctx.fillText(
           stampText,
@@ -10168,69 +10350,61 @@ export async function addBatesNumberingToPDF(
         ctx.restore();
 
 
-        /*
-         * Avoid PNG base64 duplication.
-         */
         const stampedBlob =
           await new Promise<Blob>(
             (
               resolve,
               reject
             ) => {
-              compositeCanvas.toBlob(
-                (blob) => {
+              canvas.toBlob(
+                (
+                  blob
+                ) => {
                   if (blob) {
-                    resolve(blob);
+                    resolve(
+                      blob
+                    );
                   } else {
                     reject(
                       new Error(
-                        'Failed to encode Bates page.'
+                        `Failed to encode Bates page ${pageNumber}.`
                       )
                     );
                   }
                 },
-                'image/png'
+                'image/jpeg',
+                0.9
               );
             }
           );
 
 
-        const stampedBytes =
-          await stampedBlob.arrayBuffer();
-
-        const finalPageImg =
-          await newPdfDoc.embedPng(
-            stampedBytes
+        if (
+          recovery?.writePage
+        ) {
+          await recovery
+            .writePage(
+              pageNumber,
+              stampedBlob
+            );
+        } else {
+          memoryPages.set(
+            pageNumber,
+            stampedBlob
           );
+        }
 
 
-        const newPage =
-          newPdfDoc.addPage([
-            pWidth,
-            pHeight,
-          ]);
-
-
-        newPage.drawImage(
-          finalPageImg,
-          {
-            x: 0,
-            y: 0,
-            width:
-              pWidth,
-            height:
-              pHeight,
-          }
-        );
+        freshPagesSinceRecycle++;
       } finally {
-        compositeCanvas.width =
+        canvas.width =
           1;
 
-        compositeCanvas.height =
+        canvas.height =
           1;
 
         try {
-          compositeCanvas.remove();
+          canvas.remove();
         } catch (_) {}
 
         try {
@@ -10238,44 +10412,210 @@ export async function addBatesNumberingToPDF(
         } catch (_) {}
       }
 
-      /*
-       * Allow the browser to reclaim completed page
-       * canvas/image temporaries before Bates processing
-       * starts on the next page.
-       */
-      await new Promise<void>(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            0
-          )
-      );
+
+      if (
+        freshPagesSinceRecycle >=
+          PDFJS_RECYCLE_LIMIT &&
+        pageNumber <
+          numPages
+      ) {
+        await reopenPdf();
+      } else {
+        await yieldToBrowser();
+      }
     }
 
 
     /*
-     * All stamped pages are now embedded in newPdfDoc.
-     * Release the original PDF.js source before allocating
-     * the complete serialized Bates PDF.
+     * The original source is no longer needed during output
+     * serialization. Release PDF.js before the assembly pass.
      */
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf
+        .dispose();
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
+      loadedPdf =
+        null;
+    }
+
+    await yieldToBrowser(
+      20
     );
 
 
-    return await newPdfDoc.save({
-      useObjectStreams: false,
+    /*
+     * PHASE 2:
+     * Build the final PDF from completed JPEG checkpoints.
+     */
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    await reopenPdf();
+
+    let assemblyPagesSinceRecycle =
+      0;
+
+
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        numPages;
+      pageNumber++
+    ) {
+      const pageBlob =
+        recovery?.readPage
+          ? await recovery
+              .readPage(
+                pageNumber
+              )
+          : (
+              memoryPages.get(
+                pageNumber
+              ) ||
+              null
+            );
+
+
+      if (
+        !pageBlob
+      ) {
+        throw new Error(
+          `Bates recovery page ${pageNumber} is missing. Retry the operation.`
+        );
+      }
+
+
+      const sourcePage =
+        await pdfDoc.getPage(
+          pageNumber
+        );
+
+      try {
+        const original =
+          sourcePage.getViewport({
+            scale:
+              1.0,
+          });
+
+
+        const jpegBytes =
+          await pageBlob
+            .arrayBuffer();
+
+
+        const image =
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
+
+
+        const newPage =
+          outputDoc.addPage([
+            original.width,
+            original.height,
+          ]);
+
+
+        newPage.drawImage(
+          image,
+          {
+            x:
+              0,
+
+            y:
+              0,
+
+            width:
+              original.width,
+
+            height:
+              original.height,
+          }
+        );
+      } finally {
+        try {
+          sourcePage.cleanup();
+        } catch (_) {}
+      }
+
+
+      assemblyPagesSinceRecycle++;
+
+
+      if (
+        assemblyPagesSinceRecycle >=
+          8 &&
+        pageNumber <
+          numPages
+      ) {
+        await reopenPdf();
+
+        assemblyPagesSinceRecycle =
+          0;
+      } else {
+        await yieldToBrowser();
+      }
+    }
+
+
+    /*
+     * reopenPdf() mutates loadedPdf from inside a closure.
+     * TypeScript control-flow analysis does not widen the
+     * variable again after the earlier null assignment, so use
+     * an explicit typed snapshot for the final assembly cleanup.
+     */
+    const finalLoadedPdf =
+      loadedPdf as
+        Awaited<
+          ReturnType<
+            typeof loadPdfJsFromBlob
+          >
+        > |
+        null;
+
+
+    if (
+      finalLoadedPdf
+    ) {
+      await finalLoadedPdf
+        .dispose();
+    }
+
+
+    loadedPdf =
+      null;
+
+
+    memoryPages.clear();
+
+    await yieldToBrowser(
+      20
+    );
+
+
+    return await outputDoc.save({
+      useObjectStreams:
+        false,
     });
   } finally {
-    await loadedPdf.dispose();
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
   }
 }
+
 
 export interface ExtractedImage {
   id: string;
