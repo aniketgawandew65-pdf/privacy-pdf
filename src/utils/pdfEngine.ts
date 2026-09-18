@@ -3311,7 +3311,7 @@ export async function addWatermarkToPDF(
         false,
 
       objectsPerTick:
-        20,
+        5,
     });
   } catch (
     vectorError

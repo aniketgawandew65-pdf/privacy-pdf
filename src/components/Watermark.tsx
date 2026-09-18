@@ -20,6 +20,13 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import {
+  exclusivelyProcess,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
+import {
+  saveWorkspaceFiles,
+} from '../utils/localWorkspace';
 
 interface WatermarkProps {
   file: File | null;
@@ -63,6 +70,9 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   const pdfDocRef = useRef<any>(null);
   const pdfDisposeRef =
     useRef<(() => Promise<void>) | null>(null);
+
+  const processingInFlightRef =
+    useRef(false);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
@@ -221,9 +231,17 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   };
 
   const handleApplyWatermark = async () => {
-    if (!file) return;
+    if (
+      !file ||
+      processingInFlightRef.current
+    ) {
+      return;
+    }
 
-    const creditCheck = checkTaskCredit(file);
+    const creditCheck =
+      checkTaskCredit(
+        file
+      );
 
     if (!creditCheck.allowed) {
       setError(
@@ -232,59 +250,292 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       );
       return;
     }
-    if (watermarkType === 'text' && !text.trim()) {
-      setError('Please enter watermark text.');
+
+    if (
+      watermarkType ===
+        'text' &&
+      !text.trim()
+    ) {
+      setError(
+        'Please enter watermark text.'
+      );
       return;
     }
-    if (watermarkType === 'image' && !imageDataUrl) {
-      setError('Please upload a watermark logo image.');
+
+    if (
+      watermarkType ===
+        'image' &&
+      !imageDataUrl
+    ) {
+      setError(
+        'Please upload a watermark logo image.'
+      );
       return;
     }
 
-    setIsProcessing(true);
-    setError(null);
-    revokeDownloadUrl();
 
-    try {
-      /*
-       * The live preview is the source of truth.
-       *
-       * Safari/mobile CSS can visually scale the preview canvas
-       * below its internal bitmap width because of max-height.
-       * Capture its REAL displayed width so the PDF renderer can
-       * reproduce exactly the same watermark proportions.
-       */
-      const previewPageWidth =
-        Math.max(
-          1,
-          canvasRef.current
-            ?.getBoundingClientRect()
-            .width || 460
-        );
+    /*
+     * Capture the live-preview geometry BEFORE releasing
+     * PDF.js. This preserves the exact watermark sizing that
+     * has already been approved.
+     */
+    const previewPageWidth =
+      Math.max(
+        1,
+        canvasRef.current
+          ?.getBoundingClientRect()
+          .width || 460
+      );
 
-      const opts: WatermarkOptions = {
-        type: watermarkType,
-        text: text.trim(),
-        imageDataUrl: imageDataUrl || undefined,
+
+    const opts:
+      WatermarkOptions = {
+        type:
+          watermarkType,
+
+        text:
+          text.trim(),
+
+        imageDataUrl:
+          imageDataUrl ||
+          undefined,
+
         fontFamily,
+
         fontSize,
+
         colorHex,
+
         opacity,
+
         angle,
-        letterSpacing: watermarkType === 'text' ? letterSpacing : 0,
+
+        letterSpacing:
+          watermarkType ===
+            'text'
+            ? letterSpacing
+            : 0,
+
         position,
+
         previewPageWidth,
       };
 
-      const outputBytes = await addWatermarkToPDF(file, opts);
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
+
+    processingInFlightRef.current =
+      true;
+
+    setIsProcessing(
+      true
+    );
+
+    setError(
+      null
+    );
+
+    revokeDownloadUrl();
+
+
+    try {
+      const outputBytes =
+        await exclusivelyProcess(
+          async () => {
+            /*
+             * ==================================================
+             * LARGE-FILE MEMORY PROTECTION
+             * ==================================================
+             *
+             * The live preview is no longer needed while the
+             * final PDF is being created.
+             *
+             * Release PDF.js BEFORE pdf-lib allocates the full
+             * 148-150 MB source document.
+             *
+             * Keep the existing canvas pixels visible so the
+             * user does not see the preview disappear.
+             */
+            const disposePreview =
+              pdfDisposeRef.current;
+
+            pdfDisposeRef.current =
+              null;
+
+            pdfDocRef.current =
+              null;
+
+
+            if (
+              disposePreview
+            ) {
+              try {
+                await disposePreview();
+              } catch (_) {}
+            }
+
+
+            /*
+             * App.tsx may already be saving the selected 150 MB
+             * source into the browser-local workspace.
+             *
+             * Calling saveWorkspaceFiles here joins that queue
+             * and guarantees the OPFS write is FINISHED before
+             * the watermark engine starts.
+             *
+             * This removes the previous:
+             *
+             * OPFS copy + PDF.js preview + pdf-lib parse
+             *
+             * memory/I/O overlap.
+             *
+             * It also guarantees the original source is locally
+             * recoverable if Safari recreates the page.
+             */
+            try {
+              await saveWorkspaceFiles(
+                [file]
+              );
+            } catch (
+              workspaceError
+            ) {
+              console.warn(
+                'Watermark workspace persistence unavailable:',
+                workspaceError
+              );
+            }
+
+
+            /*
+             * Give Safari/WebKit a real event-loop boundary after
+             * destroying PDF.js so its worker/range caches can be
+             * reclaimed before the 150 MB pdf-lib allocation.
+             */
+            await new Promise<void>(
+              (
+                resolve
+              ) =>
+                setTimeout(
+                  resolve,
+                  120
+                )
+            );
+
+
+            return await addWatermarkToPDF(
+              file,
+              opts
+            );
+          }
+        );
+
+
+      const blob =
+        new Blob(
+          [
+            outputBytes as
+              unknown as
+              BlobPart,
+          ],
+          {
+            type:
+              'application/pdf',
+          }
+        );
+
+
+      createUrl(
+        blob
+      );
+
+
+      /*
+       * Final PDF exists successfully.
+       *
+       * Clear the restart marker only now, then charge exactly
+       * one task as before.
+       */
+      clearProcessingRecovery();
+
       commitTaskCredit();
-    } catch (err) {
-      console.error(err);
-      setError((err as any)?.message || String(err));
+    } catch (
+      err:
+        any
+    ) {
+      console.error(
+        err
+      );
+
+
+      /*
+       * A normal caught failure is not a Safari process kill,
+       * so there is no interrupted operation to preserve.
+       *
+       * If Safari actually kills/recreates the process this code
+       * never executes, leaving the recovery marker intact so
+       * App.tsx restores the source PDF.
+       */
+      clearProcessingRecovery();
+
+
+      setError(
+        err?.message ||
+          String(
+            err
+          )
+      );
     } finally {
-      setIsProcessing(false);
+      processingInFlightRef.current =
+        false;
+
+      setIsProcessing(
+        false
+      );
+
+
+      /*
+       * Restore the lightweight range-backed PDF.js preview
+       * AFTER the heavy pdf-lib operation has completely ended.
+       *
+       * loadPdfJsFromBlob does not copy the entire 150 MB file;
+       * it reads small ranges on demand.
+       */
+      if (
+        file &&
+        !pdfDocRef.current
+      ) {
+        try {
+          const loaded =
+            await loadPdfJsFromBlob(
+              file
+            );
+
+
+          pdfDocRef.current =
+            loaded.pdf;
+
+          pdfDisposeRef.current =
+            loaded.dispose;
+
+
+          setTotalPages(
+            loaded.pdf.numPages
+          );
+
+
+          await renderCurrentPage();
+        } catch (
+          previewError
+        ) {
+          /*
+           * The final watermarked PDF is already safe.
+           * A preview restoration failure must never invalidate
+           * or remove the completed download.
+           */
+          console.warn(
+            'Unable to restore Watermark preview after processing:',
+            previewError
+          );
+        }
+      }
     }
   };
 
