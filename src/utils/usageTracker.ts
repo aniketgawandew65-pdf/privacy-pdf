@@ -183,10 +183,10 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       reason: 'FILE_SIZE_LIMIT',
       errorMessage:
         bonusAccount
-          ? `Bonus tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+          ? `Extra credits support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
             `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
+            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
             `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
     };
   }
@@ -211,10 +211,10 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       reason: 'FILE_SIZE_LIMIT',
       errorMessage:
         bonusAccount
-          ? `Your bonus tasks are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+          ? `Your extra credits are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
             `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 bonus tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
+            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
     };
   }
 
@@ -244,8 +244,8 @@ export function checkActionAllowed(fileSizeBytes?: number): {
     reason: 'DAILY_LIMIT',
     errorMessage:
       bonusAccount
-        ? 'You have used all available free and bonus tasks. Upgrade to Pro to continue.'
-        : `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in to unlock 2 bonus tasks.`,
+        ? 'You have used all available free credits. Upgrade to Pro to continue.'
+        : `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in to unlock 2 more credits.`,
   };
 }
 

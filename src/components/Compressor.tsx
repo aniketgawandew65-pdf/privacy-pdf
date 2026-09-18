@@ -521,7 +521,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
 
             {hasBonusAccount ? (
               <div className="text-emerald-400">
-                Bonus Tasks:{' '}
+                Credits:{' '}
                 <strong>
                   {dailyStats.bonusRemaining} of 2 remaining
                 </strong>
@@ -529,7 +529,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               </div>
             ) : (
               <div className="text-emerald-400">
-                Sign in to unlock 2 bonus tasks • Up to 25 MB
+                Sign in to unlock 2 more credits • Up to 25 MB
               </div>
             )}
           </div>
