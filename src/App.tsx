@@ -1424,7 +1424,6 @@ export default function App() {
             <span><ShieldCheck size={14} />100% private</span>
             <span><UserRoundCheck size={14} />No signup</span>
           </div>}
-          {!isInfo && <p className="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>}
         </section>
 
         <nav className="quick-tools" aria-label="Popular PDF tools">
@@ -1544,7 +1543,7 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         </section>
-        {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device. Cloud AI is optional.</span><NavLink to="/privacy">How it works</NavLink></div>}
+        {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device.</span><NavLink to="/privacy">How it works</NavLink></div>}
         {isHome && <section className="benefits" aria-label="Why 1into1"><div><span>01</span><h2>Pick a file.</h2><p>No account needed to use the local tools.</p></div><div><span>02</span><h2>Make it yours.</h2><p>Simple controls. No upload queue.</p></div><div><span>03</span><h2>Keep moving.</h2><p>Download your result and get on with your day.</p></div></section>}
         {!isInfo && <div dangerouslySetInnerHTML={{ __html: renderGuide(location.pathname) }} />}
       </main>

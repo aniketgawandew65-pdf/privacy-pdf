@@ -64,7 +64,7 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
         <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose a plan</span><ArrowRight size={16} /></a>
-        <p className="pro-fineprint">Choose Monthly or Yearly securely at Lemon Squeezy checkout. Taxes, renewal and refund terms are shown at checkout. Cloud AI provider charges are separate.</p>
+        <p className="pro-fineprint">Choose Monthly or Yearly securely at Lemon Squeezy checkout. Taxes, renewal and refund terms are shown at checkout.</p>
         <form className="license-form" onSubmit={handleActivate}>
           <label htmlFor="pro-license">Already purchased? Activate your license.</label>
           <div className="license-row"><input id="pro-license" value={licenseInput} onChange={e => setLicenseInput(e.target.value)} placeholder="Paste your license key" autoComplete="off" autoCapitalize="none" spellCheck={false} required /><button className="quiet-button" disabled={busy} type="submit">{busy ? 'Checking…' : 'Activate'}</button></div>
