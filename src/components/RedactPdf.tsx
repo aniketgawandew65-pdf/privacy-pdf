@@ -47,7 +47,7 @@ interface RedactPdfProps {
  * workspace that could contain boxes imported from Private PII.
  */
 const MANUAL_REDACTION_WORKSPACE_KEY =
-  'manual-redaction-geometry-v2';
+  'manual-redaction-geometry-v3';
 
 type ManualReviewItem = {
   id: string;
@@ -101,6 +101,33 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
    * inside Manual Redact.
    */
   const manualDraftDirtyRef =
+    useRef(false);
+
+  /*
+   * CRITICAL STATE SEPARATION
+   *
+   * "auto":
+   *   This Redact session originated from Private PII.
+   *   Its imported PII geometry must NEVER become an
+   *   independent Manual Redact draft.
+   *
+   * "manual":
+   *   User opened Redact independently.
+   *   Genuine manual work may be restored later.
+   */
+  const sessionOriginRef =
+    useRef<"manual" | "auto">(
+      "manual"
+    );
+
+  /*
+   * Private PII route geometry is a one-shot handoff.
+   *
+   * After it initializes Redact once, clearing/reselecting the
+   * original PDF in the same Redact screen must NOT inject the
+   * Private PII boxes again.
+   */
+  const autoHandoffConsumedRef =
     useRef(false);
 
   const previewLifecycle = useRef<Promise<void>>(Promise.resolve());
@@ -175,7 +202,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   useEffect(() => {
     if (
       !sourceIdentity ||
-      !manualDraftDirtyRef.current
+      !manualDraftDirtyRef.current ||
+      sessionOriginRef.current !==
+        "manual"
     ) {
       return;
     }
@@ -197,9 +226,23 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   // Reset state when file changes
   useEffect(() => {
     /*
-     * A newly selected source starts clean.
-     * Imported Auto-Redactor geometry is NOT a manual draft.
+     * Private PII may initialize this Redact screen ONCE.
+     *
+     * Any later file selection in the same component is an
+     * independent Manual Redact load.
      */
+    const shouldUseAutoHandoff =
+      Boolean(
+        file &&
+        incomingAutoRedactions &&
+        !autoHandoffConsumedRef.current
+      );
+
+    sessionOriginRef.current =
+      shouldUseAutoHandoff
+        ? "auto"
+        : "manual";
+
     manualDraftDirtyRef.current =
       false;
 
@@ -291,7 +334,10 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
          * On a later remount with no route-state geometry, the
          * persisted Manual workspace is restored instead.
          */
-        if (incomingAutoRedactions) {
+        if (
+          shouldUseAutoHandoff &&
+          incomingAutoRedactions
+        ) {
           const cloned: Record<number, RedactionRect[]> = {};
 
           for (const [pageNumber, rects] of Object.entries(
@@ -307,8 +353,19 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
            * imported boxes alone must not contaminate a later
            * independent Manual Redact session.
            */
+          /*
+           * This is an Auto/PII session for its entire lifetime.
+           * Even if the user moves/resizes/adds boxes here,
+           * its geometry must never pollute direct Manual Redact.
+           */
+          sessionOriginRef.current =
+            "auto";
+
           manualDraftDirtyRef.current =
             false;
+
+          autoHandoffConsumedRef.current =
+            true;
 
           setCurrentPage(1);
           setPageRedactions(cloned);
@@ -326,6 +383,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             )
           );
 
+          sessionOriginRef.current =
+            "manual";
+
           manualDraftDirtyRef.current =
             true;
 
@@ -333,6 +393,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             saved.pageRedactions
           );
         } else {
+          sessionOriginRef.current =
+            "manual";
+
           manualDraftDirtyRef.current =
             false;
 
