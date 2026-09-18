@@ -473,6 +473,18 @@ export default function App() {
      *
      * Normal SPA navigation still retains sharedFiles in memory.
      */
+    const hasLargeWatermarkSource =
+      location.pathname ===
+        '/watermark-pdf' &&
+      sharedFiles.some(
+        (file) =>
+          file.size >=
+          64 *
+            1024 *
+            1024
+      );
+
+
     if (
       location.pathname ===
         '/edit-pdf' ||
@@ -481,7 +493,8 @@ export default function App() {
       location.pathname ===
         '/bates-numbering' ||
       location.pathname ===
-        '/sanitize-pdf'
+        '/sanitize-pdf' ||
+      hasLargeWatermarkSource
     ) {
       return;
     }
