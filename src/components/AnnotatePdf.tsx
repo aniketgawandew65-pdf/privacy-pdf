@@ -2328,47 +2328,56 @@ React.FC<AnnotatePdfProps> = ({
             </div>
 
 
-            <div className="w-px h-6 bg-zinc-800" />
+            {tool !== 'text' &&
+              selected?.type !==
+                'text' && (
+                <>
+                  <div className="w-px h-6 bg-zinc-800" />
 
 
-            <label className="flex items-center gap-2 text-xs text-zinc-500">
+                  <label
+                    className="flex items-center gap-2 text-xs text-zinc-500"
+                    title="Line thickness for pen, shapes and arrows"
+                  >
 
-              Thickness
+                    Line thickness
 
-              <input
-                type="range"
-                min="1"
-                max="8"
-                step="1"
-                value={
-                  strokeWidth
-                }
+                    <input
+                      type="range"
+                      min="1"
+                      max="8"
+                      step="1"
+                      value={
+                        strokeWidth
+                      }
 
-                onChange={(
-                  event
-                ) => {
-                  const value =
-                    Number(
-                      event.target
-                        .value
-                    );
+                      onChange={(
+                        event
+                      ) => {
+                        const value =
+                          Number(
+                            event.target
+                              .value
+                          );
 
-                  setStrokeWidth(
-                    value
-                  );
-                }}
+                        setStrokeWidth(
+                          value
+                        );
+                      }}
 
-                className="w-24"
-              />
+                      className="w-24"
+                    />
 
-              <span className="font-mono text-zinc-300 min-w-[18px]">
-                {strokeWidth}
-              </span>
+                    <span className="font-mono text-zinc-300 min-w-[18px]">
+                      {strokeWidth}
+                    </span>
 
-            </label>
+                  </label>
 
 
-            <div className="w-px h-6 bg-zinc-800" />
+                  <div className="w-px h-6 bg-zinc-800" />
+                </>
+              )}
 
 
             <button
@@ -2425,54 +2434,125 @@ React.FC<AnnotatePdfProps> = ({
               placeholder="Annotation text"
             />
 
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
 
-              Size
+              <span>
+                Size
+              </span>
 
-              <input
-                type="number"
-                min="6"
-                max="72"
 
-                value={
-                  selected.fontSize ||
-                  fontSize
-                }
+              <div className="flex items-center overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
 
-                onFocus={() => {
-                  saveHistory();
-                }}
+                <button
+                  type="button"
 
-                onChange={(
-                  event
-                ) => {
+                  aria-label="Decrease font size"
+                  title="Smaller text"
 
-                  const value =
-                    Math.max(
-                      6,
-                      Math.min(
-                        72,
-                        Number(
-                          event.target
-                            .value
-                        ) || 16
-                      )
+                  disabled={
+                    (
+                      selected.fontSize ||
+                      fontSize
+                    ) <= 6
+                  }
+
+                  onClick={() => {
+                    const current =
+                      selected.fontSize ||
+                      fontSize;
+
+                    const value =
+                      Math.max(
+                        6,
+                        current - 2
+                      );
+
+
+                    if (
+                      value ===
+                      current
+                    ) {
+                      return;
+                    }
+
+
+                    saveHistory();
+
+                    setFontSize(
+                      value
                     );
 
-                  setFontSize(
-                    value
-                  );
+                    updateSelected({
+                      fontSize:
+                        value,
+                    });
+                  }}
 
-                  updateSelected({
-                    fontSize:
-                      value,
-                  });
-                }}
+                  className="w-11 h-11 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
 
-                className="w-20 min-h-11 rounded-xl border border-zinc-800 bg-zinc-900 px-2 text-white"
-              />
 
-            </label>
+                <span className="min-w-[48px] text-center font-mono text-sm text-white select-none">
+                  {selected.fontSize ||
+                    fontSize}
+                </span>
+
+
+                <button
+                  type="button"
+
+                  aria-label="Increase font size"
+                  title="Bigger text"
+
+                  disabled={
+                    (
+                      selected.fontSize ||
+                      fontSize
+                    ) >= 72
+                  }
+
+                  onClick={() => {
+                    const current =
+                      selected.fontSize ||
+                      fontSize;
+
+                    const value =
+                      Math.min(
+                        72,
+                        current + 2
+                      );
+
+
+                    if (
+                      value ===
+                      current
+                    ) {
+                      return;
+                    }
+
+
+                    saveHistory();
+
+                    setFontSize(
+                      value
+                    );
+
+                    updateSelected({
+                      fontSize:
+                        value,
+                    });
+                  }}
+
+                  className="w-11 h-11 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+
+              </div>
+
+            </div>
 
           </div>
         )}
