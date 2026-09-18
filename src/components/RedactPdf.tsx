@@ -40,6 +40,15 @@ interface RedactPdfProps {
   onFileChange: (file: File | null) => void;
 }
 
+/*
+ * Manual Redact owns this workspace.
+ *
+ * v2 intentionally ignores the older shared/mixed geometry
+ * workspace that could contain boxes imported from Private PII.
+ */
+const MANUAL_REDACTION_WORKSPACE_KEY =
+  'manual-redaction-geometry-v2';
+
 type ManualReviewItem = {
   id: string;
   category: string;
@@ -84,6 +93,16 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       : [];
 
   const [sourceIdentity, setSourceIdentity] = useState<string | null>(null);
+
+  /*
+   * False for geometry merely handed over by Private PII.
+   *
+   * Becomes true only after the user actually edits geometry
+   * inside Manual Redact.
+   */
+  const manualDraftDirtyRef =
+    useRef(false);
+
   const previewLifecycle = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -154,13 +173,38 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   };
 
   useEffect(() => {
-    if (!sourceIdentity) return;
-    saveToolWorkspaceState('manual-redaction-geometry', { sourceIdentity, pageRedactions, currentPage });
-  }, [sourceIdentity, pageRedactions, currentPage]);
+    if (
+      !sourceIdentity ||
+      !manualDraftDirtyRef.current
+    ) {
+      return;
+    }
+
+    saveToolWorkspaceState(
+      MANUAL_REDACTION_WORKSPACE_KEY,
+      {
+        sourceIdentity,
+        pageRedactions,
+        currentPage,
+      }
+    );
+  }, [
+    sourceIdentity,
+    pageRedactions,
+    currentPage,
+  ]);
 
   // Reset state when file changes
   useEffect(() => {
+    /*
+     * A newly selected source starts clean.
+     * Imported Auto-Redactor geometry is NOT a manual draft.
+     */
+    manualDraftDirtyRef.current =
+      false;
+
     setSourceIdentity(null);
+
     if (!file) {
       setTotalPages(0);
       setCurrentPage(1);
@@ -211,7 +255,17 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       if (!isMounted) return;
       try {
         const identity = await localContentId(file);
-        const saved = restoreToolWorkspaceState<{ sourceIdentity: string; pageRedactions: Record<number, RedactionRect[]>; currentPage: number }>('manual-redaction-geometry');
+        const saved =
+          restoreToolWorkspaceState<{
+            sourceIdentity: string;
+            pageRedactions: Record<
+              number,
+              RedactionRect[]
+            >;
+            currentPage: number;
+          }>(
+            MANUAL_REDACTION_WORKSPACE_KEY
+          );
         const loaded =
           await loadPdfJsFromBlob(
             file
@@ -248,6 +302,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             }));
           }
 
+          /*
+           * Private PII handoff remains fully functional, but
+           * imported boxes alone must not contaminate a later
+           * independent Manual Redact session.
+           */
+          manualDraftDirtyRef.current =
+            false;
+
           setCurrentPage(1);
           setPageRedactions(cloned);
         } else if (
@@ -264,8 +326,16 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
             )
           );
 
-          setPageRedactions(saved.pageRedactions);
+          manualDraftDirtyRef.current =
+            true;
+
+          setPageRedactions(
+            saved.pageRedactions
+          );
         } else {
+          manualDraftDirtyRef.current =
+            false;
+
           setCurrentPage(1);
           setPageRedactions({});
         }
@@ -362,6 +432,10 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
+
+        manualDraftDirtyRef.current =
+          true;
+
         setPageRedactions((prev) => {
           const updated = [...(prev[currentPage] || [])];
           updated.splice(selectedIndex, 1);
@@ -374,6 +448,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         const step = e.shiftKey ? 0.02 : 0.005;
+
+        manualDraftDirtyRef.current =
+          true;
 
         setPageRedactions((prev) => {
           const updated = [...(prev[currentPage] || [])];
@@ -415,6 +492,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
         const nextX = Math.max(0, Math.min(1 - initial.width, initial.x + dx));
         const nextY = Math.max(0, Math.min(1 - initial.height, initial.y + dy));
 
+        manualDraftDirtyRef.current =
+          true;
+
         setPageRedactions((prev) => {
           const updated = [...(prev[currentPage] || [])];
           updated[state.index!] = { ...initial, x: nextX, y: nextY };
@@ -446,6 +526,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
           height = bottomEdge - newY;
         }
 
+        manualDraftDirtyRef.current =
+          true;
+
         setPageRedactions((prev) => {
           const updated = [...(prev[currentPage] || [])];
           updated[state.index!] = { x, y, width, height };
@@ -460,6 +543,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
 
       if (state.mode === 'draw' && activeDrawRect) {
         if (activeDrawRect.width > 0.01 && activeDrawRect.height > 0.01) {
+          manualDraftDirtyRef.current =
+            true;
+
           setPageRedactions((prev) => {
             const list = prev[currentPage] || [];
             return {
@@ -538,6 +624,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
   };
 
   const handleResetCurrent = () => {
+    manualDraftDirtyRef.current =
+      true;
+
     setPageRedactions((prev) => {
       const next = { ...prev };
       delete next[currentPage];
@@ -761,6 +850,9 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
                 <button
                   type="button"
                   onClick={() => {
+                    manualDraftDirtyRef.current =
+                      true;
+
                     setPageRedactions((prev) => {
                       const updated = [...(prev[currentPage] || [])];
                       updated.splice(selectedIndex, 1);
