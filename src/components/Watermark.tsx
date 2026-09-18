@@ -25,6 +25,13 @@ import {
   clearProcessingRecovery,
 } from '../utils/localProcessing';
 import {
+  buildWatermarkStampPdf,
+  type WatermarkPageSize,
+} from '../utils/watermarkStamp';
+import {
+  watermarkPdfInWorker,
+} from '../utils/watermarkWorkerClient';
+import {
   saveWorkspaceFiles,
 } from '../utils/localWorkspace';
 
@@ -41,6 +48,164 @@ const PRESET_COLORS = [
   { label: 'Amber Orange', hex: '#d97706' },
   { label: 'Pitch Black', hex: '#000000' },
 ];
+
+type WatermarkDraft = {
+  watermarkType:
+    'text' |
+    'image';
+
+  text:
+    string;
+
+  imageDataUrl:
+    string |
+    null;
+
+  imageFileName:
+    string |
+    null;
+
+  fontFamily:
+    'Helvetica' |
+    'TimesRoman' |
+    'Courier';
+
+  fontSize:
+    number;
+
+  colorHex:
+    string;
+
+  opacity:
+    number;
+
+  angle:
+    number;
+
+  letterSpacing:
+    number;
+
+  position:
+    'center' |
+    'top' |
+    'bottom';
+};
+
+
+const WATERMARK_DRAFT_PREFIX =
+  'oneinto1-watermark-draft-v1::';
+
+
+const watermarkDraftKey =
+  (
+    file:
+      File
+  ) =>
+    WATERMARK_DRAFT_PREFIX +
+    [
+      file.name,
+      file.size,
+      file.lastModified ||
+        0,
+    ].join(
+      '::'
+    );
+
+
+const readWatermarkDraft =
+  (
+    file:
+      File
+  ):
+    WatermarkDraft |
+    null => {
+    try {
+      const raw =
+        sessionStorage.getItem(
+          watermarkDraftKey(
+            file
+          )
+        );
+
+
+      if (!raw) {
+        return null;
+      }
+
+
+      return JSON.parse(
+        raw
+      ) as WatermarkDraft;
+    } catch (_) {
+      return null;
+    }
+  };
+
+
+const writeWatermarkDraft =
+  (
+    file:
+      File,
+
+    draft:
+      WatermarkDraft
+  ) => {
+    const key =
+      watermarkDraftKey(
+        file
+      );
+
+
+    try {
+      sessionStorage.setItem(
+        key,
+        JSON.stringify(
+          draft
+        )
+      );
+
+      return;
+    } catch (_) {}
+
+
+    /*
+     * Very large logo Data URLs can exceed Safari's
+     * sessionStorage quota.
+     *
+     * Preserve every other Watermark setting rather than
+     * losing the entire draft.
+     */
+    try {
+      sessionStorage.setItem(
+        key,
+        JSON.stringify({
+          ...draft,
+
+          imageDataUrl:
+            null,
+
+          imageFileName:
+            draft.imageFileName,
+        })
+      );
+    } catch (_) {}
+  };
+
+
+const deleteWatermarkDraft =
+  (
+    file:
+      File
+  ) => {
+    try {
+      sessionStorage.removeItem(
+        watermarkDraftKey(
+          file
+        )
+      );
+    } catch (_) {}
+  };
+
 
 export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   const [watermarkType, setWatermarkType] = useState<'text' | 'image'>('text');
@@ -74,7 +239,152 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   const processingInFlightRef =
     useRef(false);
 
+  const draftReadyKeyRef =
+    useRef<string | null>(
+      null
+    );
+
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  /*
+   * Restore the user's exact Watermark settings after:
+   *
+   * - normal SPA navigation
+   * - Preview -> Back
+   * - Safari/WebKit process recreation
+   *
+   * The key is tied to the exact selected PDF.
+   */
+  useEffect(() => {
+    if (!file) {
+      draftReadyKeyRef.current =
+        null;
+
+      return;
+    }
+
+
+    const key =
+      watermarkDraftKey(
+        file
+      );
+
+
+    draftReadyKeyRef.current =
+      null;
+
+
+    const saved =
+      readWatermarkDraft(
+        file
+      );
+
+
+    if (saved) {
+      setWatermarkType(
+        saved.watermarkType
+      );
+
+      setText(
+        saved.text
+      );
+
+      setImageDataUrl(
+        saved.imageDataUrl
+      );
+
+      setImageFileName(
+        saved.imageFileName
+      );
+
+      setFontFamily(
+        saved.fontFamily
+      );
+
+      setFontSize(
+        saved.fontSize
+      );
+
+      setColorHex(
+        saved.colorHex
+      );
+
+      setOpacity(
+        saved.opacity
+      );
+
+      setAngle(
+        saved.angle
+      );
+
+      setLetterSpacing(
+        saved.letterSpacing
+      );
+
+      setPosition(
+        saved.position
+      );
+    }
+
+
+    draftReadyKeyRef.current =
+      key;
+  }, [
+    file,
+  ]);
+
+
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+
+    const key =
+      watermarkDraftKey(
+        file
+      );
+
+
+    if (
+      draftReadyKeyRef.current !==
+      key
+    ) {
+      return;
+    }
+
+
+    writeWatermarkDraft(
+      file,
+      {
+        watermarkType,
+        text,
+        imageDataUrl,
+        imageFileName,
+        fontFamily,
+        fontSize,
+        colorHex,
+        opacity,
+        angle,
+        letterSpacing,
+        position,
+      }
+    );
+  }, [
+    file,
+    watermarkType,
+    text,
+    imageDataUrl,
+    imageFileName,
+    fontFamily,
+    fontSize,
+    colorHex,
+    opacity,
+    angle,
+    letterSpacing,
+    position,
+  ]);
+
 
   // Load PDF for live preview
   useEffect(() => {
@@ -238,18 +548,24 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       return;
     }
 
+
     const creditCheck =
       checkTaskCredit(
         file
       );
 
-    if (!creditCheck.allowed) {
+
+    if (
+      !creditCheck.allowed
+    ) {
       setError(
         creditCheck.errorMessage ||
           'This task is not available on your current plan.'
       );
+
       return;
     }
+
 
     if (
       watermarkType ===
@@ -259,8 +575,10 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       setError(
         'Please enter watermark text.'
       );
+
       return;
     }
+
 
     if (
       watermarkType ===
@@ -270,21 +588,18 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       setError(
         'Please upload a watermark logo image.'
       );
+
       return;
     }
 
 
-    /*
-     * Capture the live-preview geometry BEFORE releasing
-     * PDF.js. This preserves the exact watermark sizing that
-     * has already been approved.
-     */
     const previewPageWidth =
       Math.max(
         1,
         canvasRef.current
           ?.getBoundingClientRect()
-          .width || 460
+          .width ||
+          460
       );
 
 
@@ -322,6 +637,30 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       };
 
 
+    /*
+     * Persist the settings synchronously BEFORE heavy work.
+     *
+     * Even if WebKit recreates the page, the user's selected
+     * configuration does not reset to defaults.
+     */
+    writeWatermarkDraft(
+      file,
+      {
+        watermarkType,
+        text,
+        imageDataUrl,
+        imageFileName,
+        fontFamily,
+        fontSize,
+        colorHex,
+        opacity,
+        angle,
+        letterSpacing,
+        position,
+      }
+    );
+
+
     processingInFlightRef.current =
       true;
 
@@ -337,25 +676,165 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
 
 
     try {
-      const outputBytes =
-        await exclusivelyProcess(
-          async () => {
+      await exclusivelyProcess(
+        async () => {
+          /*
+           * ==================================================
+           * LARGE PDFs: DEDICATED QPDF WORKER
+           * ==================================================
+           *
+           * The old 150 MB path did:
+           *
+           * File -> full ArrayBuffer -> pdf-lib object graph
+           *      -> full serialized output
+           *
+           * all inside the main Safari page.
+           *
+           * For large PDFs we now create only a tiny stamp PDF
+           * on the main page, release PDF.js, then hand the
+           * ORIGINAL File to a dedicated qpdf Worker.
+           */
+          const LARGE_FILE_BYTES =
+            64 *
+            1024 *
+            1024;
+
+
+          if (
+            file.size >=
+            LARGE_FILE_BYTES
+          ) {
             /*
-             * ==================================================
-             * LARGE-FILE MEMORY PROTECTION
-             * ==================================================
+             * Make sure our existing OPFS workspace has the
+             * source before beginning the large operation.
              *
-             * The live preview is no longer needed while the
-             * final PDF is being created.
-             *
-             * Release PDF.js BEFORE pdf-lib allocates the full
-             * 148-150 MB source document.
-             *
-             * Keep the existing canvas pixels visible so the
-             * user does not see the preview disappear.
+             * If Safari ever recreates the page, App.tsx can
+             * restore the source while the processing recovery
+             * marker is still active.
+             */
+            try {
+              await saveWorkspaceFiles(
+                [file]
+              );
+            } catch (
+              workspaceError
+            ) {
+              console.warn(
+                'Unable to prepare Watermark restart recovery:',
+                workspaceError
+              );
+            }
+
+
+            let sizePdf =
+              pdfDocRef.current;
+
+            let temporaryLoaded:
+              Awaited<
+                ReturnType<
+                  typeof loadPdfJsFromBlob
+                >
+              > |
+              null =
+                null;
+
+
+            if (!sizePdf) {
+              temporaryLoaded =
+                await loadPdfJsFromBlob(
+                  file
+                );
+
+              sizePdf =
+                temporaryLoaded.pdf;
+            }
+
+
+            const pageSizes:
+              WatermarkPageSize[] =
+                [];
+
+
+            try {
+              const count =
+                sizePdf.numPages;
+
+
+              for (
+                let pageNumber = 1;
+                pageNumber <=
+                  count;
+                pageNumber++
+              ) {
+                const page =
+                  await sizePdf.getPage(
+                    pageNumber
+                  );
+
+
+                try {
+                  const viewport =
+                    page.getViewport({
+                      scale:
+                        1,
+                    });
+
+
+                  pageSizes.push({
+                    width:
+                      viewport.width,
+
+                    height:
+                      viewport.height,
+                  });
+                } finally {
+                  try {
+                    page.cleanup();
+                  } catch (_) {}
+                }
+
+
+                if (
+                  pageNumber %
+                    8 ===
+                  0
+                ) {
+                  await new Promise<void>(
+                    (
+                      resolve
+                    ) =>
+                      setTimeout(
+                        resolve,
+                        0
+                      )
+                  );
+                }
+              }
+            } finally {
+              if (
+                temporaryLoaded
+              ) {
+                await temporaryLoaded
+                  .dispose();
+              }
+            }
+
+
+            const stampBytes =
+              await buildWatermarkStampPdf(
+                pageSizes,
+                opts
+              );
+
+
+            /*
+             * PDF.js has served its purpose.
+             * Free it BEFORE qpdf allocates anything for the
+             * 148-150 MB original.
              */
             const disposePreview =
               pdfDisposeRef.current;
+
 
             pdfDisposeRef.current =
               null;
@@ -373,106 +852,89 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
             }
 
 
-            /*
-             * App.tsx may already be saving the selected 150 MB
-             * source into the browser-local workspace.
-             *
-             * Calling saveWorkspaceFiles here joins that queue
-             * and guarantees the OPFS write is FINISHED before
-             * the watermark engine starts.
-             *
-             * This removes the previous:
-             *
-             * OPFS copy + PDF.js preview + pdf-lib parse
-             *
-             * memory/I/O overlap.
-             *
-             * It also guarantees the original source is locally
-             * recoverable if Safari recreates the page.
-             */
-            try {
-              await saveWorkspaceFiles(
-                [file]
-              );
-            } catch (
-              workspaceError
-            ) {
-              console.warn(
-                'Watermark workspace persistence unavailable:',
-                workspaceError
-              );
-            }
-
-
-            /*
-             * Give Safari/WebKit a real event-loop boundary after
-             * destroying PDF.js so its worker/range caches can be
-             * reclaimed before the 150 MB pdf-lib allocation.
-             */
             await new Promise<void>(
               (
                 resolve
               ) =>
                 setTimeout(
                   resolve,
-                  120
+                  100
                 )
             );
 
 
-            return await addWatermarkToPDF(
+            const outputBlob =
+              await watermarkPdfInWorker(
+                file,
+                stampBytes
+              );
+
+
+            /*
+             * Blob arrives directly from the worker.
+             * Do not create another 150 MB Uint8Array/Blob copy
+             * on the main Safari thread.
+             */
+            createUrl(
+              outputBlob
+            );
+
+
+            commitTaskCredit();
+
+            clearProcessingRecovery();
+
+            return;
+          }
+
+
+          /*
+           * SMALL/MEDIUM PDFs:
+           *
+           * Keep the already-approved current lossless path.
+           * Do not change working behaviour unnecessarily.
+           */
+          const outputBytes =
+            await addWatermarkToPDF(
               file,
               opts
             );
-          }
-        );
 
 
-      const blob =
-        new Blob(
-          [
-            outputBytes as
-              unknown as
-              BlobPart,
-          ],
-          {
-            type:
-              'application/pdf',
-          }
-        );
+          const blob =
+            new Blob(
+              [
+                outputBytes as
+                  unknown as
+                  BlobPart,
+              ],
+              {
+                type:
+                  'application/pdf',
+              }
+            );
 
 
-      createUrl(
-        blob
+          createUrl(
+            blob
+          );
+
+
+          commitTaskCredit();
+
+          clearProcessingRecovery();
+        }
       );
-
-
-      /*
-       * Final PDF exists successfully.
-       *
-       * Clear the restart marker only now, then charge exactly
-       * one task as before.
-       */
-      clearProcessingRecovery();
-
-      commitTaskCredit();
     } catch (
       err:
         any
     ) {
       console.error(
+        'Watermark error:',
         err
       );
 
 
-      /*
-       * A normal caught failure is not a Safari process kill,
-       * so there is no interrupted operation to preserve.
-       *
-       * If Safari actually kills/recreates the process this code
-       * never executes, leaving the recovery marker intact so
-       * App.tsx restores the source PDF.
-       */
       clearProcessingRecovery();
 
 
@@ -492,11 +954,8 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
 
 
       /*
-       * Restore the lightweight range-backed PDF.js preview
-       * AFTER the heavy pdf-lib operation has completely ended.
-       *
-       * loadPdfJsFromBlob does not copy the entire 150 MB file;
-       * it reads small ranges on demand.
+       * Restore the lightweight range-based preview only after
+       * heavy processing has completely ended.
        */
       if (
         file &&
@@ -525,13 +984,8 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
         } catch (
           previewError
         ) {
-          /*
-           * The final watermarked PDF is already safe.
-           * A preview restoration failure must never invalidate
-           * or remove the completed download.
-           */
           console.warn(
-            'Unable to restore Watermark preview after processing:',
+            'Unable to restore Watermark preview:',
             previewError
           );
         }
@@ -540,10 +994,28 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
   };
 
   const handleClear = () => {
+    if (
+      file
+    ) {
+      deleteWatermarkDraft(
+        file
+      );
+    }
+
+
+    draftReadyKeyRef.current =
+      null;
+
+    clearProcessingRecovery();
+
     onFileChange(null);
+
     revokeDownloadUrl();
+
     setError(null);
+
     setImageDataUrl(null);
+
     setImageFileName(null);
   };
 
