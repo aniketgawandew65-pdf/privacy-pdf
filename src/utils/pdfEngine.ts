@@ -12387,40 +12387,147 @@ export interface ExtractedImage {
   height: number;
 }
 
+
+export interface ExtractImagesOptions {
+  /*
+   * Large-file callers can move each completed image to OPFS
+   * immediately and return an OPFS-backed File.
+   */
+  persistImage?: (
+    image:
+      ExtractedImage
+  ) => Promise<ExtractedImage>;
+
+  /*
+   * Safari/PDF.js can retain decoded image resources inside a
+   * document session. Large PDFs recycle the complete PDF.js
+   * session periodically so caches cannot grow across 80+ pages.
+   */
+  recyclePdfJsEveryPages?:
+    number;
+}
+
+
 export async function extractImagesFromPDF(
   file: File,
+
   onProgress?: (
     current: number,
     total: number
-  ) => void
+  ) => void,
+
+  options:
+    ExtractImagesOptions = {}
 ): Promise<ExtractedImage[]> {
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+
+  let pdfDoc:
+    any =
+      loadedPdf.pdf;
+
+
+  const totalPages =
+    pdfDoc.numPages;
+
+
+  const images:
+    ExtractedImage[] =
+      [];
+
+
+  const seenImageHashes =
+    new Set<string>();
+
+
+  let counter =
+    0;
+
+
+  const recycleEvery =
+    Math.max(
+      1,
+      options
+        .recyclePdfJsEveryPages ??
+        Number.MAX_SAFE_INTEGER
     );
 
-  const pdfDoc =
-    loadedPdf.pdf;
+
+  const yieldToBrowser =
+    async (
+      delay =
+        0
+    ) =>
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            delay
+          )
+      );
+
+
+  const reopenPdf =
+    async () => {
+      if (loadedPdf) {
+        try {
+          await loadedPdf
+            .dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+      }
+
+
+      pdfDoc =
+        null;
+
+
+      /*
+       * Give WebKit a real reclamation boundary before opening
+       * the next range-backed PDF.js session.
+       */
+      await yieldToBrowser(
+        20
+      );
+
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+
+      pdfDoc =
+        loadedPdf.pdf;
+    };
+
 
   try {
-    const totalPages =
-      pdfDoc.numPages;
-
-    const images:
-      ExtractedImage[] = [];
-
-    const seenImageHashes =
-      new Set<string>();
-
-    let counter = 0;
-
-
     for (
       let pageNum = 1;
-      pageNum <= totalPages;
+      pageNum <=
+        totalPages;
       pageNum++
     ) {
       onProgress?.(
@@ -12428,20 +12535,26 @@ export async function extractImagesFromPDF(
         totalPages
       );
 
+
       const page =
         await pdfDoc.getPage(
           pageNum
         );
 
+
       try {
         const operatorList =
-          await page.getOperatorList();
+          await page
+            .getOperatorList();
+
 
         const validOps = [
           pdfjsLib.OPS
             .paintImageXObject,
+
           pdfjsLib.OPS
             .paintInlineImageXObject,
+
           pdfjsLib.OPS
             .paintImageXObjectRepeat,
         ];
@@ -12450,11 +12563,15 @@ export async function extractImagesFromPDF(
         for (
           let i = 0;
           i <
-          operatorList.fnArray.length;
+          operatorList
+            .fnArray
+            .length;
           i++
         ) {
           const fn =
-            operatorList.fnArray[i];
+            operatorList
+              .fnArray[i];
+
 
           if (
             !validOps.includes(
@@ -12471,9 +12588,12 @@ export async function extractImagesFromPDF(
 
 
           try {
-            const imgObj: any =
+            const imgObj:
+              any =
               await new Promise(
-                (resolve) => {
+                (
+                  resolve
+                ) => {
                   const timeout =
                     setTimeout(
                       () =>
@@ -12521,9 +12641,11 @@ export async function extractImagesFromPDF(
                   let handled =
                     false;
 
+
                   const handleResult =
                     (
-                      data: any
+                      data:
+                        any
                     ) => {
                       if (
                         !handled &&
@@ -12546,11 +12668,13 @@ export async function extractImagesFromPDF(
                   try {
                     const syncObj =
                       (
-                        page.objs as any
+                        page.objs as
+                          any
                       ).get(
                         imgArg,
                         handleResult
                       );
+
 
                     if (syncObj) {
                       handleResult(
@@ -12564,20 +12688,22 @@ export async function extractImagesFromPDF(
                     try {
                       const commonStore =
                         (
-                          page as any
+                          page as
+                            any
                         ).commonObjs ||
                         (
-                          pdfDoc as any
+                          pdfDoc as
+                            any
                         ).commonObjs;
 
-                      if (
-                        commonStore
-                      ) {
+
+                      if (commonStore) {
                         const syncCommon =
                           commonStore.get(
                             imgArg,
                             handleResult
                           );
+
 
                         if (
                           syncCommon
@@ -12608,13 +12734,19 @@ export async function extractImagesFromPDF(
             if (
               !width ||
               !height ||
-              width < 10 ||
-              height < 10
+              width <
+                10 ||
+              height <
+                10
             ) {
               continue;
             }
 
 
+            /*
+             * Keep the existing de-duplication behaviour exactly
+             * as it was before this large-file hardening.
+             */
             const dedupeKey =
               width +
               'x' +
@@ -12642,9 +12774,11 @@ export async function extractImagesFromPDF(
 
 
             const canvas =
-              document.createElement(
-                'canvas'
-              );
+              document
+                .createElement(
+                  'canvas'
+                );
+
 
             try {
               canvas.width =
@@ -12658,7 +12792,8 @@ export async function extractImagesFromPDF(
                 canvas.getContext(
                   '2d',
                   {
-                    alpha: false,
+                    alpha:
+                      false,
                   }
                 );
 
@@ -12736,17 +12871,23 @@ export async function extractImagesFromPDF(
                     rgba[q] =
                       imgObj.data[p];
 
-                    rgba[q + 1] =
+                    rgba[
+                      q + 1
+                    ] =
                       imgObj.data[
                         p + 1
                       ];
 
-                    rgba[q + 2] =
+                    rgba[
+                      q + 2
+                    ] =
                       imgObj.data[
                         p + 2
                       ];
 
-                    rgba[q + 3] =
+                    rgba[
+                      q + 3
+                    ] =
                       255;
                   }
 
@@ -12780,19 +12921,26 @@ export async function extractImagesFromPDF(
                     p++,
                       q += 4
                   ) {
-                    const val =
+                    const value =
                       imgObj.data[p];
 
+
                     rgba[q] =
-                      val;
+                      value;
 
-                    rgba[q + 1] =
-                      val;
+                    rgba[
+                      q + 1
+                    ] =
+                      value;
 
-                    rgba[q + 2] =
-                      val;
+                    rgba[
+                      q + 2
+                    ] =
+                      value;
 
-                    rgba[q + 3] =
+                    rgba[
+                      q + 3
+                    ] =
                       255;
                   }
 
@@ -12820,9 +12968,12 @@ export async function extractImagesFromPDF(
 
               const blob =
                 await new Promise<
-                  Blob | null
+                  Blob |
+                  null
                 >(
-                  (resolve) =>
+                  (
+                    resolve
+                  ) =>
                     canvas.toBlob(
                       resolve,
                       'image/png'
@@ -12838,24 +12989,49 @@ export async function extractImagesFromPDF(
               counter++;
 
 
-              images.push({
-                id:
-                  'img-' +
-                  counter +
-                  '-p' +
-                  pageNum,
+              const extracted:
+                ExtractedImage = {
+                  id:
+                    'img-' +
+                    counter +
+                    '-p' +
+                    pageNum,
 
-                name:
-                  'extracted_img_' +
-                  counter +
-                  '_p' +
-                  pageNum +
-                  '.png',
+                  name:
+                    'extracted_img_' +
+                    counter +
+                    '_p' +
+                    pageNum +
+                    '.png',
 
-                blob,
-                width,
-                height,
-              });
+                  blob,
+
+                  width,
+
+                  height,
+                };
+
+
+              /*
+               * On the large-file path this write completes
+               * BEFORE the next embedded image is decoded.
+               *
+               * The array therefore contains lightweight
+               * browser-storage-backed File objects instead of
+               * a growing pile of full PNG Blobs in JS memory.
+               */
+              const finalImage =
+                options.persistImage
+                  ? await options
+                      .persistImage(
+                        extracted
+                      )
+                  : extracted;
+
+
+              images.push(
+                finalImage
+              );
             } finally {
               canvas.width =
                 1;
@@ -12863,16 +13039,19 @@ export async function extractImagesFromPDF(
               canvas.height =
                 1;
 
+
               try {
                 canvas.remove();
               } catch (_) {}
             }
-          } catch (err) {
+          } catch (
+            error
+          ) {
             console.warn(
               'Skipping unparseable image on page ' +
                 pageNum +
                 ':',
-              err
+              error
             );
           }
         }
@@ -12881,14 +13060,47 @@ export async function extractImagesFromPDF(
           page.cleanup();
         } catch (_) {}
       }
+
+
+      /*
+       * Large PDFs recycle PDF.js frequently so decoded image
+       * XObjects/common-object caches cannot accumulate over
+       * the entire document.
+       *
+       * Small files keep their old one-session behaviour.
+       */
+      if (
+        pageNum <
+          totalPages &&
+        pageNum %
+          recycleEvery ===
+          0
+      ) {
+        await reopenPdf();
+      } else {
+        await yieldToBrowser();
+      }
     }
 
 
     return images;
   } finally {
-    await loadedPdf.dispose();
+    if (loadedPdf) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+    }
+
+
+    loadedPdf =
+      null;
+
+    pdfDoc =
+      null;
   }
 }
+
 
 export async function packageImagesToZip(
   images: ExtractedImage[],

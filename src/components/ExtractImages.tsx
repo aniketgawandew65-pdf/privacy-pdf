@@ -24,6 +24,20 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import {
+  exclusivelyProcess,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
+import {
+  saveWorkspaceFiles,
+} from '../utils/localWorkspace';
+import {
+  clearExtractImagesStorage,
+  persistExtractedImageToOpfs,
+} from '../utils/extractImagesStorage';
+import {
+  packageExtractedImagesToZipWorker,
+} from '../utils/extractImagesZipClient';
 
 interface ExtractImagesProps {
   file: File | null;
@@ -43,7 +57,16 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
   ] = useState<Record<string, string>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { url: zipUrl, createUrl, revoke: revokeZipUrl } = useObjectUrl();
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const {
+    url: zipUrl,
+    createUrl,
+    revoke: revokeZipUrl,
+    revokeNow: revokeZipUrlNow,
+  } = useObjectUrl();
 
   useEffect(() => {
     const nextUrls:
@@ -78,51 +101,372 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
   }, [extractedImages]);
 
   const handleScanAndExtract = async () => {
-    if (!file) return;
+    if (
+      !file ||
+      processingInFlightRef.current
+    ) {
+      return;
+    }
 
-    const creditCheck = checkTaskCredit(file);
 
-    if (!creditCheck.allowed) {
+    const creditCheck =
+      checkTaskCredit(
+        file
+      );
+
+
+    if (
+      !creditCheck.allowed
+    ) {
       setErrorMessage(
         creditCheck.errorMessage ||
           'This task is not available on your current plan.'
       );
+
       return;
     }
 
-    setIsScanning(true);
-    setErrorMessage(null);
-    revokeZipUrl();
+
+    const LARGE_FILE_BYTES =
+      64 *
+      1024 *
+      1024;
+
+
+    const isLargeFile =
+      file.size >=
+      LARGE_FILE_BYTES;
+
+
+    processingInFlightRef.current =
+      true;
+
+
+    setIsScanning(
+      true
+    );
+
+    setErrorMessage(
+      null
+    );
+
+
+    if (isLargeFile) {
+      /*
+       * Do not leave an old huge ZIP object URL alive while
+       * beginning another heavy extraction.
+       */
+      revokeZipUrlNow();
+
+      /*
+       * Drop the previous gallery immediately so its full-size
+       * image URLs can be revoked before scanning the next PDF.
+       */
+      setExtractedImages(
+        []
+      );
+
+      setHasScanned(
+        false
+      );
+
+
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    } else {
+      revokeZipUrl();
+    }
+
 
     try {
-      const results = await extractImagesFromPDF(file, (curr, total) => {
-        setProgressText(`Scanning page ${curr} of ${total} for embedded images...`);
-      });
+      if (!isLargeFile) {
+        /*
+         * Existing small/medium-file behavior is intentionally
+         * unchanged.
+         */
+        const results =
+          await extractImagesFromPDF(
+            file,
+            (
+              curr,
+              total
+            ) => {
+              setProgressText(
+                `Scanning page ${curr} of ${total} for embedded images...`
+              );
+            }
+          );
 
-      setExtractedImages(results);
-      setHasScanned(true);
 
-      if (results.length > 0) {
-        setProgressText('Bundling images into ZIP archive...');
-        const zipBlob = await packageImagesToZip(results, file.name);
-        createUrl(zipBlob);
+        setExtractedImages(
+          results
+        );
+
+        setHasScanned(
+          true
+        );
+
+
+        if (
+          results.length >
+          0
+        ) {
+          setProgressText(
+            'Bundling images into ZIP archive...'
+          );
+
+
+          const zipBlob =
+            await packageImagesToZip(
+              results,
+              file.name
+            );
+
+
+          createUrl(
+            zipBlob
+          );
+
+          commitTaskCredit();
+        }
+
+
+        return;
+      }
+
+
+      /*
+       * The App may already be mirroring this 150 MB source to
+       * its generic browser-local workspace.
+       *
+       * Joining the same serialized save here guarantees that
+       * source persistence finishes BEFORE image decoding begins,
+       * instead of both operations competing for Safari memory/I/O.
+       */
+      setProgressText(
+        'Preparing large PDF for memory-safe extraction...'
+      );
+
+
+      try {
+        await saveWorkspaceFiles(
+          [
+            file,
+          ]
+        );
+      } catch (
+        workspaceError
+      ) {
+        console.warn(
+          'Unable to prepare Extract Images workspace:',
+          workspaceError
+        );
+      }
+
+
+      const {
+        results,
+        zipBlob,
+      } =
+        await exclusivelyProcess(
+          async () => {
+            /*
+             * Remove only the previous Extract Images OPFS
+             * outputs. No other tool storage is touched.
+             */
+            await clearExtractImagesStorage();
+
+
+            const extracted =
+              await extractImagesFromPDF(
+                file,
+                (
+                  curr,
+                  total
+                ) => {
+                  setProgressText(
+                    `Scanning page ${curr} of ${total} for embedded images...`
+                  );
+                },
+                {
+                  /*
+                   * One PDF.js session per page on the 64 MB+
+                   * path prevents decoded XObject/common-image
+                   * caches from growing across the whole PDF.
+                   */
+                  recyclePdfJsEveryPages:
+                    1,
+
+                  /*
+                   * Move each completed full-resolution PNG to
+                   * OPFS immediately.
+                   */
+                  persistImage:
+                    persistExtractedImageToOpfs,
+                }
+              );
+
+
+            let archive:
+              Blob |
+              null =
+                null;
+
+
+            if (
+              extracted.length >
+              0
+            ) {
+              setProgressText(
+                'Building ZIP directly in browser-local storage...'
+              );
+
+
+              archive =
+                await packageExtractedImagesToZipWorker(
+                  extracted,
+                  file.name,
+                  (
+                    current,
+                    total
+                  ) => {
+                    setProgressText(
+                      `Bundling image ${current} of ${total} into ZIP...`
+                    );
+                  }
+                );
+            }
+
+
+            return {
+              results:
+                extracted,
+
+              zipBlob:
+                archive,
+            };
+          }
+        );
+
+
+      /*
+       * Important:
+       * expose the gallery only AFTER the ZIP phase finishes.
+       *
+       * This prevents Safari from decoding dozens of full-size
+       * gallery images while the ZIP worker is also active.
+       */
+      setExtractedImages(
+        results
+      );
+
+      setHasScanned(
+        true
+      );
+
+
+      if (zipBlob) {
+        createUrl(
+          zipBlob
+        );
+
         commitTaskCredit();
       }
-    } catch (err: any) {
-      console.error('Image extraction error:', err);
-      setErrorMessage(err.message || 'Failed to extract images from PDF.');
+
+
+      clearProcessingRecovery();
+    } catch (
+      err:
+        any
+    ) {
+      console.error(
+        'Image extraction error:',
+        err
+      );
+
+
+      if (isLargeFile) {
+        clearProcessingRecovery();
+      }
+
+
+      setErrorMessage(
+        err?.message ||
+          'Failed to extract images from PDF.'
+      );
     } finally {
-      setIsScanning(false);
-      setProgressText('');
+      processingInFlightRef.current =
+        false;
+
+
+      setIsScanning(
+        false
+      );
+
+      setProgressText(
+        ''
+      );
     }
   };
 
-  const handleClear = () => {
-    onFileChange(null);
-    setExtractedImages([]);
-    setHasScanned(false);
-    revokeZipUrl();
-    setErrorMessage(null);
+
+  const handleClear = async () => {
+    if (isScanning) {
+      return;
+    }
+
+
+    const wasLargeFile =
+      Boolean(
+        file &&
+        file.size >=
+          64 *
+            1024 *
+            1024
+      );
+
+
+    processingInFlightRef.current =
+      false;
+
+
+    clearProcessingRecovery();
+
+
+    if (wasLargeFile) {
+      revokeZipUrlNow();
+
+      await clearExtractImagesStorage()
+        .catch(
+          () => {}
+        );
+    } else {
+      revokeZipUrl();
+    }
+
+
+    onFileChange(
+      null
+    );
+
+    setExtractedImages(
+      []
+    );
+
+    setHasScanned(
+      false
+    );
+
+    setErrorMessage(
+      null
+    );
   };
 
   return (
@@ -254,6 +598,8 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
                       <img
                         src={imageUrls[img.id]}
                         alt={img.name}
+                        loading="lazy"
+                        decoding="async"
                         className="max-w-full max-h-full object-contain"
                       />
                     </div>
