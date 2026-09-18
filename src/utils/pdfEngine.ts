@@ -4274,127 +4274,446 @@ export async function encryptPDF(
     );
   }
 
+
   /*
    * =========================================================
-   * LOSSLESS / VECTOR-PRESERVING PDF PROTECTION
+   * UNIVERSAL LOCAL PDF PROTECTION
    * =========================================================
    *
-   * The old implementation rendered every source page at
-   * 2x resolution, JPEG-encoded it, and rebuilt the PDF with
-   * jsPDF just to add encryption.
+   * Protect must care about ONE thing only:
    *
-   * That was extremely expensive for large mobile files:
-   * - full-page canvas rasterization
-   * - JPEG encoding on every page
-   * - sustained CPU/GPU load
-   * - phone heating
-   * - possible quality loss
+   *   Apply password encryption to the supplied PDF.
    *
-   * Encryption does not require rasterization.
+   * It must not depend on whether the PDF contains:
+   * - text
+   * - scans
+   * - images
+   * - forms
+   * - sanitized pages
+   * - unusual metadata
+   * - object streams
    *
-   * Use an encryption-capable pdf-lib fork only for this
-   * operation. It preserves the existing PDF page content,
-   * text, images and vectors while applying AES encryption.
+   * No rasterization is performed here.
+   * Visible PDF content remains unchanged.
    *
-   * Dynamic import keeps this additional library out of the
-   * initial/shared PDF tool bundle until Protect PDF is used.
+   *
+   * TWO SAFE PATHS
+   * ---------------------------------------------------------
+   *
+   * SMALL / MEDIUM FILES:
+   *   First perform a structural normalization with the normal
+   *   pdf-lib parser, disabling object streams.
+   *
+   *   This specifically avoids pathological encryption-parser
+   *   behaviour seen with some newly rebuilt/image-only PDFs.
+   *
+   * LARGE FILES:
+   *   Keep the existing proven direct encryption path so we do
+   *   not create an unnecessary second complete PDF in memory.
    */
 
+
+  const yieldToBrowser =
+    async (
+      delay = 0
+    ) =>
+      await new Promise<void>(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            delay
+          )
+      );
+
+
+  /*
+   * Cheap structural verification of the FINAL output.
+   *
+   * We do not parse the protected PDF again because doing so
+   * would duplicate a potentially 150 MB output in memory.
+   *
+   * /Encrypt is a trailer/xref dictionary entry and therefore
+   * remains visible even though the document contents are
+   * encrypted.
+   */
+  const containsEncryptEntry =
+    (
+      bytes: Uint8Array
+    ) => {
+      const token = [
+        47,  // /
+        69,  // E
+        110, // n
+        99,  // c
+        114, // r
+        121, // y
+        112, // p
+        116, // t
+      ];
+
+      outer:
+      for (
+        let i = 0;
+        i <=
+          bytes.length -
+            token.length;
+        i++
+      ) {
+        for (
+          let j = 0;
+          j <
+            token.length;
+          j++
+        ) {
+          if (
+            bytes[
+              i + j
+            ] !==
+            token[j]
+          ) {
+            continue outer;
+          }
+        }
+
+        const next =
+          bytes[
+            i +
+            token.length
+          ];
+
+        /*
+         * Avoid treating a longer name such as
+         * /EncryptMetadata as the actual /Encrypt entry.
+         */
+        if (
+          next === undefined ||
+          next === 9 ||
+          next === 10 ||
+          next === 13 ||
+          next === 32 ||
+          next === 47 ||
+          next === 60 ||
+          next === 62 ||
+          next === 91 ||
+          next === 93
+        ) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+
+  const NORMALIZE_LIMIT =
+    64 *
+    1024 *
+    1024;
+
+
   onProgress?.(
-    5
+    3
   );
 
-  let sourceBuffer:
+
+  let originalBuffer:
     | ArrayBuffer
     | null =
       await file.arrayBuffer();
 
+
   onProgress?.(
-    20
+    12
   );
 
-  try {
-    const {
-      PDFDocument:
-        EncryptingPDFDocument,
-    } =
-      await import(
-        '@cantoo/pdf-lib'
+
+  let workingBytes:
+    | ArrayBuffer
+    | Uint8Array =
+      originalBuffer;
+
+
+  let compatibilityNormalized =
+    false;
+
+
+  /*
+   * =========================================================
+   * COMPATIBILITY NORMALIZATION
+   * =========================================================
+   *
+   * This does NOT rasterize the document.
+   *
+   * Pages, images, vectors and text remain PDF objects.
+   * We only rewrite the container into a conservative,
+   * non-object-stream representation before encryption.
+   *
+   * 64 MB boundary is purely a mobile memory guard.
+   * Large files retain the already-proven direct path.
+   */
+  if (
+    file.size <=
+      NORMALIZE_LIMIT
+  ) {
+    try {
+      const standardDoc =
+        await PDFDocument.load(
+          originalBuffer,
+          {
+            updateMetadata:
+              false,
+          }
+        );
+
+
+      if (
+        standardDoc
+          .isEncrypted
+      ) {
+        throw new Error(
+          'INPUT_ALREADY_ENCRYPTED'
+        );
+      }
+
+
+      onProgress?.(
+        25
       );
 
-    onProgress?.(
-      30
-    );
+
+      const normalizedBytes =
+        await standardDoc.save({
+          useObjectStreams:
+            false,
+
+          addDefaultPage:
+            false,
+
+          /*
+           * Yield frequently on Safari instead of monopolizing
+           * the main thread during structural serialization.
+           */
+          objectsPerTick:
+            8,
+        });
+
+
+      workingBytes =
+        normalizedBytes;
+
+      compatibilityNormalized =
+        true;
+
+
+      /*
+       * The normalized copy is now the encryption source.
+       * Drop our explicit reference to the original buffer.
+       */
+      originalBuffer =
+        null;
+
+
+      await yieldToBrowser(
+        20
+      );
+    } catch (
+      normalizationError:
+        any
+    ) {
+      if (
+        String(
+          normalizationError
+            ?.message ||
+            normalizationError ||
+            ''
+        ).includes(
+          'INPUT_ALREADY_ENCRYPTED'
+        )
+      ) {
+        throw new Error(
+          'This PDF is already protected. Unlock it first, then apply the new password.'
+        );
+      }
+
+
+      /*
+       * Normalization is a compatibility enhancement,
+       * never a requirement.
+       *
+       * If an unusual valid PDF cannot be normalized by
+       * standard pdf-lib, fall straight back to the existing
+       * direct encryption path.
+       */
+      workingBytes =
+        originalBuffer!;
+
+      compatibilityNormalized =
+        false;
+
+
+      await yieldToBrowser(
+        20
+      );
+    }
+  }
+
+
+  onProgress?.(
+    compatibilityNormalized
+      ? 40
+      : 25
+  );
+
+
+  try {
+    const cantoo:
+      any =
+        await import(
+          '@cantoo/pdf-lib'
+        );
+
+
+    const EncryptingPDFDocument =
+      cantoo.PDFDocument;
+
+
+    /*
+     * Fastest parser mode where the installed fork exposes it.
+     * This changes parser scheduling only, never PDF content.
+     */
+    const loadOptions:
+      any = {
+        updateMetadata:
+          false,
+      };
+
+
+    if (
+      cantoo
+        .ParseSpeeds
+        ?.Fastest !==
+      undefined
+    ) {
+      loadOptions.parseSpeed =
+        cantoo
+          .ParseSpeeds
+          .Fastest;
+    }
+
 
     const pdfDoc =
-      await EncryptingPDFDocument.load(
-        sourceBuffer,
-        {
-          updateMetadata:
-            false,
-        }
+      await EncryptingPDFDocument
+        .load(
+          workingBytes,
+          loadOptions
+        );
+
+
+    /*
+     * Cantoo has parsed the source structures.
+     * Release our explicit complete input references before
+     * allocating the encrypted output.
+     */
+    workingBytes =
+      new Uint8Array(
+        0
       );
 
-    /*
-     * The parser now owns the document structures.
-     * Release our separate 150 MB ArrayBuffer reference
-     * before encryption/final serialization.
-     */
-    sourceBuffer = null;
+    originalBuffer =
+      null;
 
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          0
-        )
+
+    await yieldToBrowser(
+      20
     );
+
 
     onProgress?.(
-      55
+      60
     );
 
+
     /*
-     * Keep AES-128 to match the product's existing
-     * "128-bit password protection" behaviour/UI.
+     * Preserve the product's existing AES-128 behaviour.
      *
-     * No page rasterization occurs here.
+     * The encryption is applied to the PDF object streams and
+     * strings; nothing is rendered, OCR'd or visually altered.
      */
     pdfDoc.encrypt({
       userPassword,
+
       ownerPassword:
         userPassword,
+
       algorithm:
         'AES-128',
     });
 
+
     onProgress?.(
-      70
+      72
     );
 
+
+    await yieldToBrowser(
+      20
+    );
+
+
     /*
-     * Preserve all original PDF content streams.
-     * Object streams affect PDF structure/compression,
-     * not visual quality.
+     * Sanitized / compatibility-normalized documents use the
+     * most conservative serializer: no object streams.
+     *
+     * Large PDFs keep the old compact object-stream behaviour.
+     *
+     * objectsPerTick is intentionally low so iPhone Safari gets
+     * regular opportunities to service the event loop instead
+     * of treating encryption as a frozen page.
      */
-    const protectedBytes =
-      await pdfDoc.save({
-        useObjectStreams:
-          true,
-        addDefaultPage:
-          false,
-      });
+    const protectedBytes:
+      Uint8Array =
+        await pdfDoc.save({
+          useObjectStreams:
+            !compatibilityNormalized,
+
+          addDefaultPage:
+            false,
+
+          objectsPerTick:
+            5,
+        });
+
+
+    onProgress?.(
+      95
+    );
+
+
+    /*
+     * Never show "successfully protected" unless the output
+     * actually contains an encryption dictionary.
+     */
+    if (
+      !containsEncryptEntry(
+        protectedBytes
+      )
+    ) {
+      throw new Error(
+        'Password protection could not be verified. No unprotected output was created.'
+      );
+    }
+
 
     onProgress?.(
       100
     );
 
+
     return protectedBytes;
-  } catch (error: any) {
-    /*
-     * An already-encrypted input cannot be protected again
-     * without its current password.
-     */
+  } catch (
+    error:
+      any
+  ) {
     const message =
       String(
         error?.message ||
@@ -4402,9 +4721,17 @@ export async function encryptPDF(
           ''
       );
 
+
+    /*
+     * Already-encrypted input still requires its existing
+     * password first. Protect must not silently corrupt it.
+     */
     if (
       /password|encrypted|encryption/i.test(
         message
+      ) &&
+      !message.includes(
+        'Password protection could not be verified'
       )
     ) {
       throw new Error(
@@ -4412,12 +4739,19 @@ export async function encryptPDF(
       );
     }
 
+
     throw new Error(
       message ||
         'Failed to protect PDF.'
     );
   } finally {
-    sourceBuffer = null;
+    originalBuffer =
+      null;
+
+    workingBytes =
+      new Uint8Array(
+        0
+      );
   }
 }
 
