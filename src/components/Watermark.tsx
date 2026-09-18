@@ -246,6 +246,22 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
     revokeDownloadUrl();
 
     try {
+      /*
+       * The live preview is the source of truth.
+       *
+       * Safari/mobile CSS can visually scale the preview canvas
+       * below its internal bitmap width because of max-height.
+       * Capture its REAL displayed width so the PDF renderer can
+       * reproduce exactly the same watermark proportions.
+       */
+      const previewPageWidth =
+        Math.max(
+          1,
+          canvasRef.current
+            ?.getBoundingClientRect()
+            .width || 460
+        );
+
       const opts: WatermarkOptions = {
         type: watermarkType,
         text: text.trim(),
@@ -257,6 +273,7 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
         angle,
         letterSpacing: watermarkType === 'text' ? letterSpacing : 0,
         position,
+        previewPageWidth,
       };
 
       const outputBytes = await addWatermarkToPDF(file, opts);

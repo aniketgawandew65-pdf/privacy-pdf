@@ -2663,6 +2663,12 @@ export interface WatermarkOptions {
   angle?: number;
   letterSpacing?: number;
   position?: 'center' | 'top' | 'bottom';
+
+  /*
+   * Actual CSS width of the page shown in Live Watermark
+   * Preview. Export uses this to reproduce the preview exactly.
+   */
+  previewPageWidth?: number;
 }
 
 export async function addWatermarkToPDF(
@@ -2728,9 +2734,37 @@ export async function addWatermarkToPDF(
     ctx.rotate((angleDeg * Math.PI) / 180);
 
     if (options.type === 'text' && options.text?.trim()) {
-      // Normalized scale matching the 460px UI preview container
-      const scaleNormalization = pWidth / 460;
-      const finalFontSize = (options.fontSize ?? 48) * scaleNormalization;
+      /*
+       * EXACT LIVE-PREVIEW PARITY
+       * ------------------------------------------------------
+       * Preview CSS uses:
+       *
+       *   fontSize * 0.46
+       *
+       * The old export accidentally used the raw fontSize,
+       * which made CONFIDENTIAL much larger after download.
+       *
+       * Convert the exact displayed preview size into the
+       * rendered PDF coordinate system.
+       */
+      const previewPageWidth =
+        Math.max(
+          1,
+          options.previewPageWidth ??
+            460
+        );
+
+      const scaleNormalization =
+        pWidth /
+        previewPageWidth;
+
+      const previewFontSize =
+        (options.fontSize ?? 48) *
+        0.46;
+
+      const finalFontSize =
+        previewFontSize *
+        scaleNormalization;
 
       let fontFamilyCSS = 'Helvetica, Arial, sans-serif';
       if (options.fontFamily === 'TimesRoman') fontFamilyCSS = '"Times New Roman", Times, serif';
@@ -2741,8 +2775,14 @@ export async function addWatermarkToPDF(
       ctx.textBaseline = 'middle';
 
       const text = options.text.trim();
-      // Exact proportional letter spacing matching preview CSS (slider value * 6 px)
-      const spacingPx = (options.letterSpacing ?? 0) * 6 * scaleNormalization;
+      /*
+       * Preview CSS uses letterSpacing * 6px.
+       * Scale those exact visual pixels into PDF coordinates.
+       */
+      const spacingPx =
+        (options.letterSpacing ?? 0) *
+        6 *
+        scaleNormalization;
 
       // Measure total width with precise character-by-character gaps
       const chars = text.split('');
@@ -2764,11 +2804,71 @@ export async function addWatermarkToPDF(
       const logoImg = new Image();
       await new Promise<void>((resolve) => {
         logoImg.onload = () => {
-          const scaleNormalization = pWidth / 460;
-          const logoScale = ((options.fontSize ?? 50) / 100) * scaleNormalization;
-          const lW = logoImg.width * logoScale;
-          const lH = logoImg.height * logoScale;
-          ctx.drawImage(logoImg, -lW / 2, -lH / 2, lW, lH);
+          /*
+           * EXACT LIVE-PREVIEW PARITY
+           * --------------------------------------------------
+           * Preview CSS uses:
+           *
+           *   width = fontSize * 2.2px
+           *
+           * Do NOT multiply by the uploaded image's original
+           * pixel dimensions. A 3000px logo and a 300px logo
+           * must appear the same size when the same Logo Scale
+           * is selected.
+           */
+          const previewPageWidth =
+            Math.max(
+              1,
+              options.previewPageWidth ??
+                460
+            );
+
+          const scaleNormalization =
+            pWidth /
+            previewPageWidth;
+
+          const previewLogoWidth =
+            (options.fontSize ?? 50) *
+            2.2;
+
+          const lW =
+            previewLogoWidth *
+            scaleNormalization;
+
+          const sourceWidth =
+            Math.max(
+              1,
+              logoImg.naturalWidth ||
+                logoImg.width ||
+                1
+            );
+
+          const sourceHeight =
+            Math.max(
+              1,
+              logoImg.naturalHeight ||
+                logoImg.height ||
+                1
+            );
+
+          /*
+           * Same as CSS height:auto — preserve image aspect ratio.
+           */
+          const lH =
+            lW *
+            (
+              sourceHeight /
+              sourceWidth
+            );
+
+          ctx.drawImage(
+            logoImg,
+            -lW / 2,
+            -lH / 2,
+            lW,
+            lH
+          );
+
           resolve();
         };
         logoImg.src = options.imageDataUrl!;
