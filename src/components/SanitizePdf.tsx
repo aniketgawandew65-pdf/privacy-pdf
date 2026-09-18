@@ -17,6 +17,22 @@ import {
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  clearProcessingRecovery,
+  exclusivelyProcess,
+  preserveProcessingWorkspace,
+} from '../utils/localProcessing';
+
+import {
+  clearSanitizeRecovery,
+  readSanitizeJobMeta,
+  readSanitizePage,
+  restoreSanitizeJobSource,
+  sanitizeJobMatchesFile,
+  saveSanitizeJobSource,
+  writeSanitizePage,
+} from '../utils/sanitizeRecovery';
+
 interface SanitizePdfProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
@@ -24,44 +40,407 @@ interface SanitizePdfProps {
 
 export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [progressText, setProgressText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryReady, setRecoveryReady] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processingInFlightRef =
+    useRef(false);
+
+  const durableRestoreAttemptedRef =
+    useRef(false);
+
+  const checkedRecoveryFileRef =
+    useRef<File | null>(null);
+
+  const resumeAttemptedRef =
+    useRef(false);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
-  const handleSanitize = async () => {
-    if (!file) return;
-
-    const creditCheck = checkTaskCredit(file);
-
-    if (!creditCheck.allowed) {
-      setErrorMessage(
-        creditCheck.errorMessage ||
-          'This task is not available on your current plan.'
-      );
+  /*
+   * ==========================================================
+   * RESTORE INTERRUPTED SANITIZE JOB
+   * ==========================================================
+   */
+  React.useEffect(() => {
+    if (
+      file ||
+      durableRestoreAttemptedRef.current
+    ) {
       return;
     }
-    setIsProcessing(true);
-    setErrorMessage(null);
-    revokeDownloadUrl();
 
-    try {
-      const outputBytes = await sanitizePDF(file);
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
-      commitTaskCredit();
-    } catch (err) {
-      console.error('Sanitize error:', err);
-      setErrorMessage('Failed to sanitize PDF. The document may be corrupted or password-protected.');
-    } finally {
-      setIsProcessing(false);
+    durableRestoreAttemptedRef.current =
+      true;
+
+    let cancelled =
+      false;
+
+    void (
+      async () => {
+        try {
+          const restored =
+            await restoreSanitizeJobSource();
+
+          if (
+            cancelled ||
+            !restored
+          ) {
+            return;
+          }
+
+          preserveProcessingWorkspace();
+
+          setRecoveryReady(
+            true
+          );
+
+          onFileChange(
+            restored
+          );
+        } catch (
+          error
+        ) {
+          console.warn(
+            'Unable to restore interrupted Sanitize job:',
+            error
+          );
+        }
+      }
+    )();
+
+    return () => {
+      cancelled =
+        true;
+    };
+  }, [
+    file,
+    onFileChange,
+  ]);
+
+
+  /*
+   * Detect a recovery job if the same source File is already
+   * present in the current SPA session.
+   */
+  React.useEffect(() => {
+    if (!file) {
+      checkedRecoveryFileRef.current =
+        null;
+
+      setRecoveryReady(
+        false
+      );
+
+      return;
     }
-  };
+
+    if (
+      checkedRecoveryFileRef.current ===
+      file
+    ) {
+      return;
+    }
+
+    checkedRecoveryFileRef.current =
+      file;
+
+    let cancelled =
+      false;
+
+    void (
+      async () => {
+        try {
+          const meta =
+            await readSanitizeJobMeta();
+
+          if (
+            cancelled ||
+            !sanitizeJobMatchesFile(
+              meta,
+              file
+            )
+          ) {
+            return;
+          }
+
+          preserveProcessingWorkspace();
+
+          setRecoveryReady(
+            true
+          );
+        } catch (
+          error
+        ) {
+          console.warn(
+            'Unable to inspect Sanitize recovery:',
+            error
+          );
+        }
+      }
+    )();
+
+    return () => {
+      cancelled =
+        true;
+    };
+  }, [
+    file,
+  ]);
+
+
+  const handleSanitize =
+    async () => {
+      if (
+        !file ||
+        processingInFlightRef.current
+      ) {
+        return;
+      }
+
+
+      const creditCheck =
+        checkTaskCredit(
+          file
+        );
+
+
+      if (
+        !creditCheck.allowed
+      ) {
+        setErrorMessage(
+          creditCheck.errorMessage ||
+            'This task is not available on your current plan.'
+        );
+
+        return;
+      }
+
+
+      processingInFlightRef.current =
+        true;
+
+      setIsProcessing(
+        true
+      );
+
+      setErrorMessage(
+        null
+      );
+
+      revokeDownloadUrl();
+
+
+      try {
+        const outputBytes =
+          await exclusivelyProcess(
+            async () => {
+              let recoveryEnabled =
+                false;
+
+
+              try {
+                await saveSanitizeJobSource(
+                  file
+                );
+
+                recoveryEnabled =
+                  true;
+
+                setRecoveryReady(
+                  true
+                );
+              } catch (
+                recoveryError
+              ) {
+                console.warn(
+                  'Sanitize restart recovery unavailable:',
+                  recoveryError
+                );
+              }
+
+
+              return await sanitizePDF(
+                file,
+                {
+                  onProgress:
+                    (
+                      current,
+                      total
+                    ) => {
+                      setProgressText(
+                        `Deep sanitizing page ${current} of ${total}...`
+                      );
+                    },
+
+                  recovery:
+                    recoveryEnabled
+                      ? {
+                          readPage:
+                            readSanitizePage,
+
+                          writePage:
+                            writeSanitizePage,
+                        }
+                      : undefined,
+                }
+              );
+            }
+          );
+
+
+        const blob =
+          new Blob(
+            [
+              outputBytes as unknown as BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+
+
+        createUrl(
+          blob
+        );
+
+
+        /*
+         * The final clean PDF exists. Recovery can now be
+         * deleted and this successful operation charged.
+         */
+        await clearSanitizeRecovery();
+
+        clearProcessingRecovery();
+
+        setRecoveryReady(
+          false
+        );
+
+        resumeAttemptedRef.current =
+          false;
+
+
+        commitTaskCredit();
+      } catch (
+        err:
+          any
+      ) {
+        console.error(
+          'Sanitize error:',
+          err
+        );
+
+        setErrorMessage(
+          err?.message ||
+            'Sanitization was interrupted. Reopen Sanitize to continue from the last completed page.'
+        );
+      } finally {
+        processingInFlightRef.current =
+          false;
+
+        setIsProcessing(
+          false
+        );
+
+        setProgressText(
+          ''
+        );
+      }
+    };
+
+
+  /*
+   * Automatically continue after Safari/WebKit recreation.
+   */
+  React.useEffect(() => {
+    if (
+      !file ||
+      !recoveryReady ||
+      resumeAttemptedRef.current ||
+      processingInFlightRef.current
+    ) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          if (
+            resumeAttemptedRef.current ||
+            processingInFlightRef.current
+          ) {
+            return;
+          }
+
+          resumeAttemptedRef.current =
+            true;
+
+          void handleSanitize();
+        },
+        300
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    file,
+    recoveryReady,
+  ]);
+
+
+  const discardSanitizeRecovery =
+    () => {
+      clearProcessingRecovery();
+
+      void clearSanitizeRecovery()
+        .catch(
+          () => {}
+        );
+
+      resumeAttemptedRef.current =
+        false;
+
+      setRecoveryReady(
+        false
+      );
+    };
+
 
   const handleClear = () => {
-    onFileChange(null);
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+    discardSanitizeRecovery();
+
+    processingInFlightRef.current =
+      false;
+
+    durableRestoreAttemptedRef.current =
+      false;
+
+    checkedRecoveryFileRef.current =
+      null;
+
+    onFileChange(
+      null
+    );
+
     revokeDownloadUrl();
-    setErrorMessage(null);
+
+    setErrorMessage(
+      null
+    );
   };
 
   return (
@@ -133,22 +512,24 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
           <div className="p-4 bg-zinc-950/50 rounded-xl border border-zinc-800/80 space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Sanitization removes the following hidden data:</span>
+              <span>Deep sanitization removes hidden & interactive data:</span>
             </div>
             <ul className="grid grid-cols-2 gap-1.5 text-[11px] text-zinc-400 list-disc list-inside">
-              <li>Author & Creator info</li>
-              <li>Software & OS fingerprint</li>
-              <li>Creation & Edit dates</li>
-              <li>XMP metadata catalog</li>
-              <li>PDF producer details</li>
-              <li>Print & piece-info dictionaries</li>
+              <li>All document metadata</li>
+              <li>XMP & custom Info keys</li>
+              <li>Embedded files</li>
+              <li>Comments & annotations</li>
+              <li>Forms & hidden values</li>
+              <li>JavaScript & actions</li>
+              <li>Tracking links</li>
+              <li>Invisible / OCR text layers</li>
             </ul>
 
             {/* Clarification Notice */}
             <div className="pt-2 border-t border-zinc-800/60 flex items-start gap-2 text-[11px] text-zinc-500">
               <Info className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
               <span>
-                Visible on-page text and numbers remain intact. To black out sensitive details on the page, use the <strong>Redact</strong> tool.
+                Deep Sanitize rebuilds only the visible page appearance into a clean PDF. Links, forms, comments, attachments, scripts, bookmarks and selectable/OCR text layers are intentionally removed. To black out visible sensitive details, use <strong>Redact</strong>.
               </span>
             </div>
           </div>
@@ -171,19 +552,19 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Sanitizing document in browser...</span>
+                  <span>{progressText || 'Deep sanitizing document...'}</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
-                  <span>Sanitize & Strip All Metadata</span>
+                  <span>Deep Sanitize & Rebuild PDF</span>
                 </>
               )}
             </button>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
-                <CheckCircle2 className="w-4 h-4" /> All Metadata Stripped Successfully
+                <CheckCircle2 className="w-4 h-4" /> Deep Sanitization Completed Successfully
               </div>
               <a
                 href={downloadUrl}

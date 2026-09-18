@@ -5385,56 +5385,703 @@ export async function reorderAndProcessPDF(
  * 1-click sanitization: Safely strips XMP metadata, author, creator, producer,
  * and date tags without corrupting xref tables.
  */
-export async function sanitizePDF(file: File): Promise<Uint8Array> {
-  let arrayBuffer:
-    | ArrayBuffer
-    | null =
-      await file.arrayBuffer();
+export interface SanitizeRecoveryHooks {
+  readPage?: (
+    pageNumber:
+      number
+  ) => Promise<
+    Blob |
+    null |
+    undefined
+  >;
 
-  const pdfDoc =
-    await PDFDocument.load(
-      arrayBuffer,
-      {
-        ignoreEncryption: true,
-      }
-    );
+  writePage?: (
+    pageNumber:
+      number,
 
-  /*
-   * pdf-lib has parsed the source. Release the separate
-   * complete input-buffer reference before sanitization
-   * and final serialization.
-   */
-  arrayBuffer = null;
+    blob:
+      Blob
+  ) => Promise<void>;
+}
 
-  await new Promise<void>(
-    (resolve) =>
-      setTimeout(
-        resolve,
+
+export interface SanitizeOptions {
+  onProgress?: (
+    current: number,
+    total: number
+  ) => void;
+
+  recovery?:
+    SanitizeRecoveryHooks;
+}
+
+
+/**
+ * ============================================================
+ * DEEP PRIVACY SANITIZER
+ * ============================================================
+ *
+ * Security model:
+ *
+ * Do NOT copy the original PDF object graph.
+ *
+ * Instead:
+ *  1. PDF.js paints only visible page appearance.
+ *  2. Each completed visible page is encoded as a clean JPEG.
+ *  3. A brand-new PDF is created from those page images.
+ *
+ * Therefore the new document does not inherit:
+ *
+ * - Info dictionary / custom metadata keys
+ * - XMP Metadata
+ * - PieceInfo
+ * - embedded files / portfolios / associated files
+ * - annotations / comments / reviewer identities
+ * - AcroForm values / widgets / XFA
+ * - JavaScript / OpenAction / additional actions
+ * - URI actions / tracking links
+ * - bookmarks / interactive navigation
+ * - hidden/invisible text
+ * - OCR / selectable text layers
+ * - signatures / certificates / DSS
+ * - original trailer identifiers
+ *
+ * Visible page appearance is preserved.
+ */
+export async function sanitizePDF(
+  file:
+    File,
+
+  options:
+    SanitizeOptions =
+      {}
+): Promise<Uint8Array> {
+  const recovery =
+    options.recovery;
+
+
+  const yieldToBrowser =
+    async (
+      delay =
         0
-      )
-  );
+    ) =>
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            delay
+          )
+      );
 
-  pdfDoc.setTitle('');
-  pdfDoc.setAuthor('');
-  pdfDoc.setSubject('');
-  pdfDoc.setKeywords([]);
-  pdfDoc.setProducer('1into1 PDF (Privacy Sanitized)');
-  pdfDoc.setCreator('');
-  pdfDoc.setCreationDate(new Date(0));
-  pdfDoc.setModificationDate(new Date(0));
+
+  let loadedPdf:
+    Awaited<
+      ReturnType<
+        typeof loadPdfJsFromBlob
+      >
+    > |
+    null =
+      await loadPdfJsFromBlob(
+        file,
+        {
+          stopAtErrors:
+            false,
+        }
+      );
+
+
+  let pdf =
+    loadedPdf.pdf;
+
+  const totalPages =
+    pdf.numPages;
+
+
+  const memoryPages =
+    new Map<
+      number,
+      Blob
+    >();
+
+
+  let freshPagesSinceRecycle =
+    0;
+
+  const PDFJS_RECYCLE_LIMIT =
+    2;
+
+
+  const reopenPdf =
+    async () => {
+      if (
+        loadedPdf
+      ) {
+        try {
+          await loadedPdf
+            .dispose();
+        } catch (_) {}
+
+        loadedPdf =
+          null;
+      }
+
+      await yieldToBrowser(
+        20
+      );
+
+      loadedPdf =
+        await loadPdfJsFromBlob(
+          file,
+          {
+            stopAtErrors:
+              false,
+          }
+        );
+
+      pdf =
+        loadedPdf.pdf;
+
+      freshPagesSinceRecycle =
+        0;
+    };
+
 
   try {
-    const catalog = pdfDoc.context.lookup(pdfDoc.context.trailerInfo.Root);
-    if (catalog instanceof PDFDict) {
-      catalog.delete(PDFName.of('Metadata'));
-      catalog.delete(PDFName.of('PieceInfo'));
-    }
-  } catch (e) {
-    console.warn('Metadata cleanup bypassed:', e);
-  }
+    /*
+     * ========================================================
+     * PHASE 1 — CLEAN VISIBLE-PAGE CHECKPOINTS
+     * ========================================================
+     */
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        totalPages;
+      pageNumber++
+    ) {
+      let existing:
+        | Blob
+        | null =
+          null;
 
-  return await pdfDoc.save({ useObjectStreams: false });
+
+      if (
+        recovery?.readPage
+      ) {
+        try {
+          existing =
+            (
+              await recovery
+                .readPage(
+                  pageNumber
+                )
+            ) ||
+            null;
+        } catch (_) {
+          existing =
+            null;
+        }
+      } else {
+        existing =
+          memoryPages.get(
+            pageNumber
+          ) ||
+          null;
+      }
+
+
+      if (
+        existing
+      ) {
+        await yieldToBrowser();
+
+        continue;
+      }
+
+
+      options.onProgress?.(
+        pageNumber,
+        totalPages
+      );
+
+
+      const page =
+        await pdf.getPage(
+          pageNumber
+        );
+
+      const canvas =
+        document.createElement(
+          'canvas'
+        );
+
+
+      try {
+        const baseViewport =
+          page.getViewport({
+            scale:
+              1.0,
+          });
+
+
+        const maxDimension =
+          Math.max(
+            baseViewport.width,
+            baseViewport.height
+          );
+
+
+        /*
+         * High enough for readable legal/business documents,
+         * bounded enough for iPhone Safari.
+         */
+        const renderScale =
+          Math.max(
+            1,
+            Math.min(
+              2.0,
+              2200 /
+                Math.max(
+                  1,
+                  maxDimension
+                )
+            )
+          );
+
+
+        const viewport =
+          page.getViewport({
+            scale:
+              renderScale,
+          });
+
+
+        canvas.width =
+          Math.max(
+            1,
+            Math.floor(
+              viewport.width
+            )
+          );
+
+        canvas.height =
+          Math.max(
+            1,
+            Math.floor(
+              viewport.height
+            )
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d',
+            {
+              alpha:
+                false,
+            }
+          );
+
+
+        if (!ctx) {
+          throw new Error(
+            `Canvas rendering context unavailable for page ${pageNumber}.`
+          );
+        }
+
+
+        ctx.fillStyle =
+          '#ffffff';
+
+        ctx.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+
+        await (
+          page.render({
+            canvasContext:
+              ctx as any,
+
+            viewport,
+
+            canvas,
+          } as any) as any
+        ).promise;
+
+
+        /*
+         * JPEG avoids giant PNG memory/size amplification while
+         * keeping document text visually clear.
+         */
+        const cleanBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (
+                  blob
+                ) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        `Unable to encode sanitized page ${pageNumber}.`
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.94
+              );
+            }
+          );
+
+
+        if (
+          recovery?.writePage
+        ) {
+          await recovery
+            .writePage(
+              pageNumber,
+              cleanBlob
+            );
+        } else {
+          memoryPages.set(
+            pageNumber,
+            cleanBlob
+          );
+        }
+
+
+        freshPagesSinceRecycle++;
+      } finally {
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
+
+        try {
+          canvas.remove();
+        } catch (_) {}
+
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+
+      if (
+        freshPagesSinceRecycle >=
+          PDFJS_RECYCLE_LIMIT &&
+        pageNumber <
+          totalPages
+      ) {
+        await reopenPdf();
+      } else {
+        await yieldToBrowser();
+      }
+    }
+
+
+    /*
+     * Source object graph is no longer needed during output
+     * creation.
+     */
+    if (
+      loadedPdf
+    ) {
+      await loadedPdf
+        .dispose();
+
+      loadedPdf =
+        null;
+    }
+
+
+    await yieldToBrowser(
+      20
+    );
+
+
+    /*
+     * ========================================================
+     * PHASE 2 — BRAND-NEW CLEAN PDF
+     * ========================================================
+     */
+    const outputDoc =
+      await PDFDocument.create();
+
+
+    await reopenPdf();
+
+
+    let assemblyPagesSinceRecycle =
+      0;
+
+
+    for (
+      let pageNumber = 1;
+      pageNumber <=
+        totalPages;
+      pageNumber++
+    ) {
+      const cleanBlob =
+        recovery?.readPage
+          ? await recovery
+              .readPage(
+                pageNumber
+              )
+          : (
+              memoryPages.get(
+                pageNumber
+              ) ||
+              null
+            );
+
+
+      if (
+        !cleanBlob
+      ) {
+        throw new Error(
+          `Sanitized page ${pageNumber} checkpoint is missing. Retry the operation.`
+        );
+      }
+
+
+      const sourcePage =
+        await pdf.getPage(
+          pageNumber
+        );
+
+
+      try {
+        /*
+         * scale:1 gives the visible page geometry including the
+         * source rotation. The clean image is baked into that
+         * same visual page orientation.
+         */
+        const originalViewport =
+          sourcePage.getViewport({
+            scale:
+              1.0,
+          });
+
+
+        const jpegBytes =
+          await cleanBlob
+            .arrayBuffer();
+
+
+        const image =
+          await outputDoc
+            .embedJpg(
+              jpegBytes
+            );
+
+
+        const newPage =
+          outputDoc.addPage([
+            originalViewport.width,
+            originalViewport.height,
+          ]);
+
+
+        newPage.drawImage(
+          image,
+          {
+            x:
+              0,
+
+            y:
+              0,
+
+            width:
+              originalViewport.width,
+
+            height:
+              originalViewport.height,
+          }
+        );
+      } finally {
+        try {
+          sourcePage.cleanup();
+        } catch (_) {}
+      }
+
+
+      assemblyPagesSinceRecycle++;
+
+
+      if (
+        assemblyPagesSinceRecycle >=
+          8 &&
+        pageNumber <
+          totalPages
+      ) {
+        await reopenPdf();
+
+        assemblyPagesSinceRecycle =
+          0;
+      } else {
+        await yieldToBrowser();
+      }
+    }
+
+
+    /*
+     * reopenPdf() mutates loadedPdf inside a closure.
+     * TypeScript does not widen the variable again after the
+     * earlier null assignment, so take an explicit typed snapshot
+     * for final assembly cleanup.
+     */
+    const finalSanitizePdf =
+      loadedPdf as
+        Awaited<
+          ReturnType<
+            typeof loadPdfJsFromBlob
+          >
+        > |
+        null;
+
+
+    if (
+      finalSanitizePdf
+    ) {
+      await finalSanitizePdf
+        .dispose();
+    }
+
+
+    loadedPdf =
+      null;
+
+
+    memoryPages.clear();
+
+
+    /*
+     * ========================================================
+     * REMOVE EVEN THE NEW DOCUMENT'S LIBRARY-GENERATED INFO
+     * ========================================================
+     *
+     * PDFDocument.create() may create its own harmless Info
+     * dictionary. Sanitize should expose NO producer/date
+     * metadata at all, so clear it and unlink it from trailer.
+     */
+    const trailerInfo:
+      any =
+        outputDoc.context
+          .trailerInfo;
+
+
+    try {
+      const infoRef =
+        trailerInfo.Info;
+
+      if (
+        infoRef
+      ) {
+        const info =
+          outputDoc.context
+            .lookup(
+              infoRef
+            );
+
+        if (
+          info instanceof
+            PDFDict
+        ) {
+          for (
+            const key of
+            info.keys()
+          ) {
+            info.delete(
+              key
+            );
+          }
+        }
+      }
+    } catch (_) {}
+
+
+    try {
+      delete trailerInfo.Info;
+    } catch (_) {}
+
+
+    try {
+      delete trailerInfo.ID;
+    } catch (_) {}
+
+
+    /*
+     * Defensive cleanup: these structures should not exist in a
+     * fresh image-only document, but explicitly guarantee it.
+     */
+    for (
+      const name of
+      [
+        'Metadata',
+        'PieceInfo',
+        'OpenAction',
+        'AA',
+        'Names',
+        'AcroForm',
+        'AF',
+        'Collection',
+        'Perms',
+        'DSS',
+      ]
+    ) {
+      try {
+        outputDoc.catalog
+          .delete(
+            PDFName.of(
+              name
+            )
+          );
+      } catch (_) {}
+    }
+
+
+    await yieldToBrowser(
+      20
+    );
+
+
+    return await outputDoc.save({
+      useObjectStreams:
+        true,
+
+      objectsPerTick:
+        20,
+    });
+  } finally {
+    if (
+      loadedPdf
+    ) {
+      try {
+        await loadedPdf
+          .dispose();
+      } catch (_) {}
+
+      loadedPdf =
+        null;
+    }
+  }
 }
+
 
 export interface RedactionRect {
   x: number;
