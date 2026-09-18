@@ -35,6 +35,54 @@ interface CropArea {
   height: number;
 }
 
+interface CropDraft {
+  currentPage: number;
+  zoom: number;
+  mode: "crop" | "pan";
+  applyToAll: boolean;
+  crops: Record<number, CropArea | null>;
+  cropBox: CropArea | null;
+}
+
+/*
+ * Session-only Crop PDF drafts.
+ *
+ * This intentionally lives only in JS module memory:
+ *
+ * - SPA navigation / preview -> Back: preserved
+ * - hard refresh: cleared
+ * - removing the source PDF: cleared
+ *
+ * Nothing is written to localStorage or permanent storage.
+ */
+const cropDrafts =
+  new Map<string, CropDraft>();
+
+const getCropDraftKey =
+  (file: File) =>
+    `${file.name}::${file.size}::${file.lastModified || 0}`;
+
+const cloneCropArea =
+  (
+    area: CropArea | null
+  ): CropArea | null =>
+    area
+      ? { ...area }
+      : null;
+
+const cloneCropMap =
+  (
+    value: Record<number, CropArea | null>
+  ): Record<number, CropArea | null> =>
+    Object.fromEntries(
+      Object.entries(value).map(
+        ([page, area]) => [
+          Number(page),
+          cloneCropArea(area),
+        ]
+      )
+    );
+
 interface CropPdfProps {
   file?: File | null;
   onFileChange?: (file: File | null) => void;
@@ -68,6 +116,13 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  /*
+   * Prevent the initial default React state from overwriting an
+   * existing draft before this file has finished loading.
+   */
+  const draftReadyKeyRef =
+    useRef<string | null>(null);
+
   const pdfDisposeRef =
     useRef<(() => Promise<void>) | null>(null);
 
@@ -95,6 +150,13 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
     }
 
     let isMounted = true;
+
+    /*
+     * A different File is loading. Do not let its initial/default
+     * React state overwrite a saved draft.
+     */
+    draftReadyKeyRef.current =
+      null;
 
     const previousDispose =
       pdfDisposeRef.current;
@@ -127,14 +189,69 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
         setPdfDoc(doc);
         setNumPages(doc.numPages);
-        setCurrentPage(1);
-        setCrops({});
-        setCropBox({
-          x: 25,
-          y: 25,
-          width: 250,
-          height: 340,
-        });
+
+        const draftKey =
+          getCropDraftKey(file);
+
+        const savedDraft =
+          cropDrafts.get(
+            draftKey
+          );
+
+        if (savedDraft) {
+          setCurrentPage(
+            Math.max(
+              1,
+              Math.min(
+                savedDraft.currentPage,
+                doc.numPages
+              )
+            )
+          );
+
+          setZoom(
+            savedDraft.zoom
+          );
+
+          setMode(
+            savedDraft.mode
+          );
+
+          setApplyToAll(
+            savedDraft.applyToAll
+          );
+
+          setCrops(
+            cloneCropMap(
+              savedDraft.crops
+            )
+          );
+
+          setCropBox(
+            cloneCropArea(
+              savedDraft.cropBox
+            )
+          );
+        } else {
+          setCurrentPage(1);
+          setZoom(1.0);
+          setMode("crop");
+          setApplyToAll(false);
+          setCrops({});
+          setCropBox({
+            x: 25,
+            y: 25,
+            width: 250,
+            height: 340,
+          });
+        }
+
+        /*
+         * Only from this point may state changes be written back
+         * into this file's draft.
+         */
+        draftReadyKeyRef.current =
+          draftKey;
       } catch (err: any) {
         if (isMounted) {
           setError(
@@ -162,6 +279,58 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       setPdfDoc(null);
     };
   }, [file]);
+
+  /*
+   * Preserve the complete Crop editing session while navigating
+   * around the app or opening the generated PDF preview.
+   *
+   * Hard refresh clears this automatically because cropDrafts is
+   * module-memory only.
+   */
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+    const draftKey =
+      getCropDraftKey(file);
+
+    if (
+      draftReadyKeyRef.current !==
+      draftKey
+    ) {
+      return;
+    }
+
+    cropDrafts.set(
+      draftKey,
+      {
+        currentPage,
+        zoom,
+        mode,
+        applyToAll,
+
+        crops:
+          cloneCropMap(
+            crops
+          ),
+
+        cropBox:
+          cloneCropArea(
+            cropBox
+          ),
+      }
+    );
+  }, [
+    file,
+    currentPage,
+    zoom,
+    mode,
+    applyToAll,
+    crops,
+    cropBox,
+  ]);
+
 
   // Render current page to canvas with high-DPI Retina resolution
   useEffect(() => {
@@ -751,7 +920,21 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             </div>
             <button
               type="button"
-              onClick={() => { setFile(null); setDownloadUrl(null); setPdfDoc(null); setDownloadUrl(null); }}
+              onClick={() => {
+                if (file) {
+                  cropDrafts.delete(
+                    getCropDraftKey(file)
+                  );
+                }
+
+                draftReadyKeyRef.current =
+                  null;
+
+                setFile(null);
+                setDownloadUrl(null);
+                setPdfDoc(null);
+                setDownloadUrl(null);
+              }}
               className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition"
             >
               <X className="w-4 h-4" />
