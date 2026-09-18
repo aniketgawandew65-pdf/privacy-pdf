@@ -2098,21 +2098,6 @@ React.FC<AnnotatePdfProps> = ({
 
             <ToolButton
               active={
-                tool === 'select'
-              }
-              label="Select"
-              onClick={() =>
-                setTool(
-                  'select'
-                )
-              }
-            >
-              <MousePointer2 className="w-4 h-4" />
-            </ToolButton>
-
-
-            <ToolButton
-              active={
                 tool === 'text'
               }
               label="Text"
@@ -2229,20 +2214,6 @@ React.FC<AnnotatePdfProps> = ({
               <Redo2 className="w-4 h-4" />
             </button>
 
-
-            <button
-              type="button"
-              onClick={
-                deleteSelected
-              }
-              disabled={
-                !selectedId
-              }
-              className="p-2.5 shrink-0 rounded-xl border border-zinc-800 text-zinc-400 hover:text-red-400 disabled:opacity-30"
-              title="Delete selected"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
 
           </div>
 
@@ -2460,11 +2431,11 @@ React.FC<AnnotatePdfProps> = ({
         </div>
 
 
-        {/* SELECTED TEXT SETTINGS */}
-        {selected?.type ===
-          'text' && (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-2.5 flex flex-col gap-2.5">
+        {/* SELECTION CONTROLS */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-2.5 flex flex-col gap-2.5">
 
+          {selected?.type ===
+            'text' && (
             <input
               value={
                 selected.text ||
@@ -2488,17 +2459,13 @@ React.FC<AnnotatePdfProps> = ({
               className="w-full min-h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-emerald-500"
               placeholder="Annotation text"
             />
+          )}
 
 
-            {/*
-             * Compact selected-text actions:
-             *
-             * Size | Select | Delete
-             *
-             * Kept together in one small row for mobile use.
-             */}
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
 
+            {selected?.type ===
+              'text' && (
               <div className="flex items-center gap-1.5">
 
                 <span className="text-[11px] text-zinc-500">
@@ -2510,7 +2477,6 @@ React.FC<AnnotatePdfProps> = ({
 
                   <button
                     type="button"
-
                     aria-label="Decrease font size"
                     title="Smaller text"
 
@@ -2570,7 +2536,6 @@ React.FC<AnnotatePdfProps> = ({
 
                   <button
                     type="button"
-
                     aria-label="Increase font size"
                     title="Bigger text"
 
@@ -2624,49 +2589,53 @@ React.FC<AnnotatePdfProps> = ({
                 </div>
 
               </div>
+            )}
 
 
-              <button
-                type="button"
+            <button
+              type="button"
 
-                onClick={() =>
-                  setTool(
-                    'select'
-                  )
-                }
+              onClick={() =>
+                setTool(
+                  'select'
+                )
+              }
 
-                className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[11px] font-medium transition ${
-                  tool === 'select'
-                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
-                    : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white'
-                }`}
+              className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[11px] font-medium transition ${
+                tool === 'select'
+                  ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
+                  : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white'
+              }`}
 
-                title="Select and move annotation"
-              >
-                <MousePointer2 className="w-3.5 h-3.5" />
-                Select
-              </button>
+              title="Select text, pen, rectangle, circle, arrow or highlight"
+            >
+              <MousePointer2 className="w-3.5 h-3.5" />
+              Select
+            </button>
 
 
-              <button
-                type="button"
+            <button
+              type="button"
 
-                onClick={
-                  deleteSelected
-                }
+              onClick={
+                deleteSelected
+              }
 
-                className="w-8 h-8 rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-red-400 hover:border-red-500/40 transition"
+              disabled={
+                !selectedId
+              }
 
-                title="Delete selected annotation"
-                aria-label="Delete selected annotation"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              className="w-8 h-8 rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-red-400 hover:border-red-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition"
 
-            </div>
+              title="Delete selected annotation"
+              aria-label="Delete selected annotation"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
 
           </div>
-        )}
+
+        </div>
 
 
         {/* ERROR */}
