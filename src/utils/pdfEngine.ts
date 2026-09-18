@@ -2675,165 +2675,326 @@ export async function addWatermarkToPDF(
   file: File,
   options: WatermarkOptions
 ): Promise<Uint8Array> {
-  const loadedPdf =
-    await loadPdfJsFromBlob(
-      file,
-      {
-        stopAtErrors: false,
-      }
+  const opacity =
+    options.opacity ??
+    0.25;
+
+  const angleDeg =
+    options.angle ??
+    -45;
+
+  const previewPageWidth =
+    Math.max(
+      1,
+      options.previewPageWidth ??
+        460
     );
 
-  const pdfDoc =
-    loadedPdf.pdf;
 
-  try {
-    const numPages =
-      pdfDoc.numPages;
+  /*
+   * Load the logo only once for the whole document.
+   */
+  let logoPromise:
+    Promise<HTMLImageElement> |
+    null =
+      null;
 
-    const newPdfDoc =
-      await PDFDocument.create();
 
-  const opacity = options.opacity ?? 0.25;
-  const angleDeg = options.angle ?? -45;
+  const getLogoImage =
+    async () => {
+      if (
+        !options.imageDataUrl
+      ) {
+        throw new Error(
+          'Watermark image is missing.'
+        );
+      }
 
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdfDoc.getPage(i);
-    // Render at high-def 2.0 scale for pristine clarity
-    const { imgBytes, width: pWidth, height: pHeight } = await renderPageAsJpg(page, 2.0);
 
-    const compositeCanvas = document.createElement('canvas');
-    compositeCanvas.width = pWidth;
-    compositeCanvas.height = pHeight;
-    const ctx = compositeCanvas.getContext('2d');
+      if (!logoPromise) {
+        logoPromise =
+          new Promise<HTMLImageElement>(
+            (
+              resolve,
+              reject
+            ) => {
+              const image =
+                new Image();
 
-    // Prevent silent page drops if context fails to allocate
-    if (!ctx) {
-      throw new Error(`Failed to allocate 2D canvas context for page ${i}. Browser graphics memory may be exhausted.`);
-    }
 
-    const pageImg = new Image();
-    await new Promise<void>((resolve) => {
-      pageImg.onload = () => {
-        ctx.drawImage(pageImg, 0, 0, pWidth, pHeight);
-        URL.revokeObjectURL(pageImg.src); // Free blob reference immediately
-        resolve();
-      };
-      pageImg.src = URL.createObjectURL(new Blob([imgBytes as unknown as BlobPart], { type: 'image/jpeg' }));
-    });
+              image.onload =
+                () =>
+                  resolve(
+                    image
+                  );
 
-    ctx.save();
-    ctx.globalAlpha = opacity;
 
-    // Position mapping matching UI preview coordinates exactly
-    let posX = pWidth / 2;
-    let posY = pHeight / 2;
-    if (options.position === 'top') posY = pHeight * 0.14;
-    if (options.position === 'bottom') posY = pHeight * 0.86;
+              image.onerror =
+                () =>
+                  reject(
+                    new Error(
+                      'Unable to load watermark image.'
+                    )
+                  );
 
-    ctx.translate(posX, posY);
-    ctx.rotate((angleDeg * Math.PI) / 180);
 
-    if (options.type === 'text' && options.text?.trim()) {
-      /*
-       * EXACT LIVE-PREVIEW PARITY
-       * ------------------------------------------------------
-       * Preview CSS uses:
-       *
-       *   fontSize * 0.46
-       *
-       * The old export accidentally used the raw fontSize,
-       * which made CONFIDENTIAL much larger after download.
-       *
-       * Convert the exact displayed preview size into the
-       * rendered PDF coordinate system.
-       */
-      const previewPageWidth =
-        Math.max(
-          1,
-          options.previewPageWidth ??
-            460
+              image.src =
+                options.imageDataUrl!;
+            }
+          );
+      }
+
+
+      return await logoPromise;
+    };
+
+
+  /*
+   * =========================================================
+   * ONE WATERMARK DRAWING ROUTINE
+   * =========================================================
+   *
+   * This reproduces exactly the same sizing logic already
+   * approved in Live Watermark Preview.
+   *
+   * The only thing being rasterized here is the TRANSPARENT
+   * watermark layer — never the original PDF page.
+   */
+  const paintWatermark =
+    async (
+      ctx:
+        CanvasRenderingContext2D,
+      pageWidth:
+        number,
+      pageHeight:
+        number
+    ) => {
+      ctx.save();
+
+
+      try {
+        ctx.globalAlpha =
+          opacity;
+
+
+        let posX =
+          pageWidth /
+          2;
+
+        let posY =
+          pageHeight /
+          2;
+
+
+        if (
+          options.position ===
+          'top'
+        ) {
+          posY =
+            pageHeight *
+            0.14;
+        }
+
+
+        if (
+          options.position ===
+          'bottom'
+        ) {
+          posY =
+            pageHeight *
+            0.86;
+        }
+
+
+        ctx.translate(
+          posX,
+          posY
         );
 
-      const scaleNormalization =
-        pWidth /
-        previewPageWidth;
 
-      const previewFontSize =
-        (options.fontSize ?? 48) *
-        0.46;
+        ctx.rotate(
+          (
+            angleDeg *
+            Math.PI
+          ) /
+            180
+        );
 
-      const finalFontSize =
-        previewFontSize *
-        scaleNormalization;
 
-      let fontFamilyCSS = 'Helvetica, Arial, sans-serif';
-      if (options.fontFamily === 'TimesRoman') fontFamilyCSS = '"Times New Roman", Times, serif';
-      if (options.fontFamily === 'Courier') fontFamilyCSS = '"Courier New", Courier, monospace';
-
-      ctx.font = `bold ${finalFontSize}px ${fontFamilyCSS}`;
-      ctx.fillStyle = options.colorHex || '#dc2626';
-      ctx.textBaseline = 'middle';
-
-      const text = options.text.trim();
-      /*
-       * Preview CSS uses letterSpacing * 6px.
-       * Scale those exact visual pixels into PDF coordinates.
-       */
-      const spacingPx =
-        (options.letterSpacing ?? 0) *
-        6 *
-        scaleNormalization;
-
-      // Measure total width with precise character-by-character gaps
-      const chars = text.split('');
-      let totalWidth = 0;
-      const charWidths = chars.map((char) => {
-        const w = ctx.measureText(char).width;
-        totalWidth += w;
-        return w;
-      });
-      totalWidth += spacingPx * (chars.length - 1);
-
-      // Draw centered character by character so spacing never distorts
-      let currentX = -totalWidth / 2;
-      chars.forEach((char, idx) => {
-        ctx.fillText(char, currentX, 0);
-        currentX += charWidths[idx] + spacingPx;
-      });
-    } else if (options.type === 'image' && options.imageDataUrl) {
-      const logoImg = new Image();
-      await new Promise<void>((resolve) => {
-        logoImg.onload = () => {
-          /*
-           * EXACT LIVE-PREVIEW PARITY
-           * --------------------------------------------------
-           * Preview CSS uses:
-           *
-           *   width = fontSize * 2.2px
-           *
-           * Do NOT multiply by the uploaded image's original
-           * pixel dimensions. A 3000px logo and a 300px logo
-           * must appear the same size when the same Logo Scale
-           * is selected.
-           */
-          const previewPageWidth =
-            Math.max(
-              1,
-              options.previewPageWidth ??
-                460
-            );
-
+        /*
+         * =========================
+         * TEXT WATERMARK
+         * =========================
+         */
+        if (
+          options.type ===
+            'text' &&
+          options.text?.trim()
+        ) {
           const scaleNormalization =
-            pWidth /
+            pageWidth /
             previewPageWidth;
 
+
+          const previewFontSize =
+            (
+              options.fontSize ??
+              48
+            ) *
+            0.46;
+
+
+          const finalFontSize =
+            previewFontSize *
+            scaleNormalization;
+
+
+          let fontFamilyCSS =
+            'Helvetica, Arial, sans-serif';
+
+
+          if (
+            options.fontFamily ===
+            'TimesRoman'
+          ) {
+            fontFamilyCSS =
+              '"Times New Roman", Times, serif';
+          }
+
+
+          if (
+            options.fontFamily ===
+            'Courier'
+          ) {
+            fontFamilyCSS =
+              '"Courier New", Courier, monospace';
+          }
+
+
+          ctx.font =
+            `bold ${finalFontSize}px ${fontFamilyCSS}`;
+
+
+          ctx.fillStyle =
+            options.colorHex ||
+            '#dc2626';
+
+
+          ctx.textBaseline =
+            'middle';
+
+
+          const text =
+            options.text.trim();
+
+
+          const spacingPx =
+            (
+              options.letterSpacing ??
+              0
+            ) *
+            6 *
+            scaleNormalization;
+
+
+          const chars =
+            text.split('');
+
+
+          let totalWidth =
+            0;
+
+
+          const charWidths =
+            chars.map(
+              (
+                char
+              ) => {
+                const width =
+                  ctx.measureText(
+                    char
+                  ).width;
+
+
+                totalWidth +=
+                  width;
+
+
+                return width;
+              }
+            );
+
+
+          totalWidth +=
+            spacingPx *
+            Math.max(
+              0,
+              chars.length -
+                1
+            );
+
+
+          let currentX =
+            -totalWidth /
+            2;
+
+
+          chars.forEach(
+            (
+              char,
+              index
+            ) => {
+              ctx.fillText(
+                char,
+                currentX,
+                0
+              );
+
+
+              currentX +=
+                charWidths[
+                  index
+                ] +
+                spacingPx;
+            }
+          );
+
+
+          return;
+        }
+
+
+        /*
+         * =========================
+         * IMAGE WATERMARK
+         * =========================
+         */
+        if (
+          options.type ===
+            'image' &&
+          options.imageDataUrl
+        ) {
+          const logoImg =
+            await getLogoImage();
+
+
+          const scaleNormalization =
+            pageWidth /
+            previewPageWidth;
+
+
           const previewLogoWidth =
-            (options.fontSize ?? 50) *
+            (
+              options.fontSize ??
+              50
+            ) *
             2.2;
 
-          const lW =
+
+          const logoWidth =
             previewLogoWidth *
             scaleNormalization;
+
 
           const sourceWidth =
             Math.max(
@@ -2843,6 +3004,7 @@ export async function addWatermarkToPDF(
                 1
             );
 
+
           const sourceHeight =
             Math.max(
               1,
@@ -2851,81 +3013,600 @@ export async function addWatermarkToPDF(
                 1
             );
 
-          /*
-           * Same as CSS height:auto — preserve image aspect ratio.
-           */
-          const lH =
-            lW *
+
+          const logoHeight =
+            logoWidth *
             (
               sourceHeight /
               sourceWidth
             );
 
+
           ctx.drawImage(
             logoImg,
-            -lW / 2,
-            -lH / 2,
-            lW,
-            lH
+            -logoWidth /
+              2,
+            -logoHeight /
+              2,
+            logoWidth,
+            logoHeight
           );
+        }
+      } finally {
+        ctx.restore();
+      }
+    };
 
-          resolve();
-        };
-        logoImg.src = options.imageDataUrl!;
-      });
-    }
 
-    ctx.restore();
+  /*
+   * =========================================================
+   * PATH A — LOSSLESS ORIGINAL-PDF WATERMARK
+   * =========================================================
+   *
+   * The original PDF page content is NEVER rendered to JPEG.
+   *
+   * We load the source document and place a transparent
+   * watermark-only PNG over each original page.
+   *
+   * Therefore:
+   *
+   * - text stays vector text
+   * - original images keep original resolution
+   * - scanned documents keep their original image encoding
+   * - no background JPEG recompression
+   * - no reduction in document clarity
+   */
+  let sourceBuffer:
+    ArrayBuffer |
+    null =
+      null;
 
-    const stampedBlob =
-      await new Promise<Blob>(
-        (
-          resolve,
-          reject
-        ) => {
-          compositeCanvas.toBlob(
-            (blob) => {
-              if (blob) {
-                resolve(blob);
-              } else {
-                reject(
-                  new Error(
-                    'Failed to encode watermarked page.'
-                  )
-                );
-              }
-            },
-            'image/jpeg',
-            0.95
-          );
+
+  try {
+    sourceBuffer =
+      await file.arrayBuffer();
+
+
+    const sourceDoc =
+      await PDFDocument.load(
+        sourceBuffer,
+        {
+          updateMetadata:
+            false,
         }
       );
 
-    const stampedBytes =
-      await stampedBlob.arrayBuffer();
 
-    const finalPageImg =
-      await newPdfDoc.embedJpg(
-        stampedBytes
+    if (
+      sourceDoc.isEncrypted
+    ) {
+      throw new Error(
+        'Protected PDF requires compatibility rendering.'
+      );
+    }
+
+
+    /*
+     * pdf-lib now owns the document graph.
+     * Release our separate complete source reference.
+     */
+    sourceBuffer =
+      null;
+
+
+    const pages =
+      sourceDoc.getPages();
+
+
+    /*
+     * Cache overlays for identical page dimensions.
+     *
+     * Most PDFs use the same size on every page, so an
+     * 86-page PDF normally needs only ONE watermark PNG.
+     */
+    const overlayCache =
+      new Map<
+        string,
+        any
+      >();
+
+
+    for (
+      let index = 0;
+      index <
+        pages.length;
+      index++
+    ) {
+      const page =
+        pages[
+          index
+        ];
+
+
+      const {
+        width,
+        height,
+      } =
+        page.getSize();
+
+
+      const cacheKey =
+        `${width.toFixed(3)}x${height.toFixed(3)}`;
+
+
+      let overlay =
+        overlayCache.get(
+          cacheKey
+        );
+
+
+      if (!overlay) {
+        /*
+         * 2x affects ONLY watermark sharpness.
+         *
+         * It does not resize or touch the original PDF page.
+         */
+        const overlayScale =
+          2;
+
+
+        const canvas =
+          document.createElement(
+            'canvas'
+          );
+
+
+        canvas.width =
+          Math.max(
+            1,
+            Math.ceil(
+              width *
+                overlayScale
+            )
+          );
+
+
+        canvas.height =
+          Math.max(
+            1,
+            Math.ceil(
+              height *
+                overlayScale
+            )
+          );
+
+
+        const ctx =
+          canvas.getContext(
+            '2d'
+          );
+
+
+        if (!ctx) {
+          throw new Error(
+            'Unable to create watermark layer.'
+          );
+        }
+
+
+        /*
+         * Keep watermark calculations in PDF-page units while
+         * rendering them internally at 2x for extra sharpness.
+         */
+        ctx.setTransform(
+          overlayScale,
+          0,
+          0,
+          overlayScale,
+          0,
+          0
+        );
+
+
+        await paintWatermark(
+          ctx,
+          width,
+          height
+        );
+
+
+        const overlayBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              canvas.toBlob(
+                (
+                  blob
+                ) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Unable to encode watermark layer.'
+                      )
+                    );
+                  }
+                },
+                'image/png'
+              );
+            }
+          );
+
+
+        const overlayBytes =
+          await overlayBlob
+            .arrayBuffer();
+
+
+        overlay =
+          await sourceDoc
+            .embedPng(
+              overlayBytes
+            );
+
+
+        overlayCache.set(
+          cacheKey,
+          overlay
+        );
+
+
+        /*
+         * Release browser graphics memory immediately.
+         */
+        canvas.width =
+          1;
+
+        canvas.height =
+          1;
+      }
+
+
+      /*
+       * Draw the transparent watermark layer ON TOP of the
+       * untouched original PDF page.
+       */
+      page.drawImage(
+        overlay,
+        {
+          x:
+            0,
+
+          y:
+            0,
+
+          width,
+
+          height,
+        }
       );
 
-    const newPage = newPdfDoc.addPage([pWidth, pHeight]);
-    newPage.drawImage(finalPageImg, { x: 0, y: 0, width: pWidth, height: pHeight });
 
-    // Explicitly release canvas memory buffer per page
-    ctx.clearRect(0, 0, pWidth, pHeight);
-    compositeCanvas.width = 0;
-    compositeCanvas.height = 0;
-    try { page.cleanup(); } catch {}
+      /*
+       * Allow mobile Safari to reclaim temporary graphics
+       * memory between pages.
+       */
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
+    return await sourceDoc.save({
+      useObjectStreams:
+        true,
+
+      addDefaultPage:
+        false,
+
+      objectsPerTick:
+        20,
+    });
+  } catch (
+    vectorError
+  ) {
+    console.warn(
+      'Lossless watermark path unavailable; using compatibility renderer:',
+      vectorError
+    );
+  } finally {
+    sourceBuffer =
+      null;
   }
 
+
+  /*
+   * =========================================================
+   * PATH B — UNIVERSAL COMPATIBILITY FALLBACK
+   * =========================================================
+   *
+   * Only PDFs that cannot be safely modified by pdf-lib use
+   * the older visual reconstruction route.
+   *
+   * The already-approved preview/export watermark sizing is
+   * preserved here exactly.
+   */
+  const loadedPdf =
+    await loadPdfJsFromBlob(
+      file,
+      {
+        stopAtErrors:
+          false,
+      }
+    );
+
+
+  const pdfDoc =
+    loadedPdf.pdf;
+
+
+  try {
+    const numPages =
+      pdfDoc.numPages;
+
+
+    const newPdfDoc =
+      await PDFDocument.create();
+
+
+    for (
+      let i = 1;
+      i <=
+        numPages;
+      i++
+    ) {
+      const page =
+        await pdfDoc.getPage(
+          i
+        );
+
+
+      try {
+        const {
+          imgBytes,
+          width:
+            pageWidth,
+          height:
+            pageHeight,
+        } =
+          await renderPageAsJpg(
+            page,
+            2.0
+          );
+
+
+        const compositeCanvas =
+          document.createElement(
+            'canvas'
+          );
+
+
+        compositeCanvas.width =
+          Math.max(
+            1,
+            Math.ceil(
+              pageWidth
+            )
+          );
+
+
+        compositeCanvas.height =
+          Math.max(
+            1,
+            Math.ceil(
+              pageHeight
+            )
+          );
+
+
+        const ctx =
+          compositeCanvas
+            .getContext(
+              '2d'
+            );
+
+
+        if (!ctx) {
+          throw new Error(
+            `Failed to allocate 2D canvas context for page ${i}.`
+          );
+        }
+
+
+        const pageImg =
+          new Image();
+
+
+        await new Promise<void>(
+          (
+            resolve,
+            reject
+          ) => {
+            const url =
+              URL.createObjectURL(
+                new Blob(
+                  [
+                    imgBytes as
+                      unknown as
+                      BlobPart,
+                  ],
+                  {
+                    type:
+                      'image/jpeg',
+                  }
+                )
+              );
+
+
+            pageImg.onload =
+              () => {
+                ctx.drawImage(
+                  pageImg,
+                  0,
+                  0,
+                  pageWidth,
+                  pageHeight
+                );
+
+
+                URL.revokeObjectURL(
+                  url
+                );
+
+
+                resolve();
+              };
+
+
+            pageImg.onerror =
+              () => {
+                URL.revokeObjectURL(
+                  url
+                );
+
+
+                reject(
+                  new Error(
+                    `Unable to render page ${i}.`
+                  )
+                );
+              };
+
+
+            pageImg.src =
+              url;
+          }
+        );
+
+
+        await paintWatermark(
+          ctx,
+          pageWidth,
+          pageHeight
+        );
+
+
+        const stampedBlob =
+          await new Promise<Blob>(
+            (
+              resolve,
+              reject
+            ) => {
+              compositeCanvas.toBlob(
+                (
+                  blob
+                ) => {
+                  if (blob) {
+                    resolve(
+                      blob
+                    );
+                  } else {
+                    reject(
+                      new Error(
+                        'Failed to encode watermarked page.'
+                      )
+                    );
+                  }
+                },
+                'image/jpeg',
+                0.95
+              );
+            }
+          );
+
+
+        const stampedBytes =
+          await stampedBlob
+            .arrayBuffer();
+
+
+        const finalPageImg =
+          await newPdfDoc
+            .embedJpg(
+              stampedBytes
+            );
+
+
+        const newPage =
+          newPdfDoc.addPage([
+            pageWidth,
+            pageHeight,
+          ]);
+
+
+        newPage.drawImage(
+          finalPageImg,
+          {
+            x:
+              0,
+
+            y:
+              0,
+
+            width:
+              pageWidth,
+
+            height:
+              pageHeight,
+          }
+        );
+
+
+        ctx.clearRect(
+          0,
+          0,
+          pageWidth,
+          pageHeight
+        );
+
+
+        compositeCanvas.width =
+          1;
+
+        compositeCanvas.height =
+          1;
+      } finally {
+        try {
+          page.cleanup();
+        } catch (_) {}
+      }
+
+
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+    }
+
+
     return await newPdfDoc.save({
-      useObjectStreams: false,
+      useObjectStreams:
+        false,
+
+      addDefaultPage:
+        false,
     });
   } finally {
     await loadedPdf.dispose();
   }
 }
+
 export async function addPageNumbersToPDF(
   file: File,
   position: 'bottom-center' | 'bottom-right'
