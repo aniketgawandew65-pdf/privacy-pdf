@@ -12,6 +12,135 @@ interface RemovePagesProps {
   onFileChange: (file: File | null) => void;
 }
 
+/*
+ * Preserve the typed page range while the user previews the
+ * generated PDF and returns to the tool.
+ *
+ * sessionStorage is used because iPhone Safari can recreate the
+ * web process while its PDF preview is open.
+ *
+ * - Preview -> Back: preserved
+ * - repeated Preview -> Back: preserved
+ * - Safari process recreation: preserved
+ * - Remove File: cleared
+ * - hard refresh: cleared
+ *
+ * Only the small page-range string is stored. PDF bytes are not.
+ */
+const REMOVE_PAGES_DRAFT_PREFIX =
+  'oneinto1-remove-pages-draft::';
+
+
+const getRemovePagesDraftKey =
+  (file: File) =>
+    `${file.name}::${file.size}::${file.lastModified || 0}`;
+
+
+const getRemovePagesStorageKey =
+  (draftKey: string) =>
+    REMOVE_PAGES_DRAFT_PREFIX +
+    draftKey;
+
+
+const readRemovePagesDraft =
+  (
+    draftKey: string
+  ): string | null => {
+    try {
+      return sessionStorage.getItem(
+        getRemovePagesStorageKey(
+          draftKey
+        )
+      );
+    } catch {
+      return null;
+    }
+  };
+
+
+const writeRemovePagesDraft =
+  (
+    draftKey: string,
+    value: string
+  ) => {
+    try {
+      sessionStorage.setItem(
+        getRemovePagesStorageKey(
+          draftKey
+        ),
+        value
+      );
+    } catch (_) {}
+  };
+
+
+const deleteRemovePagesDraft =
+  (
+    draftKey: string
+  ) => {
+    try {
+      sessionStorage.removeItem(
+        getRemovePagesStorageKey(
+          draftKey
+        )
+      );
+    } catch (_) {}
+  };
+
+
+/*
+ * A genuine Reload starts a fresh Remove Pages session.
+ * Back/forward restoration is intentionally preserved.
+ */
+try {
+  const navigation =
+    performance.getEntriesByType(
+      'navigation'
+    )[0] as
+      PerformanceNavigationTiming |
+      undefined;
+
+  const isHardReload =
+    navigation?.type ===
+      'reload' ||
+    (
+      !navigation &&
+      (
+        performance as any
+      ).navigation?.type ===
+        1
+    );
+
+  if (
+    isHardReload &&
+    typeof sessionStorage !==
+      'undefined'
+  ) {
+    for (
+      let index =
+        sessionStorage.length - 1;
+      index >= 0;
+      index--
+    ) {
+      const key =
+        sessionStorage.key(
+          index
+        );
+
+      if (
+        key?.startsWith(
+          REMOVE_PAGES_DRAFT_PREFIX
+        )
+      ) {
+        sessionStorage.removeItem(
+          key
+        );
+      }
+    }
+  }
+} catch (_) {}
+
+
 export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [pagesInput, setPagesInput] = useState<string>('');
@@ -19,61 +148,314 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * Prevent default/empty state from overwriting a restored draft
+   * before the current PDF has finished loading.
+   */
+  const draftReadyKeyRef =
+    useRef<string | null>(null);
+
   // Managed Object URL lifecycle to prevent memory leaks on mobile
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
 
   useEffect(() => {
     revokeDownloadUrl();
+
     if (file) {
-      getPDFPageCount(file).then((count) => {
-        setTotalPages(count);
-        setPagesInput('');
-        setError(null);
-      }).catch(() => {
-        setError('Failed to read PDF pages.');
-      });
+      const draftKey =
+        getRemovePagesDraftKey(
+          file
+        );
+
+      draftReadyKeyRef.current =
+        null;
+
+      getPDFPageCount(file)
+        .then((count) => {
+          setTotalPages(
+            count
+          );
+
+          setPagesInput(
+            readRemovePagesDraft(
+              draftKey
+            ) || ''
+          );
+
+          setError(
+            null
+          );
+
+          draftReadyKeyRef.current =
+            draftKey;
+        })
+        .catch(() => {
+          setError(
+            'Failed to read PDF pages.'
+          );
+        });
     } else {
+      draftReadyKeyRef.current =
+        null;
+
       setTotalPages(0);
       setPagesInput('');
       setError(null);
     }
   }, [file, revokeDownloadUrl]);
 
-  const parsePageNumbers = (input: string, max: number): number[] => {
-    const pages = new Set<number>();
-    const parts = input.split(',').map((p) => p.trim());
+
+  /*
+   * Persist only after this file has finished restoring.
+   */
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+    const draftKey =
+      getRemovePagesDraftKey(
+        file
+      );
+
+    if (
+      draftReadyKeyRef.current !==
+      draftKey
+    ) {
+      return;
+    }
+
+    writeRemovePagesDraft(
+      draftKey,
+      pagesInput
+    );
+  }, [
+    file,
+    pagesInput,
+  ]);
+
+  const parsePageNumbers = (
+    input: string,
+    max: number
+  ): {
+    pages: number[];
+    error: string | null;
+  } => {
+    const pages =
+      new Set<number>();
+
+    const value =
+      input.trim();
+
+    if (!value) {
+      return {
+        pages: [],
+        error:
+          'Enter at least one page or page range.',
+      };
+    }
+
+
+    const parts =
+      value
+        .split(',')
+        .map(
+          (part) =>
+            part.trim()
+        );
+
 
     for (const part of parts) {
-      if (part.includes('-')) {
-        const [start, end] = part.split('-').map((n) => parseInt(n.trim(), 10));
-        if (!isNaN(start) && !isNaN(end) && start <= end) {
-          for (let i = start; i <= end; i++) {
-            if (i >= 1 && i <= max) pages.add(i);
-          }
+      if (!part) {
+        return {
+          pages: [],
+          error:
+            'Empty page range detected. Remove extra commas.',
+        };
+      }
+
+
+      /*
+       * Single page must be a whole integer.
+       *
+       * 86       valid
+       * 86.5     invalid
+       * abc      invalid
+       */
+      if (
+        /^\d+$/.test(
+          part
+        )
+      ) {
+        const page =
+          Number(
+            part
+          );
+
+        if (
+          page < 1 ||
+          page > max
+        ) {
+          return {
+            pages: [],
+            error:
+              `Page "${part}" is outside this PDF. ` +
+              `Choose a page between 1 and ${max}.`,
+          };
         }
-      } else {
-        const pageNum = parseInt(part, 10);
-        if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= max) {
-          pages.add(pageNum);
-        }
+
+        pages.add(
+          page
+        );
+
+        continue;
+      }
+
+
+      /*
+       * Range must be exactly INTEGER-INTEGER.
+       *
+       * Valid:
+       *   7-8
+       *   10-5  -> interpreted as pages 5 through 10
+       *
+       * Invalid:
+       *   1-10.9.5
+       *   7568.7-8
+       */
+      const match =
+        part.match(
+          /^(\d+)\s*-\s*(\d+)$/
+        );
+
+
+      if (!match) {
+        return {
+          pages: [],
+          error:
+            `Invalid page range "${part}". ` +
+            `Use whole page numbers only, for example 2, 4-6, 10.`,
+        };
+      }
+
+
+      const startPage =
+        Number(
+          match[1]
+        );
+
+      const endPage =
+        Number(
+          match[2]
+        );
+
+
+      if (
+        startPage < 1 ||
+        startPage > max
+      ) {
+        return {
+          pages: [],
+          error:
+            `Page "${startPage}" in range "${part}" is outside this PDF. ` +
+            `Choose pages between 1 and ${max}.`,
+        };
+      }
+
+
+      if (
+        endPage < 1 ||
+        endPage > max
+      ) {
+        return {
+          pages: [],
+          error:
+            `Page "${endPage}" in range "${part}" is outside this PDF. ` +
+            `Choose pages between 1 and ${max}.`,
+        };
+      }
+
+
+      const from =
+        Math.min(
+          startPage,
+          endPage
+        );
+
+      const to =
+        Math.max(
+          startPage,
+          endPage
+        );
+
+
+      for (
+        let page = from;
+        page <= to;
+        page++
+      ) {
+        pages.add(
+          page
+        );
       }
     }
 
-    return Array.from(pages);
+
+    return {
+      pages:
+        Array.from(
+          pages
+        ).sort(
+          (a, b) =>
+            a - b
+        ),
+
+      error: null,
+    };
   };
 
   const handleRemove = async () => {
     if (!file || totalPages === 0) return;
     setError(null);
 
-    const pagesToRemove = parsePageNumbers(pagesInput, totalPages);
-    if (pagesToRemove.length === 0) {
-      setError('Please specify valid page number(s) to remove.');
+    const parsedPages =
+      parsePageNumbers(
+        pagesInput,
+        totalPages
+      );
+
+    if (
+      parsedPages.error
+    ) {
+      setError(
+        parsedPages.error
+      );
+
       return;
     }
 
-    if (pagesToRemove.length >= totalPages) {
-      setError('Cannot remove all pages from the PDF.');
+    const pagesToRemove =
+      parsedPages.pages;
+
+    if (
+      pagesToRemove.length ===
+      0
+    ) {
+      setError(
+        'Please specify valid page number(s) to remove.'
+      );
+
+      return;
+    }
+
+    if (
+      pagesToRemove.length >=
+      totalPages
+    ) {
+      setError(
+        'Cannot remove all pages from the PDF.'
+      );
+
       return;
     }
 
@@ -105,6 +487,17 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
   };
 
   const handleClear = () => {
+    if (file) {
+      deleteRemovePagesDraft(
+        getRemovePagesDraftKey(
+          file
+        )
+      );
+    }
+
+    draftReadyKeyRef.current =
+      null;
+
     onFileChange(null);
     revokeDownloadUrl();
     setPagesInput('');
@@ -192,7 +585,18 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
             <input
               type="text"
               value={pagesInput}
-              onChange={(e) => setPagesInput(e.target.value)}
+              onChange={(e) => {
+                setPagesInput(
+                  e.target.value
+                );
+
+                /*
+                 * The old generated PDF no longer represents
+                 * the currently typed page-removal settings.
+                 */
+                revokeDownloadUrl();
+                setError(null);
+              }}
               placeholder="e.g. 1, 3, 5-7"
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500 transition-colors"
             />
