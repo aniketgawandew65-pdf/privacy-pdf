@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Lock, Eye, EyeOff } from 'lucide-react';
-import { encryptPDF } from '../utils/pdfEngine';
+import { protectPdfInWorker } from '../utils/protectPdfWorkerClient';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -11,6 +11,101 @@ interface ProtectPdfProps {
   onFileChange: (file: File | null) => void;
 }
 
+type ProtectDraft = {
+  password: string;
+  confirmPassword: string;
+};
+
+const PROTECT_DRAFT_PREFIX =
+  'oneinto1-protect-draft::';
+
+
+const getProtectDraftKey =
+  (
+    file: File
+  ) =>
+    `${file.name}::${file.size}::${file.lastModified || 0}`;
+
+
+const getProtectStorageKey =
+  (
+    draftKey: string
+  ) =>
+    PROTECT_DRAFT_PREFIX +
+    draftKey;
+
+
+const readProtectDraft =
+  (
+    draftKey: string
+  ): ProtectDraft | null => {
+    try {
+      const raw =
+        sessionStorage.getItem(
+          getProtectStorageKey(
+            draftKey
+          )
+        );
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed =
+        JSON.parse(
+          raw
+        ) as ProtectDraft;
+
+      return {
+        password:
+          typeof parsed.password ===
+            'string'
+            ? parsed.password
+            : '',
+
+        confirmPassword:
+          typeof parsed.confirmPassword ===
+            'string'
+            ? parsed.confirmPassword
+            : '',
+      };
+    } catch (_) {
+      return null;
+    }
+  };
+
+
+const writeProtectDraft =
+  (
+    draftKey: string,
+    draft: ProtectDraft
+  ) => {
+    try {
+      sessionStorage.setItem(
+        getProtectStorageKey(
+          draftKey
+        ),
+        JSON.stringify(
+          draft
+        )
+      );
+    } catch (_) {}
+  };
+
+
+const deleteProtectDraft =
+  (
+    draftKey: string
+  ) => {
+    try {
+      sessionStorage.removeItem(
+        getProtectStorageKey(
+          draftKey
+        )
+      );
+    } catch (_) {}
+  };
+
 export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -20,6 +115,110 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const draftReadyKeyRef =
+    useRef<string | null>(
+      null
+    );
+
+
+  /*
+   * Restore password fields when returning to Protect with the
+   * same PDF.
+   *
+   * sessionStorage is tab/session local and survives normal
+   * route navigation and Safari web-process recreation.
+   */
+  useEffect(() => {
+    if (!file) {
+      draftReadyKeyRef.current =
+        null;
+
+      return;
+    }
+
+    const draftKey =
+      getProtectDraftKey(
+        file
+      );
+
+    const saved =
+      readProtectDraft(
+        draftKey
+      );
+
+    draftReadyKeyRef.current =
+      null;
+
+    setPassword(
+      saved?.password ||
+        ''
+    );
+
+    setConfirmPassword(
+      saved
+        ?.confirmPassword ||
+        ''
+    );
+
+    setShowPassword(
+      false
+    );
+
+    setDownloadUrl(
+      null
+    );
+
+    setError(
+      null
+    );
+
+    setProgress(
+      0
+    );
+
+    draftReadyKeyRef.current =
+      draftKey;
+  }, [
+    file,
+  ]);
+
+
+  /*
+   * Keep the entered password only for this browser tab/session.
+   *
+   * Explicit Remove File deletes it.
+   */
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+    const draftKey =
+      getProtectDraftKey(
+        file
+      );
+
+    if (
+      draftReadyKeyRef.current !==
+        draftKey
+    ) {
+      return;
+    }
+
+    writeProtectDraft(
+      draftKey,
+      {
+        password,
+        confirmPassword,
+      }
+    );
+  }, [
+    file,
+    password,
+    confirmPassword,
+  ]);
+
 
   const handleProtect = async () => {
     if (!file) return;
@@ -33,6 +232,21 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
       setError('Passwords do not match.');
       return;
     }
+
+    /*
+     * Persist the exact values synchronously BEFORE the Worker
+     * starts, so even an iOS/Safari process recreation cannot
+     * wipe the two password fields.
+     */
+    writeProtectDraft(
+      getProtectDraftKey(
+        file
+      ),
+      {
+        password,
+        confirmPassword,
+      }
+    );
 
     const creditCheck = checkTaskCredit(file);
     if (!creditCheck.allowed) {
@@ -48,10 +262,53 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
     setProgress(0);
 
     try {
-      const outputBytes = await encryptPDF(file, password, (p) => setProgress(p));
-      const blob = new Blob([outputBytes as BlobPart], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      const outputBytes =
+        await protectPdfInWorker(
+          file,
+          password,
+          (value) =>
+            setProgress(
+              value
+            )
+        );
+
+
+      const blob =
+        new Blob(
+          [
+            outputBytes as
+              BlobPart,
+          ],
+          {
+            type:
+              'application/pdf',
+          }
+        );
+
+
+      if (
+        downloadUrl
+      ) {
+        URL.revokeObjectURL(
+          downloadUrl
+        );
+      }
+
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+
+      setDownloadUrl(
+        url
+      );
+
+
+      /*
+       * Charge only AFTER the protected PDF exists.
+       */
       commitTaskCredit();
     } catch (err) {
       console.error(err);
@@ -62,7 +319,30 @@ export const ProtectPdf: React.FC<ProtectPdfProps> = ({ file, onFileChange }) =>
   };
 
   const handleClear = () => {
+    if (file) {
+      deleteProtectDraft(
+        getProtectDraftKey(
+          file
+        )
+      );
+    }
+
+
+    draftReadyKeyRef.current =
+      null;
+
+
+    if (
+      downloadUrl
+    ) {
+      URL.revokeObjectURL(
+        downloadUrl
+      );
+    }
+
+
     onFileChange(null);
+
     setPassword('');
     setConfirmPassword('');
     setDownloadUrl(null);
