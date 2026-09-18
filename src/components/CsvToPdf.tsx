@@ -424,33 +424,36 @@ export const CsvToPdf: React.FC = () => {
   return (
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl text-left space-y-6">
       {/* Mode Switcher */}
-      <div className="flex items-center p-1 bg-zinc-950 rounded-xl border border-zinc-800 text-xs font-medium">
+      <div className="csv-mode-switch">
         <button
+          type="button"
           onClick={() => {
             setActiveTab('upload');
             revokeUrl();
           }}
-          className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+          className={`csv-mode-tab ${
             activeTab === 'upload'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'csv-mode-tab-active'
+              : 'csv-mode-tab-inactive'
           }`}
         >
-          <Upload className="w-3.5 h-3.5" />
+          <Upload className="csv-mode-icon" />
           <span>Upload File</span>
         </button>
+
         <button
+          type="button"
           onClick={() => {
             setActiveTab('paste');
             revokeUrl();
           }}
-          className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+          className={`csv-mode-tab ${
             activeTab === 'paste'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'csv-mode-tab-active'
+              : 'csv-mode-tab-inactive'
           }`}
         >
-          <Table className="w-3.5 h-3.5" />
+          <Table className="csv-mode-icon" />
           <span>Paste Spreadsheet Data</span>
         </button>
       </div>
@@ -532,7 +535,10 @@ export const CsvToPdf: React.FC = () => {
           <input
             type="text"
             value={documentTitle}
-            onChange={(e) => setDocumentTitle(e.target.value)}
+            onChange={(e) => {
+              setDocumentTitle(e.target.value);
+              revokeUrl();
+            }}
             placeholder="e.g. Q3 Sales & Operations Report"
             className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
           />
@@ -543,7 +549,10 @@ export const CsvToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Orientation</label>
             <select
               value={orientation}
-              onChange={(e) => setOrientation(e.target.value as any)}
+              onChange={(e) => {
+                setOrientation(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="auto">Auto (Smart)</option>
@@ -556,7 +565,10 @@ export const CsvToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Table Theme</label>
             <select
               value={theme}
-              onChange={(e) => setTheme(e.target.value as any)}
+              onChange={(e) => {
+                setTheme(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="striped">Striped Rows</option>
@@ -569,7 +581,10 @@ export const CsvToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Page Size</label>
             <select
               value={pageSize}
-              onChange={(e) => setPageSize(e.target.value as any)}
+              onChange={(e) => {
+                setPageSize(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="a4">A4</option>
