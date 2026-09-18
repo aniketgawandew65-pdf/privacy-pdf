@@ -415,7 +415,7 @@ export function GoogleBonusAccount() {
 
   if (account) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="google-account-signed-in flex items-center gap-2">
         <div className="hidden sm:flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1.5">
           <Gift
             size={14}

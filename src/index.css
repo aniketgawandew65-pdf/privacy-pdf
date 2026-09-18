@@ -799,3 +799,52 @@ a {text-decoration:none}
   opacity: 0.65 !important;
   cursor: not-allowed !important;
 }
+
+
+/* Mobile signed-in Google account:
+   keep logout quiet at far right of the main header.
+   Logged-out Continue with Google remains on its centered row. */
+@media (max-width: 700px) {
+  .site-header > .google-account-signed-in {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+  }
+
+  .google-account-signed-in > div:first-child {
+    display: none !important;
+  }
+
+  .google-account-signed-in .google-logout-button {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    padding: 0 !important;
+
+    border-radius: 9999px !important;
+    border: 1px solid #52525b !important;
+
+    background: #ffffff !important;
+    color: #202023 !important;
+
+    opacity: 1 !important;
+    box-shadow: none !important;
+  }
+
+  .google-account-signed-in .google-logout-button svg {
+    color: #202023 !important;
+  }
+
+  .google-account-signed-in .google-logout-button span {
+    display: none !important;
+  }
+
+  .google-account-signed-in .google-logout-button:hover:not(:disabled),
+  .google-account-signed-in .google-logout-button:active:not(:disabled) {
+    background: #f4f4f5 !important;
+    border-color: #202023 !important;
+    color: #202023 !important;
+  }
+}
