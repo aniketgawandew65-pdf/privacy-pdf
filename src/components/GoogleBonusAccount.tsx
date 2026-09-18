@@ -450,7 +450,7 @@ export function GoogleBonusAccount() {
           type="button"
           onClick={handleLogout}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 hover:text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-full border border-zinc-500 bg-white px-3 py-1.5 text-xs font-medium text-zinc-900 hover:border-zinc-900 hover:bg-zinc-100 disabled:opacity-100 disabled:text-zinc-600 disabled:cursor-not-allowed transition-colors"
           title="Log out or switch Google account"
         >
           {loading ? (
