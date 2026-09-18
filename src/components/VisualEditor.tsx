@@ -58,6 +58,46 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   const canvasScrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * ==========================================================
+   * LARGE EDIT-PDF PAGE NAVIGATION
+   * ==========================================================
+   *
+   * Keep one PDF.js document alive for the selected file.
+   * Changing Page 1 -> 2 -> 3 must NOT reopen a 150 MB PDF
+   * every time.
+   */
+  const pdfSessionRef =
+    useRef<{
+      pdf: any;
+      dispose: () => Promise<void>;
+    } | null>(
+      null
+    );
+
+  const activeRenderTaskRef =
+    useRef<any>(
+      null
+    );
+
+  const activeRenderedPageRef =
+    useRef<any>(
+      null
+    );
+
+  const renderRequestRef =
+    useRef(
+      0
+    );
+
+  const [
+    pdfSessionVersion,
+    setPdfSessionVersion,
+  ] =
+    useState(
+      0
+    );
+
   // Preserve viewport position while the mobile keyboard opens/closes.
   const mobileFocusScrollRef = useRef<{
     x: number;
@@ -176,168 +216,582 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedId]);
 
-  // Load and render PDF page
+  /*
+   * ==========================================================
+   * OPEN SOURCE PDF ONCE
+   * ==========================================================
+   *
+   * Previous behaviour reopened PDF.js whenever currentPage
+   * changed. Large iPhone documents could therefore overlap
+   * document teardown/re-open with a new canvas allocation.
+   *
+   * Now the selected source is opened once per File.
+   */
   useEffect(() => {
-    if (!file) {
-      setItems([]);
-      setSelectedId(null);
-      setCurrentPage(1);
-      setTotalPages(1);
-      revokeDownloadUrl();
-      return;
-    }
+    let cancelled =
+      false;
 
-    let isMounted = true;
 
-    let disposePdf:
-      | (() => Promise<void>)
-      | null = null;
+    const stopCurrentRender =
+      async () => {
+        const task =
+          activeRenderTaskRef.current;
 
-    let activePage: any = null;
-    let renderTask: any = null;
+        activeRenderTaskRef.current =
+          null;
 
-    (async () => {
-      try {
-        const loaded =
-          await loadPdfJsFromBlob(
-            file
-          );
 
-        disposePdf =
-          loaded.dispose;
+        if (task) {
+          try {
+            task.cancel?.();
+          } catch (_) {}
 
-        if (!isMounted) {
-          await disposePdf();
-          disposePdf = null;
+          try {
+            await task.promise;
+          } catch (_) {}
+        }
+
+
+        const page =
+          activeRenderedPageRef.current;
+
+        activeRenderedPageRef.current =
+          null;
+
+
+        if (page) {
+          try {
+            page.cleanup();
+          } catch (_) {}
+        }
+      };
+
+
+    const openSource =
+      async () => {
+        /*
+         * Release any session belonging to the previous file.
+         */
+        await stopCurrentRender();
+
+
+        const previousSession =
+          pdfSessionRef.current;
+
+        pdfSessionRef.current =
+          null;
+
+
+        if (previousSession) {
+          try {
+            await previousSession.dispose();
+          } catch (_) {}
+        }
+
+
+        if (!file) {
+          if (!cancelled) {
+            setItems([]);
+            setSelectedId(
+              null
+            );
+            setCurrentPage(
+              1
+            );
+            setTotalPages(
+              1
+            );
+            revokeDownloadUrl();
+          }
+
           return;
         }
 
-        const pdf =
-          loaded.pdf;
 
-        setTotalPages(
-          pdf.numPages
-        );
+        try {
+          const loaded =
+            await loadPdfJsFromBlob(
+              file,
+              {
+                stopAtErrors:
+                  false,
+              }
+            );
 
-        const page =
-          await pdf.getPage(
-            currentPage
+
+          if (cancelled) {
+            await loaded.dispose();
+            return;
+          }
+
+
+          pdfSessionRef.current =
+            loaded;
+
+
+          setTotalPages(
+            loaded.pdf.numPages
           );
 
-        activePage = page;
 
-        const retinaScale = 2.0;
-
-        const viewport =
-          page.getViewport({
-            scale: retinaScale,
-          });
-
-        // Canvas is displayed at a fixed base width of 500px.
-        // Store the matching height so the zoom sizing wrapper
-        // always has the exact same aspect ratio as the PDF.
-        setPageDisplayHeight(
-          500 *
+          setCurrentPage(
             (
-              viewport.height /
-              viewport.width
-            )
-        );
+              current
+            ) =>
+              Math.max(
+                1,
+                Math.min(
+                  current,
+                  loaded.pdf
+                    .numPages
+                )
+              )
+          );
 
-        const canvas =
-          canvasRef.current;
 
-        if (canvas) {
-          canvas.width =
-            Math.floor(
-              viewport.width
-            );
+          /*
+           * Signal the page-render effect that the persistent
+           * PDF session is ready.
+           */
+          setPdfSessionVersion(
+            (
+              version
+            ) =>
+              version +
+              1
+          );
 
-          canvas.height =
-            Math.floor(
-              viewport.height
-            );
 
-          const ctx =
-            canvas.getContext(
-              '2d'
-            );
-
-          if (ctx) {
-            renderTask =
-              page.render({
-                canvasContext:
-                  ctx as any,
-                viewport,
-              } as any);
-
-            await renderTask.promise;
-
-            if (isMounted) {
-              setErrorMessage(
-                null
-              );
-            }
-          }
-        }
-      } catch (err: any) {
-        if (
-          err?.name !==
-          'RenderingCancelledException'
-        ) {
+          setErrorMessage(
+            null
+          );
+        } catch (err: any) {
           console.error(
-            'Render error:',
+            'PDF open error:',
             err
           );
 
-          if (isMounted) {
+          if (!cancelled) {
             setErrorMessage(
-              'Failed to render PDF page.'
+              'Failed to open PDF.'
             );
           }
         }
-      } finally {
-        if (activePage) {
-          try {
-            activePage.cleanup();
-          } catch (_) {}
+      };
 
-          activePage = null;
-        }
 
-        if (disposePdf) {
-          try {
-            await disposePdf();
-          } catch (_) {}
+    void openSource();
 
-          disposePdf = null;
-        }
-      }
-    })();
 
     return () => {
-      isMounted = false;
+      cancelled =
+        true;
 
-      if (renderTask) {
+      renderRequestRef.current +=
+        1;
+
+
+      const task =
+        activeRenderTaskRef.current;
+
+      activeRenderTaskRef.current =
+        null;
+
+
+      if (task) {
         try {
-          renderTask.cancel();
+          task.cancel?.();
         } catch (_) {}
       }
 
-      if (activePage) {
-        try {
-          activePage.cleanup();
-        } catch (_) {}
 
-        activePage = null;
+      const page =
+        activeRenderedPageRef.current;
+
+      activeRenderedPageRef.current =
+        null;
+
+
+      if (page) {
+        try {
+          page.cleanup();
+        } catch (_) {}
       }
 
-      if (disposePdf) {
-        void disposePdf();
-        disposePdf = null;
+
+      const session =
+        pdfSessionRef.current;
+
+      pdfSessionRef.current =
+        null;
+
+
+      if (session) {
+        void session
+          .dispose()
+          .catch(
+            () => {}
+          );
       }
     };
-  }, [file, currentPage]);
+  }, [file]);
+
+
+  /*
+   * ==========================================================
+   * RENDER PAGE FROM THE EXISTING PDF SESSION
+   * ==========================================================
+   */
+  useEffect(() => {
+    if (
+      !file ||
+      !pdfSessionRef.current
+    ) {
+      return;
+    }
+
+
+    let cancelled =
+      false;
+
+    const requestId =
+      ++renderRequestRef.current;
+
+
+    /*
+     * Tiny debounce:
+     * Page 1 -> 2 -> 3 from quick taps should render only the
+     * final requested page instead of allocating three canvases.
+     */
+    const timer =
+      window.setTimeout(
+        () => {
+          void (
+            async () => {
+              try {
+                /*
+                 * Fully settle/cancel the previous canvas render
+                 * before touching the same canvas again.
+                 */
+                const previousTask =
+                  activeRenderTaskRef.current;
+
+                activeRenderTaskRef.current =
+                  null;
+
+
+                if (previousTask) {
+                  try {
+                    previousTask.cancel?.();
+                  } catch (_) {}
+
+                  try {
+                    await previousTask.promise;
+                  } catch (_) {}
+                }
+
+
+                const previousPage =
+                  activeRenderedPageRef.current;
+
+                activeRenderedPageRef.current =
+                  null;
+
+
+                if (previousPage) {
+                  try {
+                    previousPage.cleanup();
+                  } catch (_) {}
+                }
+
+
+                if (
+                  cancelled ||
+                  requestId !==
+                    renderRequestRef.current
+                ) {
+                  return;
+                }
+
+
+                const session =
+                  pdfSessionRef.current;
+
+                if (!session) {
+                  return;
+                }
+
+
+                const page =
+                  await session.pdf.getPage(
+                    currentPage
+                  );
+
+
+                if (
+                  cancelled ||
+                  requestId !==
+                    renderRequestRef.current
+                ) {
+                  try {
+                    page.cleanup();
+                  } catch (_) {}
+
+                  return;
+                }
+
+
+                activeRenderedPageRef.current =
+                  page;
+
+
+                const baseViewport =
+                  page.getViewport({
+                    scale: 1,
+                  });
+
+
+                /*
+                 * 1.4x mobile is intentional.
+                 *
+                 * Pixel memory compared with the old 2x:
+                 * (1.4 / 2)^2 ~= 49%
+                 *
+                 * The visible editor is only 500 CSS px wide,
+                 * so 1.4x remains sufficiently sharp for editing
+                 * while being substantially safer on iPhone.
+                 */
+                const isMobileRender =
+                  window.matchMedia(
+                    '(max-width: 767px)'
+                  ).matches;
+
+
+                const preferredScale =
+                  isMobileRender
+                    ? 1.4
+                    : 2.0;
+
+
+                const maxRenderDimension =
+                  isMobileRender
+                    ? 1600
+                    : 2400;
+
+
+                const dimensionScale =
+                  maxRenderDimension /
+                  Math.max(
+                    baseViewport.width,
+                    baseViewport.height
+                  );
+
+
+                const renderScale =
+                  Math.max(
+                    1,
+                    Math.min(
+                      preferredScale,
+                      dimensionScale
+                    )
+                  );
+
+
+                const viewport =
+                  page.getViewport({
+                    scale:
+                      renderScale,
+                  });
+
+
+                /*
+                 * Logical editing geometry remains fixed at
+                 * 500px. Only backing pixels changed.
+                 */
+                setPageDisplayHeight(
+                  500 *
+                    (
+                      viewport.height /
+                      viewport.width
+                    )
+                );
+
+
+                const canvas =
+                  canvasRef.current;
+
+                if (!canvas) {
+                  return;
+                }
+
+
+                /*
+                 * Explicitly drop the previous backing store
+                 * before allocating the next page.
+                 */
+                canvas.width =
+                  1;
+
+                canvas.height =
+                  1;
+
+
+                await new Promise<void>(
+                  (
+                    resolve
+                  ) =>
+                    requestAnimationFrame(
+                      () =>
+                        resolve()
+                    )
+                );
+
+
+                if (
+                  cancelled ||
+                  requestId !==
+                    renderRequestRef.current
+                ) {
+                  return;
+                }
+
+
+                canvas.width =
+                  Math.max(
+                    1,
+                    Math.floor(
+                      viewport.width
+                    )
+                  );
+
+                canvas.height =
+                  Math.max(
+                    1,
+                    Math.floor(
+                      viewport.height
+                    )
+                  );
+
+
+                const ctx =
+                  canvas.getContext(
+                    '2d',
+                    {
+                      alpha:
+                        false,
+                    }
+                  );
+
+
+                if (!ctx) {
+                  throw new Error(
+                    'Canvas rendering context unavailable'
+                  );
+                }
+
+
+                const renderTask =
+                  page.render({
+                    canvasContext:
+                      ctx as any,
+                    viewport,
+                  } as any);
+
+
+                activeRenderTaskRef.current =
+                  renderTask;
+
+
+                await renderTask.promise;
+
+
+                if (
+                  cancelled ||
+                  requestId !==
+                    renderRequestRef.current
+                ) {
+                  return;
+                }
+
+
+                setErrorMessage(
+                  null
+                );
+              } catch (err: any) {
+                if (
+                  err?.name !==
+                    'RenderingCancelledException' &&
+                  !cancelled &&
+                  requestId ===
+                    renderRequestRef.current
+                ) {
+                  console.error(
+                    'Render error:',
+                    err
+                  );
+
+                  setErrorMessage(
+                    'Failed to render PDF page.'
+                  );
+                }
+              } finally {
+                if (
+                  requestId ===
+                    renderRequestRef.current
+                ) {
+                  activeRenderTaskRef.current =
+                    null;
+
+
+                  const page =
+                    activeRenderedPageRef.current;
+
+                  activeRenderedPageRef.current =
+                    null;
+
+
+                  if (page) {
+                    try {
+                      page.cleanup();
+                    } catch (_) {}
+                  }
+                }
+              }
+            }
+          )();
+        },
+        80
+      );
+
+
+    return () => {
+      cancelled =
+        true;
+
+      window.clearTimeout(
+        timer
+      );
+
+
+      /*
+       * Cancel immediately when the user requests another page.
+       * The next render waits for this task to settle.
+       */
+      const task =
+        activeRenderTaskRef.current;
+
+      if (task) {
+        try {
+          task.cancel?.();
+        } catch (_) {}
+      }
+    };
+  }, [
+    file,
+    currentPage,
+    pdfSessionVersion,
+  ]);
+
 
   const handleAddWhiteout = () => {
     const newItem: VisualOverlayItem = {
@@ -716,8 +1170,8 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
           {/* Configuration Tray */}
           {activeItem && (
-            <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[320px]">
+            <div className="visual-editor-config bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="visual-editor-config-controls flex flex-wrap items-center gap-3 flex-1 min-w-[320px]">
                 <span className="text-zinc-400 font-medium capitalize">{activeItem.type}:</span>
 
                 {activeItem.type === 'text' && (
@@ -727,11 +1181,11 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       value={activeItem.text || ''}
                       onChange={(e) => handleUpdateItem(activeItem.id, { text: e.target.value })}
                       placeholder="Type replacement text..."
-                      className="flex-1 min-w-[150px] md:min-w-[260px] lg:min-w-[320px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
+                      className="visual-editor-text-input flex-1 min-w-[150px] md:min-w-[260px] lg:min-w-[320px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-emerald-500"
                     />
 
                     {/* Font Selector */}
-                    <div className="bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
+                    <div className="visual-editor-font-select bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
                       <select
                         value={activeItem.fontFamily || 'helvetica'}
                         onChange={(e) =>
@@ -746,7 +1200,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                     </div>
 
                     {/* Text Styling: Bold, Italic, Underline, Strikethrough */}
-                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
+                    <div className="visual-editor-button-group flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
                       <button
                         type="button"
                         onClick={() => handleUpdateItem(activeItem.id, { isBold: !activeItem.isBold })}
@@ -798,7 +1252,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                     </div>
 
                     {/* Text Alignment */}
-                    <div className="flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
+                    <div className="visual-editor-button-group flex items-center bg-zinc-950 border border-zinc-800 rounded-lg p-0.5">
                       <button
                         type="button"
                         onClick={() => handleUpdateItem(activeItem.id, { textAlign: 'left' })}
@@ -840,7 +1294,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                     </div>
 
                     {/* Fit Mode Switcher */}
-                    <div className="flex items-center p-0.5 bg-zinc-950 border border-zinc-800 rounded-lg text-[11px]">
+                    <div className="visual-editor-fit-group flex items-center p-0.5 bg-zinc-950 border border-zinc-800 rounded-lg text-[11px]">
                       <button
                         onClick={() => handleUpdateItem(activeItem.id, { fitMode: 'wrap' })}
                         className={`px-2 py-0.5 rounded transition-colors ${
@@ -865,7 +1319,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
                     {/* Synchronized Slider & Numeric Input */}
                     {(activeItem.fitMode || 'wrap') === 'wrap' && (
-                      <div className="flex items-center gap-1.5 bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800 text-zinc-400">
+                      <div className="visual-editor-size-control flex items-center gap-1.5 bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800 text-zinc-400">
                         <span>Size:</span>
                         <input
                           type="range"
@@ -892,7 +1346,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       </div>
                     )}
 
-                    <label className="flex items-center gap-1.5 text-zinc-300 cursor-pointer select-none bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
+                    <label className="visual-editor-erase-toggle flex items-center gap-1.5 text-zinc-300 cursor-pointer select-none bg-zinc-950 px-2 py-1 rounded-lg border border-zinc-800">
                       <input
                         type="checkbox"
                         checked={activeItem.hasBackground ?? true}
@@ -908,7 +1362,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                       type="color"
                       value={activeItem.color || '#000000'}
                       onChange={(e) => handleUpdateItem(activeItem.id, { color: e.target.value })}
-                      className="w-7 h-7 rounded border border-zinc-800 bg-transparent cursor-pointer"
+                      className="visual-editor-color-input w-7 h-7 rounded border border-zinc-800 bg-transparent cursor-pointer"
                       title="Select text color"
                     />
                   </>

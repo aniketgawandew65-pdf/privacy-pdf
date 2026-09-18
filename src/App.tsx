@@ -459,6 +459,30 @@ export default function App() {
     if (!workspaceReady) return;
 
     /*
+     * ========================================================
+     * EDIT PDF LARGE-FILE MEMORY PROTECTION
+     * ========================================================
+     *
+     * VisualEditor already reads the selected browser-backed
+     * File directly using PDF.js range requests.
+     *
+     * Do not simultaneously mirror a 100-150 MB source into
+     * the generic OPFS workspace while the editor is rendering.
+     * That duplicate large-file operation is unnecessary and
+     * can trigger Safari WebContent recreation on iPhone.
+     *
+     * Normal SPA navigation still retains sharedFiles in memory.
+     */
+    if (
+      location.pathname ===
+        '/edit-pdf' ||
+      location.pathname ===
+        '/visual-editor'
+    ) {
+      return;
+    }
+
+    /*
      * Searchable OCR, Dark Mode, B&W / Grayscale, PDF to Image,
      * PDF to Text and PDF to CSV own dedicated durable OPFS
      * recovery sources while processing.

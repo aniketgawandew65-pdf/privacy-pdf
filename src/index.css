@@ -494,3 +494,188 @@ a {text-decoration:none}
     grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr) !important;
   }
 }
+
+
+/* EDIT PDF — ISOLATED MOBILE CONFIGURATION TRAY */
+.visual-editor-config {
+  background: #ffffff !important;
+  color: #18181b !important;
+  border-color: #52525b !important;
+  padding: 16px !important;
+  gap: 12px !important;
+}
+
+.visual-editor-config-controls {
+  min-width: 0 !important;
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns:
+    minmax(180px, 1fr)
+    minmax(170px, auto)
+    auto
+    auto !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.visual-editor-config-controls > span:first-child {
+  color: #27272a !important;
+  font-weight: 650 !important;
+}
+
+.visual-editor-text-input {
+  min-width: 0 !important;
+  width: 100% !important;
+  background: #ffffff !important;
+  color: #18181b !important;
+  border: 1px solid #71717a !important;
+}
+
+.visual-editor-text-input:focus {
+  border-color: #00764a !important;
+  box-shadow: 0 0 0 1px #00764a !important;
+}
+
+.visual-editor-font-select {
+  background: #ffffff !important;
+  color: #18181b !important;
+  border: 1px solid #71717a !important;
+}
+
+.visual-editor-font-select select,
+.visual-editor-font-select option {
+  width: 100% !important;
+  background: #ffffff !important;
+  color: #18181b !important;
+}
+
+.visual-editor-button-group,
+.visual-editor-fit-group {
+  background: #f4f4f5 !important;
+  border: 1px solid #71717a !important;
+  padding: 4px !important;
+  gap: 3px !important;
+}
+
+.visual-editor-button-group button,
+.visual-editor-fit-group button {
+  min-width: 40px !important;
+  min-height: 40px !important;
+  background: #ffffff !important;
+  color: #18181b !important;
+  border: 1px solid transparent !important;
+  border-radius: 7px !important;
+}
+
+.visual-editor-button-group button[class*="bg-zinc-800"],
+.visual-editor-fit-group button[class*="bg-zinc-800"] {
+  background: #00764a !important;
+  color: #ffffff !important;
+  border-color: #00764a !important;
+}
+
+.visual-editor-button-group button[class*="bg-zinc-800"] svg,
+.visual-editor-fit-group button[class*="bg-zinc-800"] svg {
+  color: #ffffff !important;
+}
+
+.visual-editor-size-control {
+  background: #ffffff !important;
+  color: #27272a !important;
+  border: 1px solid #71717a !important;
+  min-height: 48px !important;
+}
+
+.visual-editor-size-control input[type="number"] {
+  background: #ffffff !important;
+  color: #00643e !important;
+  border-color: #71717a !important;
+}
+
+.visual-editor-size-control input[type="range"] {
+  accent-color: #00764a !important;
+}
+
+.visual-editor-erase-toggle {
+  min-height: 48px !important;
+  background: #ffffff !important;
+  color: #18181b !important;
+  border: 1px solid #71717a !important;
+}
+
+.visual-editor-erase-toggle input {
+  accent-color: #00764a !important;
+}
+
+.visual-editor-color-input {
+  width: 48px !important;
+  height: 48px !important;
+  padding: 3px !important;
+  background: #ffffff !important;
+  border: 1px solid #71717a !important;
+}
+
+@media (max-width: 700px) {
+  .visual-editor-config {
+    display: block !important;
+    padding: 14px !important;
+  }
+
+  .visual-editor-config-controls {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+
+  .visual-editor-config-controls > span:first-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  .visual-editor-text-input {
+    grid-column: 1 / -1 !important;
+  }
+
+  .visual-editor-font-select {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+  }
+
+  .visual-editor-button-group {
+    width: 100% !important;
+    justify-content: space-evenly !important;
+  }
+
+  .visual-editor-fit-group {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .visual-editor-fit-group button {
+    width: 100% !important;
+  }
+
+  .visual-editor-size-control {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    justify-content: space-between !important;
+  }
+
+  .visual-editor-size-control input[type="range"] {
+    flex: 1 !important;
+    width: auto !important;
+  }
+
+  .visual-editor-erase-toggle {
+    width: 100% !important;
+  }
+
+  .visual-editor-color-input {
+    justify-self: end !important;
+  }
+
+  .visual-editor-config > button {
+    margin-top: 12px !important;
+  }
+}
