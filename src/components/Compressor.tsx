@@ -512,7 +512,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 sm:pb-4 mb-4 sm:mb-5 border-b border-zinc-800 text-xs">
           <div className="space-y-1">
             <div className="text-zinc-400">
-              Daily Free Tasks:{' '}
+              Daily Free Credits:{' '}
               <strong className="text-zinc-200">
                 {dailyStats.anonymousRemaining} of 2 remaining
               </strong>
