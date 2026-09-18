@@ -166,6 +166,28 @@ React.FC<AnnotatePdfProps> = ({
     );
 
 
+  const selectedSupportsStrokeWidth =
+    Boolean(
+      selected &&
+      (
+        selected.type === 'pen' ||
+        selected.type === 'rectangle' ||
+        selected.type === 'ellipse' ||
+        selected.type === 'arrow'
+      )
+    );
+
+
+  const displayedStrokeWidth =
+    selectedSupportsStrokeWidth &&
+    tool === 'select'
+      ? (
+          selected?.strokeWidth ||
+          strokeWidth
+        )
+      : strokeWidth;
+
+
   // ============================================================
   // HISTORY
   // ============================================================
@@ -2348,8 +2370,21 @@ React.FC<AnnotatePdfProps> = ({
                       max="8"
                       step="1"
                       value={
-                        strokeWidth
+                        displayedStrokeWidth
                       }
+
+                      onPointerDown={() => {
+                        /*
+                         * Save ONE history snapshot before the
+                         * selected annotation begins changing.
+                         */
+                        if (
+                          selectedSupportsStrokeWidth &&
+                          tool === 'select'
+                        ) {
+                          saveHistory();
+                        }
+                      }}
 
                       onChange={(
                         event
@@ -2360,16 +2395,36 @@ React.FC<AnnotatePdfProps> = ({
                               .value
                           );
 
+
                         setStrokeWidth(
                           value
                         );
+
+
+                        /*
+                         * If the user selected an existing pen,
+                         * rectangle, circle or arrow, change that
+                         * annotation immediately.
+                         *
+                         * Otherwise this remains the thickness
+                         * for the next annotation exactly as before.
+                         */
+                        if (
+                          selectedSupportsStrokeWidth &&
+                          tool === 'select'
+                        ) {
+                          updateSelected({
+                            strokeWidth:
+                              value,
+                          });
+                        }
                       }}
 
                       className="w-24"
                     />
 
                     <span className="font-mono text-zinc-300 min-w-[18px]">
-                      {strokeWidth}
+                      {displayedStrokeWidth}
                     </span>
 
                   </label>
@@ -2408,7 +2463,7 @@ React.FC<AnnotatePdfProps> = ({
         {/* SELECTED TEXT SETTINGS */}
         {selected?.type ===
           'text' && (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3 flex flex-col sm:flex-row gap-3">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-2.5 flex flex-col gap-2.5">
 
             <input
               value={
@@ -2430,127 +2485,183 @@ React.FC<AnnotatePdfProps> = ({
                 })
               }
 
-              className="flex-1 min-h-11 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-emerald-500"
+              className="w-full min-h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-emerald-500"
               placeholder="Annotation text"
             />
 
-            <div className="flex items-center gap-2 text-xs text-zinc-400">
 
-              <span>
-                Size
-              </span>
+            {/*
+             * Compact selected-text actions:
+             *
+             * Size | Select | Delete
+             *
+             * Kept together in one small row for mobile use.
+             */}
+            <div className="flex items-center gap-1.5">
 
+              <div className="flex items-center gap-1.5">
 
-              <div className="flex items-center overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-
-                <button
-                  type="button"
-
-                  aria-label="Decrease font size"
-                  title="Smaller text"
-
-                  disabled={
-                    (
-                      selected.fontSize ||
-                      fontSize
-                    ) <= 6
-                  }
-
-                  onClick={() => {
-                    const current =
-                      selected.fontSize ||
-                      fontSize;
-
-                    const value =
-                      Math.max(
-                        6,
-                        current - 2
-                      );
-
-
-                    if (
-                      value ===
-                      current
-                    ) {
-                      return;
-                    }
-
-
-                    saveHistory();
-
-                    setFontSize(
-                      value
-                    );
-
-                    updateSelected({
-                      fontSize:
-                        value,
-                    });
-                  }}
-
-                  className="w-11 h-11 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="w-5 h-5" />
-                </button>
-
-
-                <span className="min-w-[48px] text-center font-mono text-sm text-white select-none">
-                  {selected.fontSize ||
-                    fontSize}
+                <span className="text-[11px] text-zinc-500">
+                  Size
                 </span>
 
 
-                <button
-                  type="button"
+                <div className="flex items-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
 
-                  aria-label="Increase font size"
-                  title="Bigger text"
+                  <button
+                    type="button"
 
-                  disabled={
-                    (
-                      selected.fontSize ||
-                      fontSize
-                    ) >= 72
-                  }
+                    aria-label="Decrease font size"
+                    title="Smaller text"
 
-                  onClick={() => {
-                    const current =
-                      selected.fontSize ||
-                      fontSize;
+                    disabled={
+                      (
+                        selected.fontSize ||
+                        fontSize
+                      ) <= 6
+                    }
 
-                    const value =
-                      Math.min(
-                        72,
-                        current + 2
+                    onClick={() => {
+                      const current =
+                        selected.fontSize ||
+                        fontSize;
+
+
+                      const value =
+                        Math.max(
+                          6,
+                          current - 2
+                        );
+
+
+                      if (
+                        value ===
+                        current
+                      ) {
+                        return;
+                      }
+
+
+                      saveHistory();
+
+
+                      setFontSize(
+                        value
                       );
 
 
-                    if (
-                      value ===
-                      current
-                    ) {
-                      return;
+                      updateSelected({
+                        fontSize:
+                          value,
+                      });
+                    }}
+
+                    className="w-8 h-8 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+
+                  <span className="min-w-[34px] px-1 text-center font-mono text-xs text-white select-none">
+                    {selected.fontSize ||
+                      fontSize}
+                  </span>
+
+
+                  <button
+                    type="button"
+
+                    aria-label="Increase font size"
+                    title="Bigger text"
+
+                    disabled={
+                      (
+                        selected.fontSize ||
+                        fontSize
+                      ) >= 72
                     }
 
+                    onClick={() => {
+                      const current =
+                        selected.fontSize ||
+                        fontSize;
 
-                    saveHistory();
 
-                    setFontSize(
-                      value
-                    );
+                      const value =
+                        Math.min(
+                          72,
+                          current + 2
+                        );
 
-                    updateSelected({
-                      fontSize:
-                        value,
-                    });
-                  }}
 
-                  className="w-11 h-11 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="w-5 h-5" />
-                </button>
+                      if (
+                        value ===
+                        current
+                      ) {
+                        return;
+                      }
+
+
+                      saveHistory();
+
+
+                      setFontSize(
+                        value
+                      );
+
+
+                      updateSelected({
+                        fontSize:
+                          value,
+                      });
+                    }}
+
+                    className="w-8 h-8 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                </div>
 
               </div>
+
+
+              <button
+                type="button"
+
+                onClick={() =>
+                  setTool(
+                    'select'
+                  )
+                }
+
+                className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[11px] font-medium transition ${
+                  tool === 'select'
+                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
+                    : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white'
+                }`}
+
+                title="Select and move annotation"
+              >
+                <MousePointer2 className="w-3.5 h-3.5" />
+                Select
+              </button>
+
+
+              <button
+                type="button"
+
+                onClick={
+                  deleteSelected
+                }
+
+                className="w-8 h-8 rounded-lg border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-red-400 hover:border-red-500/40 transition"
+
+                title="Delete selected annotation"
+                aria-label="Delete selected annotation"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
 
             </div>
 
