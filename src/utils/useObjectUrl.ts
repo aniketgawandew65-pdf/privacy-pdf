@@ -15,6 +15,28 @@ export function useObjectUrl() {
     }
   }, []);
 
+  /*
+   * Optional immediate cleanup for very large browser-local
+   * outputs.
+   *
+   * Existing tools continue using revoke(), including its
+   * 60-second safety delay.
+   */
+  const revokeNow = useCallback(() => {
+    const target = activeUrlRef.current;
+
+    if (!target) {
+      return;
+    }
+
+    try {
+      URL.revokeObjectURL(target);
+    } catch {}
+
+    activeUrlRef.current = null;
+    setUrl(null);
+  }, []);
+
   const createUrl = useCallback((blob: Blob | MediaSource) => {
     const prev = activeUrlRef.current;
     if (prev) {
@@ -39,5 +61,10 @@ export function useObjectUrl() {
     };
   }, []);
 
-  return { url, createUrl, revoke };
+  return {
+    url,
+    createUrl,
+    revoke,
+    revokeNow,
+  };
 }

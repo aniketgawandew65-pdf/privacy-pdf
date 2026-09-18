@@ -244,7 +244,12 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       null
     );
 
-  const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+  const {
+    url: downloadUrl,
+    createUrl,
+    revoke: revokeDownloadUrl,
+    revokeNow: revokeDownloadUrlNow,
+  } = useObjectUrl();
 
   /*
    * Restore the user's exact Watermark settings after:
@@ -384,6 +389,87 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
     letterSpacing,
     position,
   ]);
+
+
+  const releaseLargeWatermarkResources =
+    async () => {
+      /*
+       * Drop any previous large output immediately.
+       *
+       * A 150 MB Blob URL waiting 60 seconds for revocation can
+       * otherwise overlap with the next qpdf/WASM job.
+       */
+      revokeDownloadUrlNow();
+
+
+      const dispose =
+        pdfDisposeRef.current;
+
+
+      pdfDisposeRef.current =
+        null;
+
+      pdfDocRef.current =
+        null;
+
+
+      if (dispose) {
+        try {
+          await dispose();
+        } catch (_) {}
+      }
+
+
+      /*
+       * Release the canvas backing store.
+       *
+       * CSS size is unaffected; the next PDF.js preview render
+       * recreates the backing pixels normally.
+       */
+      const canvas =
+        canvasRef.current;
+
+
+      if (canvas) {
+        try {
+          const ctx =
+            canvas.getContext(
+              '2d'
+            );
+
+          ctx?.clearRect(
+            0,
+            0,
+            canvas.width,
+            canvas.height
+          );
+
+          canvas.width =
+            1;
+
+          canvas.height =
+            1;
+        } catch (_) {}
+      }
+
+
+      /*
+       * Safari/WebKit does not necessarily return Worker/WASM,
+       * canvas and Blob resources immediately.
+       *
+       * Give it multiple event-loop boundaries before the next
+       * large allocation begins.
+       */
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            250
+          )
+      );
+    };
 
 
   // Load PDF for live preview
@@ -672,7 +758,25 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
       null
     );
 
-    revokeDownloadUrl();
+    const isLargeWatermarkFile =
+      file.size >=
+        64 *
+          1024 *
+          1024;
+
+
+    if (
+      isLargeWatermarkFile
+    ) {
+      /*
+       * Unlike the shared delayed cleanup, a previous 100-150 MB
+       * Watermark result must not remain alive while another
+       * large qpdf job starts.
+       */
+      revokeDownloadUrlNow();
+    } else {
+      revokeDownloadUrl();
+    }
 
 
     try {
@@ -832,35 +936,7 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
              * Free it BEFORE qpdf allocates anything for the
              * 148-150 MB original.
              */
-            const disposePreview =
-              pdfDisposeRef.current;
-
-
-            pdfDisposeRef.current =
-              null;
-
-            pdfDocRef.current =
-              null;
-
-
-            if (
-              disposePreview
-            ) {
-              try {
-                await disposePreview();
-              } catch (_) {}
-            }
-
-
-            await new Promise<void>(
-              (
-                resolve
-              ) =>
-                setTimeout(
-                  resolve,
-                  100
-                )
-            );
+            await releaseLargeWatermarkResources();
 
 
             const outputBlob =
@@ -993,7 +1069,24 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
     }
   };
 
-  const handleClear = () => {
+  const handleClear = async () => {
+    if (
+      isProcessing
+    ) {
+      return;
+    }
+
+
+    const wasLargeWatermarkFile =
+      Boolean(
+        file &&
+        file.size >=
+          64 *
+            1024 *
+            1024
+      );
+
+
     if (
       file
     ) {
@@ -1008,9 +1101,17 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
 
     clearProcessingRecovery();
 
-    onFileChange(null);
 
-    revokeDownloadUrl();
+    if (
+      wasLargeWatermarkFile
+    ) {
+      await releaseLargeWatermarkResources();
+    } else {
+      revokeDownloadUrl();
+    }
+
+
+    onFileChange(null);
 
     setError(null);
 
