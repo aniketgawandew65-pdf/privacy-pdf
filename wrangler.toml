@@ -10,3 +10,8 @@ NODE_VERSION = "20"
 binding = "oneinto1_user_credits"
 database_name = "oneinto1-user-credits"
 database_id = "60befcff-9929-408a-8e4b-e5452a22697b"
+
+[[env.production.d1_databases]]
+binding = "oneinto1_user_credits"
+database_name = "oneinto1-user-credits"
+database_id = "60befcff-9929-408a-8e4b-e5452a22697b"
