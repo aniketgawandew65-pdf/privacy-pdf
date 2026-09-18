@@ -12,6 +12,12 @@ type Request = {
 const INPUT_DIR =
   '/watermark-input';
 
+const OUTPUT_DIRECTORY =
+  'oneinto1-watermark-output-v1';
+
+const OUTPUT_FILE =
+  'watermarked-output.pdf';
+
 
 const getExitCode =
   (
@@ -29,6 +35,242 @@ const getExitCode =
     }
 
     return null;
+  };
+
+
+const openOutputStream =
+  async () => {
+    if (
+      !navigator.storage ||
+      typeof navigator.storage
+        .getDirectory !==
+        'function'
+    ) {
+      throw new Error(
+        'Browser-local file storage is unavailable.'
+      );
+    }
+
+
+    const root =
+      await navigator.storage
+        .getDirectory();
+
+
+    const directory =
+      await root
+        .getDirectoryHandle(
+          OUTPUT_DIRECTORY,
+          {
+            create:
+              true,
+          }
+        );
+
+
+    const fileHandle:
+      any =
+      await directory
+        .getFileHandle(
+          OUTPUT_FILE,
+          {
+            create:
+              true,
+          }
+        );
+
+
+    if (
+      typeof fileHandle
+        .createSyncAccessHandle !==
+      'function'
+    ) {
+      throw new Error(
+        'This browser does not support memory-safe large PDF output.'
+      );
+    }
+
+
+    /*
+     * SyncAccessHandle is allowed inside a Dedicated Worker.
+     * qpdf can therefore write bytes directly to OPFS without
+     * building the finished PDF in JavaScript memory.
+     */
+    const access =
+      await fileHandle
+        .createSyncAccessHandle();
+
+
+    access.truncate(
+      0
+    );
+
+
+    const chunk =
+      new Uint8Array(
+        64 *
+        1024
+      );
+
+
+    let chunkLength =
+      0;
+
+    let fileOffset =
+      0;
+
+    let closed =
+      false;
+
+
+    const flushChunk =
+      () => {
+        if (
+          chunkLength ===
+          0
+        ) {
+          return;
+        }
+
+
+        let writtenTotal =
+          0;
+
+
+        while (
+          writtenTotal <
+          chunkLength
+        ) {
+          const written =
+            access.write(
+              chunk.subarray(
+                writtenTotal,
+                chunkLength
+              ),
+              {
+                at:
+                  fileOffset +
+                  writtenTotal,
+              }
+            );
+
+
+          if (
+            !Number.isFinite(
+              written
+            ) ||
+            written <=
+              0
+          ) {
+            throw new Error(
+              'Unable to write watermarked PDF to browser-local storage.'
+            );
+          }
+
+
+          writtenTotal +=
+            written;
+        }
+
+
+        fileOffset +=
+          chunkLength;
+
+        chunkLength =
+          0;
+      };
+
+
+    const writeByte =
+      (
+        byte:
+          number |
+          null
+      ) => {
+        if (
+          byte ===
+          null
+        ) {
+          return;
+        }
+
+
+        chunk[
+          chunkLength
+        ] =
+          byte &
+          0xff;
+
+
+        chunkLength++;
+
+
+        if (
+          chunkLength ===
+          chunk.length
+        ) {
+          flushChunk();
+        }
+      };
+
+
+    const finish =
+      () => {
+        if (
+          closed
+        ) {
+          return;
+        }
+
+
+        flushChunk();
+
+        access.flush();
+
+        /*
+         * Guarantee there are no stale bytes from a previous
+         * larger output using the same OPFS filename.
+         */
+        access.truncate(
+          fileOffset
+        );
+
+        access.close();
+
+        closed =
+          true;
+      };
+
+
+    const abort =
+      () => {
+        if (
+          closed
+        ) {
+          return;
+        }
+
+
+        try {
+          access.close();
+        } catch (_) {}
+
+
+        closed =
+          true;
+      };
+
+
+    return {
+      directory,
+      fileHandle,
+      writeByte,
+      finish,
+      abort,
+      getSize:
+        () =>
+          fileOffset,
+    };
   };
 
 
@@ -55,10 +297,27 @@ self.onmessage =
         ).postMessage({
           type:
             'progress',
+
           requestId,
+
           progress,
         });
       };
+
+
+    let outputStream:
+      Awaited<
+        ReturnType<
+          typeof openOutputStream
+        >
+      > |
+      null =
+        null;
+
+
+    let qpdf:
+      any =
+        null;
 
 
     try {
@@ -68,31 +327,87 @@ self.onmessage =
 
 
       /*
-       * ======================================================
-       * TRUE LARGE-FILE WORKERFS PATH
-       * ======================================================
+       * noFSInit lets us install our OWN stdout handler.
        *
-       * The previous pdfstudio worker still did:
-       *
-       * File -> arrayBuffer -> Uint8Array -> MEMFS
-       *
-       * which copied the entire 150 MB PDF into WebAssembly
-       * memory before qpdf could even start.
-       *
-       * WORKERFS mounts the browser File/Blob directly.
-       * The original PDF is therefore NOT first converted into
-       * a giant JavaScript ArrayBuffer.
+       * qpdf's binary PDF output will be written directly
+       * into OPFS instead of MEMFS or a giant JS array.
        */
-      const qpdf =
-        await createQpdfModule({
+      qpdf =
+        await (
+          createQpdfModule as
+            any
+        )({
           locateFile:
             () =>
               qpdfWasmUrl,
+
+          noInitialRun:
+            true,
+
+          noFSInit:
+            true,
         });
 
 
       sendProgress(
-        25
+        20
+      );
+
+
+      outputStream =
+        await openOutputStream();
+
+
+      /*
+       * Capture only a small amount of stderr for useful
+       * qpdf error messages.
+       */
+      const stderrBytes:
+        number[] =
+          [];
+
+      const STDERR_LIMIT =
+        64 *
+        1024;
+
+
+      const writeErrorByte =
+        (
+          byte:
+            number |
+            null
+        ) => {
+          if (
+            byte ===
+              null ||
+            stderrBytes.length >=
+              STDERR_LIMIT
+          ) {
+            return;
+          }
+
+
+          stderrBytes.push(
+            byte &
+              0xff
+          );
+        };
+
+
+      /*
+       * stdin = null
+       * stdout = direct OPFS writer
+       * stderr = tiny bounded diagnostic buffer
+       */
+      qpdf.FS.init(
+        null,
+        outputStream.writeByte,
+        writeErrorByte
+      );
+
+
+      sendProgress(
+        30
       );
 
 
@@ -116,8 +431,13 @@ self.onmessage =
 
 
       /*
-       * source.pdf remains browser/Blob-backed.
-       * stamp.pdf is tiny compared with the source PDF.
+       * ORIGINAL SOURCE:
+       * browser File/Blob mounted directly using WORKERFS.
+       *
+       * There is no:
+       * file.arrayBuffer()
+       * Uint8Array(source)
+       * MEMFS source copy
        */
       qpdf.FS.mount(
         qpdf.WORKERFS,
@@ -126,12 +446,15 @@ self.onmessage =
             {
               name:
                 'source.pdf',
+
               data:
                 file,
             },
+
             {
               name:
                 'stamp.pdf',
+
               data:
                 stampBlob,
             },
@@ -141,19 +464,16 @@ self.onmessage =
       );
 
 
-      sendProgress(
-        35
-      );
-
-
       const sourcePath =
         `${INPUT_DIR}/source.pdf`;
 
       const stampPath =
         `${INPUT_DIR}/stamp.pdf`;
 
-      const outputPath =
-        '/watermarked-output.pdf';
+
+      sendProgress(
+        40
+      );
 
 
       let exitCode =
@@ -162,12 +482,12 @@ self.onmessage =
 
       try {
         /*
-         * qpdf overlays the stamp PDF over the original pages.
+         * "-" = qpdf standard output.
          *
-         * The stamp document contains matching page dimensions,
-         * so the exact approved preview geometry is retained.
+         * Our FS.init stdout callback immediately streams those
+         * PDF bytes into the OPFS SyncAccessHandle.
          *
-         * Original PDF pages are NOT rasterized.
+         * Original page content remains lossless.
          */
         exitCode =
           qpdf.callMain([
@@ -175,7 +495,7 @@ self.onmessage =
             stampPath,
             '--',
             sourcePath,
-            outputPath,
+            '-',
           ]);
       } catch (
         error:
@@ -186,12 +506,14 @@ self.onmessage =
             error
           );
 
+
         if (
           status ===
           null
         ) {
           throw error;
         }
+
 
         exitCode =
           status;
@@ -204,21 +526,37 @@ self.onmessage =
         exitCode !==
           3
       ) {
+        outputStream.abort();
+
+
+        const stderr =
+          new TextDecoder()
+            .decode(
+              new Uint8Array(
+                stderrBytes
+              )
+            )
+            .trim();
+
+
         throw new Error(
-          `qpdf watermark failed with exit code ${exitCode}.`
+          stderr ||
+            `qpdf watermark failed with exit code ${exitCode}.`
         );
       }
 
 
+      /*
+       * Flush final partial 64 KB chunk and close the disk file.
+       */
+      outputStream.finish();
+
+
       sendProgress(
-        85
+        90
       );
 
 
-      /*
-       * Source is no longer needed.
-       * Detach WORKERFS before materializing the final output.
-       */
       try {
         qpdf.FS.unmount(
           INPUT_DIR
@@ -226,67 +564,71 @@ self.onmessage =
       } catch (_) {}
 
 
-      /*
-       * Only the FINAL result enters MEMFS/JS memory.
-       *
-       * Most importantly:
-       * there is no simultaneous 150 MB source ArrayBuffer +
-       * source MEMFS copy + output copy anymore.
-       */
-      const output =
-        qpdf.FS.readFile(
-          outputPath
+      const outputFile =
+        await outputStream
+          .fileHandle
+          .getFile();
+
+
+      if (
+        outputFile.size <
+        5
+      ) {
+        throw new Error(
+          'Watermarked PDF output is empty.'
         );
-
-
-      const transferable:
-        ArrayBuffer =
-          (
-            output.byteOffset ===
-              0 &&
-            output.byteLength ===
-              output.buffer.byteLength
-          )
-            ? (
-                output.buffer as
-                  ArrayBuffer
-              )
-            : (
-                output.slice()
-                  .buffer as
-                  ArrayBuffer
-              );
+      }
 
 
       sendProgress(
-        95
+        98
       );
 
 
+      /*
+       * Send the browser-backed File object.
+       *
+       * DO NOT:
+       * output.arrayBuffer()
+       * FS.readFile()
+       * transfer a 150 MB ArrayBuffer
+       */
       (
         self as any
-      ).postMessage(
-        {
-          type:
-            'success',
-          requestId,
-          buffer:
-            transferable,
-        },
-        [
-          transferable,
-        ]
-      );
+      ).postMessage({
+        type:
+          'success',
+
+        requestId,
+
+        file:
+          outputFile,
+      });
     } catch (
       error:
         any
     ) {
+      try {
+        outputStream
+          ?.abort();
+      } catch (_) {}
+
+
+      try {
+        qpdf?.FS?.unmount?.(
+          INPUT_DIR
+        );
+      } catch (_) {}
+
+
       (
         self as any
       ).postMessage({
         type:
           'error',
+
         requestId,
+
         message:
           String(
             error?.message ||

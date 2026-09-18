@@ -2,24 +2,30 @@ type WorkerMessage =
   | {
       type:
         'progress';
+
       requestId:
         string;
+
       progress:
         number;
     }
   | {
       type:
         'success';
+
       requestId:
         string;
-      buffer:
-        ArrayBuffer;
+
+      file:
+        File;
     }
   | {
       type:
         'error';
+
       requestId:
         string;
+
       message:
         string;
     };
@@ -125,18 +131,6 @@ export const watermarkPdfInWorker =
               message.type ===
               'success'
             ) {
-              const blob =
-                new Blob(
-                  [
-                    message.buffer,
-                  ],
-                  {
-                    type:
-                      'application/pdf',
-                  }
-                );
-
-
               onProgress?.(
                 100
               );
@@ -145,8 +139,14 @@ export const watermarkPdfInWorker =
               finish();
 
 
+              /*
+               * File extends Blob.
+               *
+               * useObjectUrl can use this browser-backed OPFS
+               * File directly. No 150 MB JS copy is created.
+               */
               resolve(
-                blob
+                message.file
               );
 
               return;
@@ -193,10 +193,10 @@ export const watermarkPdfInWorker =
 
 
         /*
-         * Only transfer the SMALL stamp PDF.
+         * Only the SMALL stamp PDF is transferred.
          *
-         * The 150 MB original remains a File/Blob and is
-         * mounted directly by WORKERFS inside the worker.
+         * The large original remains a File and WORKERFS mounts
+         * it directly inside the worker.
          */
         const stampBuffer:
           ArrayBuffer =
@@ -220,7 +220,9 @@ export const watermarkPdfInWorker =
         worker.postMessage(
           {
             requestId,
+
             file,
+
             stampBuffer,
           },
           [
