@@ -64,31 +64,85 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
     };
   }, [file]);
 
-  const parsePageRange = (input: string, maxPages: number): number[] => {
+  const parsePageRange = (
+    input: string,
+    maxPages: number
+  ): {
+    pages: number[];
+    error: string | null;
+  } => {
     const pages = new Set<number>();
-    const parts = input.split(',').map((p) => p.trim());
+    const value = input.trim();
+
+    if (!value) {
+      return {
+        pages: [],
+        error: 'Enter at least one page or page range.',
+      };
+    }
+
+    const parts = value.split(',').map((part) => part.trim());
 
     for (const part of parts) {
-      if (part.includes('-')) {
-        const [startStr, endStr] = part.split('-').map((s) => s.trim());
-        const start = parseInt(startStr, 10);
-        const end = parseInt(endStr, 10);
-        if (!isNaN(start) && !isNaN(end)) {
-          const from = Math.max(1, Math.min(start, end));
-          const to = Math.min(maxPages, Math.max(start, end));
-          for (let i = from; i <= to; i++) {
-            pages.add(i);
-          }
+      if (!part) {
+        return {
+          pages: [],
+          error: 'Empty page range detected. Remove extra commas.',
+        };
+      }
+
+      if (/^\d+$/.test(part)) {
+        const page = Number(part);
+
+        if (page < 1 || page > maxPages) {
+          return {
+            pages: [],
+            error: `Page "${part}" is outside this PDF. Choose a page between 1 and ${maxPages}.`,
+          };
         }
-      } else {
-        const page = parseInt(part, 10);
-        if (!isNaN(page) && page >= 1 && page <= maxPages) {
-          pages.add(page);
-        }
+
+        pages.add(page);
+        continue;
+      }
+
+      const match = part.match(/^(\d+)\s*-\s*(\d+)$/);
+
+      if (!match) {
+        return {
+          pages: [],
+          error: `Invalid page range "${part}". Use whole page numbers only, for example 1-3, 5, 8-10.`,
+        };
+      }
+
+      const startPage = Number(match[1]);
+      const endPage = Number(match[2]);
+
+      if (startPage < 1 || startPage > maxPages) {
+        return {
+          pages: [],
+          error: `Page "${startPage}" in range "${part}" is outside this PDF. Choose pages between 1 and ${maxPages}.`,
+        };
+      }
+
+      if (endPage < 1 || endPage > maxPages) {
+        return {
+          pages: [],
+          error: `Page "${endPage}" in range "${part}" is outside this PDF. Choose pages between 1 and ${maxPages}.`,
+        };
+      }
+
+      const from = Math.min(startPage, endPage);
+      const to = Math.max(startPage, endPage);
+
+      for (let page = from; page <= to; page++) {
+        pages.add(page);
       }
     }
 
-    return Array.from(pages).sort((a, b) => a - b);
+    return {
+      pages: Array.from(pages).sort((a, b) => a - b),
+      error: null,
+    };
   };
 
   const handleSplit = async () => {
@@ -117,13 +171,19 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
         createUrl(zipBlob);
       } else {
         setProgressText('Extracting pages...');
-        const selectedPages = parsePageRange(rangeInput, pageCount);
-        if (selectedPages.length === 0) {
+
+        const parsedRange = parsePageRange(rangeInput, pageCount);
+
+        if (parsedRange.error) {
+          throw new Error(parsedRange.error);
+        }
+
+        if (parsedRange.pages.length === 0) {
           throw new Error('Please specify a valid page range.');
         }
 
         // Call dual-engine splitPDF to support bank statements, forms, and protected files
-        const pdfBytes = await splitPDF(file, selectedPages.join(', '));
+        const pdfBytes = await splitPDF(file, parsedRange.pages.join(', '));
         const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
         createUrl(blob);
       }
