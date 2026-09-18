@@ -32,6 +32,11 @@ import {
 
 import {
   saveWorkspaceFiles,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+  clearToolWorkspace,
+  markPdfPreviewNavigation,
+  clearPdfPreviewNavigation,
 } from '../utils/localWorkspace';
 
 import {
@@ -74,6 +79,67 @@ const EMPTY_SESSION:
   error: null,
   status: '',
 };
+
+
+const EXTRACTOR_STATE_SCOPE =
+  'universal-document-data-extractor';
+
+
+type PersistedExtractorState = {
+  version: 1;
+
+  file: {
+    name: string;
+    size: number;
+    lastModified: number;
+  };
+
+  sections: ExtractorSection[];
+
+  error: string | null;
+
+  status: string;
+};
+
+
+const extractorFileKey =
+  (
+    file:
+      File
+  ) =>
+    [
+      file.name,
+      file.size,
+      file.lastModified ||
+        0,
+    ].join(
+      '::'
+    );
+
+
+const persistedStateMatchesFile =
+  (
+    state:
+      PersistedExtractorState |
+      null,
+
+    file:
+      File
+  ) =>
+    Boolean(
+      state &&
+      state.version ===
+        1 &&
+      state.file.name ===
+        file.name &&
+      state.file.size ===
+        file.size &&
+      state.file.lastModified ===
+        (
+          file.lastModified ||
+          0
+        )
+    );
 
 let extractorSessionCache:
   ExtractorSession = {
@@ -129,12 +195,41 @@ const downloadBlob = (
   anchor.href = url;
   anchor.download = filename;
 
+
+  /*
+   * iOS Safari may preview CSV/XLSX and recreate the web page
+   * when Back is pressed.
+   *
+   * Reuse the same session-return protection already used for
+   * generated PDF previews.
+   */
+  markPdfPreviewNavigation();
+
+
   document.body.appendChild(
     anchor
   );
 
   anchor.click();
   anchor.remove();
+
+
+  setTimeout(
+    () => {
+      /*
+       * A normal download never leaves the page.
+       * Do not leave a false preview marker behind.
+       */
+      if (
+        document.visibilityState ===
+          'visible'
+      ) {
+        clearPdfPreviewNavigation();
+      }
+    },
+    4000
+  );
+
 
   setTimeout(
     () =>
@@ -213,6 +308,13 @@ export const DocumentDataExtractor:
     const extractionInFlightRef =
       useRef(false);
 
+
+    const restoredResultFileRef =
+      useRef<string | null>(
+        null
+      );
+
+
     const [
       sections,
       setSections,
@@ -275,6 +377,64 @@ export const DocumentDataExtractor:
         error,
         status,
       };
+
+
+      if (
+        !file ||
+        sections.length ===
+          0 ||
+        restoredResultFileRef.current !==
+          extractorFileKey(
+            file
+          )
+      ) {
+        return;
+      }
+
+
+      saveToolWorkspaceState<
+        PersistedExtractorState
+      >(
+        EXTRACTOR_STATE_SCOPE,
+        {
+          version:
+            1,
+
+          file: {
+            name:
+              file.name,
+
+            size:
+              file.size,
+
+            lastModified:
+              file.lastModified ||
+              0,
+          },
+
+          sections:
+            sections.map(
+              (
+                section
+              ) => ({
+                ...section,
+
+                rows:
+                  section.rows.map(
+                    (
+                      row
+                    ) => [
+                      ...row,
+                    ]
+                  ),
+              })
+            ),
+
+          error,
+
+          status,
+        }
+      );
     }, [
       file,
       sections,
@@ -286,6 +446,25 @@ export const DocumentDataExtractor:
       extractorSessionCache = {
         ...EMPTY_SESSION,
       };
+
+
+      restoredResultFileRef.current =
+        null;
+
+
+      void clearToolWorkspace(
+        EXTRACTOR_STATE_SCOPE
+      ).catch(
+        (
+          workspaceError
+        ) => {
+          console.warn(
+            'Unable to clear Universal Extractor session:',
+            workspaceError
+          );
+        }
+      );
+
 
       void clearUniversalPages()
         .catch(
@@ -481,6 +660,12 @@ export const DocumentDataExtractor:
             );
           }
 
+          restoredResultFileRef.current =
+            extractorFileKey(
+              targetFile
+            );
+
+
           setSections(
             nextSections
           );
@@ -553,6 +738,39 @@ export const DocumentDataExtractor:
           return;
         }
 
+        /*
+         * A deliberately selected replacement document starts
+         * a new final-result session.
+         */
+        await clearToolWorkspace(
+          EXTRACTOR_STATE_SCOPE
+        ).catch(
+          () => {}
+        );
+
+
+        extractorSessionCache = {
+          ...EMPTY_SESSION,
+        };
+
+
+        restoredResultFileRef.current =
+          null;
+
+
+        setSections(
+          []
+        );
+
+        setError(
+          null
+        );
+
+        setStatus(
+          ''
+        );
+
+
         onFileChange(
           nextFile
         );
@@ -560,26 +778,153 @@ export const DocumentDataExtractor:
 
     useEffect(() => {
       if (!file) {
+        restoredResultFileRef.current =
+          null;
+
         setSections([]);
         setError(null);
         setStatus('');
+
         return;
       }
 
+
+      const key =
+        extractorFileKey(
+          file
+        );
+
+
+      /*
+       * Durable session result:
+       *
+       * survives:
+       * - CSV/Excel preview -> Back
+       * - moving to another 1into1 tool and returning
+       * - Safari page recreation associated with Preview
+       *
+       * resetWorkspaceSession() removes it on a genuine refresh.
+       */
+      const persisted =
+        restoreToolWorkspaceState<
+          PersistedExtractorState
+        >(
+          EXTRACTOR_STATE_SCOPE
+        );
+
+
       if (
-        extractorSessionCache.file ===
-          file &&
+        persistedStateMatchesFile(
+          persisted,
+          file
+        ) &&
+        persisted &&
+        persisted.sections.length >
+          0
+      ) {
+        restoredResultFileRef.current =
+          key;
+
+
+        const restoredSections =
+          persisted.sections.map(
+            (
+              section
+            ) => ({
+              ...section,
+
+              rows:
+                section.rows.map(
+                  (
+                    row
+                  ) => [
+                    ...row,
+                  ]
+                ),
+            })
+          );
+
+
+        extractorSessionCache = {
+          file,
+
+          sections:
+            restoredSections,
+
+          error:
+            persisted.error,
+
+          status:
+            persisted.status,
+        };
+
+
+        setSections(
+          restoredSections
+        );
+
+        setError(
+          persisted.error
+        );
+
+        setStatus(
+          persisted.status
+        );
+
+
+        return;
+      }
+
+
+      /*
+       * Same-process SPA navigation is even cheaper: reuse the
+       * existing module cache without touching storage.
+       */
+      if (
+        extractorSessionCache.file &&
+        extractorFileKey(
+          extractorSessionCache.file
+        ) ===
+          key &&
         extractorSessionCache
           .sections.length >
           0
       ) {
+        restoredResultFileRef.current =
+          key;
+
+
+        setSections(
+          extractorSessionCache.sections
+        );
+
+        setError(
+          extractorSessionCache.error
+        );
+
+        setStatus(
+          extractorSessionCache.status
+        );
+
+
         return;
       }
+
+
+      restoredResultFileRef.current =
+        null;
+
 
       setSections([]);
       setError(null);
       setStatus('');
 
+
+      /*
+       * Only resume extraction when there is genuinely an
+       * interrupted processing job. A completed final result
+       * never reaches this branch.
+       */
       if (
         hasRecoverableProcessing()
       ) {
