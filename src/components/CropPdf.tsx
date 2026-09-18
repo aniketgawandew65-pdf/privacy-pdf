@@ -45,22 +45,185 @@ interface CropDraft {
 }
 
 /*
- * Session-only Crop PDF drafts.
+ * Crop PDF editing drafts.
  *
- * This intentionally lives only in JS module memory:
+ * Keep a tiny coordinate/settings draft in both module memory
+ * and sessionStorage.
  *
- * - SPA navigation / preview -> Back: preserved
- * - hard refresh: cleared
- * - removing the source PDF: cleared
+ * Why sessionStorage:
+ * iPhone Safari may recreate the web process while viewing a
+ * generated PDF and then returning with Back. Pure JS memory can
+ * disappear even though the tab/file survives.
  *
- * Nothing is written to localStorage or permanent storage.
+ * Behaviour:
+ * - Preview -> Back: preserved
+ * - repeated Preview -> Back: preserved
+ * - Safari process recreation: preserved
+ * - Remove File: cleared
+ * - genuine hard refresh: cleared below
+ *
+ * Only crop coordinates/settings are stored — never PDF bytes.
  */
 const cropDrafts =
   new Map<string, CropDraft>();
 
+const CROP_DRAFT_PREFIX =
+  'oneinto1-crop-draft::';
+
+
+/*
+ * A true browser Reload should behave like a fresh Crop session.
+ * Back/forward restoration is intentionally NOT cleared.
+ */
+try {
+  const navigation =
+    performance.getEntriesByType(
+      'navigation'
+    )[0] as
+      PerformanceNavigationTiming |
+      undefined;
+
+  const isHardReload =
+    navigation?.type ===
+      'reload' ||
+    (
+      !navigation &&
+      (
+        performance as any
+      ).navigation?.type ===
+        1
+    );
+
+  if (
+    isHardReload &&
+    typeof sessionStorage !==
+      'undefined'
+  ) {
+    for (
+      let index =
+        sessionStorage.length - 1;
+
+      index >= 0;
+      index--
+    ) {
+      const key =
+        sessionStorage.key(
+          index
+        );
+
+      if (
+        key?.startsWith(
+          CROP_DRAFT_PREFIX
+        )
+      ) {
+        sessionStorage.removeItem(
+          key
+        );
+      }
+    }
+  }
+} catch (_) {}
+
+
 const getCropDraftKey =
   (file: File) =>
     `${file.name}::${file.size}::${file.lastModified || 0}`;
+
+
+const getCropStorageKey =
+  (
+    draftKey: string
+  ) =>
+    CROP_DRAFT_PREFIX +
+    draftKey;
+
+
+const readCropDraft =
+  (
+    draftKey: string
+  ): CropDraft | null => {
+    const memoryDraft =
+      cropDrafts.get(
+        draftKey
+      );
+
+    if (memoryDraft) {
+      return memoryDraft;
+    }
+
+    try {
+      const raw =
+        sessionStorage.getItem(
+          getCropStorageKey(
+            draftKey
+          )
+        );
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed =
+        JSON.parse(
+          raw
+        ) as CropDraft;
+
+      cropDrafts.set(
+        draftKey,
+        parsed
+      );
+
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
+
+const writeCropDraft =
+  (
+    draftKey: string,
+    draft: CropDraft
+  ) => {
+    cropDrafts.set(
+      draftKey,
+      draft
+    );
+
+    try {
+      sessionStorage.setItem(
+        getCropStorageKey(
+          draftKey
+        ),
+        JSON.stringify(
+          draft
+        )
+      );
+    } catch {
+      /*
+       * Memory draft still works when sessionStorage is
+       * unavailable.
+       */
+    }
+  };
+
+
+const deleteCropDraft =
+  (
+    draftKey: string
+  ) => {
+    cropDrafts.delete(
+      draftKey
+    );
+
+    try {
+      sessionStorage.removeItem(
+        getCropStorageKey(
+          draftKey
+        )
+      );
+    } catch (_) {}
+  };
 
 const cloneCropArea =
   (
@@ -194,7 +357,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
           getCropDraftKey(file);
 
         const savedDraft =
-          cropDrafts.get(
+          readCropDraft(
             draftKey
           );
 
@@ -302,7 +465,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       return;
     }
 
-    cropDrafts.set(
+    writeCropDraft(
       draftKey,
       {
         currentPage,
@@ -587,6 +750,32 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
       return;
     }
 
+    /*
+     * Freeze exactly what the user sees NOW before processing.
+     *
+     * The old code could prefer crops[currentPage] from a
+     * previous navigation over the newly adjusted cropBox.
+     * That caused Preview #2 to show Preview #1's crop.
+     */
+    const currentCropSnapshot =
+      cloneCropArea(
+        cropBox
+      );
+
+    const cropSnapshot =
+      cloneCropMap(
+        crops
+      );
+
+    cropSnapshot[
+      currentPage
+    ] =
+      currentCropSnapshot;
+
+    const applyToAllSnapshot =
+      applyToAll;
+
+
     setIsProcessing(true);
     setError(null);
     setDownloadUrl(null);
@@ -633,11 +822,20 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
         pages.forEach((page, i) => {
           const pageIdx = i + 1;
-          const targetCrop = (typeof applyToAll !== "undefined" && applyToAll)
-            ? cropBox
-            : ((typeof crops !== "undefined" && crops && (crops as any)[pageIdx])
-                ? (crops as any)[pageIdx]
-                : (pageIdx === (typeof currentPage !== "undefined" ? currentPage : 1) ? cropBox : null));
+          const targetCrop =
+            applyToAllSnapshot
+              ? currentCropSnapshot
+              : (
+                  Object.prototype
+                    .hasOwnProperty.call(
+                      cropSnapshot,
+                      pageIdx
+                    )
+                    ? cropSnapshot[
+                        pageIdx
+                      ]
+                    : null
+                );
 
           if (!targetCrop) return;
 
@@ -714,11 +912,20 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
 
         for (let pageNum = 1; pageNum <= numPages; pageNum++) {
           const pageIdx = pageNum;
-          const targetCrop = (typeof applyToAll !== "undefined" && applyToAll)
-            ? cropBox
-            : ((typeof crops !== "undefined" && crops && (crops as any)[pageIdx])
-                ? (crops as any)[pageIdx]
-                : (pageIdx === (typeof currentPage !== "undefined" ? currentPage : 1) ? cropBox : null));
+          const targetCrop =
+            applyToAllSnapshot
+              ? currentCropSnapshot
+              : (
+                  Object.prototype
+                    .hasOwnProperty.call(
+                      cropSnapshot,
+                      pageIdx
+                    )
+                    ? cropSnapshot[
+                        pageIdx
+                      ]
+                    : null
+                );
 
           const page =
             await pdfDoc.getPage(
@@ -922,8 +1129,10 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               type="button"
               onClick={() => {
                 if (file) {
-                  cropDrafts.delete(
-                    getCropDraftKey(file)
+                  deleteCropDraft(
+                    getCropDraftKey(
+                      file
+                    )
                   );
                 }
 
@@ -1062,6 +1271,16 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                       top: `${cropBox.y}px`,
                       width: `${cropBox.width}px`,
                       height: `${cropBox.height}px`,
+
+                      /*
+                       * Include the 2px green border inside the
+                       * exact x/y/width/height geometry.
+                       *
+                       * Previously content-box made the visible
+                       * rectangle extend beyond the coordinates
+                       * used for PDF cropping.
+                       */
+                      boxSizing: "border-box",
                     }}
                     className="absolute border-2 border-emerald-500 bg-emerald-500/10 cursor-move z-20 select-none touch-none shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"
                     onPointerDown={handleBoxPointerDown}
