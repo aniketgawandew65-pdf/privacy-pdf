@@ -404,33 +404,36 @@ export const CodeToPdf: React.FC = () => {
   return (
     <div className="w-full max-w-xl mx-auto bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl text-left space-y-6">
       {/* Mode Switcher */}
-      <div className="flex items-center p-1 bg-zinc-950 rounded-xl border border-zinc-800 text-xs font-medium">
+      <div className="code-pdf-mode-switch">
         <button
+          type="button"
           onClick={() => {
             setActiveTab('paste');
             revokeUrl();
           }}
-          className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+          className={`code-pdf-mode-tab ${
             activeTab === 'paste'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'code-pdf-mode-active'
+              : 'code-pdf-mode-inactive'
           }`}
         >
-          <Code2 className="w-3.5 h-3.5" />
+          <Code2 className="code-pdf-mode-icon" />
           <span>Paste Code</span>
         </button>
+
         <button
+          type="button"
           onClick={() => {
             setActiveTab('upload');
             revokeUrl();
           }}
-          className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+          className={`code-pdf-mode-tab ${
             activeTab === 'upload'
-              ? 'bg-zinc-800 text-emerald-400 font-semibold'
-              : 'text-zinc-400 hover:text-zinc-200'
+              ? 'code-pdf-mode-active'
+              : 'code-pdf-mode-inactive'
           }`}
         >
-          <Upload className="w-3.5 h-3.5" />
+          <Upload className="code-pdf-mode-icon" />
           <span>Upload File</span>
         </button>
       </div>
@@ -508,7 +511,10 @@ export const CodeToPdf: React.FC = () => {
           <input
             type="text"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              revokeUrl();
+            }}
             placeholder="e.g. main.py or query.sql"
             className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
           />
@@ -519,7 +525,10 @@ export const CodeToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Theme</label>
             <select
               value={theme}
-              onChange={(e) => setTheme(e.target.value as any)}
+              onChange={(e) => {
+                setTheme(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="dark">Dark (Terminal)</option>
@@ -531,7 +540,10 @@ export const CodeToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Orientation</label>
             <select
               value={orientation}
-              onChange={(e) => setOrientation(e.target.value as any)}
+              onChange={(e) => {
+                setOrientation(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="portrait">Portrait</option>
@@ -543,7 +555,10 @@ export const CodeToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Size</label>
             <select
               value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
+              onChange={(e) => {
+                setFontSize(Number(e.target.value));
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="7.5">7.5pt (Compact)</option>
@@ -556,7 +571,10 @@ export const CodeToPdf: React.FC = () => {
             <label className="text-[11px] text-zinc-400">Page Format</label>
             <select
               value={pageSize}
-              onChange={(e) => setPageSize(e.target.value as any)}
+              onChange={(e) => {
+                setPageSize(e.target.value as any);
+                revokeUrl();
+              }}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="a4">A4</option>
@@ -570,7 +588,10 @@ export const CodeToPdf: React.FC = () => {
           <input
             type="checkbox"
             checked={showLineNumbers}
-            onChange={(e) => setShowLineNumbers(e.target.checked)}
+            onChange={(e) => {
+              setShowLineNumbers(e.target.checked);
+              revokeUrl();
+            }}
             className="rounded border-zinc-800 accent-emerald-500 w-3.5 h-3.5"
           />
           <span>Include line numbers column</span>
