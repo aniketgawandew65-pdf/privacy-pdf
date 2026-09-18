@@ -31,12 +31,122 @@ import {
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  preserveProcessingWorkspace,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
+
+import {
+  saveToolWorkspaceFiles,
+  restoreToolWorkspaceFiles,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+  clearToolWorkspace,
+} from '../utils/localWorkspace';
+
 interface VisualEditorProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
 }
 
 type ResizeHandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+
+const EDIT_PDF_SCOPE =
+  'edit-pdf-session';
+
+const EDIT_PDF_OUTPUT_SCOPE =
+  'edit-pdf-session-output';
+
+
+type EditPdfSessionState = {
+  version: 1;
+
+  file: {
+    name: string;
+    size: number;
+    lastModified: number;
+  };
+
+  items: VisualOverlayItem[];
+
+  currentPage: number;
+
+  zoom: number;
+
+  selectedId: string | null;
+
+  isPanMode: boolean;
+
+  savedItemsSignature:
+    string |
+    null;
+};
+
+
+const editPdfFileKey =
+  (
+    file:
+      File
+  ) =>
+    [
+      file.name,
+      file.size,
+      file.lastModified ||
+        0,
+    ].join(
+      '::'
+    );
+
+
+const editPdfStateMatchesFile =
+  (
+    state:
+      EditPdfSessionState |
+      null,
+
+    file:
+      File
+  ) =>
+    Boolean(
+      state &&
+      state.version ===
+        1 &&
+      state.file.name ===
+        file.name &&
+      state.file.size ===
+        file.size &&
+      state.file.lastModified ===
+        (
+          file.lastModified ||
+          0
+        )
+    );
+
+
+const editItemsSignature =
+  (
+    items:
+      VisualOverlayItem[]
+  ) =>
+    JSON.stringify(
+      items
+    );
+
+
+const cloneEditItems =
+  (
+    items:
+      VisualOverlayItem[]
+  ):
+    VisualOverlayItem[] =>
+      items.map(
+        (
+          item
+        ) => ({
+          ...item,
+        })
+      );
 
 export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }) => {
   const [items, setItems] = useState<VisualOverlayItem[]>([]);
@@ -46,6 +156,42 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
   const [zoom, setZoom] = useState<number>(1.0);
   const [isPanMode, setIsPanMode] = useState<boolean>(false);
+
+
+  const [
+    savedItemsSignature,
+    setSavedItemsSignature,
+  ] =
+    useState<
+      string |
+      null
+    >(
+      null
+    );
+
+
+  /*
+   * Prevent fresh default React state from overwriting a
+   * recovered edit session before restoration is complete.
+   */
+  const stateReadyFileKeyRef =
+    useRef<
+      string |
+      null
+    >(
+      null
+    );
+
+
+  /*
+   * A component mount with file=null may be Safari recreating
+   * the page. Restore the Edit PDF source only once.
+   */
+  const sourceRestoreAttemptedRef =
+    useRef(
+      false
+    );
+
 
   // The editor always uses a stable 500px-wide coordinate system.
   // Only the outer visual scale changes.
@@ -107,6 +253,130 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   } | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+
+    preserveProcessingWorkspace();
+
+
+    const handleIntentionalUnload =
+      () => {
+        /*
+         * A real user refresh should start a fresh editor
+         * session. Unexpected WebContent termination never gets
+         * the chance to execute this handler.
+         */
+        clearProcessingRecovery();
+      };
+
+
+    window.addEventListener(
+      'beforeunload',
+      handleIntentionalUnload
+    );
+
+
+    return () => {
+      window.removeEventListener(
+        'beforeunload',
+        handleIntentionalUnload
+      );
+
+
+      /*
+       * Normal navigation to another 1into1 tool must not leave
+       * a global processing marker behind.
+       *
+       * The actual Edit PDF source/state remains in its isolated
+       * tool workspace and will restore when the user returns.
+       */
+      clearProcessingRecovery();
+    };
+  }, [
+    file,
+  ]);
+
+
+  /*
+   * If Safari recreated the page there may be no File left in
+   * App React memory. Restore the dedicated Edit PDF source.
+   *
+   * Small delay lets App.tsx finish a genuine hard-refresh reset
+   * before we inspect this workspace.
+   */
+  useEffect(() => {
+    if (
+      file ||
+      sourceRestoreAttemptedRef.current
+    ) {
+      return;
+    }
+
+
+    sourceRestoreAttemptedRef.current =
+      true;
+
+
+    let cancelled =
+      false;
+
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void (
+            async () => {
+              try {
+                const restored =
+                  await restoreToolWorkspaceFiles(
+                    EDIT_PDF_SCOPE
+                  );
+
+
+                if (
+                  cancelled ||
+                  restored.length ===
+                    0
+                ) {
+                  return;
+                }
+
+
+                onFileChange(
+                  restored[0]
+                );
+              } catch (
+                restoreError
+              ) {
+                console.warn(
+                  'Unable to restore Edit PDF source:',
+                  restoreError
+                );
+              }
+            }
+          )();
+        },
+        220
+      );
+
+
+    return () => {
+      cancelled =
+        true;
+
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    file,
+    onFileChange,
+  ]);
 
 
   // Mobile Safari:
@@ -291,6 +561,10 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
         if (!file) {
           if (!cancelled) {
+            stateReadyFileKeyRef.current =
+              null;
+
+
             setItems([]);
             setSelectedId(
               null
@@ -309,6 +583,207 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
 
 
         try {
+          /*
+           * ==================================================
+           * DURABLE EDIT-PDF SOURCE
+           * ==================================================
+           *
+           * App intentionally does NOT mirror /edit-pdf through
+           * the generic workspace because a simultaneous 150 MB
+           * OPFS write + PDF.js render previously caused iPhone
+           * memory pressure.
+           *
+           * Therefore Edit PDF owns one isolated source copy.
+           *
+           * Finish that write BEFORE PDF.js opens the document.
+           */
+          const sourceStored =
+            await saveToolWorkspaceFiles(
+              EDIT_PDF_SCOPE,
+              [
+                file,
+              ]
+            );
+
+
+          if (!sourceStored) {
+            console.warn(
+              'Edit PDF restart recovery source could not be persisted.'
+            );
+          }
+
+
+          const fileKey =
+            editPdfFileKey(
+              file
+            );
+
+
+          const persisted =
+            restoreToolWorkspaceState<
+              EditPdfSessionState
+            >(
+              EDIT_PDF_SCOPE
+            );
+
+
+          if (
+            editPdfStateMatchesFile(
+              persisted,
+              file
+            ) &&
+            persisted
+          ) {
+            const restoredItems =
+              cloneEditItems(
+                persisted.items ||
+                  []
+              );
+
+
+            stateReadyFileKeyRef.current =
+              fileKey;
+
+
+            setItems(
+              restoredItems
+            );
+
+
+            setCurrentPage(
+              Math.max(
+                1,
+                persisted.currentPage ||
+                  1
+              )
+            );
+
+
+            setZoom(
+              Math.max(
+                0.5,
+                Math.min(
+                  2.5,
+                  persisted.zoom ||
+                    1
+                )
+              )
+            );
+
+
+            setIsPanMode(
+              Boolean(
+                persisted.isPanMode
+              )
+            );
+
+
+            const restoredSelectedId =
+              persisted.selectedId &&
+              restoredItems.some(
+                (
+                  item
+                ) =>
+                  item.id ===
+                  persisted.selectedId
+              )
+                ? persisted.selectedId
+                : null;
+
+
+            setSelectedId(
+              restoredSelectedId
+            );
+
+
+            setSavedItemsSignature(
+              persisted.savedItemsSignature ||
+                null
+            );
+          } else {
+            /*
+             * New/different source selected in Edit PDF.
+             * Do not let edits/output from the previous source
+             * leak into it.
+             */
+            await clearToolWorkspace(
+              EDIT_PDF_OUTPUT_SCOPE
+            ).catch(
+              () => {}
+            );
+
+
+            stateReadyFileKeyRef.current =
+              fileKey;
+
+
+            setItems(
+              []
+            );
+
+            setSelectedId(
+              null
+            );
+
+            setCurrentPage(
+              1
+            );
+
+            setZoom(
+              1
+            );
+
+            setIsPanMode(
+              false
+            );
+
+            setSavedItemsSignature(
+              null
+            );
+
+
+            saveToolWorkspaceState<
+              EditPdfSessionState
+            >(
+              EDIT_PDF_SCOPE,
+              {
+                version:
+                  1,
+
+                file: {
+                  name:
+                    file.name,
+
+                  size:
+                    file.size,
+
+                  lastModified:
+                    file.lastModified ||
+                    0,
+                },
+
+                items:
+                  [],
+
+                currentPage:
+                  1,
+
+                zoom:
+                  1,
+
+                selectedId:
+                  null,
+
+                isPanMode:
+                  false,
+
+                savedItemsSignature:
+                  null,
+              }
+            );
+          }
+
+
           const loaded =
             await loadPdfJsFromBlob(
               file,
@@ -793,6 +1268,217 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   ]);
 
 
+  useEffect(() => {
+    if (!file) {
+      return;
+    }
+
+
+    const fileKey =
+      editPdfFileKey(
+        file
+      );
+
+
+    if (
+      stateReadyFileKeyRef.current !==
+      fileKey
+    ) {
+      return;
+    }
+
+
+    const timer =
+      window.setTimeout(
+        () => {
+          saveToolWorkspaceState<
+            EditPdfSessionState
+          >(
+            EDIT_PDF_SCOPE,
+            {
+              version:
+                1,
+
+              file: {
+                name:
+                  file.name,
+
+                size:
+                  file.size,
+
+                lastModified:
+                  file.lastModified ||
+                  0,
+              },
+
+              items:
+                cloneEditItems(
+                  items
+                ),
+
+              currentPage,
+
+              zoom,
+
+              selectedId,
+
+              isPanMode,
+
+              savedItemsSignature,
+            }
+          );
+        },
+        50
+      );
+
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    file,
+    items,
+    currentPage,
+    zoom,
+    selectedId,
+    isPanMode,
+    savedItemsSignature,
+  ]);
+
+
+  /*
+   * If the user changes any edit AFTER creating the output PDF,
+   * that old output must not reappear after navigation.
+   */
+  useEffect(() => {
+    if (
+      !savedItemsSignature
+    ) {
+      return;
+    }
+
+
+    const currentSignature =
+      editItemsSignature(
+        items
+      );
+
+
+    if (
+      currentSignature ===
+      savedItemsSignature
+    ) {
+      return;
+    }
+
+
+    setSavedItemsSignature(
+      null
+    );
+
+
+    revokeDownloadUrl();
+
+
+    void clearToolWorkspace(
+      EDIT_PDF_OUTPUT_SCOPE
+    ).catch(
+      () => {}
+    );
+  }, [
+    items,
+    savedItemsSignature,
+    revokeDownloadUrl,
+  ]);
+
+
+  /*
+   * Restore an already-created edited PDF after:
+   *
+   * - PDF Preview -> Back
+   * - Safari process recreation
+   * - moving to another 1into1 tool and returning
+   *
+   * This prevents forcing another Save operation / task charge.
+   */
+  useEffect(() => {
+    if (
+      !file ||
+      !savedItemsSignature ||
+      downloadUrl ||
+      editItemsSignature(
+        items
+      ) !==
+        savedItemsSignature
+    ) {
+      return;
+    }
+
+
+    let cancelled =
+      false;
+
+
+    void (
+      async () => {
+        try {
+          const outputs =
+            await restoreToolWorkspaceFiles(
+              EDIT_PDF_OUTPUT_SCOPE
+            );
+
+
+          if (
+            cancelled ||
+            outputs.length ===
+              0
+          ) {
+            return;
+          }
+
+
+          const output =
+            outputs[0];
+
+
+          if (
+            output.name !==
+            `edited_${file.name}`
+          ) {
+            return;
+          }
+
+
+          createUrl(
+            output
+          );
+        } catch (
+          outputRestoreError
+        ) {
+          console.warn(
+            'Unable to restore edited PDF output:',
+            outputRestoreError
+          );
+        }
+      }
+    )();
+
+
+    return () => {
+      cancelled =
+        true;
+    };
+  }, [
+    file,
+    items,
+    savedItemsSignature,
+    downloadUrl,
+    createUrl,
+  ]);
+
+
   const handleAddWhiteout = () => {
     const newItem: VisualOverlayItem = {
       id: `whiteout-${Date.now()}`,
@@ -863,9 +1549,138 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     revokeDownloadUrl();
 
     try {
-      const outputBytes = await applyVisualOverlays(file, items);
-      const blob = new Blob([outputBytes as unknown as BlobPart], { type: 'application/pdf' });
-      createUrl(blob);
+      let outputBytes:
+        Uint8Array |
+        null =
+          await applyVisualOverlays(
+            file,
+            items
+          );
+
+
+      const blob =
+        new Blob(
+          [
+            outputBytes as
+              unknown as
+              BlobPart,
+          ],
+          {
+            type:
+              'application/pdf',
+          }
+        );
+
+
+      /*
+       * Drop the direct JS reference before the browser-local
+       * output persistence phase.
+       */
+      outputBytes =
+        null;
+
+
+      await new Promise<void>(
+        (
+          resolve
+        ) =>
+          setTimeout(
+            resolve,
+            0
+          )
+      );
+
+
+      const outputFile =
+        new File(
+          [
+            blob,
+          ],
+          `edited_${file.name}`,
+          {
+            type:
+              'application/pdf',
+
+            lastModified:
+              Date.now(),
+          }
+        );
+
+
+      const outputStored =
+        await saveToolWorkspaceFiles(
+          EDIT_PDF_OUTPUT_SCOPE,
+          [
+            outputFile,
+          ]
+        );
+
+
+      const signature =
+        editItemsSignature(
+          items
+        );
+
+
+      if (outputStored) {
+        setSavedItemsSignature(
+          signature
+        );
+
+
+        /*
+         * Persist the successful output relationship
+         * synchronously before the user can open PDF Preview.
+         */
+        saveToolWorkspaceState<
+          EditPdfSessionState
+        >(
+          EDIT_PDF_SCOPE,
+          {
+            version:
+              1,
+
+            file: {
+              name:
+                file.name,
+
+              size:
+                file.size,
+
+              lastModified:
+                file.lastModified ||
+                0,
+            },
+
+            items:
+              cloneEditItems(
+                items
+              ),
+
+            currentPage,
+
+            zoom,
+
+            selectedId,
+
+            isPanMode,
+
+            savedItemsSignature:
+              signature,
+          }
+        );
+      } else {
+        console.warn(
+          'Edited PDF output could not be persisted for Preview/Back recovery.'
+        );
+      }
+
+
+      createUrl(
+        outputFile
+      );
+
+
       commitTaskCredit();
     } catch (err: any) {
       console.error('Export error:', err);
@@ -1041,6 +1856,121 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
     window.addEventListener('pointercancel', finish);
   };
 
+  const handleChooseFile =
+    async (
+      nextFile:
+        File
+    ) => {
+      /*
+       * User intentionally selected a replacement PDF.
+       * Remove only the previous Edit PDF session.
+       */
+      await Promise.all([
+        clearToolWorkspace(
+          EDIT_PDF_SCOPE
+        ).catch(
+          () => {}
+        ),
+
+        clearToolWorkspace(
+          EDIT_PDF_OUTPUT_SCOPE
+        ).catch(
+          () => {}
+        ),
+      ]);
+
+
+      stateReadyFileKeyRef.current =
+        null;
+
+      sourceRestoreAttemptedRef.current =
+        true;
+
+      setSavedItemsSignature(
+        null
+      );
+
+      revokeDownloadUrl();
+
+
+      onFileChange(
+        nextFile
+      );
+    };
+
+
+  const handleClearEditor =
+    async () => {
+      if (
+        isProcessing
+      ) {
+        return;
+      }
+
+
+      sourceRestoreAttemptedRef.current =
+        true;
+
+      stateReadyFileKeyRef.current =
+        null;
+
+
+      clearProcessingRecovery();
+
+
+      revokeDownloadUrl();
+
+
+      await Promise.all([
+        clearToolWorkspace(
+          EDIT_PDF_SCOPE
+        ).catch(
+          () => {}
+        ),
+
+        clearToolWorkspace(
+          EDIT_PDF_OUTPUT_SCOPE
+        ).catch(
+          () => {}
+        ),
+      ]);
+
+
+      setItems(
+        []
+      );
+
+      setSelectedId(
+        null
+      );
+
+      setCurrentPage(
+        1
+      );
+
+      setZoom(
+        1
+      );
+
+      setIsPanMode(
+        false
+      );
+
+      setSavedItemsSignature(
+        null
+      );
+
+      setErrorMessage(
+        null
+      );
+
+
+      onFileChange(
+        null
+      );
+    };
+
+
   const currentPageItems = items.filter((item) => item.pageIndex === currentPage - 1);
   const activeItem = items.find((i) => i.id === selectedId);
 
@@ -1063,7 +1993,16 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
           onDrop={(e) => {
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
-            if (dropped && dropped.type === 'application/pdf') onFileChange(dropped);
+
+            if (
+              dropped &&
+              dropped.type ===
+                'application/pdf'
+            ) {
+              void handleChooseFile(
+                dropped
+              );
+            }
           }}
           className="cursor-pointer border-2 border-dashed border-zinc-700 hover:border-emerald-500/60 transition-all rounded-2xl p-12 text-center bg-zinc-950/40 max-w-xl mx-auto"
         >
@@ -1076,8 +2015,21 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
             accept="application/pdf"
             className="hidden"
             onChange={(e) => {
-              const selected = e.target.files?.[0];
-              if (selected && selected.type === 'application/pdf') onFileChange(selected);
+              const selected =
+                e.target.files?.[0];
+
+
+              if (
+                selected &&
+                selected.type ===
+                  'application/pdf'
+              ) {
+                void handleChooseFile(
+                  selected
+                );
+              }
+
+
               e.target.value = '';
             }}
           />
@@ -1159,9 +2111,14 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
                 </a>
               )}
               <button
-                onClick={() => onFileChange(null)}
-                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
-                title="Close file"
+                onClick={() =>
+                  void handleClearEditor()
+                }
+                disabled={
+                  isProcessing
+                }
+                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Remove file and clear Edit PDF session"
               >
                 <X className="w-4 h-4" />
               </button>
