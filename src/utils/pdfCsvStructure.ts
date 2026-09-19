@@ -605,6 +605,524 @@ const mappedValue = (
   );
 };
 
+const normalizeBankRowsLossless = (
+  inputRows:
+    string[][]
+):
+  string[][] => {
+  const rows =
+    inputRows
+      .map(cleanRow)
+      .filter(
+        (row) =>
+          row.some(Boolean)
+      );
+
+  const output:
+    string[][] = [
+      [...BANK_HEADER],
+    ];
+
+  let insideTable =
+    false;
+
+  let previousTransaction:
+    string[] |
+    null =
+      null;
+
+  let previousBalance:
+    number |
+    null =
+      null;
+
+  let pendingAmount:
+    string |
+    null =
+      null;
+
+
+  const setTransactionMoney =
+    (
+      transaction:
+        string[],
+      amountText:
+        string,
+      balanceText:
+        string
+    ) => {
+      const amount =
+        normalizeMoney(
+          amountText
+        );
+
+      const balance =
+        normalizeMoney(
+          balanceText
+        );
+
+      const amountNumber =
+        moneyNumber(
+          amount
+        );
+
+      const balanceNumber =
+        moneyNumber(
+          balance
+        );
+
+      if (
+        !amount ||
+        !balance ||
+        amountNumber ===
+          null ||
+        balanceNumber ===
+          null
+      ) {
+        return false;
+      }
+
+      let debit = '';
+      let credit = '';
+
+      if (
+        previousBalance !==
+        null
+      ) {
+        const debitExpected =
+          previousBalance -
+          amountNumber;
+
+        const creditExpected =
+          previousBalance +
+          amountNumber;
+
+        if (
+          Math.abs(
+            balanceNumber -
+            debitExpected
+          ) <=
+          0.02
+        ) {
+          debit =
+            amount;
+        } else if (
+          Math.abs(
+            balanceNumber -
+            creditExpected
+          ) <=
+          0.02
+        ) {
+          credit =
+            amount;
+        } else {
+          /*
+           * Do not invent a direction if arithmetic
+           * cannot prove it.
+           */
+          return false;
+        }
+      } else {
+        return false;
+      }
+
+      transaction[3] =
+        debit;
+
+      transaction[4] =
+        credit;
+
+      transaction[5] =
+        balance;
+
+      previousBalance =
+        balanceNumber;
+
+      pendingAmount =
+        null;
+
+      return true;
+    };
+
+
+  for (
+    const row of
+    rows
+  ) {
+    const text =
+      rowText(
+        row
+      );
+
+    if (!text) {
+      continue;
+    }
+
+
+    if (
+      looksLikeBankHeader(
+        text
+      )
+    ) {
+      insideTable =
+        true;
+
+      continue;
+    }
+
+
+    if (
+      !insideTable
+    ) {
+      continue;
+    }
+
+
+    if (
+      /\bopening\s+balance\b/i.test(
+        text
+      )
+    ) {
+      const monies =
+        text.match(
+          MONEY_GLOBAL
+        ) || [];
+
+      const balance =
+        monies[
+          monies.length -
+            1
+        ] || '';
+
+      if (balance) {
+        const opening = [
+          '',
+          '',
+          'Opening Balance',
+          '',
+          '',
+          balance,
+        ];
+
+        output.push(
+          opening
+        );
+
+        previousBalance =
+          moneyNumber(
+            balance
+          );
+
+        previousTransaction =
+          null;
+
+        pendingAmount =
+          null;
+      }
+
+      continue;
+    }
+
+
+    if (
+      /\bclosing\s+balance\b/i.test(
+        text
+      )
+    ) {
+      const monies =
+        text.match(
+          MONEY_GLOBAL
+        ) || [];
+
+      const balance =
+        monies[
+          monies.length -
+            1
+        ] || '';
+
+      /*
+       * If the final transaction amount was separated from
+       * its balance line, the closing balance is also the
+       * final running balance.
+       */
+      if (
+        previousTransaction &&
+        !previousTransaction[5] &&
+        pendingAmount &&
+        balance
+      ) {
+        setTransactionMoney(
+          previousTransaction,
+          pendingAmount,
+          balance
+        );
+      }
+
+      if (balance) {
+        output.push([
+          '',
+          '',
+          'Closing Balance',
+          '',
+          '',
+          balance,
+        ]);
+      }
+
+      break;
+    }
+
+
+    if (
+      isBankNoise(
+        text
+      )
+    ) {
+      continue;
+    }
+
+
+    const dates =
+      text.match(
+        DATE_GLOBAL
+      ) || [];
+
+    const monies =
+      text.match(
+        MONEY_GLOBAL
+      ) || [];
+
+
+    /*
+     * New transaction row.
+     */
+    if (
+      dates.length >
+      0
+    ) {
+      const transactionDate =
+        dates[0] || '';
+
+      const valueDate =
+        dates[1] || '';
+
+      const details =
+        removeTokens(
+          text,
+          [
+            ...dates.slice(
+              0,
+              2
+            ),
+            ...monies,
+          ]
+        );
+
+      const transaction = [
+        transactionDate,
+        valueDate,
+        details,
+        '',
+        '',
+        '',
+      ];
+
+      output.push(
+        transaction
+      );
+
+      previousTransaction =
+        transaction;
+
+      pendingAmount =
+        null;
+
+
+      /*
+       * Some PDF pages keep amount + balance on the same
+       * physical line as the dated transaction.
+       */
+      if (
+        monies.length >=
+        2
+      ) {
+        const amount =
+          monies[
+            monies.length -
+              2
+          ];
+
+        const balance =
+          monies[
+            monies.length -
+              1
+          ];
+
+        setTransactionMoney(
+          transaction,
+          amount,
+          balance
+        );
+      } else if (
+        monies.length ===
+        1
+      ) {
+        pendingAmount =
+          monies[0];
+      }
+
+      continue;
+    }
+
+
+    if (
+      !previousTransaction
+    ) {
+      continue;
+    }
+
+
+    const continuationText =
+      removeTokens(
+        text,
+        monies
+      );
+
+
+    /*
+     * Wrapped narration/reference line.
+     */
+    if (
+      continuationText
+    ) {
+      appendDescription(
+        previousTransaction,
+        continuationText
+      );
+    }
+
+
+    /*
+     * Most bank PDFs expose the final financial line as:
+     *
+     * Amount | Balance
+     *
+     * with no date. This was the data-loss bug.
+     */
+    if (
+      monies.length >=
+      2
+    ) {
+      const amount =
+        monies[
+          monies.length -
+            2
+        ];
+
+      const balance =
+        monies[
+          monies.length -
+            1
+        ];
+
+      setTransactionMoney(
+        previousTransaction,
+        amount,
+        balance
+      );
+
+      continue;
+    }
+
+
+    /*
+     * Handle split monetary lines:
+     *
+     * amount
+     * balance
+     */
+    if (
+      monies.length ===
+      1
+    ) {
+      const money =
+        monies[0];
+
+      if (
+        pendingAmount
+      ) {
+        if (
+          setTransactionMoney(
+            previousTransaction,
+            pendingAmount,
+            money
+          )
+        ) {
+          continue;
+        }
+      }
+
+      pendingAmount =
+        money;
+    }
+  }
+
+
+  /*
+   * Strict integrity guard:
+   * never export a silently broken bank table.
+   */
+  const transactions =
+    output.filter(
+      (
+        row
+      ) =>
+        Boolean(
+          firstDate(
+            row[0] || ''
+          )
+        )
+    );
+
+  const invalid =
+    transactions.filter(
+      (
+        row
+      ) =>
+        row.length !==
+          6 ||
+        !row[5] ||
+        (
+          !row[3] &&
+          !row[4]
+        ) ||
+        (
+          Boolean(
+            row[3]
+          ) &&
+          Boolean(
+            row[4]
+          )
+        )
+    );
+
+  if (
+    transactions.length >
+      0 &&
+    invalid.length ===
+      0
+  ) {
+    return output;
+  }
+
+  /*
+   * Returning [] allows the older coordinate-aware
+   * fallback below to remain available for unusual PDFs.
+   */
+  return [];
+};
+
+
 const normalizeBankRows = (
   inputRows:
     string[][]
@@ -1686,12 +2204,20 @@ export function refineExtractedTableResult(
       rows
     )
   ) {
-    const bankRows =
-      repairCollapsedBankMoneyColumns(
-        normalizeBankRows(
-          rows
-        )
+    const losslessBankRows =
+      normalizeBankRowsLossless(
+        rows
       );
+
+    const bankRows =
+      losslessBankRows.length >
+        0
+        ? losslessBankRows
+        : repairCollapsedBankMoneyColumns(
+            normalizeBankRows(
+              rows
+            )
+          );
 
     return buildResult(
       bankRows,
