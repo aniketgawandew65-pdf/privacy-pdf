@@ -254,6 +254,39 @@ const detectDeviceKind = (
   return 'desktop';
 };
 
+/**
+ * Synchronous runtime safety classification.
+ *
+ * Reuses the exact same OS/device detection as the full
+ * capability snapshot, without waiting for storage/heap probes.
+ *
+ * Conservative fallback: anything that cannot be positively
+ * classified as Desktop remains in the mobile safety policy.
+ */
+export function isMobileSafetyEnvironment(): boolean {
+  if (
+    typeof navigator ===
+      'undefined'
+  ) {
+    return true;
+  }
+
+  const nav =
+    navigator as
+      NavigatorCapabilityLike;
+
+  const os =
+    detectOS(nav);
+
+  const kind =
+    detectDeviceKind(
+      nav,
+      os
+    );
+
+  return kind !== 'desktop';
+}
+
 const detectBrowser = (
   nav: NavigatorCapabilityLike,
   os: OperatingSystem

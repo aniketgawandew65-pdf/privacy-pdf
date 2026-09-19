@@ -1,6 +1,9 @@
 import { safeStorage, safeSessionStorage } from './safeStorage';
 import { getLicenseStatus } from './license';
 import {
+  isMobileSafetyEnvironment,
+} from './deviceCapability';
+import {
   GOOGLE_BONUS_FILE_SIZE_MB,
   consumeGoogleBonus,
   getActiveGoogleBonus,
@@ -140,13 +143,26 @@ export function checkActionAllowed(fileSizeBytes?: number): {
 } {
   const { isPro } = getLicenseStatus();
 
+  const mobileSafetyEnvironment =
+    isMobileSafetyEnvironment();
+
   const sizeInMb =
     fileSizeBytes === undefined
       ? undefined
       : fileSizeBytes / (1024 * 1024);
 
   if (isPro) {
+    /*
+     * Mobile/tablet Pro retains the hard 150 MB combined
+     * task ceiling.
+     *
+     * Desktop Pro has no fixed task-credit size ceiling.
+     * Actual Desktop processing capacity is handled by the
+     * separate hardware/browser/tool-aware recommendation
+     * system and later concrete resource checks.
+     */
     if (
+      mobileSafetyEnvironment &&
       sizeInMb !== undefined &&
       sizeInMb > MAX_PRO_FILE_SIZE_MB
     ) {
@@ -154,7 +170,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
         allowed: false,
         reason: 'FILE_SIZE_LIMIT',
         errorMessage:
-          `File exceeds the maximum Pro upload limit of ${MAX_PRO_FILE_SIZE_MB}MB.`,
+          `Mobile and tablet Pro support up to ${MAX_PRO_FILE_SIZE_MB}MB per task.`,
       };
     }
 
@@ -171,6 +187,11 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   const bonusRemaining =
     bonusAccount?.bonusRemaining ?? 0;
 
+  const proSizeUpgradeMessage =
+    mobileSafetyEnvironment
+      ? `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+      : 'Upgrade to Desktop Pro for hardware-aware processing with no fixed upload-size cap.';
+
   /*
    * Anything above 25 MB requires Pro.
    */
@@ -184,7 +205,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       errorMessage:
         bonusAccount
           ? `Extra credits support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
-            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+            proSizeUpgradeMessage
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
             `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
             `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
@@ -212,7 +233,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       errorMessage:
         bonusAccount
           ? `Your extra credits are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
+            proSizeUpgradeMessage
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
             `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
     };
