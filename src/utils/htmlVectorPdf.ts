@@ -1615,21 +1615,25 @@ export async function generateStyledVectorHtmlPDF(
       pageHeight -
       margin * 2;
 
-    const scale =
+    let scale =
       usableWidth /
       contentWidth;
 
-    const pageSlicePx =
+    let pageSlicePx =
       usableHeight /
       scale;
 
     /*
      * -------------------------------------------------------
-     * PAGE BREAK GUARDS
+     * CONSERVATIVE PAGE BREAK GUARD
      * -------------------------------------------------------
      *
-     * Keep reasonably-sized cards together and avoid leaving
-     * headings stranded at the very bottom of a PDF page.
+     * Do NOT push headings or whole sections forward.
+     *
+     * Only protect a reasonably small card when it would begin
+     * in the final sliver of a page. Normal splitting is allowed
+     * because avoiding huge blank pages is more important than
+     * keeping every website card absolutely indivisible.
      */
     const candidateCards =
       Array.from(
@@ -1677,10 +1681,6 @@ export async function generateStyledVectorHtmlPDF(
       const card of
       candidateCards
     ) {
-      /*
-       * Skip nested card-like elements when their parent is
-       * already being treated as one unit.
-       */
       if (
         card.parentElement &&
         cardSet.has(
@@ -1720,11 +1720,14 @@ export async function generateStyledVectorHtmlPDF(
       const height =
         rect.height;
 
+      /*
+       * Large cards are deliberately allowed to split.
+       */
       if (
         height <= 0 ||
         height >
           pageSlicePx *
-            0.82
+            0.30
       ) {
         continue;
       }
@@ -1743,12 +1746,16 @@ export async function generateStyledVectorHtmlPDF(
         pageSlicePx -
         positionInPage;
 
+      /*
+       * Move only when the card would start in the final 8%
+       * of the current page AND genuinely cannot fit there.
+       */
       if (
         height >
           remaining &&
         remaining <
           pageSlicePx *
-            0.45
+            0.08
       ) {
         const currentMargin =
           parseFloat(
@@ -1760,77 +1767,7 @@ export async function generateStyledVectorHtmlPDF(
           `${
             currentMargin +
             remaining +
-            8
-          }px`;
-      }
-    }
-
-    /*
-     * Keep headings with a little content beneath them.
-     */
-    for (
-      const heading of
-      Array.from(
-        body
-          .querySelectorAll<HTMLElement>(
-            'h1, h2, h3, h4'
-          )
-      )
-    ) {
-      const bodyTop =
-        body
-          .getBoundingClientRect()
-          .top;
-
-      const rect =
-        heading
-          .getBoundingClientRect();
-
-      const y =
-        rect.top -
-        bodyTop;
-
-      const positionInPage =
-        (
-          (
-            y %
-            pageSlicePx
-          ) +
-          pageSlicePx
-        ) %
-        pageSlicePx;
-
-      const remaining =
-        pageSlicePx -
-        positionInPage;
-
-      const required =
-        rect.height +
-        70;
-
-      if (
-        required <
-          pageSlicePx *
-            0.45 &&
-        remaining <
-          required
-      ) {
-        const style =
-          win.getComputedStyle(
-            heading
-          );
-
-        const currentMargin =
-          parseFloat(
-            style.marginTop ||
-              '0'
-          ) || 0;
-
-        heading.style.marginTop =
-          `${
-            currentMargin +
-            remaining +
-            8
+            4
           }px`;
       }
     }
@@ -1842,6 +1779,88 @@ export async function generateStyledVectorHtmlPDF(
 
     contentHeight =
       meaningfulBounds.height;
+
+    const initialPageCount =
+      Math.max(
+        1,
+        Math.ceil(
+          (
+            contentHeight -
+            0.5
+          ) /
+            pageSlicePx
+        )
+      );
+
+    if (
+      initialPageCount >
+        1
+    ) {
+      const tailHeight =
+        Math.max(
+          0,
+          contentHeight -
+            (
+              initialPageCount -
+              1
+            ) *
+              pageSlicePx
+        );
+
+      /*
+       * Only treat it as an orphan when the final page contains
+       * a small fragment of the document.
+       */
+      if (
+        tailHeight >
+          0 &&
+        tailHeight <
+          pageSlicePx *
+            0.16
+      ) {
+        /*
+         * Scale required to fit the same content into one fewer
+         * page. Smaller scale is always horizontally safer too.
+         */
+        const fitScale =
+          (
+            (
+              initialPageCount -
+              1
+            ) *
+              usableHeight
+          ) /
+          Math.max(
+            1,
+            contentHeight
+          );
+
+        /*
+         * Never shrink more than 8%.
+         */
+        const minimumScale =
+          scale *
+          0.92;
+
+        if (
+          fitScale <
+            scale &&
+          fitScale >=
+            minimumScale
+        ) {
+          scale =
+            Math.max(
+              minimumScale,
+              fitScale *
+                0.995
+            );
+
+          pageSlicePx =
+            usableHeight /
+            scale;
+        }
+      }
+    }
 
     const pageCount =
       Math.max(
