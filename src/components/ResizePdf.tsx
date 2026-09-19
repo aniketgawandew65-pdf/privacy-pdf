@@ -17,6 +17,9 @@ import {
   type ResizeFitMode,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -39,6 +42,14 @@ export const ResizePdf: React.FC<ResizePdfProps> = ({ file, onFileChange }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'resize-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount: pageCount > 0 ? pageCount : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     if (!file) {
@@ -172,6 +183,10 @@ export const ResizePdf: React.FC<ResizePdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Target Format Preset Selector */}
           <div className="space-y-2">

@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import { splitPDF, splitPdfToZip, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -34,6 +37,14 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'split-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount: pageCount > 0 ? pageCount : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     if (!file) {
@@ -276,6 +287,10 @@ export const Splitter: React.FC<SplitterProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Mode Selector */}
           <div className="grid grid-cols-2 gap-2">

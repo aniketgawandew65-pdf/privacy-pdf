@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, Download, Loader2, CheckCircle2, X, Trash2 } from 'lucide-react';
 import { removePagesFromPDF, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -157,6 +160,14 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
 
   // Managed Object URL lifecycle to prevent memory leaks on mobile
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'remove-pages',
+      selectedBytes: file?.size ?? 0,
+      pageCount: totalPages > 0 ? totalPages : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     revokeDownloadUrl();
@@ -576,6 +587,10 @@ export const RemovePages: React.FC<RemovePagesProps> = ({ file, onFileChange }) 
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Page input */}
           <div className="space-y-2">
