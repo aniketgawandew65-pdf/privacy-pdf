@@ -9,6 +9,9 @@ import {
   Table,
 } from 'lucide-react';
 import { extractTableFromPDF, type ExtractedTableResult } from '../utils/pdfEngine';
+import {
+  refineExtractedTableResult,
+} from '../utils/pdfCsvStructure';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import {
   clearProcessingRecovery,
@@ -562,7 +565,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
 
 
     try {
-      const result =
+      const rawResult =
         await exclusivelyProcess(
           async () => {
             let recoveryEnabled =
@@ -621,6 +624,17 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               }
             );
           }
+        );
+
+
+      /*
+       * Refinement runs only AFTER extraction/checkpointing.
+       * Recovery data remains the untouched raw page data.
+       */
+      const result =
+        refineExtractedTableResult(
+          rawResult,
+          activeSettings.delimiter
         );
 
 
