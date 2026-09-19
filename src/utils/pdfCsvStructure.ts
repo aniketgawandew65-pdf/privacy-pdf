@@ -205,29 +205,51 @@ const findHeaderMap = (
         row[index]
           .toLowerCase();
 
+      /*
+       * Some bank PDFs expose:
+       *
+       * "Transaction Date Value Date"
+       *
+       * as ONE physical PDF text column.
+       *
+       * Both logical fields therefore legitimately point to
+       * the same source column.
+       */
+      const hasTransactionDate =
+        /transaction\s*date/.test(
+          value
+        );
+
+      const hasValueDate =
+        /value\s*date/.test(
+          value
+        );
+
+
       if (
         map.transactionDate ===
           undefined &&
-        /transaction\s*date/.test(
-          value
-        )
+        hasTransactionDate
       ) {
         map.transactionDate =
           index;
-
-        continue;
       }
+
 
       if (
         map.valueDate ===
           undefined &&
-        /value\s*date/.test(
-          value
-        )
+        hasValueDate
       ) {
         map.valueDate =
           index;
+      }
 
+
+      if (
+        hasTransactionDate ||
+        hasValueDate
+      ) {
         continue;
       }
 
@@ -710,22 +732,60 @@ const normalizeBankRows = (
      * use the original coordinate column map.
      */
     if (headerMap) {
-      const transactionDate =
-        firstDate(
-          mappedValue(
-            row,
-            headerMap,
-            'transactionDate'
-          )
+      const transactionDateSource =
+        mappedValue(
+          row,
+          headerMap,
+          'transactionDate'
         );
 
-      const valueDate =
+      const valueDateSource =
+        mappedValue(
+          row,
+          headerMap,
+          'valueDate'
+        );
+
+
+      /*
+       * DBS and similar statements place both dates inside the
+       * same physical PDF coordinate column.
+       *
+       * Example:
+       *
+       * 01-Feb-2022 01-Feb-2022 UPI~...
+       *
+       * Preserve the first date as Transaction Date and the
+       * second as Value Date instead of duplicating/dropping one.
+       */
+      const sharedDateColumn =
+        headerMap.transactionDate !==
+          undefined &&
+        headerMap.transactionDate ===
+          headerMap.valueDate;
+
+
+      const sharedDates =
+        sharedDateColumn
+          ? (
+              transactionDateSource.match(
+                DATE_GLOBAL
+              ) || []
+            )
+          : [];
+
+
+      const transactionDate =
+        sharedDates[0] ||
         firstDate(
-          mappedValue(
-            row,
-            headerMap,
-            'valueDate'
-          )
+          transactionDateSource
+        );
+
+
+      const valueDate =
+        sharedDates[1] ||
+        firstDate(
+          valueDateSource
         );
 
       const debit =
@@ -761,6 +821,53 @@ const normalizeBankRows = (
           headerMap,
           'details'
         );
+
+
+      /*
+       * When both dates share the first PDF column, that same
+       * cell also contains the beginning of the narration.
+       *
+       * Remove only the two date tokens and prepend the
+       * remaining text to the dedicated Details column.
+       *
+       * This preserves transaction IDs, UPI references,
+       * merchant text, ATM references, etc.
+       */
+      if (
+        sharedDateColumn &&
+        sharedDates.length >=
+          2
+      ) {
+        const inlineDetails =
+          removeTokens(
+            transactionDateSource,
+            sharedDates.slice(
+              0,
+              2
+            )
+          );
+
+
+        if (
+          inlineDetails
+        ) {
+          details =
+            (
+              inlineDetails +
+              (
+                details
+                  ? ' ' +
+                    details
+                  : ''
+              )
+            )
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim();
+        }
+      }
 
       /*
        * OCR/text layers sometimes place a continuation fragment
