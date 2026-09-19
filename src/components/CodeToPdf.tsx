@@ -21,7 +21,7 @@ import {
   Loader2,
   X,
 } from 'lucide-react';
-import { generateCodePDF, type CodeToPdfOptions } from '../utils/pdfEngine';
+import { generateCodeVectorPDF, type CodeVectorPdfOptions } from '../utils/codeVectorPdf';
 import { useObjectUrl } from '../utils/useObjectUrl';
 
 const SAMPLE_CODE = `// 1into1 Serverless PDF Engine
@@ -362,7 +362,7 @@ export const CodeToPdf: React.FC = () => {
     revokeUrl();
 
     try {
-      const options: CodeToPdfOptions = {
+      const options: CodeVectorPdfOptions = {
         code: codeContent,
         title: title.trim(),
         theme,
@@ -372,7 +372,7 @@ export const CodeToPdf: React.FC = () => {
         orientation,
       };
 
-      const pdfBytes = await generateCodePDF(options);
+      const pdfBytes = await generateCodeVectorPDF(options);
       const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
       createUrl(blob);
       commitTaskCredit();
