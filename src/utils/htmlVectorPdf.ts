@@ -1080,7 +1080,8 @@ export async function generateStyledVectorHtmlPDF(
     #particle-canvas,
     #mouse-spotlight,
     #custom-cursor-dot,
-    #custom-cursor-ring {
+    #custom-cursor-ring,
+    #type-cursor {
       display: none !important;
     }
   `;
@@ -1255,6 +1256,178 @@ export async function generateStyledVectorHtmlPDF(
       ).fonts?.ready;
     } catch (_) {}
 
+    const waitForVectorLayout =
+      () =>
+        new Promise<void>(
+          (
+            resolve
+          ) =>
+            win.requestAnimationFrame(
+              () =>
+                win.requestAnimationFrame(
+                  () =>
+                    resolve()
+                )
+            )
+        );
+
+    /*
+     * -------------------------------------------------------
+     * HORIZONTAL OVERFLOW NORMALIZATION
+     * -------------------------------------------------------
+     *
+     * App-like HTML often has navigation/chip/flex rows with
+     * nowrap behaviour. In a browser they can scroll sideways;
+     * in a PDF they must wrap instead of leaving the page.
+     */
+    doc.documentElement.style.maxWidth =
+      `${viewportWidth}px`;
+
+    doc.body.style.maxWidth =
+      `${viewportWidth}px`;
+
+    doc.documentElement.style.overflowX =
+      'hidden';
+
+    doc.body.style.overflowX =
+      'hidden';
+
+    const normalizeHorizontalOverflow =
+      () => {
+        for (
+          let pass = 0;
+          pass < 3;
+          pass++
+        ) {
+          const bodyLeft =
+            doc.body
+              .getBoundingClientRect()
+              .left;
+
+          const rightLimit =
+            bodyLeft +
+            viewportWidth;
+
+          for (
+            const element of
+            Array.from(
+              doc.body
+                .querySelectorAll<HTMLElement>(
+                  '*'
+                )
+            )
+          ) {
+            const style =
+              win.getComputedStyle(
+                element
+              );
+
+            if (
+              style.display ===
+                'none' ||
+              style.visibility ===
+                'hidden'
+            ) {
+              continue;
+            }
+
+            /*
+             * Website fixed/sticky UI becomes normal document
+             * content in a PDF.
+             */
+            if (
+              style.position ===
+                'fixed' ||
+              style.position ===
+                'sticky'
+            ) {
+              element.style.position =
+                'static';
+            }
+
+            element.style.boxSizing =
+              'border-box';
+
+            element.style.minWidth =
+              '0';
+
+            const rect =
+              element
+                .getBoundingClientRect();
+
+            const hasOverflow =
+              rect.right >
+                rightLimit +
+                  1 ||
+              rect.width >
+                viewportWidth +
+                  1 ||
+              (
+                element.scrollWidth >
+                  element.clientWidth +
+                    1 &&
+                element.clientWidth >
+                  0
+              );
+
+            if (!hasOverflow) {
+              continue;
+            }
+
+            if (
+              style.display ===
+                'flex' ||
+              style.display ===
+                'inline-flex'
+            ) {
+              element.style.flexWrap =
+                'wrap';
+            }
+
+            if (
+              style.whiteSpace ===
+                'nowrap'
+            ) {
+              element.style.whiteSpace =
+                'normal';
+            }
+
+            element.style.maxWidth =
+              '100%';
+
+            if (
+              rect.width >
+              viewportWidth
+            ) {
+              element.style.width =
+                '100%';
+            }
+
+            for (
+              const child of
+              Array.from(
+                element.children
+              )
+            ) {
+              if (
+                child instanceof
+                HTMLElement
+              ) {
+                child.style.maxWidth =
+                  '100%';
+
+                child.style.minWidth =
+                  '0';
+              }
+            }
+          }
+        }
+      };
+
+    normalizeHorizontalOverflow();
+
+    await waitForVectorLayout();
+
     onProgress?.(
       1,
       4,
@@ -1267,31 +1440,145 @@ export async function generateStyledVectorHtmlPDF(
     const htmlElement =
       doc.documentElement;
 
-    const contentHeight =
-      Math.max(
-        body.scrollHeight,
-        body.offsetHeight,
-        htmlElement.scrollHeight,
-        htmlElement.offsetHeight,
-        1
-      );
+    const measureMeaningfulBounds =
+      () => {
+        const bodyRect =
+          body
+            .getBoundingClientRect();
 
-    /*
-     * Account for app-like layouts whose flex/grid content is
-     * wider than the nominal browser viewport.
-     *
-     * The whole vector document is scaled to fit instead of
-     * allowing content to run outside the PDF edge.
-     */
+        let bottom =
+          1;
+
+        let right =
+          viewportWidth;
+
+        for (
+          const element of
+          Array.from(
+            body
+              .querySelectorAll<HTMLElement>(
+                '*'
+              )
+          )
+        ) {
+          const style =
+            win.getComputedStyle(
+              element
+            );
+
+          if (
+            style.display ===
+              'none' ||
+            style.visibility ===
+              'hidden' ||
+            Number(
+              style.opacity ||
+                '1'
+            ) <=
+              0.001
+          ) {
+            continue;
+          }
+
+          const rect =
+            element
+              .getBoundingClientRect();
+
+          if (
+            rect.width <= 0 ||
+            rect.height <= 0
+          ) {
+            continue;
+          }
+
+          const background =
+            parseCssColor(
+              style.backgroundColor
+            );
+
+          const borderWidth =
+            Math.max(
+              parseFloat(
+                style.borderTopWidth ||
+                  '0'
+              ) || 0,
+              parseFloat(
+                style.borderRightWidth ||
+                  '0'
+              ) || 0,
+              parseFloat(
+                style.borderBottomWidth ||
+                  '0'
+              ) || 0,
+              parseFloat(
+                style.borderLeftWidth ||
+                  '0'
+              ) || 0
+            );
+
+          const hasText =
+            Boolean(
+              element
+                .textContent
+                ?.trim()
+            );
+
+          const visuallyMeaningful =
+            hasText ||
+            Boolean(
+              background &&
+              background.a >
+                0.01
+            ) ||
+            borderWidth >
+              0.1;
+
+          if (
+            !visuallyMeaningful
+          ) {
+            continue;
+          }
+
+          bottom =
+            Math.max(
+              bottom,
+              rect.bottom -
+                bodyRect.top
+            );
+
+          right =
+            Math.max(
+              right,
+              rect.right -
+                bodyRect.left
+            );
+        }
+
+        return {
+          height:
+            Math.max(
+              1,
+              bottom +
+                2
+            ),
+
+          width:
+            Math.max(
+              viewportWidth,
+              right +
+                2
+            ),
+        };
+      };
+
+    let meaningfulBounds =
+      measureMeaningfulBounds();
+
+    let contentHeight =
+      meaningfulBounds.height;
+
     const contentWidth =
-      Math.max(
-        viewportWidth,
-        body.scrollWidth,
-        body.offsetWidth,
-        htmlElement.scrollWidth,
-        htmlElement.offsetWidth,
-        1
-      );
+      meaningfulBounds.width;
 
     const isLandscape =
       orientation ===
@@ -1336,11 +1623,234 @@ export async function generateStyledVectorHtmlPDF(
       usableHeight /
       scale;
 
+    /*
+     * -------------------------------------------------------
+     * PAGE BREAK GUARDS
+     * -------------------------------------------------------
+     *
+     * Keep reasonably-sized cards together and avoid leaving
+     * headings stranded at the very bottom of a PDF page.
+     */
+    const candidateCards =
+      Array.from(
+        body
+          .querySelectorAll<HTMLElement>(
+            'article, [class]'
+          )
+      )
+        .filter(
+          (
+            element
+          ) => {
+            if (
+              element.tagName ===
+              'ARTICLE'
+            ) {
+              return true;
+            }
+
+            const className =
+              element.className;
+
+            if (
+              typeof className !==
+              'string'
+            ) {
+              return false;
+            }
+
+            return (
+              /(^|[-_\s])(card|panel|tile)([-_\s]|$)/i
+                .test(
+                  className
+                )
+            );
+          }
+        );
+
+    const cardSet =
+      new Set(
+        candidateCards
+      );
+
+    for (
+      const card of
+      candidateCards
+    ) {
+      /*
+       * Skip nested card-like elements when their parent is
+       * already being treated as one unit.
+       */
+      if (
+        card.parentElement &&
+        cardSet.has(
+          card.parentElement
+        )
+      ) {
+        continue;
+      }
+
+      const style =
+        win.getComputedStyle(
+          card
+        );
+
+      if (
+        style.display ===
+          'none' ||
+        style.visibility ===
+          'hidden'
+      ) {
+        continue;
+      }
+
+      const bodyTop =
+        body
+          .getBoundingClientRect()
+          .top;
+
+      const rect =
+        card
+          .getBoundingClientRect();
+
+      const y =
+        rect.top -
+        bodyTop;
+
+      const height =
+        rect.height;
+
+      if (
+        height <= 0 ||
+        height >
+          pageSlicePx *
+            0.82
+      ) {
+        continue;
+      }
+
+      const positionInPage =
+        (
+          (
+            y %
+            pageSlicePx
+          ) +
+          pageSlicePx
+        ) %
+        pageSlicePx;
+
+      const remaining =
+        pageSlicePx -
+        positionInPage;
+
+      if (
+        height >
+          remaining &&
+        remaining <
+          pageSlicePx *
+            0.45
+      ) {
+        const currentMargin =
+          parseFloat(
+            style.marginTop ||
+              '0'
+          ) || 0;
+
+        card.style.marginTop =
+          `${
+            currentMargin +
+            remaining +
+            8
+          }px`;
+      }
+    }
+
+    /*
+     * Keep headings with a little content beneath them.
+     */
+    for (
+      const heading of
+      Array.from(
+        body
+          .querySelectorAll<HTMLElement>(
+            'h1, h2, h3, h4'
+          )
+      )
+    ) {
+      const bodyTop =
+        body
+          .getBoundingClientRect()
+          .top;
+
+      const rect =
+        heading
+          .getBoundingClientRect();
+
+      const y =
+        rect.top -
+        bodyTop;
+
+      const positionInPage =
+        (
+          (
+            y %
+            pageSlicePx
+          ) +
+          pageSlicePx
+        ) %
+        pageSlicePx;
+
+      const remaining =
+        pageSlicePx -
+        positionInPage;
+
+      const required =
+        rect.height +
+        70;
+
+      if (
+        required <
+          pageSlicePx *
+            0.45 &&
+        remaining <
+          required
+      ) {
+        const style =
+          win.getComputedStyle(
+            heading
+          );
+
+        const currentMargin =
+          parseFloat(
+            style.marginTop ||
+              '0'
+          ) || 0;
+
+        heading.style.marginTop =
+          `${
+            currentMargin +
+            remaining +
+            8
+          }px`;
+      }
+    }
+
+    await waitForVectorLayout();
+
+    meaningfulBounds =
+      measureMeaningfulBounds();
+
+    contentHeight =
+      meaningfulBounds.height;
+
     const pageCount =
       Math.max(
         1,
         Math.ceil(
-          contentHeight /
+          (
+            contentHeight -
+            0.5
+          ) /
             pageSlicePx
         )
       );
@@ -2335,12 +2845,29 @@ export async function generateStyledVectorHtmlPDF(
         '';
 
       if (
-        !/^(https?:|mailto:|tel:)/i.test(
+        !href ||
+        /^javascript:/i.test(
+          href
+        ) ||
+        /^data:/i.test(
           href
         )
       ) {
         continue;
       }
+
+      const internalTarget =
+        href.startsWith(
+          '#'
+        )
+          ? doc.getElementById(
+              decodeURIComponent(
+                href.slice(
+                  1
+                )
+              )
+            )
+          : null;
 
       for (
         const rect of
@@ -2397,22 +2924,95 @@ export async function generateStyledVectorHtmlPDF(
             1
         );
 
-        pdf.link(
+        const linkX =
           margin +
-            xPx *
-              scale,
+          xPx *
+            scale;
+
+        const linkY =
           margin +
-            pageLocalY *
-              scale,
+          pageLocalY *
+            scale;
+
+        const linkWidth =
           rect.width *
-            scale,
+          scale;
+
+        const linkHeight =
           rect.height *
-            scale,
-          {
-            url:
-              href,
-          }
-        );
+          scale;
+
+        if (
+          internalTarget
+        ) {
+          const targetRect =
+            internalTarget
+              .getBoundingClientRect();
+
+          const targetYPx =
+            targetRect.top -
+            rootTop;
+
+          const targetPageIndex =
+            Math.max(
+              0,
+              Math.min(
+                pageCount -
+                  1,
+                Math.floor(
+                  Math.max(
+                    0,
+                    targetYPx
+                  ) /
+                    pageSlicePx
+                )
+              )
+            );
+
+          const targetLocalY =
+            Math.max(
+              0,
+              targetYPx -
+                targetPageIndex *
+                  pageSlicePx
+            );
+
+          pdf.link(
+            linkX,
+            linkY,
+            linkWidth,
+            linkHeight,
+            {
+              pageNumber:
+                targetPageIndex +
+                1,
+
+              top:
+                margin +
+                targetLocalY *
+                  scale,
+
+              magFactor:
+                0,
+            }
+          );
+        } else {
+          /*
+           * Keep external, mail, telephone and relative links.
+           * Relative URLs are intentionally preserved instead
+           * of silently throwing them away.
+           */
+          pdf.link(
+            linkX,
+            linkY,
+            linkWidth,
+            linkHeight,
+            {
+              url:
+                href,
+            }
+          );
+        }
       }
     }
 
