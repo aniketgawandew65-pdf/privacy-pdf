@@ -16,6 +16,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -92,6 +95,22 @@ export function CompressImage() {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const imageCapacityBytes =
+    files.reduce(
+      (total, file) =>
+        total + file.size,
+      0
+    );
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'compress-image',
+      selectedBytes: imageCapacityBytes,
+      enabled:
+        files.length > 0 &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore selected source images and compression settings
@@ -470,6 +489,12 @@ export function CompressImage() {
               Clear
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={desktopCapacityRecommendation}
+            />
+          )}
 
           <div>
             <label className="block text-sm font-semibold text-zinc-900 mb-3">

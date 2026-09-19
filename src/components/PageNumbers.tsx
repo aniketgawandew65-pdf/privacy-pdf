@@ -5,6 +5,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 interface PageNumbersProps {
   file: File | null;
@@ -17,6 +20,15 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'page-numbers',
+      selectedBytes: file?.size ?? 0,
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   const handleApplyNumbers = async () => {
     if (!file) return;
@@ -125,6 +137,12 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={desktopCapacityRecommendation}
+            />
+          )}
 
           {/* Position Selector */}
           <div className="space-y-2">

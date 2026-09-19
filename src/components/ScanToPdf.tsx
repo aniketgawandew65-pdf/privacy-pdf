@@ -19,6 +19,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -391,6 +394,15 @@ export const ScanToPdf = () => {
     [pages]
   );
 
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'scan-to-pdf',
+      selectedBytes: totalSize,
+      enabled:
+        pages.length > 0 &&
+        getLicenseStatus().isPro,
+    });
+
   useEffect(() => {
     return () => {
       pages.forEach((page) =>
@@ -720,6 +732,12 @@ export const ScanToPdf = () => {
 
       {pages.length > 0 && (
         <>
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={desktopCapacityRecommendation}
+            />
+          )}
+
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 sm:p-5">
 
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">

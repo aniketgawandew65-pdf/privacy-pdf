@@ -21,6 +21,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   saveToolWorkspaceFiles,
   restoreToolWorkspaceFiles,
@@ -175,6 +178,22 @@ export const ImageToPdf: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const imageCapacityBytes =
+    images.reduce(
+      (total, image) =>
+        total + image.size,
+      0
+    );
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'image-converter',
+      selectedBytes: imageCapacityBytes,
+      enabled:
+        images.length > 0 &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Keep selected source images available when the user
@@ -604,6 +623,14 @@ export const ImageToPdf: React.FC = () => {
           }}
         />
       </div>
+
+      {desktopCapacityRecommendation && (
+        <div className="mb-5">
+          <DesktopCapacityStatus
+            recommendation={desktopCapacityRecommendation}
+          />
+        </div>
+      )}
 
       <div className="mb-5 p-3 rounded-xl bg-zinc-950/70 border border-zinc-800">
         <label className="text-xs text-zinc-400 font-medium block mb-2">

@@ -26,6 +26,9 @@ import {
   type VisualOverlayItem,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -253,6 +256,19 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
   } | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'edit-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount:
+        totalPages > 0
+          ? totalPages
+          : null,
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
 
   useEffect(() => {
@@ -2036,6 +2052,12 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
         </div>
       ) : (
         <>
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={desktopCapacityRecommendation}
+            />
+          )}
+
           {/* Top Controls */}
           <div className="bg-zinc-900/70 border border-zinc-800/90 rounded-2xl p-3.5 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4 shadow-xl">
             <div className="flex items-center gap-2">
