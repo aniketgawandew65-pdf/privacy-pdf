@@ -40,6 +40,11 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from "../utils/taskCreditGate";
+import { getLicenseStatus } from "../utils/license";
+import {
+  useDesktopCapacityRecommendation,
+} from "../hooks/useDesktopCapacityRecommendation";
+import { DesktopCapacityStatus } from "./DesktopCapacityStatus";
 // @ts-ignore
 import html2canvas from "html2canvas";
 
@@ -232,6 +237,22 @@ export const TextToPdf: React.FC<any> = () => {
 
   const [fitScale, setFitScale] = useState<number>(0.5);
   const [pagesHtml, setPagesHtml] = useState<string[]>([""]);
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'text-to-pdf',
+
+      selectedBytes:
+        content.length,
+
+      enabled:
+        Boolean(content.trim()) &&
+        getLicenseStatus().isPro,
+    });
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const previewOuterRef = useRef<HTMLDivElement | null>(null);
@@ -1769,6 +1790,14 @@ export const TextToPdf: React.FC<any> = () => {
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 text-white space-y-6 select-none">
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+        />
+      )}
+
       {/* Top Document Editor Card */}
       <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col gap-4">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">

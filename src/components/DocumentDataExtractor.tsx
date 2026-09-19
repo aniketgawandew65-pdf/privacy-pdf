@@ -5,6 +5,12 @@ import React, {
   useState,
 } from 'react';
 
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
+
 import {
   AlertCircle,
   CheckCircle2,
@@ -354,6 +360,22 @@ export const DocumentDataExtractor:
       setExportingExcel,
     ] =
       useState(false);
+
+    const {
+      recommendation:
+        desktopCapacityRecommendation,
+    } =
+      useDesktopCapacityRecommendation({
+        toolId:
+          'document-data-extractor',
+
+        selectedBytes:
+          file?.size ?? 0,
+
+        enabled:
+          Boolean(file) &&
+          getLicenseStatus().isPro,
+      });
 
     const totalRows =
       useMemo(
@@ -1416,6 +1438,16 @@ export const DocumentDataExtractor:
                 0 ? (
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
               ) : null}
+            </div>
+          )}
+
+          {desktopCapacityRecommendation && (
+            <div className="mt-4">
+              <DesktopCapacityStatus
+                recommendation={
+                  desktopCapacityRecommendation
+                }
+              />
             </div>
           )}
 

@@ -16,6 +16,11 @@ import {
   recognizeMobileOcrTile,
 } from '../utils/mobileOcrEngine';
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getLicenseStatus } from "../utils/license";
+import {
+  useDesktopCapacityRecommendation,
+} from "../hooks/useDesktopCapacityRecommendation";
+import { DesktopCapacityStatus } from "./DesktopCapacityStatus";
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -665,6 +670,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const [file, setFile] = useState<File | null>(
     () => redactorSessionCache.file
   );
+
+  const {
+    recommendation: desktopCapacityRecommendation,
+  } = useDesktopCapacityRecommendation({
+    toolId: 'private-pii-secrets-auto-redactor',
+    selectedBytes: file?.size ?? 0,
+    enabled:
+      Boolean(file) &&
+      getLicenseStatus().isPro,
+  });
 
   const [workspaceHydrated, setWorkspaceHydrated] =
     useState(false);
@@ -4332,6 +4347,14 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
+          </div>
+        )}
+
+        {desktopCapacityRecommendation && (
+          <div className="mt-4">
+            <DesktopCapacityStatus
+              recommendation={desktopCapacityRecommendation}
+            />
           </div>
         )}
 

@@ -11,6 +11,11 @@ import {
 } from 'lucide-react';
 import { generateCsvPDF, type CsvToPdfOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
   checkTaskCredit,
@@ -41,6 +46,27 @@ export const CsvToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  const csvCapacityBytes =
+    activeTab === 'upload'
+      ? file?.size ?? 0
+      : pastedText.length;
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'csv-to-pdf',
+
+      selectedBytes:
+        csvCapacityBytes,
+
+      enabled:
+        csvCapacityBytes > 0 &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore CSV / pasted spreadsheet input after
@@ -526,6 +552,14 @@ export const CsvToPdf: React.FC = () => {
             className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
           />
         </div>
+      )}
+
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+        />
       )}
 
       {/* Configuration Controls */}

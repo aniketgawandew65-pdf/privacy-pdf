@@ -23,6 +23,11 @@ import {
 } from 'lucide-react';
 import { generateCodeVectorPDF, type CodeVectorPdfOptions } from '../utils/codeVectorPdf';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   exclusivelyProcess,
   hasRecoverableProcessing,
@@ -64,6 +69,27 @@ export const CodeToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  const codeCapacityBytes =
+    activeTab === 'upload'
+      ? file?.size ?? 0
+      : codeContent.length;
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'code-to-pdf',
+
+      selectedBytes:
+        codeCapacityBytes,
+
+      enabled:
+        codeCapacityBytes > 0 &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore Code to PDF input after Preview/Download -> Back.
@@ -726,6 +752,14 @@ export const CodeToPdf: React.FC = () => {
             className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl p-3.5 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
           />
         </div>
+      )}
+
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+        />
       )}
 
       {/* Configuration Controls */}

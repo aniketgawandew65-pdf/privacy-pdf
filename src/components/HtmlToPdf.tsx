@@ -13,6 +13,11 @@ import {
 import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
 import { generateStyledVectorHtmlPDF } from '../utils/htmlVectorPdf';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
   checkTaskCredit,
@@ -140,6 +145,27 @@ export const HtmlToPdf: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
+
+  const htmlCapacityBytes =
+    activeTab === 'upload'
+      ? file?.size ?? 0
+      : htmlContent.length;
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'html-to-pdf',
+
+      selectedBytes:
+        htmlCapacityBytes,
+
+      enabled:
+        htmlCapacityBytes > 0 &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore HTML / Receipt input after
@@ -938,6 +964,14 @@ export const HtmlToPdf: React.FC = () => {
             className="w-full bg-zinc-950/80 border border-zinc-800 rounded-xl p-3.5 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
           />
         </div>
+      )}
+
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+        />
       )}
 
       {/* Format Controls */}
