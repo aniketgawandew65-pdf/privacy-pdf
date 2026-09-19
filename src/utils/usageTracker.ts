@@ -207,8 +207,8 @@ export function checkActionAllowed(fileSizeBytes?: number): {
           ? `Extra credits support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
             proSizeUpgradeMessage
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB, ` +
-            `or upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`,
+            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+            proSizeUpgradeMessage,
     };
   }
 
