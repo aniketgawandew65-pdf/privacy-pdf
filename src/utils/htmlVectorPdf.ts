@@ -1000,6 +1000,10 @@ const cleanVectorText = (
       ''
     )
     .replace(
+      /[\u2190-\u21FF\u2300-\u23FF\u2600-\u27BF]/g,
+      ''
+    )
+    .replace(
       /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
       ''
     );
@@ -1190,6 +1194,44 @@ export async function generateStyledVectorHtmlPDF(
       doc
     );
 
+    /*
+     * Do not let unstyled browser-default blue links leak into
+     * an otherwise styled PDF.
+     *
+     * Explicit source colours / Tailwind text colours remain
+     * untouched.
+     */
+    for (
+      const control of
+      Array.from(
+        doc.querySelectorAll<HTMLElement>(
+          'a, button'
+        )
+      )
+    ) {
+      const computed =
+        parseCssColor(
+          win.getComputedStyle(
+            control
+          ).color
+        );
+
+      const looksLikeBrowserDefaultBlue =
+        Boolean(
+          computed &&
+          computed.r <= 20 &&
+          computed.g <= 20 &&
+          computed.b >= 180
+        );
+
+      if (
+        looksLikeBrowserDefaultBlue
+      ) {
+        control.style.color =
+          'inherit';
+      }
+    }
+
     await new Promise<void>(
       (
         resolve
@@ -1234,6 +1276,23 @@ export async function generateStyledVectorHtmlPDF(
         1
       );
 
+    /*
+     * Account for app-like layouts whose flex/grid content is
+     * wider than the nominal browser viewport.
+     *
+     * The whole vector document is scaled to fit instead of
+     * allowing content to run outside the PDF edge.
+     */
+    const contentWidth =
+      Math.max(
+        viewportWidth,
+        body.scrollWidth,
+        body.offsetWidth,
+        htmlElement.scrollWidth,
+        htmlElement.offsetWidth,
+        1
+      );
+
     const isLandscape =
       orientation ===
       'landscape';
@@ -1271,7 +1330,7 @@ export async function generateStyledVectorHtmlPDF(
 
     const scale =
       usableWidth /
-      viewportWidth;
+      contentWidth;
 
     const pageSlicePx =
       usableHeight /
@@ -1873,6 +1932,15 @@ export async function generateStyledVectorHtmlPDF(
                 16
             );
 
+          type VisualWord = {
+            text: string;
+            rect: DOMRect;
+          };
+
+          const visualWords:
+            VisualWord[] =
+              [];
+
           const words =
             /\S+/g;
 
@@ -1903,124 +1971,347 @@ export async function generateStyledVectorHtmlPDF(
                 match[0].length
             );
 
-            for (
-              const rect of
+            const rects =
               Array.from(
                 range
                   .getClientRects()
-              )
+              );
+
+            /*
+             * Normal words have one rectangle.
+             * If a browser splits an unusually long word,
+             * retaining the first painted segment is safer
+             * than duplicating that word in the PDF.
+             */
+            const rect =
+              rects[0];
+
+            if (
+              rect &&
+              rect.width > 0 &&
+              rect.height > 0
             ) {
-              if (
-                rect.width <=
-                  0 ||
-                rect.height <=
-                  0
-              ) {
-                continue;
-              }
-
-              const yPx =
-                rect.top -
-                rootTop;
-
-              const xPx =
-                rect.left -
-                rootLeft;
-
-              if (
-                yPx <
-                  0 ||
-                yPx >
-                  contentHeight
-              ) {
-                continue;
-              }
-
-              const pageIndex =
-                Math.max(
-                  0,
-                  Math.min(
-                    pageCount -
-                      1,
-                    Math.floor(
-                      (
-                        yPx +
-                        rect.height *
-                          0.5
-                      ) /
-                        pageSlicePx
-                    )
-                  )
-                );
-
-              const pageLocalY =
-                yPx -
-                pageIndex *
-                  pageSlicePx;
-
-              let word =
-                cleanVectorText(
-                  match[0]
-                );
-
-              if (
-                style.textTransform ===
-                'uppercase'
-              ) {
-                word =
-                  word.toUpperCase();
-              } else if (
-                style.textTransform ===
-                'lowercase'
-              ) {
-                word =
-                  word.toLowerCase();
-              }
-
-              if (!word) {
-                continue;
-              }
-
-              pdf.setPage(
-                pageIndex +
-                  1
-              );
-
-              pdf.setFont(
-                font,
-                fontStyle
-              );
-
-              pdf.setFontSize(
-                Math.max(
-                  5,
-                  fontSize *
-                    scale
-                )
-              );
-
-              pdf.setTextColor(
-                textR,
-                textG,
-                textB
-              );
-
-              pdf.text(
-                word,
-                margin +
-                  xPx *
-                    scale,
-                margin +
-                  (
-                    pageLocalY +
-                    rect.height *
-                      0.82
-                  ) *
-                    scale
-              );
+              visualWords.push({
+                text:
+                  match[0],
+                rect,
+              });
             }
 
             range.detach?.();
+          }
+
+          /*
+           * Group words by their ACTUAL browser-painted line.
+           *
+           * This preserves browser wrapping while putting real
+           * spaces back into the PDF text stream.
+           */
+          const visualLines:
+            VisualWord[][] =
+              [];
+
+          for (
+            const word of
+            [...visualWords]
+              .sort(
+                (
+                  a,
+                  b
+                ) =>
+                  (
+                    a.rect.top -
+                    b.rect.top
+                  ) ||
+                  (
+                    a.rect.left -
+                    b.rect.left
+                  )
+              )
+          ) {
+            const centerY =
+              word.rect.top +
+              word.rect.height /
+                2;
+
+            let target =
+              visualLines.find(
+                (
+                  line
+                ) => {
+                  if (
+                    line.length ===
+                    0
+                  ) {
+                    return false;
+                  }
+
+                  const sample =
+                    line[0];
+
+                  const sampleCenterY =
+                    sample.rect.top +
+                    sample.rect.height /
+                      2;
+
+                  const tolerance =
+                    Math.max(
+                      2,
+                      Math.min(
+                        6,
+                        Math.max(
+                          sample.rect.height,
+                          word.rect.height
+                        ) *
+                          0.32
+                      )
+                    );
+
+                  return (
+                    Math.abs(
+                      sampleCenterY -
+                      centerY
+                    ) <=
+                    tolerance
+                  );
+                }
+              );
+
+            if (!target) {
+              target = [];
+              visualLines.push(
+                target
+              );
+            }
+
+            target.push(
+              word
+            );
+          }
+
+          for (
+            const line of
+            visualLines
+          ) {
+            line.sort(
+              (
+                a,
+                b
+              ) =>
+                a.rect.left -
+                b.rect.left
+            );
+
+            let lineText =
+              cleanVectorText(
+                line
+                  .map(
+                    (
+                      word
+                    ) =>
+                      word.text
+                  )
+                  .join(' ')
+              );
+
+            if (
+              style.textTransform ===
+              'uppercase'
+            ) {
+              lineText =
+                lineText.toUpperCase();
+            } else if (
+              style.textTransform ===
+              'lowercase'
+            ) {
+              lineText =
+                lineText.toLowerCase();
+            }
+
+            lineText =
+              lineText
+                .replace(
+                  /\s+/g,
+                  ' '
+                )
+                .trim();
+
+            if (!lineText) {
+              continue;
+            }
+
+            const left =
+              Math.min(
+                ...line.map(
+                  (
+                    word
+                  ) =>
+                    word.rect.left
+                )
+              );
+
+            const right =
+              Math.max(
+                ...line.map(
+                  (
+                    word
+                  ) =>
+                    word.rect.right
+                )
+              );
+
+            const top =
+              Math.min(
+                ...line.map(
+                  (
+                    word
+                  ) =>
+                    word.rect.top
+                )
+              );
+
+            const bottom =
+              Math.max(
+                ...line.map(
+                  (
+                    word
+                  ) =>
+                    word.rect.bottom
+                )
+              );
+
+            const yPx =
+              top -
+              rootTop;
+
+            const xPx =
+              left -
+              rootLeft;
+
+            const lineHeightPx =
+              Math.max(
+                1,
+                bottom -
+                  top
+              );
+
+            if (
+              yPx < 0 ||
+              yPx >
+                contentHeight
+            ) {
+              continue;
+            }
+
+            const pageIndex =
+              Math.max(
+                0,
+                Math.min(
+                  pageCount -
+                    1,
+                  Math.floor(
+                    (
+                      yPx +
+                      lineHeightPx *
+                        0.5
+                    ) /
+                      pageSlicePx
+                  )
+                )
+              );
+
+            const pageLocalY =
+              yPx -
+              pageIndex *
+                pageSlicePx;
+
+            pdf.setPage(
+              pageIndex +
+                1
+            );
+
+            pdf.setFont(
+              font,
+              fontStyle
+            );
+
+            let outputFontSize =
+              Math.max(
+                5,
+                fontSize *
+                  scale
+              );
+
+            pdf.setFontSize(
+              outputFontSize
+            );
+
+            pdf.setTextColor(
+              textR,
+              textG,
+              textB
+            );
+
+            /*
+             * Browser fonts and built-in PDF Helvetica/Times
+             * have slightly different metrics.
+             *
+             * If the PDF font would exceed the exact browser
+             * line width, shrink only enough to fit that line.
+             * This prevents neighbouring words/columns from
+             * colliding without changing the layout.
+             */
+            const targetWidth =
+              Math.max(
+                1,
+                (
+                  right -
+                  left
+                ) *
+                  scale
+              );
+
+            const measuredWidth =
+              pdf.getTextWidth(
+                lineText
+              );
+
+            if (
+              measuredWidth >
+                targetWidth *
+                  1.01 &&
+              measuredWidth >
+                0
+            ) {
+              outputFontSize =
+                Math.max(
+                  5,
+                  outputFontSize *
+                    (
+                      targetWidth /
+                      measuredWidth
+                    ) *
+                    0.99
+                );
+
+              pdf.setFontSize(
+                outputFontSize
+              );
+            }
+
+            pdf.text(
+              lineText,
+              margin +
+                xPx *
+                  scale,
+              margin +
+                (
+                  pageLocalY +
+                  lineHeightPx *
+                    0.82
+                ) *
+                  scale
+            );
           }
         }
       }
