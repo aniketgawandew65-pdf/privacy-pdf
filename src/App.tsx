@@ -60,6 +60,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { validateTaskFiles } from './utils/fileSizeGuard';
+import { getDeviceCapabilitySnapshot } from './utils/deviceCapability';
 import {
   saveWorkspaceFiles,
   restoreWorkspaceFiles,
@@ -204,6 +205,39 @@ export default function App() {
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [globalFileError, setGlobalFileError] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
+
+  /*
+   * Default to the safer mobile/tablet policy until the
+   * capability engine has positively identified Desktop.
+   */
+  const [
+    isMobileSafetyEnvironment,
+    setIsMobileSafetyEnvironment,
+  ] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getDeviceCapabilitySnapshot()
+      .then((snapshot) => {
+        if (!cancelled) {
+          setIsMobileSafetyEnvironment(
+            snapshot.device
+              .isMobileSafetyEnvironment
+          );
+        }
+      })
+      .catch(() => {
+        /*
+         * Capability detection is best-effort.
+         * Failure keeps the conservative 150 MB gate.
+         */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /*
    * ==========================================================
@@ -585,6 +619,24 @@ export default function App() {
           (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
         );
         if (filesArray.length > 0) {
+          const sizeCheck =
+            validateTaskFiles(
+              filesArray,
+              'Selected files',
+              {
+                isPro,
+                isMobileSafetyEnvironment,
+              }
+            );
+
+          if (!sizeCheck.allowed) {
+            setGlobalFileError(
+              sizeCheck.errorMessage
+            );
+            return;
+          }
+
+          setGlobalFileError(null);
           setSharedFiles(filesArray);
         }
       }
@@ -601,7 +653,10 @@ export default function App() {
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('drop', handleDrop);
     };
-  }, []);
+  }, [
+    isPro,
+    isMobileSafetyEnvironment,
+  ]);
 
   useEffect(() => {
     const handleSync = () => setIsPro(getLicenseStatus().isPro);
@@ -1285,7 +1340,11 @@ export default function App() {
 
     const sizeCheck = validateTaskFiles(
       [file],
-      'Selected file'
+      'Selected file',
+      {
+        isPro,
+        isMobileSafetyEnvironment,
+      }
     );
 
     if (!sizeCheck.allowed) {
@@ -1303,7 +1362,11 @@ export default function App() {
 
     const sizeCheck = validateTaskFiles(
       Array.from(files),
-      'Selected files'
+      'Selected files',
+      {
+        isPro,
+        isMobileSafetyEnvironment,
+      }
     );
 
     if (!sizeCheck.allowed) {

@@ -9,9 +9,15 @@ export interface FileSizeCheck {
   errorMessage: string | null;
 }
 
+export interface FileSizeValidationOptions {
+  isPro?: boolean;
+  isMobileSafetyEnvironment?: boolean;
+}
+
 export function validateTaskFiles(
   files: Iterable<File>,
-  label = "Selected files"
+  label = "Selected files",
+  options: FileSizeValidationOptions = {}
 ): FileSizeCheck {
   const list = Array.from(files);
 
@@ -23,7 +29,25 @@ export function validateTaskFiles(
   const totalMB =
     totalBytes / 1024 / 1024;
 
-  if (totalBytes <= HARD_TASK_LIMIT_BYTES) {
+  /*
+   * Desktop Pro no longer uses the shared fixed 150 MB
+   * selection gate.
+   *
+   * This does NOT mean unlimited processing capacity.
+   * Desktop Pro will use the separate hardware/tool-aware
+   * recommendation system.
+   *
+   * Mobile and tablet Pro remain hard-limited to 150 MB.
+   * Free/Google tiers retain the existing shared gate.
+   */
+  const adaptiveDesktopPro =
+    options.isPro === true &&
+    options.isMobileSafetyEnvironment === false;
+
+  if (
+    adaptiveDesktopPro ||
+    totalBytes <= HARD_TASK_LIMIT_BYTES
+  ) {
     return {
       allowed: true,
       totalBytes,
