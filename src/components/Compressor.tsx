@@ -19,8 +19,9 @@ import { useObjectUrl } from '../utils/useObjectUrl';
 import type { CompressionProgress } from '../utils/exactCompressor';
 import {
   getDailyUsage,
-  MAX_PRO_FILE_SIZE_MB,
 } from '../utils/usageTracker';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
+import { isMobileSafetyEnvironment } from '../utils/deviceCapability';
 import {
   getActiveGoogleBonus,
   subscribeGoogleBonus,
@@ -125,7 +126,15 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const minSliderKb = 50;
   const maxSliderKb = useMemo(() => {
     if (!file) return 1000;
-    return Math.max(100, Math.min(Math.floor(originalSizeKb * 0.95), 150 * 1024));
+
+    /*
+     * The target-size slider should follow the source document,
+     * not the old 150 MB upload ceiling.
+     */
+    return Math.max(
+      100,
+      Math.floor(originalSizeKb * 0.95)
+    );
   }, [file, originalSizeKb]);
 
   const recommendedReadableKb = useMemo(() => {
@@ -165,18 +174,15 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const validateFiles = (files: File[]): boolean => {
     if (files.length === 0) return false;
 
-    const hardLimitBytes =
-      MAX_PRO_FILE_SIZE_MB * 1024 * 1024;
-
-    const oversizedFile =
-      files.find(
-        (selectedFile) =>
-          selectedFile.size > hardLimitBytes
+    const sizeCheck =
+      validateTaskFiles(
+        files,
+        'Compression files'
       );
 
-    if (oversizedFile) {
+    if (!sizeCheck.allowed) {
       setErrorMessage(
-        `${oversizedFile.name} exceeds the maximum supported file size of ${MAX_PRO_FILE_SIZE_MB} MB.`
+        sizeCheck.errorMessage
       );
 
       if (!isPro) {
@@ -580,7 +586,15 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             Tap or drop PDF files to compress
           </p>
           <p className="text-xs text-zinc-500 mt-1">
-            Single or multi-file batch • Max {isPro ? '150 MB' : dailyStats.bonusRemaining > 0 ? '25 MB' : '10 MB'}
+            Single or multi-file batch • {isPro
+              ? (
+                isMobileSafetyEnvironment()
+                  ? 'Max 150 MB per task'
+                  : 'Desktop Pro uses hardware-aware capacity'
+              )
+              : dailyStats.bonusRemaining > 0
+                ? 'Max 25 MB'
+                : 'Max 10 MB'}
           </p>
         </div>
       )}

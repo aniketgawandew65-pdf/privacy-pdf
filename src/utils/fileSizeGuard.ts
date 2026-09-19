@@ -1,3 +1,6 @@
+import { getLicenseStatus } from './license';
+import { isMobileSafetyEnvironment } from './deviceCapability';
+
 export const HARD_TASK_LIMIT_MB = 150;
 export const HARD_TASK_LIMIT_BYTES =
   HARD_TASK_LIMIT_MB * 1024 * 1024;
@@ -40,9 +43,23 @@ export function validateTaskFiles(
    * Mobile and tablet Pro remain hard-limited to 150 MB.
    * Free/Google tiers retain the existing shared gate.
    */
+  /*
+   * Callers may explicitly provide policy context, as App.tsx does.
+   *
+   * Older/tool-level callers can omit it and inherit the current
+   * runtime entitlement + device classification automatically.
+   */
+  const effectiveIsPro =
+    options.isPro ??
+    getLicenseStatus().isPro;
+
+  const effectiveMobileSafetyEnvironment =
+    options.isMobileSafetyEnvironment ??
+    isMobileSafetyEnvironment();
+
   const adaptiveDesktopPro =
-    options.isPro === true &&
-    options.isMobileSafetyEnvironment === false;
+    effectiveIsPro === true &&
+    effectiveMobileSafetyEnvironment === false;
 
   if (
     adaptiveDesktopPro ||
