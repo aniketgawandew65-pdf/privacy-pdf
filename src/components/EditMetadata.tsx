@@ -459,10 +459,17 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
 
       if (
         err?.message ===
-        'ENCRYPTED_PDF'
+        'PASSWORD_PROTECTED_PDF'
       ) {
         setError(
-          'This PDF is encrypted or permission-protected. Metadata was not changed because rewriting it could corrupt the document. Unlock the PDF first, then edit its metadata.'
+          'This PDF requires a password to open. Unlock it first, then edit its metadata.'
+        );
+      } else if (
+        err?.message ===
+        'QPDF_RECOVERY_FAILED'
+      ) {
+        setError(
+          'This PDF could not be safely normalized for metadata editing. No output was created.'
         );
       } else {
         setError(
