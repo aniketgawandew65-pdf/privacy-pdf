@@ -986,7 +986,9 @@ export const HtmlToPdf: React.FC = () => {
       {/* Action Buttons */}
       {!downloadUrl ? (
         <button
-          onClick={handleConvert}
+          onClick={() => {
+            void handleConvert(false);
+          }}
           disabled={
             isProcessing ||
             (
