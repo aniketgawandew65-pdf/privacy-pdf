@@ -21,7 +21,15 @@ import {
   getDailyUsage,
 } from '../utils/usageTracker';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
-import { isMobileSafetyEnvironment } from '../utils/deviceCapability';
+import {
+  getDeviceCapabilitySnapshot,
+  isMobileSafetyEnvironment,
+  type DeviceCapabilitySnapshot,
+} from '../utils/deviceCapability';
+import {
+  calculateDesktopCapacity,
+} from '../utils/desktopCapacityCalculator';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   getActiveGoogleBonus,
   subscribeGoogleBonus,
@@ -54,6 +62,10 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
+  const [
+    desktopCapabilitySnapshot,
+    setDesktopCapabilitySnapshot,
+  ] = useState<DeviceCapabilitySnapshot | null>(null);
   const [dailyStats, setDailyStats] = useState(getDailyUsage());
   const [hasBonusAccount, setHasBonusAccount] = useState(
     () => Boolean(getActiveGoogleBonus())
@@ -92,6 +104,37 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (!isPro) {
+      setDesktopCapabilitySnapshot(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getDeviceCapabilitySnapshot()
+      .then((snapshot) => {
+        if (!cancelled) {
+          setDesktopCapabilitySnapshot(
+            snapshot
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDesktopCapabilitySnapshot(
+            null
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isPro, pathname]);
+
+  useEffect(() => {
     if (!file) {
       setTotalPages(1);
       return;
@@ -122,6 +165,65 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
   useEffect(() => { if (routeTarget) { setTargetKb(routeTarget); setLevel('target'); } }, [routeTarget]);
 
   const originalSizeKb = useMemo(() => (file ? Math.round(file.size / 1024) : 0), [file]);
+
+  const selectedInputBytes =
+    useMemo(
+      () => {
+        if (file) {
+          return file.size;
+        }
+
+        return batchFiles.reduce(
+          (
+            total,
+            selectedFile
+          ) =>
+            total +
+            selectedFile.size,
+          0
+        );
+      },
+      [file, batchFiles]
+    );
+
+  const desktopCapacityRecommendation =
+    useMemo(
+      () => {
+        if (
+          !isPro ||
+          !desktopCapabilitySnapshot
+        ) {
+          return null;
+        }
+
+        return calculateDesktopCapacity(
+          desktopCapabilitySnapshot,
+          'compress-pdf',
+          {
+            selectedBytes:
+              selectedInputBytes,
+
+            /*
+             * Single-file Compress already knows the PDF
+             * page count. Batch page counts are not cheaply
+             * available before processing, so combined bytes
+             * remain the safe preflight signal there.
+             */
+            pageCount:
+              file
+                ? totalPages
+                : null,
+          }
+        );
+      },
+      [
+        isPro,
+        desktopCapabilitySnapshot,
+        selectedInputBytes,
+        file,
+        totalPages,
+      ]
+    );
 
   const minSliderKb = 50;
   const maxSliderKb = useMemo(() => {
@@ -557,6 +659,15 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
           <span>{errorMessage}</span>
         </div>
+      )}
+
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+          className="mb-4 sm:mb-5"
+        />
       )}
 
       {!file && batchFiles.length === 0 && (
