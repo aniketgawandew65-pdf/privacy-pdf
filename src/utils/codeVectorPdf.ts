@@ -850,24 +850,20 @@ export async function generateCodeVectorPDF(
           gutterText[2]
         );
 
-        const numberText =
+        if (
           chunkIndex === 0
-            ? String(
-                lineIndex + 1
-              ).padStart(
-                lineDigits,
-                ' '
-              )
-            : '·'.padStart(
-                lineDigits,
-                ' '
-              );
-
-        pdf.text(
-          numberText,
-          margin + 4,
-          y
-        );
+        ) {
+          pdf.text(
+            String(
+              lineIndex + 1
+            ).padStart(
+              lineDigits,
+              ' '
+            ),
+            margin + 4,
+            y
+          );
+        }
       }
 
       const chunk =

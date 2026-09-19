@@ -23,6 +23,11 @@ import {
 } from 'lucide-react';
 import { generateCodeVectorPDF, type CodeVectorPdfOptions } from '../utils/codeVectorPdf';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import {
+  exclusivelyProcess,
+  hasRecoverableProcessing,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
 
 const SAMPLE_CODE = `// 1into1 Serverless PDF Engine
 import { PDFDocument } from 'pdf-lib';
@@ -53,6 +58,9 @@ export const CodeToPdf: React.FC = () => {
 
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
+
+  const autoRecoveryAttemptedRef = useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
@@ -85,6 +93,7 @@ export const CodeToPdf: React.FC = () => {
             fontSize?: number;
             pageSize?: 'a4' | 'letter';
             orientation?: 'portrait' | 'landscape';
+            recoveryPending?: boolean;
           }>('code-to-pdf');
 
         if (cancelled) return;
@@ -182,6 +191,10 @@ export const CodeToPdf: React.FC = () => {
             savedState.orientation
           );
         }
+
+        setRecoveryPending(
+          Boolean(savedState?.recoveryPending)
+        );
       } catch (error) {
         console.warn(
           'Unable to restore Code to PDF workspace:',
@@ -237,6 +250,7 @@ export const CodeToPdf: React.FC = () => {
         fontSize,
         pageSize,
         orientation,
+        recoveryPending,
       }
     );
   }, [
@@ -247,6 +261,7 @@ export const CodeToPdf: React.FC = () => {
     fontSize,
     pageSize,
     orientation,
+    recoveryPending,
     workspaceHydrated,
   ]);
 
@@ -309,6 +324,10 @@ export const CodeToPdf: React.FC = () => {
   ]);
 
   const handleFileDrop = async (selectedFile: File) => {
+    clearProcessingRecovery();
+    setRecoveryPending(false);
+    autoRecoveryAttemptedRef.current = false;
+
     // Source file size limit
     const sizeCheck = validateTaskFiles(
       [selectedFile],
@@ -333,10 +352,28 @@ export const CodeToPdf: React.FC = () => {
     }
   };
 
-  const handleConvert = async () => {
-    if (!codeContent.trim()) return;
+  const handleConvert = async (
+    isAutomaticRecovery = false
+  ) => {
+    if (
+      activeTab === 'paste' &&
+      !codeContent.trim()
+    ) {
+      return;
+    }
 
-    const creditCheck = checkTaskCredit(file || undefined);
+    if (
+      activeTab === 'upload' &&
+      !file
+    ) {
+      return;
+    }
+
+    const creditCheck =
+      checkTaskCredit(
+        file || undefined
+      );
+
     if (!creditCheck.allowed) {
       setErrorMessage(
         creditCheck.errorMessage ||
@@ -346,13 +383,16 @@ export const CodeToPdf: React.FC = () => {
     }
 
     if (file) {
-      const currentSizeCheck = validateTaskFiles(
-        [file],
-        'Selected file'
-      );
+      const sizeCheck =
+        validateTaskFiles(
+          [file],
+          'Selected file'
+        );
 
-      if (!currentSizeCheck.allowed) {
-        setErrorMessage(currentSizeCheck.errorMessage);
+      if (!sizeCheck.allowed) {
+        setErrorMessage(
+          sizeCheck.errorMessage
+        );
         return;
       }
     }
@@ -361,29 +401,213 @@ export const CodeToPdf: React.FC = () => {
     setErrorMessage(null);
     revokeUrl();
 
-    try {
-      const options: CodeVectorPdfOptions = {
-        code: codeContent,
-        title: title.trim(),
-        theme,
-        showLineNumbers,
-        fontSize,
-        pageSize,
-        orientation,
-      };
+    let sourceCode = '';
 
-      const pdfBytes = await generateCodeVectorPDF(options);
-      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+    try {
+      /*
+       * Save the exact source locally before PDF generation.
+       * This is what makes browser-process recovery possible.
+       */
+      const sourceSaved =
+        activeTab === 'upload'
+          ? (
+              file
+                ? await saveToolWorkspaceFiles(
+                    'code-to-pdf',
+                    [file]
+                  )
+                : false
+            )
+          : await saveToolWorkspaceFiles(
+              'code-to-pdf-content',
+              [
+                new File(
+                  [codeContent],
+                  'editor-code.txt',
+                  {
+                    type: 'text/plain;charset=utf-8',
+                    lastModified: Date.now(),
+                  }
+                ),
+              ]
+            );
+
+      if (!sourceSaved) {
+        throw new Error(
+          'Local recovery storage is unavailable. Please keep this tab open and try again.'
+        );
+      }
+
+      setRecoveryPending(true);
+
+      saveToolWorkspaceState(
+        'code-to-pdf',
+        {
+          activeTab,
+          title,
+          theme,
+          showLineNumbers,
+          fontSize,
+          pageSize,
+          orientation,
+          recoveryPending: true,
+        }
+      );
+
+      const pdfBytes =
+        await exclusivelyProcess(
+          async () => {
+            if (
+              activeTab === 'upload'
+            ) {
+              if (!file) {
+                throw new Error(
+                  'Please select a source file.'
+                );
+              }
+
+              sourceCode =
+                await file.text();
+            } else {
+              sourceCode =
+                codeContent;
+            }
+
+            if (!sourceCode.trim()) {
+              throw new Error(
+                'No source code detected to convert.'
+              );
+            }
+
+            const options:
+              CodeVectorPdfOptions = {
+                code: sourceCode,
+                title: title.trim(),
+                theme,
+                showLineNumbers,
+                fontSize,
+                pageSize,
+                orientation,
+              };
+
+            return await generateCodeVectorPDF(
+              options
+            );
+          }
+        );
+
+      sourceCode = '';
+
+      const blob =
+        new Blob(
+          [pdfBytes as unknown as BlobPart],
+          {
+            type: 'application/pdf',
+          }
+        );
+
       createUrl(blob);
+
+      clearProcessingRecovery();
+      setRecoveryPending(false);
+
+      saveToolWorkspaceState(
+        'code-to-pdf',
+        {
+          activeTab,
+          title,
+          theme,
+          showLineNumbers,
+          fontSize,
+          pageSize,
+          orientation,
+          recoveryPending: false,
+        }
+      );
+
       commitTaskCredit();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to generate code PDF.');
+      setErrorMessage(
+        err?.message ||
+          (
+            isAutomaticRecovery
+              ? 'Automatic recovery could not complete the Code PDF.'
+              : 'Failed to generate code PDF.'
+          )
+      );
     } finally {
+      sourceCode = '';
       setIsProcessing(false);
     }
   };
 
+  /*
+   * ZERO-CLICK AUTO RECOVERY
+   *
+   * Restores the local source and automatically re-runs the
+   * interrupted conversion after Safari/Chrome WebContent
+   * recreation. No Resume button.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !recoveryPending ||
+      !hasRecoverableProcessing() ||
+      isProcessing ||
+      autoRecoveryAttemptedRef.current
+    ) {
+      return;
+    }
+
+    const sourceReady =
+      activeTab === 'upload'
+        ? Boolean(file)
+        : Boolean(codeContent.trim());
+
+    if (!sourceReady) {
+      clearProcessingRecovery();
+      setRecoveryPending(false);
+
+      setErrorMessage(
+        'The interrupted conversion could not be restored because its local source is no longer available.'
+      );
+
+      return;
+    }
+
+    autoRecoveryAttemptedRef.current = true;
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void handleConvert(true);
+        },
+        250
+      );
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    workspaceHydrated,
+    recoveryPending,
+    isProcessing,
+    activeTab,
+    file,
+    codeContent,
+    title,
+    theme,
+    showLineNumbers,
+    fontSize,
+    pageSize,
+    orientation,
+  ]);
+
   const handleClear = () => {
+    clearProcessingRecovery();
+    setRecoveryPending(false);
+    autoRecoveryAttemptedRef.current = false;
+
     setFile(null);
     setCodeContent('');
     setTitle('');
@@ -609,7 +833,9 @@ export const CodeToPdf: React.FC = () => {
       {/* Action / Download Buttons */}
       {!downloadUrl ? (
         <button
-          onClick={handleConvert}
+          onClick={() => {
+            void handleConvert(false);
+          }}
           disabled={isProcessing || !codeContent.trim()}
           className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer disabled:cursor-not-allowed text-xs"
         >
