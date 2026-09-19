@@ -25,6 +25,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 
 type DiffViewMode = 'overlay' | 'split';
@@ -65,6 +68,23 @@ export const ComparePdf: React.FC = () => {
 
   const pdfDisposeBRef =
     useRef<(() => Promise<void>) | null>(null);
+
+  const compareCapacityBytes =
+    (fileA?.size ?? 0) +
+    (fileB?.size ?? 0);
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'compare-pdf',
+      selectedBytes: compareCapacityBytes,
+      pageCount:
+        Math.max(pageCountA, pageCountB) > 0
+          ? Math.max(pageCountA, pageCountB)
+          : null,
+      enabled:
+        Boolean(fileA && fileB) &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore Compare PDF inputs after Preview -> Back.
@@ -653,6 +673,12 @@ export const ComparePdf: React.FC = () => {
           />
         </div>
       </div>
+
+      {desktopCapacityRecommendation && (
+        <div className="mb-6">
+          <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+        </div>
+      )}
 
       {/* Comparison Canvas & Controls */}
       {fileA && fileB && (

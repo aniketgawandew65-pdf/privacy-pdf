@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import { repairPDF, type RepairResult } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -30,6 +33,13 @@ export const RepairPdf: React.FC<RepairPdfProps> = ({ file, onFileChange }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'repair-pdf',
+      selectedBytes: file?.size ?? 0,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   const handleRepair = async () => {
     if (!file) return;
@@ -135,6 +145,10 @@ export const RepairPdf: React.FC<RepairPdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Recovery Explanation Card */}
           <div className="p-3.5 bg-zinc-950/50 rounded-xl border border-zinc-800/80 space-y-2 text-xs text-zinc-400">

@@ -23,6 +23,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 interface AiSummaryPdfProps {
   file: File | null;
@@ -134,6 +137,13 @@ export const AiSummaryPdf: React.FC<AiSummaryPdfProps> = ({ file, onFileChange }
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'ai-summary-pdf',
+      selectedBytes: file?.size ?? 0,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   const handleKeyChange = (key: string) => {
     const trimmed = key.trim();
@@ -510,6 +520,10 @@ ${contextText}`;
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Key & Provider Configuration Tray */}
           <div className="p-3.5 bg-zinc-950/70 rounded-xl border border-zinc-800 space-y-2.5">

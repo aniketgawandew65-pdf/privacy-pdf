@@ -16,6 +16,9 @@ import {
   type FormFieldData,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -38,6 +41,13 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'fill-pdf',
+      selectedBytes: file?.size ?? 0,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   // Load interactive form fields
   useEffect(() => {
@@ -252,6 +262,10 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Loading Indicator */}
           {isLoadingFields && (

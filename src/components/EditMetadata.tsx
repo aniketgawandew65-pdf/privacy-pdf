@@ -28,6 +28,9 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 interface EditMetadataProps {
   file: File | null;
@@ -77,6 +80,13 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
     useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'edit-metadata',
+      selectedBytes: file?.size ?? 0,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     if (!file) {
@@ -654,6 +664,10 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {isLoading ? (
             <div className="flex items-center justify-center py-8 gap-2 text-xs text-zinc-400">

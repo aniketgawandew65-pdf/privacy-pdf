@@ -38,6 +38,9 @@ import {
 } from '../utils/pdfEngine';
 
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -149,6 +152,14 @@ React.FC<AnnotatePdfProps> = ({
     createUrl,
     revoke: revokeDownloadUrl,
   } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'annotate-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount: totalPages > 0 ? totalPages : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
 
   const selected =
@@ -2090,6 +2101,9 @@ React.FC<AnnotatePdfProps> = ({
 
         </div>
 
+        {desktopCapacityRecommendation && (
+          <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+        )}
 
         {/* TOOLBAR */}
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3">
