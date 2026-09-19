@@ -60,7 +60,10 @@ import {
   Receipt,
 } from 'lucide-react';
 import { validateTaskFiles } from './utils/fileSizeGuard';
-import { getDeviceCapabilitySnapshot } from './utils/deviceCapability';
+import {
+  getDeviceCapabilitySnapshot,
+  isMobileSafetyEnvironment as detectMobileSafetyEnvironment,
+} from './utils/deviceCapability';
 import {
   saveWorkspaceFiles,
   restoreWorkspaceFiles,
@@ -625,7 +628,8 @@ export default function App() {
               'Selected files',
               {
                 isPro,
-                isMobileSafetyEnvironment,
+                isMobileSafetyEnvironment:
+                  detectMobileSafetyEnvironment(),
               }
             );
 
@@ -1343,7 +1347,8 @@ export default function App() {
       'Selected file',
       {
         isPro,
-        isMobileSafetyEnvironment,
+        isMobileSafetyEnvironment:
+          detectMobileSafetyEnvironment(),
       }
     );
 
@@ -1365,7 +1370,8 @@ export default function App() {
       'Selected files',
       {
         isPro,
-        isMobileSafetyEnvironment,
+        isMobileSafetyEnvironment:
+          detectMobileSafetyEnvironment(),
       }
     );
 
