@@ -20,6 +20,11 @@ import {
   type ExtractedImage,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -67,6 +72,22 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
     revoke: revokeZipUrl,
     revokeNow: revokeZipUrlNow,
   } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'extract-images',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     const nextUrls:
@@ -532,6 +553,14 @@ export const ExtractImages: React.FC<ExtractImagesProps> = ({ file, onFileChange
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Trigger Scan if Not Run */}
           {!hasScanned && (

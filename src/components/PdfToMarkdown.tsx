@@ -48,6 +48,18 @@ import {
   commitTaskCredit,
 } from '../utils/taskCreditGate';
 
+import {
+  getLicenseStatus,
+} from '../utils/license';
+
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+
+import {
+  DesktopCapacityStatus,
+} from './DesktopCapacityStatus';
+
 
 interface PdfToMarkdownProps {
   file:
@@ -147,6 +159,22 @@ export const PdfToMarkdown:
       >(
         null
       );
+
+    const {
+      recommendation:
+        desktopCapacityRecommendation,
+    } =
+      useDesktopCapacityRecommendation({
+        toolId:
+          'pdf-to-markdown',
+
+        selectedBytes:
+          file?.size ?? 0,
+
+        enabled:
+          Boolean(file) &&
+          getLicenseStatus().isPro,
+      });
 
     /*
      * Synchronous same-page protection.
@@ -701,6 +729,14 @@ export const PdfToMarkdown:
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {desktopCapacityRecommendation && (
+              <DesktopCapacityStatus
+                recommendation={
+                  desktopCapacityRecommendation
+                }
+              />
+            )}
 
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3.5 bg-zinc-950/60 rounded-xl border border-zinc-800 text-xs text-zinc-300">

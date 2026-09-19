@@ -16,6 +16,11 @@ import {
   type OcrProgress,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -170,6 +175,31 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
     useRef(false);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'ocr-pdf',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      /*
+       * OCR already calculates page count for its normal UI,
+       * so re-use that existing signal without extra parsing.
+       */
+      pageCount:
+        pageCount > 0
+          ? pageCount
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   // Pre-warm offline files into browser cache on initial mount
   useEffect(() => {
@@ -717,6 +747,14 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Language Selection */}
           <div className="space-y-1.5">
