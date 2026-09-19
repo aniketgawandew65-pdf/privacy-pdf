@@ -9,7 +9,21 @@ import {
   Tag,
   AlertCircle,
 } from 'lucide-react';
-import { getPDFMetadata, updatePDFMetadata } from '../utils/pdfEngine';
+import { getPDFMetadata } from '../utils/pdfEngine';
+import {
+  updatePDFMetadataSafe,
+} from '../utils/metadataPdf';
+import {
+  saveWorkspaceFiles,
+  saveToolWorkspaceState,
+  restoreToolWorkspaceState,
+  clearToolWorkspace,
+} from '../utils/localWorkspace';
+import {
+  exclusivelyProcess,
+  hasRecoverableProcessing,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -56,6 +70,12 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
   const [isProcessing, setIsProcessing] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recoveryPending, setRecoveryPending] =
+    useState(false);
+
+  const autoRecoveryAttemptedRef =
+    useRef(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,6 +92,85 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
 
     const draftKey =
       metadataDraftKey(file);
+
+    const recoveryState =
+      restoreToolWorkspaceState<{
+        recoveryPending?: boolean;
+        fileName?: string;
+        fileSize?: number;
+        fileLastModified?: number;
+        title?: string;
+        author?: string;
+        subject?: string;
+        keywords?: string;
+      }>('edit-metadata');
+
+    const recoveryMatches =
+      Boolean(
+        recoveryState?.recoveryPending &&
+        recoveryState.fileName ===
+          file.name &&
+        recoveryState.fileSize ===
+          file.size &&
+        recoveryState.fileLastModified ===
+          (file.lastModified || 0)
+      );
+
+    if (
+      recoveryMatches
+    ) {
+      const draft:
+        MetadataDraft = {
+          title:
+            recoveryState?.title ||
+            '',
+
+          author:
+            recoveryState?.author ||
+            '',
+
+          subject:
+            recoveryState?.subject ||
+            '',
+
+          keywords:
+            recoveryState?.keywords ||
+            '',
+        };
+
+      metadataDrafts.set(
+        draftKey,
+        draft
+      );
+
+      setTitle(
+        draft.title
+      );
+
+      setAuthor(
+        draft.author
+      );
+
+      setSubject(
+        draft.subject
+      );
+
+      setKeywords(
+        draft.keywords
+      );
+
+      setRecoveryPending(
+        true
+      );
+
+      setIsLoading(
+        false
+      );
+
+      setError(null);
+
+      return;
+    }
 
     const existingDraft =
       metadataDrafts.get(
@@ -212,24 +311,28 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
   };
 
 
-  const handleSave = async () => {
+  const handleSave = async (
+    isAutomaticRecovery = false
+  ) => {
     if (!file) return;
 
-    const creditCheck = checkTaskCredit(file);
+    const creditCheck =
+      checkTaskCredit(
+        file
+      );
+
     if (!creditCheck.allowed) {
       setError(
         creditCheck.errorMessage ||
           'This task is not available on your current plan.'
       );
+
       return;
     }
 
     setIsProcessing(true);
     setError(null);
 
-    /*
-     * Preserve exactly what is being written into the PDF.
-     */
     persistMetadataDraft({
       title,
       author,
@@ -238,36 +341,206 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
     });
 
     try {
-      const outputBytes = await updatePDFMetadata(file, {
-        title,
-        author,
-        subject,
-        keywords,
-      });
-
-      // Create a clean ArrayBuffer slice to preserve strict xref tables for WPS Office
-      const cleanBuffer = outputBytes.buffer.slice(
-        outputBytes.byteOffset,
-        outputBytes.byteOffset + outputBytes.byteLength
+      /*
+       * Ensure the browser-backed source is durably mirrored
+       * before the heavy rewrite begins.
+       *
+       * App.tsx uses this same workspace, so this does not
+       * create a second tool-specific 150 MB copy.
+       */
+      await saveWorkspaceFiles(
+        [file]
       );
 
-      const blob = new Blob([cleanBuffer as unknown as BlobPart], {
-        type: 'application/pdf',
-      });
+      setRecoveryPending(
+        true
+      );
 
-      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-      const url = URL.createObjectURL(blob);
-      setDownloadUrl(url);
+      saveToolWorkspaceState(
+        'edit-metadata',
+        {
+          recoveryPending:
+            true,
+
+          fileName:
+            file.name,
+
+          fileSize:
+            file.size,
+
+          fileLastModified:
+            file.lastModified ||
+            0,
+
+          title,
+          author,
+          subject,
+          keywords,
+        }
+      );
+
+      const outputBytes =
+        await exclusivelyProcess(
+          async () =>
+            await updatePDFMetadataSafe(
+              file,
+              {
+                title,
+                author,
+                subject,
+                keywords,
+              }
+            )
+        );
+
+      const cleanBuffer =
+        outputBytes.buffer.slice(
+          outputBytes.byteOffset,
+          outputBytes.byteOffset +
+            outputBytes.byteLength
+        );
+
+      const blob =
+        new Blob(
+          [
+            cleanBuffer as
+              unknown as
+              BlobPart,
+          ],
+          {
+            type:
+              'application/pdf',
+          }
+        );
+
+      if (downloadUrl) {
+        URL.revokeObjectURL(
+          downloadUrl
+        );
+      }
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+      setDownloadUrl(
+        url
+      );
+
+      clearProcessingRecovery();
+
+      setRecoveryPending(
+        false
+      );
+
+      await clearToolWorkspace(
+        'edit-metadata'
+      );
+
       commitTaskCredit();
     } catch (err: any) {
-      console.error('Metadata update failure:', err);
-      setError('Could not update metadata on this file.');
+      /*
+       * Normal deterministic failure must not cause an
+       * endless auto-recovery loop.
+       *
+       * If Safari kills the process completely, execution
+       * never reaches this catch and the marker survives.
+       */
+      clearProcessingRecovery();
+
+      setRecoveryPending(
+        false
+      );
+
+      await clearToolWorkspace(
+        'edit-metadata'
+      );
+
+      if (
+        err?.message ===
+        'ENCRYPTED_PDF'
+      ) {
+        setError(
+          'This PDF is encrypted or permission-protected. Metadata was not changed because rewriting it could corrupt the document. Unlock the PDF first, then edit its metadata.'
+        );
+      } else {
+        setError(
+          isAutomaticRecovery
+            ? 'Automatic recovery could not complete the metadata update.'
+            : 'Could not safely update metadata on this file.'
+        );
+      }
     } finally {
-      setIsProcessing(false);
+      setIsProcessing(
+        false
+      );
     }
   };
 
+  /*
+   * ZERO-CLICK AUTOMATIC RECOVERY
+   *
+   * Metadata writing is atomic rather than page-based.
+   * If mobile Safari/Chrome recreates its WebContent process,
+   * the durable original + requested metadata are restored and
+   * the operation automatically runs again.
+   *
+   * No Resume button.
+   */
+  useEffect(() => {
+    if (
+      !file ||
+      !recoveryPending ||
+      !hasRecoverableProcessing() ||
+      isProcessing ||
+      autoRecoveryAttemptedRef.current
+    ) {
+      return;
+    }
+
+    autoRecoveryAttemptedRef.current =
+      true;
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void handleSave(
+            true
+          );
+        },
+        250
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    file,
+    recoveryPending,
+    isProcessing,
+    title,
+    author,
+    subject,
+    keywords,
+  ]);
+
   const handleClear = () => {
+    clearProcessingRecovery();
+
+    setRecoveryPending(
+      false
+    );
+
+    autoRecoveryAttemptedRef.current =
+      false;
+
+    void clearToolWorkspace(
+      'edit-metadata'
+    );
+
     if (file) {
       metadataDrafts.delete(
         metadataDraftKey(
@@ -306,6 +579,19 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
             e.preventDefault();
             const dropped = e.dataTransfer.files?.[0];
             if (dropped && dropped.type === 'application/pdf') {
+              clearProcessingRecovery();
+
+              setRecoveryPending(
+                false
+              );
+
+              autoRecoveryAttemptedRef.current =
+                false;
+
+              void clearToolWorkspace(
+                'edit-metadata'
+              );
+
               onFileChange(dropped);
             }
           }}
@@ -322,6 +608,19 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
             onChange={(e) => {
               const selected = e.target.files?.[0];
               if (selected && selected.type === 'application/pdf') {
+                clearProcessingRecovery();
+
+                setRecoveryPending(
+                  false
+                );
+
+                autoRecoveryAttemptedRef.current =
+                  false;
+
+                void clearToolWorkspace(
+                  'edit-metadata'
+                );
+
                 onFileChange(selected);
               }
               e.target.value = '';
@@ -464,7 +763,9 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
               {!downloadUrl ? (
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={() => {
+                void handleSave(false);
+              }}
                   disabled={isProcessing}
                   className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-semibold rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
