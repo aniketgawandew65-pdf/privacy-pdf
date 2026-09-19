@@ -14,6 +14,9 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { deskewPDF, estimateSkewAngle } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -37,6 +40,13 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
   const previewUrlRef =
     useRef<string | null>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'deskew-pdf',
+      selectedBytes: file?.size ?? 0,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     const previousPreviewUrl =
@@ -304,6 +314,10 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* High-DPI Live Deskew Preview with Corner Zoom Widget */}
           <div className="relative w-full h-[360px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-auto p-4 select-none">

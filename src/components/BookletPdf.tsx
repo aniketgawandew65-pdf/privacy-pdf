@@ -13,6 +13,9 @@ import {
   getPDFPageCount,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -34,6 +37,14 @@ export const BookletPdf: React.FC<BookletPdfProps> = ({ file, onFileChange }) =>
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'booklet-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount: pageCount > 0 ? pageCount : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     if (!file) {
@@ -170,6 +181,10 @@ export const BookletPdf: React.FC<BookletPdfProps> = ({ file, onFileChange }) =>
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Paper Size Selector */}
           <div className="space-y-2">

@@ -29,6 +29,9 @@ import {
 } from '../utils/pdfjs';
 import { signPDF, type SignaturePlacement, getPDFPageCount } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -150,6 +153,14 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
   } | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const { recommendation: desktopCapacityRecommendation } =
+    useDesktopCapacityRecommendation({
+      toolId: 'sign-pdf',
+      selectedBytes: file?.size ?? 0,
+      pageCount: totalPages > 0 ? totalPages : null,
+      enabled: Boolean(file) && getLicenseStatus().isPro,
+    });
 
   // Load and inspect PDF file
   useEffect(() => {
@@ -719,6 +730,10 @@ export const SignPdf: React.FC<SignPdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
+          )}
 
           {/* Password Authentication & Preview Unlock Banner */}
           {isProtected && (
