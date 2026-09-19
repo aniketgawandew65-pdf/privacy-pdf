@@ -25,6 +25,11 @@ import {
   saveToolWorkspaceState,
   restoreToolWorkspaceState,
 } from '../utils/localWorkspace';
+import {
+  exclusivelyProcess,
+  hasRecoverableProcessing,
+  clearProcessingRecovery,
+} from '../utils/localProcessing';
 
 const SAMPLE_RECEIPT = `<div style="text-align: center; margin-bottom: 12px;">
   <h2 style="margin: 0; font-size: 16px;">COFFEE &amp; BAKERY</h2>
@@ -123,6 +128,15 @@ export const HtmlToPdf: React.FC = () => {
   const [progressLabel, setProgressLabel] =
     useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recoveryPending, setRecoveryPending] =
+    useState(false);
+
+  /*
+   * Prevent one restored mount from starting the same recovery
+   * twice while React state/effects settle.
+   */
+  const autoRecoveryAttemptedRef =
+    useRef(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { url: downloadUrl, createUrl, revoke: revokeUrl } = useObjectUrl();
@@ -153,6 +167,7 @@ export const HtmlToPdf: React.FC = () => {
             fileName?: string;
             pageSize?: 'receipt' | 'a4' | 'letter';
             orientation?: 'portrait' | 'landscape';
+            recoveryPending?: boolean;
           }>('html-to-pdf');
 
         if (cancelled) return;
@@ -238,6 +253,12 @@ export const HtmlToPdf: React.FC = () => {
             savedState.orientation
           );
         }
+
+        setRecoveryPending(
+          Boolean(
+            savedState?.recoveryPending
+          )
+        );
       } catch (error) {
         console.warn(
           'Unable to restore HTML to PDF workspace:',
@@ -290,6 +311,7 @@ export const HtmlToPdf: React.FC = () => {
         fileName,
         pageSize,
         orientation,
+        recoveryPending,
       }
     );
   }, [
@@ -297,6 +319,7 @@ export const HtmlToPdf: React.FC = () => {
     fileName,
     pageSize,
     orientation,
+    recoveryPending,
     workspaceHydrated,
   ]);
 
@@ -362,6 +385,14 @@ export const HtmlToPdf: React.FC = () => {
   const handleFileDrop = async (
     selectedFile: File
   ) => {
+    /*
+     * A deliberately selected replacement file is a new job.
+     */
+    clearProcessingRecovery();
+    setRecoveryPending(false);
+    autoRecoveryAttemptedRef.current =
+      false;
+
     const sizeCheck =
       validateTaskFiles(
         [selectedFile],
@@ -419,7 +450,10 @@ export const HtmlToPdf: React.FC = () => {
   };
 
   const handleConvert =
-    async () => {
+    async (
+      isAutomaticRecovery =
+        false
+    ) => {
       if (
         activeTab ===
           'paste' &&
@@ -471,7 +505,9 @@ export const HtmlToPdf: React.FC = () => {
       );
 
       setProgressLabel(
-        'Preparing HTML...'
+        isAutomaticRecovery
+          ? 'Recovering interrupted conversion…'
+          : 'Preparing HTML...'
       );
 
       setErrorMessage(
@@ -487,60 +523,127 @@ export const HtmlToPdf: React.FC = () => {
         '';
 
       try {
-        if (
-          activeTab ===
-            'upload'
-        ) {
-          if (!file) {
-            throw new Error(
-              'Please select an HTML file.'
-            );
-          }
+        /*
+         * ====================================================
+         * DURABLE AUTO-RECOVERY
+         * ====================================================
+         *
+         * Ensure the exact source exists in OPFS BEFORE the
+         * heavy DOM/PDF work begins. If mobile Safari/Chrome
+         * recreates the browser process, the source and current
+         * format settings can be restored automatically.
+         */
+        const sourceSaved =
+          activeTab === 'upload'
+            ? (
+                file
+                  ? await saveToolWorkspaceFiles(
+                      'html-to-pdf',
+                      [file]
+                    )
+                  : false
+              )
+            : await saveToolWorkspaceFiles(
+                'html-to-pdf-content',
+                [
+                  new File(
+                    [htmlContent],
+                    'editor.html',
+                    {
+                      type:
+                        'text/html',
+                      lastModified:
+                        Date.now(),
+                    }
+                  ),
+                ]
+              );
 
-          sourceHtml =
-            await file.text();
-        } else {
-          sourceHtml =
-            htmlContent;
-        }
-
-        if (
-          !sourceHtml.trim()
-        ) {
+        if (!sourceSaved) {
           throw new Error(
-            'No content provided to convert.'
+            'Local recovery storage is unavailable. Please keep this tab open and try again.'
           );
         }
 
-        const options:
-          HtmlToPdfOptions = {
-            html:
-              sourceHtml,
+        /*
+         * Persist tool identity/settings before installing the
+         * shared processing marker. This prevents another tool
+         * from accidentally treating this recovery as its own.
+         */
+        setRecoveryPending(true);
+
+        saveToolWorkspaceState(
+          'html-to-pdf',
+          {
+            activeTab,
+            fileName,
             pageSize,
             orientation,
-            onProgress: (
-              _current,
-              _total,
-              stage
-            ) => {
-              setProgressLabel(
-                stage
-              );
-            },
-          };
+            recoveryPending:
+              true,
+          }
+        );
 
         const pdfBytes =
-          pageSize === 'receipt'
-            ? await generateHtmlPDF(
-                options
-              )
-            : await generateStyledVectorHtmlPDF({
-                html: sourceHtml,
-                pageSize,
-                orientation,
-                onProgress:
-                  options.onProgress,
-              });
+          await exclusivelyProcess(
+            async () => {
+              if (
+                activeTab ===
+                  'upload'
+              ) {
+                if (!file) {
+                  throw new Error(
+                    'Please select an HTML file.'
+                  );
+                }
+
+                sourceHtml =
+                  await file.text();
+              } else {
+                sourceHtml =
+                  htmlContent;
+              }
+
+              if (
+                !sourceHtml.trim()
+              ) {
+                throw new Error(
+                  'No content provided to convert.'
+                );
+              }
+
+              const options:
+                HtmlToPdfOptions = {
+                  html:
+                    sourceHtml,
+                  pageSize,
+                  orientation,
+                  onProgress: (
+                    _current,
+                    _total,
+                    stage
+                  ) => {
+                    setProgressLabel(
+                      stage
+                    );
+                  },
+                };
+
+              return pageSize ===
+                'receipt'
+                ? await generateHtmlPDF(
+                    options
+                  )
+                : await generateStyledVectorHtmlPDF({
+                    html:
+                      sourceHtml,
+                    pageSize,
+                    orientation,
+                    onProgress:
+                      options.onProgress,
+                  });
+            }
+          );
 
         /*
          * Release our direct reference before creating the
@@ -566,6 +669,25 @@ export const HtmlToPdf: React.FC = () => {
           blob
         );
 
+        /*
+         * Output exists successfully: this is no longer an
+         * interrupted/recoverable job.
+         */
+        clearProcessingRecovery();
+        setRecoveryPending(false);
+
+        saveToolWorkspaceState(
+          'html-to-pdf',
+          {
+            activeTab,
+            fileName,
+            pageSize,
+            orientation,
+            recoveryPending:
+              false,
+          }
+        );
+
         commitTaskCredit();
       } catch (
         err: any
@@ -588,7 +710,95 @@ export const HtmlToPdf: React.FC = () => {
       }
     };
 
+  /*
+   * ==========================================================
+   * ZERO-CLICK AUTO RESUME
+   * ==========================================================
+   *
+   * After an iOS/Android browser/WebContent recreation:
+   * 1. OPFS restores the original HTML source.
+   * 2. session state restores format/orientation.
+   * 3. the shared recovery marker prevents App.tsx from wiping
+   *    that workspace.
+   * 4. conversion starts automatically — no Resume button.
+   *
+   * HTML rendering is intentionally kept atomic to protect the
+   * newly stabilized vector renderer. Therefore recovery
+   * restarts the interrupted render from its durable source
+   * rather than pretending a half-built in-memory jsPDF object
+   * survived the browser process.
+   */
+  useEffect(() => {
+    if (
+      !workspaceHydrated ||
+      !recoveryPending ||
+      !hasRecoverableProcessing() ||
+      isProcessing ||
+      autoRecoveryAttemptedRef
+        .current
+    ) {
+      return;
+    }
+
+    const sourceReady =
+      activeTab === 'upload'
+        ? Boolean(file)
+        : Boolean(
+            htmlContent.trim()
+          );
+
+    if (!sourceReady) {
+      /*
+       * The browser removed its private storage or recovery
+       * source is otherwise unavailable. Do not leave a stale
+       * global processing marker keeping the app in recovery
+       * mode forever.
+       */
+      clearProcessingRecovery();
+      setRecoveryPending(false);
+
+      setErrorMessage(
+        'The interrupted conversion could not be restored because its local source is no longer available.'
+      );
+
+      return;
+    }
+
+    autoRecoveryAttemptedRef.current =
+      true;
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void handleConvert(
+            true
+          );
+        },
+        250
+      );
+
+    return () => {
+      window.clearTimeout(
+        timer
+      );
+    };
+  }, [
+    workspaceHydrated,
+    recoveryPending,
+    isProcessing,
+    activeTab,
+    file,
+    htmlContent,
+    pageSize,
+    orientation,
+  ]);
+
   const handleClear = () => {
+    clearProcessingRecovery();
+    setRecoveryPending(false);
+    autoRecoveryAttemptedRef.current =
+      false;
+
     setFile(null);
     setHtmlContent('');
     setFileName('document');
