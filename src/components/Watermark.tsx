@@ -16,6 +16,11 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { addWatermarkToPDF, type WatermarkOptions } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -250,6 +255,27 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
     revoke: revokeDownloadUrl,
     revokeNow: revokeDownloadUrlNow,
   } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'watermark-pdf',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      pageCount:
+        totalPages > 0
+          ? totalPages
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Restore the user's exact Watermark settings after:
@@ -1196,6 +1222,14 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Mode Switcher: Text Stamp vs Image Logo */}
           <div className="grid grid-cols-2 gap-2 bg-zinc-950/60 p-1.5 rounded-xl border border-zinc-800">

@@ -29,6 +29,11 @@ import {
   redactPDFToFile,
 } from '../utils/streamingRedact';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -176,6 +181,27 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
     useRef<(() => Promise<void>) | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'redact-pdf',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      pageCount:
+        totalPages > 0
+          ? totalPages
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   const currentRects = pageRedactions[currentPage] || [];
 
@@ -860,6 +886,14 @@ export const RedactPdf: React.FC<RedactPdfProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Page Switcher & Reset Controls */}
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3 text-xs text-zinc-300 px-1 min-w-0">

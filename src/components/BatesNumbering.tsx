@@ -15,6 +15,11 @@ import {
   type BatesPosition,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -73,6 +78,27 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
   const recoverySettingsRef =
     useRef<BatesRecoverySettings | null>(null);
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'bates-numbering',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      pageCount:
+        pageCount > 0
+          ? pageCount
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * ==========================================================
@@ -650,6 +676,14 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Numbering Format Controls */}
           <div className="grid grid-cols-2 gap-3">
