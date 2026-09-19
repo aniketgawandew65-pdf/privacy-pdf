@@ -371,24 +371,6 @@ const scoreDeviceMemory = (
   return 3;
 };
 
-const scoreProcessors = (
-  count: number
-): number => {
-  if (count <= 4) {
-    return 0;
-  }
-
-  if (count <= 8) {
-    return 1;
-  }
-
-  if (count <= 12) {
-    return 2;
-  }
-
-  return 3;
-};
-
 const scoreHeap = (
   bytes: number
 ): number => {
@@ -498,17 +480,15 @@ const calculateCapability = (
     );
   }
 
-  if (
-    input.logicalProcessors !==
-    null
-  ) {
-    addSignal(
-      scoreProcessors(
-        input.logicalProcessors
-      ),
-      1
-    );
-  }
+  /*
+   * CPU concurrency affects processing speed and future
+   * worker-count decisions, but it should not reduce the
+   * safe file-size tier. A low-core desktop with sufficient
+   * RAM/heap/storage may process more slowly without having
+   * a lower memory capacity.
+   *
+   * Keep logicalProcessors in the snapshot for later phases.
+   */
 
   if (
     input.availableStorageBytes !==
