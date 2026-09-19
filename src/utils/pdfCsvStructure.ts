@@ -1114,6 +1114,249 @@ const looksLikeHeaderRow = (
   );
 };
 
+/*
+ * ============================================================
+ * BANK DEBIT / CREDIT COLUMN REPAIR
+ * ============================================================
+ *
+ * Some PDF text layers expose transaction rows as:
+ *
+ * Date | Value Date | Details | Amount | Balance
+ *
+ * even though the visual table has:
+ *
+ * Date | Value Date | Details | Debit | Credit | Balance
+ *
+ * The balance progression lets us recover the direction
+ * without guessing:
+ *
+ * previous - amount = current  -> Debit
+ * previous + amount = current  -> Credit
+ */
+const repairCollapsedBankMoneyColumns = (
+  inputRows:
+    string[][]
+):
+  string[][] => {
+  let previousBalance:
+    number |
+    null =
+      null;
+
+  return inputRows.map(
+    (
+      rawRow,
+      index
+    ) => {
+      const row =
+        [...rawRow];
+
+      while (
+        row.length <
+        6
+      ) {
+        row.push('');
+      }
+
+      if (
+        index ===
+        0
+      ) {
+        return [
+          ...BANK_HEADER,
+        ];
+      }
+
+      const details =
+        cleanCell(
+          row[2]
+        );
+
+      /*
+       * Opening balance establishes the running reference.
+       */
+      if (
+        /\bopening\s+balance\b/i.test(
+          details
+        )
+      ) {
+        const balance =
+          normalizeMoney(
+            row[5] ||
+            row[4]
+          );
+
+        previousBalance =
+          moneyNumber(
+            balance
+          );
+
+        return [
+          '',
+          '',
+          'Opening Balance',
+          '',
+          '',
+          balance,
+        ];
+      }
+
+      /*
+       * Closing balance always belongs in the Balance column.
+       */
+      if (
+        /\bclosing\s+balance\b/i.test(
+          details
+        )
+      ) {
+        const balance =
+          normalizeMoney(
+            row[5] ||
+            row[4]
+          );
+
+        return [
+          '',
+          '',
+          'Closing Balance',
+          '',
+          '',
+          balance,
+        ];
+      }
+
+      const transactionDate =
+        firstDate(
+          row[0]
+        );
+
+      /*
+       * Collapsed form produced by some PDF coordinate layers:
+       *
+       * row[3] = transaction amount
+       * row[4] = resulting balance
+       * row[5] = blank
+       */
+      const amount =
+        normalizeMoney(
+          row[3]
+        );
+
+      const possibleBalance =
+        normalizeMoney(
+          row[4]
+        );
+
+      const explicitBalance =
+        normalizeMoney(
+          row[5]
+        );
+
+      if (
+        transactionDate &&
+        amount &&
+        possibleBalance &&
+        !explicitBalance
+      ) {
+        const amountNumber =
+          moneyNumber(
+            amount
+          );
+
+        const currentBalance =
+          moneyNumber(
+            possibleBalance
+          );
+
+        let debit = '';
+        let credit = '';
+
+        if (
+          previousBalance !==
+            null &&
+          amountNumber !==
+            null &&
+          currentBalance !==
+            null
+        ) {
+          const debitBalance =
+            previousBalance -
+            amountNumber;
+
+          const creditBalance =
+            previousBalance +
+            amountNumber;
+
+          if (
+            Math.abs(
+              currentBalance -
+              debitBalance
+            ) <=
+            0.02
+          ) {
+            debit =
+              amount;
+          } else if (
+            Math.abs(
+              currentBalance -
+              creditBalance
+            ) <=
+            0.02
+          ) {
+            credit =
+              amount;
+          } else {
+            /*
+             * Preserve the amount even if a malformed statement
+             * prevents balance arithmetic from proving direction.
+             */
+            debit =
+              amount;
+          }
+        } else {
+          debit =
+            amount;
+        }
+
+        previousBalance =
+          currentBalance;
+
+        return [
+          cleanCell(
+            row[0]
+          ),
+          cleanCell(
+            row[1]
+          ),
+          details,
+          debit,
+          credit,
+          possibleBalance,
+        ];
+      }
+
+      /*
+       * Already-correct six-column rows remain untouched.
+       */
+      if (
+        transactionDate &&
+        explicitBalance
+      ) {
+        previousBalance =
+          moneyNumber(
+            explicitBalance
+          );
+      }
+
+      return row.slice(
+        0,
+        6
+      );
+    }
+  );
+};
+
+
 const normalizeGenericRows = (
   inputRows:
     string[][]
@@ -1336,10 +1579,15 @@ export function refineExtractedTableResult(
       rows
     )
   ) {
+    const bankRows =
+      repairCollapsedBankMoneyColumns(
+        normalizeBankRows(
+          rows
+        )
+      );
+
     return buildResult(
-      normalizeBankRows(
-        rows
-      ),
+      bankRows,
       delimiter
     );
   }
