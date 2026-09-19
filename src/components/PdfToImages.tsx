@@ -27,6 +27,11 @@ import {
   writePdfToImagesPage,
 } from '../utils/pdfToImagesRecovery';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -82,6 +87,26 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
     createUrl,
     revoke: revokeZipUrl,
   } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'pdf-to-image',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      /*
+       * Do not open/render the PDF only to obtain page metrics.
+       * The recommendation can safely start with source bytes.
+       */
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   useEffect(() => {
     const urls =
@@ -829,6 +854,14 @@ export const PdfToImages: React.FC<PdfToImagesProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {errorMessage && (
             <div className="p-3 rounded-xl border border-red-900/50 bg-red-950/20 text-xs text-red-300">

@@ -19,6 +19,11 @@ import {
   type GrayscaleMode,
 } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -96,6 +101,31 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
     useRef<string | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'grayscale-pdf',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      /*
+       * Grayscale already knows the document page count from
+       * its normal preview path. No extra capacity-only parsing.
+       */
+      pageCount:
+        totalPages > 0
+          ? totalPages
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * Threshold sliders fire many input events while a finger moves.
@@ -971,6 +1001,14 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Mode Selector */}
           <div className="grid grid-cols-2 gap-2">

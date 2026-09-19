@@ -15,6 +15,11 @@ import {
 import { loadPdfJsFromBlob } from '../utils/pdfjs';
 import { invertPDF, type DarkModeFilter } from '../utils/pdfEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -75,6 +80,31 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
     useRef<string | null>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'dark-mode-pdf',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      /*
+       * Dark Mode already reads the page count for its normal
+       * preview UI, so reuse it without any extra PDF parsing.
+       */
+      pageCount:
+        totalPages > 0
+          ? totalPages
+          : null,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   // Generate real-time live preview of page 1
   useEffect(() => {
@@ -934,6 +964,14 @@ export const DarkModePdf: React.FC<DarkModePdfProps> = ({ file, onFileChange }) 
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Preset Selection */}
           <div className="space-y-2">
