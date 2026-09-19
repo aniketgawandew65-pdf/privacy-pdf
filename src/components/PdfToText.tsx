@@ -29,6 +29,11 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 interface PdfToTextProps {
   file: File | null;
@@ -57,6 +62,22 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
 
   const [recoveryReady, setRecoveryReady] =
     useState(false);
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'pdf-to-text',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
 
   const discardPdfToTextRecovery =
@@ -513,6 +534,15 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
             <span>Remove</span>
           </button>
         </div>
+      )}
+
+      {desktopCapacityRecommendation && (
+        <DesktopCapacityStatus
+          recommendation={
+            desktopCapacityRecommendation
+          }
+          className="mb-6"
+        />
       )}
 
       {errorMsg && (

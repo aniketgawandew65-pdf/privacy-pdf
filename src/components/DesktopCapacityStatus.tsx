@@ -24,21 +24,21 @@ interface DesktopCapacityStatusProps {
 
 const SIGNAL_LABEL:
 Record<WorkloadSignal, string> = {
-  green: 'Recommended',
-  amber: 'Above recommended',
+  green: 'Within range',
+  amber: 'Above estimated range',
   red: 'High workload',
 };
 
 const SIGNAL_COPY:
 Record<WorkloadSignal, string> = {
   green:
-    'This workload is within the recommended range for this device and browser.',
+    'This workload is comfortably within the estimated range for this device and browser.',
 
   amber:
-    'This workload is above the recommended range. You can still try it, but processing may take longer or use more memory.',
+    'This workload is above the estimated range. You can still try it, but processing may take longer or use more memory.',
 
   red:
-    'This workload is significantly above the recommended range. Processing may fail or restart on this device.',
+    'This workload is significantly above the estimated range. Processing may fail or restart on this device.',
 };
 
 const SIGNAL_STYLE:
@@ -196,7 +196,7 @@ export function DesktopCapacityStatus({
             </p>
 
             <p className="mt-1 text-xs leading-5 text-[#55555d]">
-              Recommended on this device for{' '}
+              Estimated capacity on this device for{' '}
               {recommendation.toolName}:{' '}
               <strong className="font-semibold text-[#202023]">
                 ~
@@ -241,7 +241,7 @@ export function DesktopCapacityStatus({
 
             <div className="rounded-lg border border-zinc-300 bg-white px-3 py-2.5">
               <span className="block text-[10px] font-medium uppercase tracking-wide text-[#55555d]">
-                Recommended
+                Estimated capacity
               </span>
 
               <strong className="mt-1 block text-sm font-semibold text-[#202023]">
@@ -295,10 +295,10 @@ export function DesktopCapacityStatus({
       )}
 
       <p className="mt-3 mb-0 text-[10px] leading-4 text-[#55555d]">
-        Capacity is estimated from your browser,
-        device and this tool&apos;s processing
-        architecture. It is a recommendation,
-        not a guaranteed maximum.
+        Capacity is estimated from your device,
+        browser and this tool&apos;s processing
+        architecture. It is guidance, not a required
+        file size or guaranteed maximum.
       </p>
     </section>
   );

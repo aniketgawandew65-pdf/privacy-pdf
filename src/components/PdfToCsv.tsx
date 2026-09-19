@@ -32,6 +32,11 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from '../utils/taskCreditGate';
+import { getLicenseStatus } from '../utils/license';
+import {
+  useDesktopCapacityRecommendation,
+} from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 
 interface PdfToCsvProps {
   file: File | null;
@@ -71,6 +76,22 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
     useState(false);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'pdf-to-csv',
+
+      selectedBytes:
+        file?.size ?? 0,
+
+      enabled:
+        Boolean(file) &&
+        getLicenseStatus().isPro,
+    });
 
   /*
    * ==========================================================
@@ -893,6 +914,14 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {desktopCapacityRecommendation && (
+            <DesktopCapacityStatus
+              recommendation={
+                desktopCapacityRecommendation
+              }
+            />
+          )}
 
           {/* Tuning Options */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-zinc-950/60 rounded-xl border border-zinc-800 text-xs">
