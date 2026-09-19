@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { generateHtmlPDF, type HtmlToPdfOptions } from '../utils/pdfEngine';
+import { generateStyledVectorHtmlPDF } from '../utils/htmlVectorPdf';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { validateTaskFiles } from '../utils/fileSizeGuard';
 import {
@@ -529,9 +530,17 @@ export const HtmlToPdf: React.FC = () => {
           };
 
         const pdfBytes =
-          await generateHtmlPDF(
-            options
-          );
+          pageSize === 'receipt'
+            ? await generateHtmlPDF(
+                options
+              )
+            : await generateStyledVectorHtmlPDF({
+                html: sourceHtml,
+                pageSize,
+                orientation,
+                onProgress:
+                  options.onProgress,
+              });
 
         /*
          * Release our direct reference before creating the
