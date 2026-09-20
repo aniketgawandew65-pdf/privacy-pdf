@@ -1479,7 +1479,7 @@ export default function App() {
           {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
           <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Admin Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
         </div>
-              <GoogleBonusAccount />
+              {!isPro && <GoogleBonusAccount />}
 </header>
 
       <main className="site-main">
@@ -1494,23 +1494,25 @@ export default function App() {
               <span><ShieldCheck size={14} />100% private</span>
               <span><UserRoundCheck size={14} />No signup</span>
             </div>
-            <div className="capacity-funnel" aria-label="File size access by plan">
-              <span className="capacity-step">
-                <strong>Free</strong>
-                <span>Up to 10 MB</span>
-              </span>
-              <span className="capacity-arrow" aria-hidden="true">→</span>
-              <span className="capacity-step">
-                <strong>Sign in</strong>
-                <span>Up to 25 MB</span>
-              </span>
-              <span className="capacity-arrow" aria-hidden="true">→</span>
-              <span className="capacity-step capacity-step-pro">
-                <strong>Pro</strong>
-                <span>Up to 150 MB on mobile &amp; tablet</span>
-                <span>Beyond 150 MB on desktop, with larger-file capacity based on your device.</span>
-              </span>
-            </div>
+            {!isPro && (
+              <div className="capacity-funnel" aria-label="File size access by plan">
+                <span className="capacity-step">
+                  <strong>Free</strong>
+                  <span>Up to 10 MB</span>
+                </span>
+                <span className="capacity-arrow" aria-hidden="true">→</span>
+                <span className="capacity-step">
+                  <strong>Sign in</strong>
+                  <span>Up to 25 MB</span>
+                </span>
+                <span className="capacity-arrow" aria-hidden="true">→</span>
+                <span className="capacity-step capacity-step-pro">
+                  <strong>Pro</strong>
+                  <span>Up to 150 MB on mobile &amp; tablet</span>
+                  <span>Beyond 150 MB on desktop, with larger-file capacity based on your device.</span>
+                </span>
+              </div>
+            )}
           </>}
         </section>
 
