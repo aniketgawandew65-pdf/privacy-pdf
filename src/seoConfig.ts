@@ -143,10 +143,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/protect-pdf': {
     path: '/protect-pdf',
-    title: 'Password Protect PDF — 128-bit Client-Side Encryption',
-    description: 'Encrypt your PDF files with standard password protection without sending files over the web.',
-    heading: 'Password Protect PDF',
-    subheading: 'Apply 128-bit encryption directly inside your browser.',
+    title: 'Password Protect PDF Online — 128-bit Local Encryption | 1into1',
+    description: 'Add standard 128-bit password protection to a PDF directly in your browser. Create an encrypted copy without sending the document to a processing server.',
+    heading: 'Password Protect PDF Locally',
+    subheading: 'Add standard 128-bit password protection to your PDF directly on your device.',
   },
   '/unlock-pdf': {
     path: '/unlock-pdf',
@@ -157,10 +157,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/edit-metadata': {
     path: '/edit-metadata',
-    title: 'Edit PDF Metadata — Clean Title, Author, Keywords Privately',
-    description: 'Inspect and edit title, author, subject, and producer metadata of any PDF locally.',
-    heading: 'Edit Document Metadata',
-    subheading: 'View or scrub embedded metadata tags cleanly in your browser.',
+    title: 'Edit PDF Metadata — Title, Author, Subject & Keywords | 1into1',
+    description: 'Inspect and change PDF title, author, subject and keywords locally in your browser. Save an updated copy without uploading the document for processing.',
+    heading: 'Edit PDF Metadata Locally',
+    subheading: 'Review and change the document title, author, subject and keywords before sharing the PDF.',
   },
   '/rotate-pdf': {
     path: '/rotate-pdf',
@@ -178,10 +178,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/sanitize-pdf': {
     path: '/sanitize-pdf',
-    title: 'Sanitize PDF — Strip Hidden Metadata & Tracking Tags',
-    description: 'Remove author, creation dates, software fingerprints, and XMP metadata from PDF files in your browser. 100% private and offline.',
-    heading: 'Sanitize PDF Metadata',
-    subheading: 'Wipe hidden tracking identifiers, hardware signatures, and author data before sharing.',
+    title: 'Sanitize PDF — Remove Metadata, Forms & Hidden Data | 1into1',
+    description: 'Deep-sanitize a PDF locally by rebuilding visible pages while removing metadata, XMP data, attachments, annotations, forms, scripts, links and hidden text layers.',
+    heading: 'Deep Sanitize PDF Before Sharing',
+    subheading: 'Rebuild the visible document into a cleaner PDF without metadata, forms, scripts, attachments, annotations or hidden text layers.',
   },
   '/redact-pdf': {
     path: '/redact-pdf',
@@ -234,10 +234,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/compare-pdf': {
     path: '/compare-pdf',
-    title: 'Compare PDF Files Online Free — Visual Diff & Revision Checker',
-    description: 'Compare two PDF documents side-by-side or via visual overlay diff. Detect text alterations, contract revisions, and drawing changes 100% privately in-browser.',
-    heading: 'Visual PDF Compare & Diff',
-    subheading: 'Inspect differences and detect contract revisions side-by-side or with visual pixel subtraction in memory.',
+    title: 'Compare PDF Files Online — Side-by-Side & Overlay | 1into1',
+    description: 'Visually compare two PDF versions page by page using side-by-side viewing or an adjustable overlay. Review contracts, reports and layout changes locally in your browser.',
+    heading: 'Compare Two PDF Files Visually',
+    subheading: 'Review two PDF versions side by side or stack them with an adjustable overlay to inspect visual changes.',
   },
   '/repair-pdf': {
     path: '/repair-pdf',
@@ -311,10 +311,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/offline-pdf-redaction': {
     path: '/offline-pdf-redaction',
-    title: 'Redact PDF Online — Permanent & Private | 1into1',
-    description: 'Permanently redact sensitive visible information from PDF files in your browser. Create a redacted copy and verify every page before sharing.',
-    heading: 'Redact PDF Online Privately',
-    subheading: 'Permanently remove sensitive visible information with local browser-based PDF processing.',
+    title: 'Redact PDF Permanently — Burn Blackouts Locally | 1into1',
+    description: 'Mark sensitive areas, burn permanent blackouts into the PDF output and run final verification before download. Redaction processing stays in your browser.',
+    heading: 'Permanently Redact Sensitive PDF Content',
+    subheading: 'Mark confidential areas, burn them into the page output and verify the finished redacted PDF before sharing.',
   },
   '/extract-pdf-for-llm': {
     path: '/extract-pdf-for-llm',

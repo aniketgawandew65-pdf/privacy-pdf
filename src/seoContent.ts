@@ -267,25 +267,26 @@ export const TOOL_GUIDES: Record<string, Guide> = {
 
   '/offline-pdf-redaction': {
     title: 'How to permanently redact sensitive information from a PDF',
-    intro: 'Remove sensitive visible information from a PDF using a browser-based redaction workflow. Review the downloaded copy carefully before sharing it.',
+    intro: 'Mark sensitive visible areas, burn blackouts into the rendered PDF output and verify the finished document before downloading it. This is different from simply placing a removable shape over text.',
     steps: [
-      'Choose the PDF containing the information you need to remove.',
-      'Mark each sensitive area for redaction.',
-      'Check every page for names, account numbers, addresses or other confidential content.',
-      'Create the redacted PDF.',
-      'Download and reopen the result to confirm the information is no longer visible.'
+      'Choose the PDF containing the confidential information.',
+      'Draw redaction boxes over every area that must be removed.',
+      'Review each page and adjust the boxes if needed.',
+      'Burn the blackouts into the redacted PDF output.',
+      'Let the final safety verification complete, then download and reopen the finished file.'
     ],
-    example: 'Before sending a bank statement to a third party, redact account numbers and other information that the recipient does not need, then inspect the exported PDF before sharing it.',
+    example: 'Before sharing a bank statement, place redaction boxes over account numbers or other details the recipient does not need. Generate the permanent redacted copy, wait for verification and inspect the downloaded PDF again before sending it.',
     questions: [
-      ['Is covering text with a white box the same as redaction?', 'No. A visual cover can leave the underlying information recoverable. Use a dedicated redaction workflow when information must be removed from the output.'],
-      ['Is my PDF uploaded for redaction?', 'The redaction workflow is designed to process the document locally in your browser.'],
-      ['Should I keep the original PDF?', 'Yes. Keep the unmodified source separately until you have verified the redacted copy.'],
-      ['What should I check after redacting?', 'Reopen the downloaded PDF and inspect every redacted area and every page before sharing the file.']
+      ['Is drawing a normal black or white rectangle enough?', 'No. A normal visual overlay may leave underlying document information recoverable. This workflow creates the redacted page output with the selected blackouts burned into it.'],
+      ['Does the tool verify the redacted result?', 'Yes. The finished PDF goes through a final blackout verification step before the normal download becomes available.'],
+      ['Does redaction upload my PDF?', 'The redaction workflow processes the PDF locally in your browser.'],
+      ['Should I keep my original PDF?', 'Yes. Keep the original separately until you have inspected and approved the redacted copy.'],
+      ['Does redaction remove document metadata too?', 'Redaction focuses on visible information. Use Deep Sanitize separately when you also need to remove metadata, forms, attachments, scripts or hidden document data.']
     ],
     related: [
-      ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
-      ['/edit-pdf','Make visual PDF edits'],
-      ['/protect-pdf','Password-protect a PDF'],
+      ['/sanitize-pdf','Deep-sanitize hidden PDF data'],
+      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
+      ['/protect-pdf','Password-protect the finished PDF'],
       ['/bates-numbering','Add Bates numbers to legal documents']
     ]
   },
@@ -317,27 +318,55 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/sanitize-pdf': {
-    title: 'How to sanitize a PDF before sharing it',
-    intro: 'Create a cleaner copy of a PDF by removing metadata and other document traces that may not be needed by the recipient.',
+    title: 'How to deep-sanitize a PDF before sharing it',
+    intro: 'Create a clean PDF from the visible page appearance while intentionally removing hidden and interactive document data such as metadata, annotations, forms, attachments, scripts and invisible text layers.',
     steps: [
-      'Choose the PDF you plan to share.',
-      'Run the sanitization process.',
-      'Download the cleaned copy.',
-      'Check the document content and appearance.',
-      'Share the sanitized copy rather than your original file.'
+      'Choose the PDF you want to clean.',
+      'Run Deep Sanitize in your browser.',
+      'The visible pages are rebuilt into a new PDF.',
+      'Download the sanitized copy.',
+      'Reopen it and confirm the visible page content is correct before sharing.'
     ],
-    example: 'Before sending a document outside your organisation, sanitize the PDF to reduce unnecessary metadata, then separately redact any confidential information that appears on the pages.',
+    example: 'A PDF prepared inside several applications may contain author metadata, comments, form values, attachments, scripts or an OCR text layer. Deep Sanitize rebuilds the visible page appearance while removing those interactive and hidden elements.',
     questions: [
-      ['Is sanitizing the same as redacting?', 'No. Sanitizing targets metadata or document traces, while redaction removes sensitive visible content. Use both when both types of information matter.'],
-      ['Does sanitizing change the visible document?', 'The goal is to preserve the useful document while removing unnecessary metadata or hidden traces, but always inspect the downloaded result.'],
-      ['Should I sanitize sensitive documents before sharing?', 'It can be a useful privacy step, but it does not replace reviewing the visible content of the PDF.'],
-      ['Does processing require a normal server upload?', 'The core sanitization workflow runs locally in your browser.']
+      ['What does Deep Sanitize remove?', 'The workflow is designed to remove document metadata, XMP and custom information keys, embedded files, comments and annotations, forms and hidden values, JavaScript and actions, links, bookmarks and invisible or OCR text layers.'],
+      ['Will selectable text remain selectable?', 'No. Deep Sanitize intentionally rebuilds the visible page appearance and removes selectable or OCR text layers along with other hidden and interactive data.'],
+      ['Is sanitizing the same as redacting?', 'No. Sanitize removes hidden and interactive document data. Permanent Redaction is the appropriate workflow for visible confidential information that must be blacked out.'],
+      ['Should I keep the original PDF?', 'Yes. Sanitization intentionally removes document features, so keep your original separately until you have checked the cleaned copy.'],
+      ['Is the PDF uploaded for sanitization?', 'The sanitization workflow runs locally in your browser.']
     ],
     related: [
-      ['/offline-pdf-redaction','Redact sensitive visible content'],
-      ['/edit-metadata','Review or edit PDF metadata'],
-      ['/protect-pdf','Password-protect a copy'],
-      ['/pdf-to-markdown','Extract document content locally']
+      ['/offline-pdf-redaction','Permanently redact visible information'],
+      ['/edit-metadata','Edit selected PDF metadata fields'],
+      ['/protect-pdf','Password-protect the sanitized copy'],
+      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets']
+    ]
+  },
+
+
+
+  '/edit-metadata': {
+    title: 'How to edit PDF title, author, subject and keywords',
+    intro: 'Review and change selected document metadata fields locally before saving a new PDF copy.',
+    steps: [
+      'Choose the PDF whose metadata you want to review.',
+      'Inspect the current title, author, subject and keywords.',
+      'Change the fields you want to update.',
+      'Save the metadata changes.',
+      'Download the updated PDF and keep the original separately until you have checked it.'
+    ],
+    example: 'Before publishing a document, replace an internal working title and author value with the public title and appropriate author information, then save a new copy.',
+    questions: [
+      ['Which metadata fields can I edit?', 'The current editor supports PDF title, author, subject and keywords.'],
+      ['Does this remove all hidden PDF data?', 'No. Edit Metadata changes selected document-information fields. Use Deep Sanitize when you need to remove a wider range of metadata, attachments, forms, annotations, scripts and hidden text layers.'],
+      ['Is the PDF uploaded to edit metadata?', 'The metadata editing workflow runs locally in your browser.'],
+      ['Should I overwrite my only copy?', 'Keep the original separately until you have confirmed the metadata and visible document content in the updated file.']
+    ],
+    related: [
+      ['/sanitize-pdf','Deep-sanitize PDF hidden data'],
+      ['/protect-pdf','Password-protect a PDF'],
+      ['/offline-pdf-redaction','Remove visible sensitive information'],
+      ['/pdf-to-text','Extract selectable PDF text']
     ]
   },
 
@@ -649,27 +678,27 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   "/protect-pdf": {
-    title: "How to password protect a PDF",
-    intro: "Add password protection when a PDF contains information that should not be opened freely by anyone who receives the file.",
+    title: "How to password-protect a PDF locally",
+    intro: "Add standard 128-bit password protection to a PDF in your browser and download an encrypted copy without sending the document to a processing server.",
     steps: [
       "Choose the PDF you want to protect.",
-      "Enter a strong password that you can remember or store securely.",
-      "Create the protected PDF.",
-      "Download the new file.",
-      "Reopen it and confirm the password is required before sharing it."
+      "Enter the password you want the protected copy to require.",
+      "Confirm the password.",
+      "Create the encrypted PDF.",
+      "Download the protected copy and test the password before sharing it."
     ],
-    example: "A confidential document can be password protected before it is sent by email, with the password shared separately through another channel.",
+    example: "If you need to send a private document by email, create a password-protected copy first, verify that it opens only with the password and communicate the password separately when appropriate.",
     questions: [
-      ["What makes a good PDF password?", "Use a long, unique password that is difficult to guess and avoid reusing an important account password."],
-      ["Should I send the password in the same email?", "For sensitive documents, sharing the password through a separate communication channel can reduce accidental exposure."],
-      ["Can I remove the password later?", "If you know the password, you can use an unlock workflow to create an unprotected copy when appropriate."],
-      ["Should I keep an unprotected original?", "Keep your source file securely if you may need to edit or recreate the protected document later."]
+      ["What protection does this tool apply?", "The current workflow applies standard 128-bit PDF password protection."],
+      ["Is the PDF uploaded for encryption?", "No normal document-processing upload is required. Encryption runs locally in your browser."],
+      ["Should I test the protected PDF?", "Yes. Open the downloaded copy and confirm that the password works before sharing or deleting anything."],
+      ["Does password protection remove sensitive information?", "No. Encryption controls access to the PDF. Use Permanent Redaction to remove visible confidential content and Deep Sanitize to remove hidden document data."]
     ],
     related: [
-      ["/unlock-pdf","Unlock a PDF you have permission to open"],
-      ["/offline-pdf-redaction","Remove sensitive information"],
-      ["/sanitize-pdf","Remove PDF metadata"],
-      ["/watermark-pdf","Add a document watermark"]
+      ["/offline-pdf-redaction","Permanently redact confidential content"],
+      ["/sanitize-pdf","Deep-sanitize hidden document data"],
+      ["/unlock-pdf","Unlock a PDF when you know the password"],
+      ["/edit-metadata","Review PDF metadata"]
     ]
   },
 
@@ -724,27 +753,27 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   "/compare-pdf": {
-    title: "How to compare two PDF files for visual changes",
-    intro: "Compare two PDF versions when you need to inspect revisions, layout changes, altered text areas or other visible differences.",
+    title: "How to compare two PDF files side by side or with an overlay",
+    intro: "Load two PDF versions locally and inspect them page by page using side-by-side viewing or an adjustable visual overlay.",
     steps: [
-      "Choose the first PDF as the reference version.",
-      "Choose the second PDF you want to compare.",
-      "Review pages side by side or use the available visual difference view.",
-      "Inspect every highlighted or visible change.",
-      "Confirm important revisions against the source documents before relying on the comparison."
+      "Choose the first PDF version.",
+      "Choose the second PDF version.",
+      "Start the comparison.",
+      "Switch between Side by Side and Overlay modes.",
+      "Navigate page by page and adjust zoom or overlay opacity when you need a closer visual check."
     ],
-    example: "Two versions of a contract can be compared to identify pages where wording, signatures, tables or formatting may have changed.",
+    example: "When a revised contract or report comes back, open the original and revised PDFs together. Read them side by side for broader review, then use the overlay to inspect small layout or visual changes.",
     questions: [
-      ["Can a visual comparison detect every textual change?", "Visual comparison is useful for spotting visible differences, but important legal or financial changes should still be reviewed manually."],
-      ["Do both PDFs need the same number of pages?", "Matching layouts usually make comparison easier, but differences in page count or formatting can themselves be meaningful."],
-      ["Can I compare scanned PDFs?", "Yes for visible page differences, although scan quality, alignment and resolution can affect the comparison."],
-      ["Should I rely on comparison alone for contracts?", "No. Use it as a review aid and verify important wording directly in both source documents."]
+      ["Does Compare PDF automatically understand legal text changes?", "No. This is a visual PDF comparison workflow. It displays the documents side by side or as an overlay so you can inspect visible differences yourself."],
+      ["What is overlay mode?", "Overlay mode places the rendered versions together and lets you adjust opacity, which can make shifts and other visual differences easier to notice."],
+      ["Can the PDFs have different page counts?", "The viewer navigates through the available pages of the two documents, so inspect the complete comparison when document lengths differ."],
+      ["Are both PDFs processed locally?", "The comparison workflow loads and renders both PDFs in your browser."]
     ],
     related: [
-      ["/pdf-to-text","Extract text for manual comparison"],
-      ["/repair-pdf","Repair a damaged PDF before comparing"],
-      ["/annotate-pdf","Mark differences on a PDF"],
-      ["/offline-pdf-redaction","Redact sensitive content before sharing"]
+      ["/bates-numbering","Add Bates numbers for document review"],
+      ["/offline-pdf-redaction","Redact a reviewed PDF"],
+      ["/edit-pdf","Make visual PDF edits"],
+      ["/organize-pdf","Reorder or remove PDF pages"]
     ]
   },
 
