@@ -1,6 +1,10 @@
 // Concrete capabilities, not unverified claims of competitor exclusivity.
 export const TOOL_COPY: Record<string, string> = {
   '/compress-pdf': 'Choose your target KB. Precision compression, with no PDF upload.',
+  '/compress-pdf-to-50kb': 'Aim for a 50KB PDF target for strict upload limits, then reopen the result and check small text, signatures and stamps.',
+  '/compress-pdf-to-100kb': 'Aim for a 100KB PDF target for forms and application portals, with compression running locally in your browser.',
+  '/compress-pdf-to-200kb': 'Aim for a 200KB PDF target while giving document text and scanned details more room than smaller limits.',
+  '/compress-pdf-to-500kb': 'Aim for a 500KB PDF target for larger scans, attachments and portals while preserving more useful page detail.',
   '/merge-pdf': 'Bring separate PDFs together in your chosen order, on your device.',
   '/split-pdf': 'Pick exact page ranges. Save one PDF or download separate files in a ZIP.',
   '/organize-pdf': 'Reorder, rotate and remove pages in one visual workspace.',

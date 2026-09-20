@@ -8,9 +8,9 @@ export interface ToolMeta {
 
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
   '/compress-pdf-to-50kb': {
-    path: '/compress-pdf-to-50kb', title: 'Compress PDF to 50 KB on Your Device | 1into1',
-    description: 'Set a 50 KB PDF target with local compression. Understand quality tradeoffs, check the result and download without uploading your PDF.',
-    heading: 'Compress PDF to 50 KB', subheading: 'A small target for strict upload limits. Check text readability before sharing.',
+    path: '/compress-pdf-to-50kb', title: 'Compress PDF to 50KB Online — Free & Private | 1into1',
+    description: 'Aim for a 50KB PDF target directly in your browser for strict form and application upload limits. Review readability before downloading the locally processed result.',
+    heading: 'Compress PDF to 50KB Online', subheading: 'Target 50KB for strict upload portals while keeping the PDF on your device during processing.',
   },
   '/': {
     path: '/',
@@ -326,23 +326,23 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   '/compress-pdf-to-100kb': {
     path: '/compress-pdf-to-100kb',
     title: 'Compress PDF to 100KB Online — Free & Private | 1into1',
-    description: 'Compress PDF to a 100KB target directly in your browser. Useful for forms, applications and strict upload limits without server-side PDF processing.',
+    description: 'Aim for a 100KB PDF target directly in your browser for forms, certificates and application portals. Process locally and inspect readability before uploading.',
     heading: 'Compress PDF to 100KB Online',
-    subheading: 'Target a 100KB PDF size for applications, forms and upload portals directly in your browser.',
+    subheading: 'Target 100KB for forms and application portals with local browser-based compression.',
   },
   '/compress-pdf-to-200kb': {
     path: '/compress-pdf-to-200kb',
     title: 'Compress PDF to 200KB Online — Free & Private | 1into1',
-    description: 'Compress PDF to a 200KB target directly in your browser. Reduce file size for forms, applications and upload limits with local processing.',
+    description: 'Aim for a 200KB PDF target locally in your browser. Useful for certificates, applications and document portals where more clarity is possible than at smaller limits.',
     heading: 'Compress PDF to 200KB Online',
-    subheading: 'Target a 200KB PDF size while keeping the document as readable as the size limit allows.',
+    subheading: 'Target 200KB while giving text, signatures and scanned images more room to remain readable.',
   },
   '/compress-pdf-to-500kb': {
     path: '/compress-pdf-to-500kb',
     title: 'Compress PDF to 500KB Online — Free & Private | 1into1',
-    description: 'Compress PDF to a 500KB target directly in your browser. Reduce larger documents for upload limits without sending the PDF to a processing server.',
+    description: 'Aim for a 500KB PDF target directly in your browser for larger forms, scans and attachments. Local processing gives the document more room to preserve useful detail.',
     heading: 'Compress PDF to 500KB Online',
-    subheading: 'Target a 500KB PDF size for portals and attachments while preserving useful document clarity.',
+    subheading: 'Target 500KB for larger documents, scans and upload portals while preserving more useful detail.',
   },
   "/privacy": {"path": "/privacy", "title": "Privacy policy | 1into1 PDF", "description": "How your documents, optional cloud AI and local browser storage are handled.", "heading": "Privacy policy", "subheading": "How your documents, optional cloud AI and local browser storage are handled."},
   "/terms": {"path": "/terms", "title": "Terms of service | 1into1 PDF", "description": "Understand permitted use, device limits and purchase terms.", "heading": "Terms of service", "subheading": "Understand permitted use, device limits and purchase terms."},

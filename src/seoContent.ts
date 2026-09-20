@@ -530,14 +530,16 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     example: 'A one-page application form has much more room for readable detail at 50 KB than a ten-page scanned document. The more pages you squeeze into the same 50 KB budget, the less image data is available per page.',
     questions: [
       ['Is 50 KB suitable for a multi-page PDF?', 'Sometimes, but it is a very restrictive target. Longer scanned documents can lose substantial clarity because the available file-size budget is shared across all pages.'],
+      ['Does the tool make the PDF exactly 50 KB?', 'Target mode works toward the selected byte size and can pad a smaller result, but every valid PDF has structural overhead and not every document can realistically fit every target. Always check the finished size and quality.'],
       ['Why does a 50 KB PDF look blurry?', 'Reaching such a small target can require reducing image resolution and JPEG quality aggressively.'],
       ['What should I check before uploading?', 'Reopen the downloaded PDF and inspect small text, identification numbers, signatures, stamps and every page.'],
       ['What if 50 KB is too small for my document?', 'Remove unnecessary pages, split the PDF if permitted, or use a larger accepted limit such as 100 KB or 200 KB.']
     ],
     related: [
+      ['/compress-pdf','Choose a custom PDF target'],
       ['/compress-pdf-to-100kb','Try a 100 KB target'],
+      ['/compress-pdf-to-200kb','Try a 200 KB target'],
       ['/remove-pages','Remove unnecessary pages'],
-      ['/split-pdf','Split a large document'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
   },
@@ -556,13 +558,15 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     questions: [
       ['Is 100 KB enough for a PDF?', 'It depends on page count and content. Text-heavy or short documents generally have an easier quality trade-off than long image-heavy scans.'],
       ['Can I use this for application portals?', 'Yes when the portal accepts PDF and specifies a size around 100 KB. Always follow the portal’s exact file-type and size rules.'],
+      ['Does the tool target exactly 100 KB?', 'Target mode works toward the selected byte size and can pad a smaller result. PDF structure and document complexity can make some targets impractical, so check the downloaded file before submitting it.'],
       ['Why should I reopen the result?', 'Meeting the file-size limit does not guarantee that small text, stamps or photographs remain clear enough for the recipient.'],
       ['Should I choose 50 KB instead?', 'Only when the portal requires it. If 100 KB is allowed, using the larger permitted size generally leaves more room for readable detail.']
     ],
     related: [
       ['/compress-pdf-to-50kb','Use a stricter 50 KB target'],
       ['/compress-pdf-to-200kb','Try a 200 KB target'],
-      ['/scan-to-pdf','Create a PDF from document photos'],
+      ['/compress-pdf-to-500kb','Try a 500 KB target'],
+      ['/compress-pdf','Choose a custom PDF target'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
   },
@@ -585,6 +589,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['What if the portal says maximum 200 KB?', 'Check how the portal defines KB and leave some headroom if necessary. Different systems can calculate kilobytes differently.']
     ],
     related: [
+      ['/compress-pdf-to-50kb','Use a 50 KB target'],
       ['/compress-pdf-to-100kb','Use a 100 KB target'],
       ['/compress-pdf-to-500kb','Use a 500 KB target'],
       ['/remove-pages','Remove pages before compression'],
@@ -610,6 +615,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Can I choose a size other than 500 KB?', 'Yes. Use the main Compress PDF tool when you need another supported target or standard compression instead.']
     ],
     related: [
+      ['/compress-pdf-to-100kb','Use a smaller 100 KB target'],
       ['/compress-pdf-to-200kb','Use a smaller 200 KB target'],
       ['/compress-pdf','Choose another PDF target size'],
       ['/crop-pdf','Crop unnecessary margins'],
