@@ -61,6 +61,7 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
         <li><Check size={17} />Unlimited tasks</li>
         <li><Check size={17} />Lightening fast results</li>
         <li><Check size={17} />All tools included</li>
+        <li><Check size={17} />Up to 150 MB on mobile &amp; tablet; larger files on desktop based on your device capacity</li>
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
         <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose a plan</span><ArrowRight size={16} /></a>
