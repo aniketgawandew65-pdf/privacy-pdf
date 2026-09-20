@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/build-seo.mjs",
+    "build": "tsc -b && vite build && node scripts/build-seo.mjs && node scripts/audit-seo.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seo:audit": "node scripts/audit-seo.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.0",

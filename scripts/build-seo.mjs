@@ -7,7 +7,7 @@ async function loadTs(path) {
   const {outputText} = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}});
   return import('data:text/javascript;base64,'+Buffer.from(outputText).toString('base64'));
 }
-const {TOOLS_METADATA} = await loadTs('../src/seoConfig.ts');
+const {TOOLS_METADATA,SEO_ALIASES} = await loadTs('../src/seoConfig.ts');
 const {TOOL_COPY} = await loadTs('../src/toolCopy.ts');
 const {ARTICLES,blogMeta,renderGuide,renderBlog,escapeHtml:e} = await loadTs('../src/seoContent.ts');
 const origin = 'https://www.1into1.com';
@@ -17,8 +17,16 @@ const app = await readFile(new URL('../src/App.tsx',import.meta.url),'utf8');
 const paths = [...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g)].map(m=>m[1]).filter(p=>!p.includes('*')&&!p.includes(':'));
 const articlePaths = ARTICLES.map(a=>'/blog/'+a.slug);
 const allPaths = [...new Set([...paths,...articlePaths])];
-const aliases = {'/visual-editor':'/edit-pdf'};
+const aliases = SEO_ALIASES;
 const nav = Object.entries(TOOLS_METADATA).filter(([p])=>allPaths.includes(p)&&!aliases[p]&&!['/','/privacy','/terms'].includes(p)).map(([p,m])=>`<a href="${p}">${e(m.heading)}</a>`).join('');
+function trustFor(path) {
+  if(path==='/ai-summary-pdf') {
+    return '<div class="trust-points" aria-label="AI PDF connection and privacy details"><span>Local PDF extraction</span><span>Cloud AI needs internet</span><span>You choose provider</span><span>Consent before sending</span></div><p class="trust-caption">PDF text is extracted locally. A document excerpt and your prompts are sent directly to the AI endpoint you choose only after you approve cloud use.</p>';
+  }
+
+  return '<div class="trust-points" aria-label="Local PDF tool benefits"><span>Lightning fast</span><span>No internet needed</span><span>100% private</span><span>No signup</span></div><p class="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>';
+}
+
 function headFor(meta,path) {
   const url=origin+(aliases[path]|| (path==='/'?'':path));
   let html=template.replace(/<title>[\s\S]*?<\/title>/,`<title>${e(meta.title)}</title>`);
@@ -70,7 +78,7 @@ for(const path of allPaths) {
   const meta=blogMeta(path)||TOOLS_METADATA[path];
   if(!meta) throw new Error('Missing SEO metadata for route: '+path);
   const isBlog=Boolean(blogMeta(path));
-  const body=`<div class="app-shell seo-static-shell"><header class="site-header"><a class="brand" href="/">1into1 PDF</a><a href="/blog">PDF guides</a></header><main class="site-main"><section class="page-intro ${path==='/'?'home-intro':''}">${!isBlog&&!['/privacy','/terms'].includes(path)?'<div class="eyebrow">YOUR FILES. YOUR DEVICE.</div>':''}<h1>${path==='/'?'All tasks.<br class="mobile-break" /> <span>Simply done.</span>':e(meta.heading)}</h1><p>${e(path==='/'?'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.':TOOL_COPY[path]||meta.subheading)}</p>${!isBlog&&!['/privacy','/terms'].includes(path)?'<div class="trust-points" aria-label="Local PDF tool benefits"><span>Lightning fast</span><span>No internet needed</span><span>100% private</span><span>No signup</span></div><p class="trust-caption">*Local PDF tools after the app and required resources have loaded. Optional cloud AI and checkout need a connection.</p>':''}</section>${isBlog?renderBlog(path):`<section id="workspace" class="static-loading"><p>The interactive tool loads in your browser.</p><noscript>Enable JavaScript to process files on this device.</noscript></section>${renderGuide(path)}`}</main><footer class="site-footer"><a href="/blog">PDF guides</a><details class="footer-directory"><summary>Explore PDF tools</summary><nav>${nav}</nav></details><nav class="guide-related"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav></footer></div>`;
+  const body=`<div class="app-shell seo-static-shell"><header class="site-header"><a class="brand" href="/">1into1 PDF</a><a href="/blog">PDF guides</a></header><main class="site-main"><section class="page-intro ${path==='/'?'home-intro':''}">${!isBlog&&!['/privacy','/terms'].includes(path)?'<div class="eyebrow">YOUR FILES. YOUR DEVICE.</div>':''}<h1>${path==='/'?'All tasks.<br class="mobile-break" /> <span>Simply done.</span>':e(meta.heading)}</h1><p>${e(path==='/'?'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.':TOOL_COPY[path]||meta.subheading)}</p>${!isBlog&&!['/privacy','/terms'].includes(path)?trustFor(path):''}</section>${isBlog?renderBlog(path):`<section id="workspace" class="static-loading"><p>The interactive tool loads in your browser.</p><noscript>Enable JavaScript to process files on this device.</noscript></section>${renderGuide(path)}`}</main><footer class="site-footer"><a href="/blog">PDF guides</a><details class="footer-directory"><summary>Explore PDF tools</summary><nav>${nav}</nav></details><nav class="guide-related"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav></footer></div>`;
   const html=headFor(meta,path)
     .replace('</head>', '<style id="seo-static-shell-style">.seo-static-shell .site-header,.seo-static-shell .site-footer,.seo-static-shell .site-main>:not(.page-intro){visibility:hidden!important;pointer-events:none!important}</style></head>')
     .replace('<div id="root"></div>',`<div id="root">${body}</div>`);

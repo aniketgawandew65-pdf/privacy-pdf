@@ -6,6 +6,10 @@ export interface ToolMeta {
   subheading: string;
 }
 
+export const SEO_ALIASES: Record<string, string> = {
+  '/visual-editor': '/edit-pdf',
+};
+
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
   '/compress-pdf-to-50kb': {
     path: '/compress-pdf-to-50kb', title: 'Compress PDF to 50KB Online — Free & Private | 1into1',
@@ -269,17 +273,17 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/ai-summary-pdf': {
     path: '/ai-summary-pdf',
-    title: 'Privacy-Native AI PDF Summary & Chat Free — Zero Server Egress',
-    description: 'Summarize documents and chat with PDFs directly in your browser. Bring Your Own Key with zero intermediate server uploads.',
-    heading: 'Privacy-Native AI PDF Chat',
-    subheading: 'Summarize, interrogate, and extract key action items from documents with zero server data storage.',
+    title: 'AI PDF Summary & Chat — Bring Your Own AI Key | 1into1',
+    description: 'Extract PDF text locally, then send an excerpt directly to the AI provider you choose after explicit consent. Bring your own key without a 1into1 AI proxy.',
+    heading: 'AI PDF Summary & Chat',
+    subheading: 'Extract PDF text locally, then choose which AI provider receives the document excerpt after you approve cloud use.',
   },
   '/pdf-to-csv': {
     path: '/pdf-to-csv',
-    title: 'PDF to CSV Converter Online Free — Bank Statement Table Extractor',
-    description: 'Convert PDF tables, bank statements, and invoices into clean CSV and Excel files. 100% private in-browser coordinate parsing with zero server uploads.',
-    heading: 'PDF to CSV Table Extractor',
-    subheading: 'Extract tabular statements and invoices directly into CSV format without financial data leaving your computer.',
+    title: 'PDF to CSV Converter — Extract Tables Privately | 1into1',
+    description: 'Extract text-based PDF tables into CSV or TSV locally in your browser. Adjust row and column detection, review the output, and use OCR first for scanned PDFs.',
+    heading: 'Extract PDF Tables to CSV',
+    subheading: 'Turn text-based PDF tables into CSV or TSV locally, with adjustable row and column detection.',
   },
   '/document-data-extractor': {
     path: '/document-data-extractor',
@@ -350,7 +354,6 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   "/text-to-pdf": {"path": "/text-to-pdf", "title": "Text to PDF | 1into1 PDF", "description": "Write, format and turn your text into a PDF in your browser.", "heading": "Text to PDF", "subheading": "Write, format and turn your text into a PDF in your browser."},
   "/ocr-pdf": {"path": "/ocr-pdf", "title": "OCR PDF Online — Make Scanned PDFs Searchable Privately | 1into1", "description": "Run OCR on scanned PDFs in your browser and add an invisible searchable, selectable text layer. English OCR runs locally after required resources are available.", "heading": "OCR PDF — Make Scanned PDFs Searchable", "subheading": "Add an invisible text layer so scanned pages become searchable and selectable while the visible PDF stays unchanged."},
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF | 1into1 PDF", "description": "Turn spreadsheet data into a clear, shareable PDF table.", "heading": "CSV to PDF", "subheading": "Turn spreadsheet data into a clear, shareable PDF table."},
-  "/add-text-to-pdf": {"path": "/add-text-to-pdf", "title": "Add Text & Shapes to PDF | 1into1", "description": "Place new text, images and shapes on PDF pages without uploading your document.", "heading": "Add text & shapes", "subheading": "Place new content on your PDF with a live page preview."},
   "/visual-editor": {"path": "/visual-editor", "title": "Add Text & Shapes to PDF | 1into1", "description": "Add text, images and shapes to a PDF without uploading it.", "heading": "Add text & shapes", "subheading": "Add text, images and shapes to a PDF without uploading it."},
   "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF | 1into1 PDF", "description": "Create a readable PDF of your code with syntax highlighting.", "heading": "Code to PDF", "subheading": "Create a readable PDF of your code with syntax highlighting."},
   "/html-to-pdf": {"path": "/html-to-pdf", "title": "HTML to PDF | 1into1 PDF", "description": "Convert HTML or a receipt into a PDF, right in your browser.", "heading": "HTML to PDF", "subheading": "Convert HTML or a receipt into a PDF, right in your browser."},

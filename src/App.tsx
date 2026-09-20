@@ -1503,6 +1503,7 @@ export default function App() {
     `${tool.name} ${tool.path} ${TOOLS_METADATA[tool.path]?.description || ''}`.toLowerCase().includes(search.toLowerCase().trim())
   );
   const isHome = location.pathname === '/';
+  const isCloudAiTool = location.pathname === '/ai-summary-pdf';
 
   const freeTasksExhausted =
     !isPro &&
@@ -1546,12 +1547,31 @@ export default function App() {
           <h1>{isHome ? <>All tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
           <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
           {!isInfo && <>
-            <div className="trust-points" aria-label="Local PDF tool benefits">
-              <span><Zap size={14} />Lightning fast</span>
-              <span><WifiOff size={14} />No internet needed</span>
-              <span><ShieldCheck size={14} />100% private</span>
-              <span><UserRoundCheck size={14} />No signup</span>
-            </div>
+            {isCloudAiTool ? (
+              <>
+                <div
+                  className="trust-points"
+                  aria-label="AI PDF connection and privacy details"
+                >
+                  <span><Zap size={14} />Local PDF extraction</span>
+                  <span><WifiOff size={14} />Cloud AI needs internet</span>
+                  <span><UserRoundCheck size={14} />You choose provider</span>
+                  <span><ShieldCheck size={14} />Consent before sending</span>
+                </div>
+                <p className="trust-caption">
+                  PDF text is extracted locally. A document excerpt and your
+                  prompts are sent directly to the AI endpoint you choose only
+                  after you approve cloud use.
+                </p>
+              </>
+            ) : (
+              <div className="trust-points" aria-label="Local PDF tool benefits">
+                <span><Zap size={14} />Lightning fast</span>
+                <span><WifiOff size={14} />No internet needed</span>
+                <span><ShieldCheck size={14} />100% private</span>
+                <span><UserRoundCheck size={14} />No signup</span>
+              </div>
+            )}
             {!isPro && (
               <div className="capacity-funnel" aria-label="File size access by plan">
                 <span className="capacity-step">

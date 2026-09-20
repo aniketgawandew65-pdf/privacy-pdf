@@ -46,7 +46,6 @@ export const TOOL_COPY: Record<string, string> = {
   '/extract-pdf-for-llm': 'Prepare selectable PDF text as Markdown locally, review it, then choose what you share with ChatGPT, Claude or another LLM.',
   '/csv-to-pdf': 'Turn rows of CSV data into a paginated PDF table.',
   '/edit-pdf': 'Edit supported existing text with its original font. Local processing, with a before-and-after preview.',
-  '/add-text-to-pdf': 'Place new text, images and shapes on your PDF with a live page preview.',
   '/code-to-pdf': 'Share code as a paginated PDF with readable syntax highlighting.',
   '/html-to-pdf': 'Turn HTML into A4, Letter or a continuous receipt-sized PDF.',
 };
