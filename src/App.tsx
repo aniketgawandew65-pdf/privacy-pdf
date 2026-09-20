@@ -1487,12 +1487,17 @@ export default function App() {
           <div className="eyebrow"><ShieldCheck size={14} /> YOUR FILES. YOUR DEVICE.</div>
           <h1>{isHome ? <>All tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
           <p>{isHome ? 'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.' : TOOL_COPY[location.pathname] || currentMeta.subheading}</p>
-          {!isInfo && <div className="trust-points" aria-label="Local PDF tool benefits">
-            <span><Zap size={14} />Lightning fast</span>
-            <span><WifiOff size={14} />No internet needed</span>
-            <span><ShieldCheck size={14} />100% private</span>
-            <span><UserRoundCheck size={14} />No signup</span>
-          </div>}
+          {!isInfo && <>
+            <div className="trust-points" aria-label="Local PDF tool benefits">
+              <span><Zap size={14} />Lightning fast</span>
+              <span><WifiOff size={14} />No internet needed</span>
+              <span><ShieldCheck size={14} />100% private</span>
+              <span><UserRoundCheck size={14} />No signup</span>
+            </div>
+            <p className="trust-caption">
+              Free: up to 10 MB • Sign in: up to 25 MB • Pro: up to 150 MB on mobile &amp; tablet, with larger files supported on desktop based on your device capacity.
+            </p>
+          </>}
         </section>
 
         <nav className="quick-tools" aria-label="Popular PDF tools">
