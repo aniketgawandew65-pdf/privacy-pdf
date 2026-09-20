@@ -1494,9 +1494,23 @@ export default function App() {
               <span><ShieldCheck size={14} />100% private</span>
               <span><UserRoundCheck size={14} />No signup</span>
             </div>
-            <p className="trust-caption">
-              Free: up to 10 MB • Sign in: up to 25 MB • Pro: up to 150 MB on mobile &amp; tablet, with larger files supported on desktop based on your device capacity.
-            </p>
+            <div className="capacity-funnel" aria-label="File size access by plan">
+              <span className="capacity-step">
+                <strong>Free</strong>
+                <span>Up to 10 MB</span>
+              </span>
+              <span className="capacity-arrow" aria-hidden="true">→</span>
+              <span className="capacity-step">
+                <strong>Sign in</strong>
+                <span>Up to 25 MB</span>
+              </span>
+              <span className="capacity-arrow" aria-hidden="true">→</span>
+              <span className="capacity-step capacity-step-pro">
+                <strong>Pro</strong>
+                <span>Up to 150 MB on mobile &amp; tablet</span>
+                <small>Larger files on desktop based on your device capacity</small>
+              </span>
+            </div>
           </>}
         </section>
 
