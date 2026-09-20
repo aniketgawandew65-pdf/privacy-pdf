@@ -156,9 +156,9 @@ export const TOOL_CAPACITY_PROFILES:
     recovery: 'atomic-restart',
     usesOpfs: false,
     usesWorker: true,
-    desktopReadiness: 'conservative',
+    desktopReadiness: 'ready',
     notes:
-      'Desktop Pro uses qpdf WASM in an isolated Worker with WORKERFS-mounted browser Files, avoiding full JavaScript input buffers. Final qpdf output still resides in WASM memory, so capacity remains conservative until stress-tested.',
+      'Desktop Pro uses qpdf WASM in an isolated Worker with WORKERFS-mounted browser Files, avoiding full JavaScript input buffers. Production stress testing passed large workloads through the advisory Green, Amber, and Red ranges; final qpdf output still resides in WASM memory, so recommendations remain device- and browser-aware.',
   },
 
   {
