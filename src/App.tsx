@@ -1500,12 +1500,12 @@ export default function App() {
                   <strong>Free</strong>
                   <span>Up to 10 MB</span>
                 </span>
-                <span className="capacity-arrow" aria-hidden="true">→</span>
+                <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step">
                   <strong>Sign in</strong>
                   <span>Up to 25 MB</span>
                 </span>
-                <span className="capacity-arrow" aria-hidden="true">→</span>
+                <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step capacity-step-pro">
                   <strong>Pro</strong>
                   <span>Up to 150 MB on mobile &amp; tablet</span>
