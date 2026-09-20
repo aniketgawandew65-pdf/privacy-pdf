@@ -574,7 +574,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               <strong className="text-zinc-200">
                 {dailyStats.anonymousRemaining} of 2 remaining
               </strong>
-              {' '}• Up to 10 MB
+              {' '}• Up to 100 MB
             </div>
 
             {hasBonusAccount ? (
@@ -583,11 +583,11 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
                 <strong>
                   {dailyStats.bonusRemaining} of 2 remaining
                 </strong>
-                {' '}• Up to 25 MB
+                {' '}• Up to 150 MB
               </div>
             ) : (
               <div className="text-emerald-400">
-                Sign in to unlock 2 more credits • Up to 25 MB
+                Sign in to unlock 2 more credits • Up to 150 MB
               </div>
             )}
           </div>
@@ -654,8 +654,8 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
                   : 'Desktop Pro uses hardware-aware capacity'
               )
               : dailyStats.bonusRemaining > 0
-                ? 'Max 25 MB'
-                : 'Max 10 MB'}
+                ? 'Max 150 MB'
+                : 'Max 100 MB'}
           </p>
         </div>
       )}

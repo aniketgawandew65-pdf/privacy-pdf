@@ -193,7 +193,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       : 'Upgrade to Desktop Pro for hardware-aware processing with no fixed upload-size cap.';
 
   /*
-   * Anything above 25 MB requires Pro.
+   * Anything above 150 MB requires Pro.
    */
   if (
     sizeInMb !== undefined &&
@@ -213,7 +213,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   }
 
   /*
-   * Files above 10 MB can NEVER consume a daily anonymous
+   * Files above 100 MB can NEVER consume a daily anonymous
    * credit. They require an available bonus credit.
    */
   if (
@@ -240,7 +240,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   }
 
   /*
-   * Files up to 10 MB consume daily credits first.
+   * Files up to 100 MB consume daily credits first.
    */
   if (usage.anonymousRemaining > 0) {
     return {
@@ -251,7 +251,7 @@ export function checkActionAllowed(fileSizeBytes?: number): {
 
   /*
    * Once daily credits are gone, bonus credits can also
-   * handle files up to 10 MB.
+   * handle files up to 100 MB.
    */
   if (bonusRemaining > 0) {
     return {
