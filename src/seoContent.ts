@@ -188,6 +188,32 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/document-data-extractor': {
+    title: 'How to extract structured PDF data into Excel or CSV',
+    intro: 'Turn table-style information from digital or scanned PDFs into editable rows and columns, review the detected structure, and export the result as spreadsheet data.',
+    steps: [
+      'Choose the PDF containing the information you want to extract.',
+      'Let the tool inspect the document structure and use OCR when needed.',
+      'Review the detected sections, rows and columns.',
+      'Correct any cells that need adjustment.',
+      'Export the reviewed data to CSV or Excel.'
+    ],
+    example: 'A multi-page report containing tables can be processed page by page, reviewed as structured rows, corrected where OCR or layout detection needs help, and then exported for spreadsheet work without manually retyping every cell.',
+    questions: [
+      ['Can it work with scanned PDFs?', 'Yes. The extractor supports scanned documents with page-aware OCR fallback, although scan quality and complex layouts can affect recognition accuracy.'],
+      ['Will every PDF table extract perfectly?', 'No. PDFs describe page layout rather than guaranteed spreadsheet structure. Multi-column pages, unusual spacing, poor scans and merged cells can require manual correction.'],
+      ['Can I edit the extracted result?', 'Yes. Review and edit detected cells before exporting the structured data.'],
+      ['What export formats are available?', 'The extracted data can be exported for spreadsheet use in CSV or Excel format.'],
+      ['Is the document processed locally?', 'The extraction workflow is designed to process the document in your browser rather than requiring a normal server-side document upload.']
+    ],
+    related: [
+      ['/bank-statement-to-excel','Extract bank-statement data'],
+      ['/pdf-to-csv','Extract PDF tables to CSV'],
+      ['/ocr-pdf','Make scanned PDF text searchable'],
+      ['/pdf-to-markdown','Convert PDF content to Markdown']
+    ]
+  },
+
   '/bank-statement-to-excel': {
     title: 'How to convert a bank statement PDF to spreadsheet data',
     intro: 'Extract table-style information from a PDF statement into spreadsheet-friendly data. Always verify financial values against the original statement before relying on the result.',
@@ -263,6 +289,32 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/private-pii-secrets-auto-redactor': {
+    title: 'How to find and redact PII and exposed secrets before sharing a file',
+    intro: 'Scan supported PDF, TXT and CSV files for common personal information, financial identifiers and credential patterns, review every detected item, and create a redacted copy locally in your browser.',
+    steps: [
+      'Choose the PDF, TXT or CSV file you want to review.',
+      'Run the local sensitive-information scan.',
+      'Review each finding rather than automatically trusting every match.',
+      'Select the items that should be removed.',
+      'Create the redacted copy and inspect the result before sharing it.'
+    ],
+    example: 'A document prepared for an external recipient may contain an email address, phone number, account identifier or exposed credential. Scan the file first, review the detected items, redact only the sensitive findings you intend to remove, and verify the finished copy.',
+    questions: [
+      ['What kinds of information can the scanner detect?', 'The tool supports multiple personal, financial and secret patterns, including items such as email addresses, phone numbers, credit-card patterns, government identifiers, bank identifiers, IP addresses and several common credential or token formats. Detection coverage varies by format, so manual review is still important.'],
+      ['Does a detected match always mean the information is sensitive?', 'No. Pattern detection can produce matches that are legitimate document content. Review every finding before selecting it for redaction.'],
+      ['Can it scan more than PDFs?', 'Yes. The workflow supports PDF, TXT and CSV files. PDF findings can be mapped to document pages, while text-based files use text positions.'],
+      ['Does the file need to be uploaded to a processing server?', 'The scanning and redaction workflow is designed to run locally in your browser.'],
+      ['Should I still inspect the redacted file?', 'Yes. Reopen the finished copy and verify that the intended information is removed while required document content remains readable.']
+    ],
+    related: [
+      ['/offline-pdf-redaction','Permanently redact visible PDF content'],
+      ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
+      ['/protect-pdf','Password-protect a PDF'],
+      ['/extract-pdf-for-llm','Prepare PDF content before using an LLM']
+    ]
+  },
+
   '/sanitize-pdf': {
     title: 'How to sanitize a PDF before sharing it',
     intro: 'Create a cleaner copy of a PDF by removing metadata and other document traces that may not be needed by the recipient.',
@@ -289,21 +341,22 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/bates-numbering': {
-    title: 'How to add Bates numbers to PDF documents',
-    intro: 'Apply sequential Bates numbering to PDF pages for legal, discovery, compliance or document-review workflows.',
+    title: 'How to add Bates numbers to PDF documents for legal review',
+    intro: 'Stamp sequential Bates identifiers onto PDF pages for legal discovery, document production, compliance and review workflows while processing the document locally.',
     steps: [
-      'Choose the PDF you need to number.',
-      'Set the Bates numbering options and starting value.',
-      'Review the placement so numbers do not cover important page content.',
+      'Choose the PDF you need to Bates stamp.',
+      'Set the prefix, suffix, starting number and number of digits.',
+      'Choose the stamp position and font size.',
       'Create the numbered PDF.',
-      'Check the first, middle and final pages to confirm the sequence.'
+      'Check the first, middle and final pages to confirm numbering and placement.'
     ],
-    example: 'A document set beginning at 000001 can be numbered sequentially so each page has a stable reference during legal review or document exchange.',
+    example: 'Starting at 1 with the prefix CONF- and six digits produces CONF-000001, CONF-000002 and so on. A consistent identifier makes individual pages easier to reference during document review.',
     questions: [
-      ['What are Bates numbers used for?', 'Bates numbering gives document pages sequential identifiers that can make referencing large legal or review sets easier.'],
-      ['Should I verify the complete sequence?', 'Yes. Check the beginning, several middle pages and the final page before relying on the numbered document set.'],
-      ['Can Bates numbers cover existing content?', 'Poor placement can overlap page content, so review the position before generating the final file.'],
-      ['Is the document processed locally?', 'The Bates-numbering workflow runs in your browser rather than requiring a normal document-processing upload.']
+      ['What is Bates numbering?', 'Bates numbering applies a unique sequential identifier to document pages so individual pages can be referenced consistently during legal discovery, review or document production.'],
+      ['Can I choose the Bates prefix and starting number?', 'Yes. Set a prefix, optional suffix, starting number and digit padding before generating the stamped PDF.'],
+      ['Where can the Bates number be placed?', 'Choose the available page position and font size, then inspect the output to make sure the stamp does not cover important content.'],
+      ['Is Bates numbering different from ordinary page numbers?', 'Yes. Ordinary pagination usually describes page order inside one document. Bates identifiers are commonly used as stable references during legal or document-production workflows.'],
+      ['Is the PDF uploaded for Bates stamping?', 'The Bates-numbering workflow runs locally in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
       ['/offline-pdf-redaction','Redact confidential information'],

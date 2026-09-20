@@ -283,10 +283,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/document-data-extractor': {
     path: '/document-data-extractor',
-    title: 'Universal Document Data Extractor — PDF to Excel & CSV | 1into1',
-    description: 'Extract structured rows and tables from digital and scanned PDF documents, review the data, edit cells, and export to CSV or Excel locally in your browser.',
-    heading: 'Universal Document Data Extractor',
-    subheading: 'Turn digital and scanned PDFs into editable spreadsheet data with automatic OCR fallback and local processing.',
+    title: 'Extract PDF Data to Excel & CSV — OCR & Private | 1into1',
+    description: 'Extract structured rows and tables from digital or scanned PDFs, review and edit the detected data, then export to CSV or Excel locally in your browser.',
+    heading: 'Extract PDF Data to Excel & CSV',
+    subheading: 'Turn digital and scanned PDFs into editable spreadsheet data with page-aware OCR fallback and local processing.',
   },
   '/pdf-to-markdown': {
     path: '/pdf-to-markdown',
@@ -304,10 +304,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/private-pii-secrets-auto-redactor': {
     path: '/private-pii-secrets-auto-redactor',
-    title: 'PII & Secrets Auto-Redactor — Private File Scanner | 1into1',
-    description: 'Scan PDF, TXT and CSV files for common sensitive information and exposed secrets, review every finding, and create a redacted copy locally in your browser.',
-    heading: 'Private PII & Secrets Auto-Redactor',
-    subheading: 'Automatically find common personal information, financial identifiers and exposed secrets before sharing a file.',
+    title: 'Redact PII & Secrets from PDF, TXT & CSV — Private | 1into1',
+    description: 'Scan PDF, TXT and CSV files for supported personal information, financial identifiers and exposed secrets. Review findings and create a redacted copy locally in your browser.',
+    heading: 'Redact PII & Secrets Before Sharing',
+    subheading: 'Scan for supported personal data, financial identifiers and exposed credentials, then review and redact them locally.',
   },
   '/offline-pdf-redaction': {
     path: '/offline-pdf-redaction',
@@ -346,7 +346,7 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   "/privacy": {"path": "/privacy", "title": "Privacy policy | 1into1 PDF", "description": "How your documents, optional cloud AI and local browser storage are handled.", "heading": "Privacy policy", "subheading": "How your documents, optional cloud AI and local browser storage are handled."},
   "/terms": {"path": "/terms", "title": "Terms of service | 1into1 PDF", "description": "Understand permitted use, device limits and purchase terms.", "heading": "Terms of service", "subheading": "Understand permitted use, device limits and purchase terms."},
-  "/bates-numbering": {"path": "/bates-numbering", "title": "Bates numbering | 1into1 PDF", "description": "Add sequential reference numbers to your PDF pages on your device.", "heading": "Bates numbering", "subheading": "Add sequential reference numbers to your PDF pages on your device."},
+  "/bates-numbering": {"path": "/bates-numbering", "title": "Bates Numbering PDF Online — Private Legal Stamping | 1into1", "description": "Add sequential Bates numbers to PDF pages for legal discovery and document review. Set prefix, suffix, start number, digit padding and position locally in your browser.", "heading": "Bates Numbering for PDF Documents", "subheading": "Stamp sequential legal reference numbers with your own prefix, suffix, starting number, padding and position."},
   "/text-to-pdf": {"path": "/text-to-pdf", "title": "Text to PDF | 1into1 PDF", "description": "Write, format and turn your text into a PDF in your browser.", "heading": "Text to PDF", "subheading": "Write, format and turn your text into a PDF in your browser."},
   "/ocr-pdf": {"path": "/ocr-pdf", "title": "Make a PDF searchable | 1into1 PDF", "description": "Recognize text in scanned pages using local OCR. Language files download on first use.", "heading": "Make a PDF searchable", "subheading": "Recognize text in scanned pages using local OCR. Language files download on first use."},
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF | 1into1 PDF", "description": "Turn spreadsheet data into a clear, shareable PDF table.", "heading": "CSV to PDF", "subheading": "Turn spreadsheet data into a clear, shareable PDF table."},
