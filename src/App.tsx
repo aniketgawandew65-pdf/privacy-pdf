@@ -1508,7 +1508,7 @@ export default function App() {
               <span className="capacity-step capacity-step-pro">
                 <strong>Pro</strong>
                 <span>Up to 150 MB on mobile &amp; tablet</span>
-                <small>Larger files on desktop based on your device capacity</small>
+                <span>Beyond 150 MB on desktop, with larger-file capacity based on your device.</span>
               </span>
             </div>
           </>}
