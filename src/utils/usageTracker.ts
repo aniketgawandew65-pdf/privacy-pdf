@@ -10,6 +10,7 @@ import {
 } from './googleBonus';
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
+const USAGE_CHANGE_EVENT = 'oneintoone:daily-usage-changed';
 const MAX_FREE_DAILY_TASKS = 2;
 export const MAX_FREE_FILE_SIZE_MB = 100;
 export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = GOOGLE_BONUS_FILE_SIZE_MB;
@@ -42,7 +43,10 @@ function parseUsage(raw: string | null): DailyUsageRecord | null {
   }
 }
 
-function persistUsage(record: DailyUsageRecord): void {
+function persistUsage(
+  record: DailyUsageRecord,
+  notify = false
+): void {
   lastKnownUsage = record;
   const raw = JSON.stringify(record);
   // Avoid redundant storage events between normal-browser tabs.
@@ -51,6 +55,15 @@ function persistUsage(record: DailyUsageRecord): void {
   }
   if (safeSessionStorage.getItem(DAILY_LIMIT_KEY) !== raw) {
     safeSessionStorage.setItem(DAILY_LIMIT_KEY, raw);
+  }
+
+  if (
+    notify &&
+    typeof window !== 'undefined'
+  ) {
+    window.dispatchEvent(
+      new CustomEvent(USAGE_CHANGE_EVENT)
+    );
   }
 }
 
@@ -204,10 +217,10 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       reason: 'FILE_SIZE_LIMIT',
       errorMessage:
         bonusAccount
-          ? `Extra credits support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+          ? `Extra tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
             proSizeUpgradeMessage
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
+            `Sign in to unlock 2 more tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
             proSizeUpgradeMessage,
     };
   }
@@ -232,10 +245,10 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       reason: 'FILE_SIZE_LIMIT',
       errorMessage:
         bonusAccount
-          ? `Your extra credits are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
+          ? `Your extra tasks are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
             proSizeUpgradeMessage
           : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 more credits up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
+            `Sign in to unlock 2 more tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
     };
   }
 
@@ -265,8 +278,40 @@ export function checkActionAllowed(fileSizeBytes?: number): {
     reason: 'DAILY_LIMIT',
     errorMessage:
       bonusAccount
-        ? 'You have used all available free credits. Upgrade to Pro to continue.'
-        : `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in to unlock 2 more credits.`,
+        ? 'You have used all available free tasks. Upgrade to Pro to continue.'
+        : `You have used today's ${MAX_FREE_DAILY_TASKS} free tasks. Sign in to unlock 2 more tasks.`,
+  };
+}
+
+export function subscribeDailyUsage(
+  listener: () => void
+): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const handler = () => listener();
+
+  window.addEventListener(
+    USAGE_CHANGE_EVENT,
+    handler
+  );
+
+  window.addEventListener(
+    'storage',
+    handler
+  );
+
+  return () => {
+    window.removeEventListener(
+      USAGE_CHANGE_EVENT,
+      handler
+    );
+
+    window.removeEventListener(
+      'storage',
+      handler
+    );
   };
 }
 
@@ -315,7 +360,7 @@ export function recordActionExecution(
       persistUsage({
         date: today,
         count: record.count + 1,
-      });
+      }, true);
     }
 
     return;
@@ -332,7 +377,7 @@ export function recordActionExecution(
     persistUsage({
       date: today,
       count: record.count + 1,
-    });
+    }, true);
 
     return;
   }

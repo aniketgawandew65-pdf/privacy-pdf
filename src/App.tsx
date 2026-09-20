@@ -10,6 +10,14 @@ import { blogMeta, renderBlog, renderGuide } from './seoContent';
 import { NetworkAuditDrawer } from './components/NetworkAuditDrawer';
 import { GoogleBonusAccount } from './components/GoogleBonusAccount';
 import {
+  getDailyUsage,
+  subscribeDailyUsage,
+} from './utils/usageTracker';
+import {
+  getActiveGoogleBonus,
+  subscribeGoogleBonus,
+} from './utils/googleBonus';
+import {
   Sliders,
   Files,
   Scissors,
@@ -206,6 +214,10 @@ export default function App() {
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
+  const [dailyUsage, setDailyUsage] = useState(() => getDailyUsage());
+  const [hasGoogleBonusAccount, setHasGoogleBonusAccount] = useState(
+    () => Boolean(getActiveGoogleBonus())
+  );
   const [globalFileError, setGlobalFileError] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
 
@@ -663,12 +675,43 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const handleSync = () => setIsPro(getLicenseStatus().isPro);
-    window.addEventListener('storage', handleSync);
-    document.addEventListener('visibilitychange', handleSync);
+    const handleSync = () => {
+      setIsPro(getLicenseStatus().isPro);
+      setDailyUsage(getDailyUsage());
+      setHasGoogleBonusAccount(
+        Boolean(getActiveGoogleBonus())
+      );
+    };
+
+    const unsubscribeDaily =
+      subscribeDailyUsage(handleSync);
+
+    const unsubscribeGoogle =
+      subscribeGoogleBonus(handleSync);
+
+    window.addEventListener(
+      'storage',
+      handleSync
+    );
+
+    document.addEventListener(
+      'visibilitychange',
+      handleSync
+    );
+
     return () => {
-      window.removeEventListener('storage', handleSync);
-      document.removeEventListener('visibilitychange', handleSync);
+      unsubscribeDaily();
+      unsubscribeGoogle();
+
+      window.removeEventListener(
+        'storage',
+        handleSync
+      );
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleSync
+      );
     };
   }, []);
 
@@ -1460,6 +1503,21 @@ export default function App() {
     `${tool.name} ${tool.path} ${TOOLS_METADATA[tool.path]?.description || ''}`.toLowerCase().includes(search.toLowerCase().trim())
   );
   const isHome = location.pathname === '/';
+
+  const freeTasksExhausted =
+    !isPro &&
+    dailyUsage.anonymousRemaining === 0;
+
+  const extraTasksRemaining =
+    hasGoogleBonusAccount
+      ? dailyUsage.bonusRemaining
+      : 0;
+
+  const allFreeTasksExhausted =
+    freeTasksExhausted &&
+    hasGoogleBonusAccount &&
+    extraTasksRemaining === 0;
+
   const isBlog = Boolean(blogMeta(location.pathname));
   const isInfo = ['/privacy', '/terms'].includes(location.pathname) || isBlog;
   const closeDirectory = () => { setDirectoryOpen(false); setSearch(''); };
@@ -1643,6 +1701,35 @@ export default function App() {
           </ErrorBoundary>
         </section>
         {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device.</span><NavLink to="/privacy">How it works</NavLink></div>}
+
+        {!isInfo && freeTasksExhausted && (
+          <div className="pro-context">
+            <div>
+              <strong>
+                {allFreeTasksExhausted
+                  ? 'All free and extra tasks used today.'
+                  : 'Free tasks used for today.'}
+              </strong>
+              <span>
+                {allFreeTasksExhausted
+                  ? ' Go Pro for unlimited tasks.'
+                  : hasGoogleBonusAccount
+                    ? ` ${extraTasksRemaining} extra task${extraTasksRemaining === 1 ? '' : 's'} remaining, or go Pro for unlimited.`
+                    : ' Sign in for +2 extra tasks, or go Pro for unlimited.'}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsProModalOpen(true)}
+            >
+              {allFreeTasksExhausted
+                ? 'Go unlimited'
+                : 'View Pro'}
+              <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
 
         {isHome && (
           <section
