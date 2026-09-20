@@ -96,6 +96,20 @@ a {text-decoration:none}
 .tool-workspace .truncate {max-width:100%}
 .workspace-note {display:flex;align-items:center;justify-content:center;gap:7px;font-size:11px;line-height:1.6;color:#75757b;margin:18px auto 0;text-align:center;flex-wrap:wrap}
 .workspace-note a {color:#424246;text-decoration:underline;text-underline-offset:3px}
+
+.specialist-moat {max-width:960px;margin:50px auto 0;padding-top:30px;border-top:1px solid #e8e8e6}
+.specialist-moat-heading {max-width:580px;margin:0 auto 22px;text-align:center}
+.specialist-moat-heading .eyebrow {margin-bottom:9px}
+.specialist-moat-heading h2 {margin:0;font-size:27px;line-height:1.2;letter-spacing:-.8px;font-weight:650;color:#242428}
+.specialist-moat-heading p {max-width:520px;margin:9px auto 0;font-size:13px;line-height:1.65;color:#77777e}
+.specialist-moat-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.specialist-moat-card {display:flex;align-items:flex-start;gap:11px;min-height:112px;padding:17px 15px;border:1px solid #e5e5e5;border-radius:13px;background:#fff;color:#303035;transition:background .15s,border-color .15s,transform .15s}
+.specialist-moat-card:hover {background:#f8f8f7;border-color:#bdbdc3;transform:translateY(-1px)}
+.specialist-moat-card > svg:first-child {flex-shrink:0;margin-top:1px;color:#286440}
+.specialist-moat-card > svg:last-child {flex-shrink:0;margin-left:auto;margin-top:2px;color:#8a8a90}
+.specialist-moat-card strong {display:block;font-size:13px;line-height:1.4;font-weight:650;color:#303035}
+.specialist-moat-card span {display:block;margin-top:6px;font-size:11px;line-height:1.6;color:#74747c}
+
 .benefits {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;max-width:760px;margin:52px auto 0;padding-top:24px;border-top:1px solid #e8e8e6}
 .benefits span {font-size:10px;color:#8a8a90;letter-spacing:1px}
 .benefits h2 {font-size:15px;letter-spacing:-.25px;font-weight:600;margin:8px 0}
@@ -138,9 +152,18 @@ a {text-decoration:none}
  .google-account-login > span {display:none}
 }
 
+@media(max-width:900px) and (min-width:701px){
+ .specialist-moat-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
 @media(max-width:700px){
  .site-header,.site-main,.site-footer {width:calc(100% - 32px)}
  .site-header {height:auto;min-height:72px;gap:8px;flex-wrap:wrap;padding:8px 0 10px}
+ .specialist-moat {margin-top:38px;padding-top:24px}
+ .specialist-moat-heading {margin-bottom:17px}
+ .specialist-moat-heading h2 {font-size:23px}
+ .specialist-moat-grid {grid-template-columns:1fr;gap:8px}
+ .specialist-moat-card {min-height:0}
  .brand {font-size:20px;gap:8px}
  .brand img {width:30px;height:35px}
  .header-actions {gap:4px;margin-left:auto}

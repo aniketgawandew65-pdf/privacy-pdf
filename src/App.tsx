@@ -1643,6 +1643,116 @@ export default function App() {
           </ErrorBoundary>
         </section>
         {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device.</span><NavLink to="/privacy">How it works</NavLink></div>}
+
+        {isHome && (
+          <section
+            className="specialist-moat"
+            aria-labelledby="specialist-moat-heading"
+          >
+            <div className="specialist-moat-heading">
+              <span className="eyebrow">SPECIALIST WORKFLOWS</span>
+              <h2 id="specialist-moat-heading">
+                Built for more than basic PDFs.
+              </h2>
+              <p>
+                Privacy, data extraction, legal workflows and
+                AI-ready documents — built into the same toolkit.
+              </p>
+            </div>
+
+            <div className="specialist-moat-grid">
+              <NavLink
+                to="/private-pii-secrets-auto-redactor"
+                className="specialist-moat-card"
+              >
+                <ShieldCheck size={21} />
+                <div>
+                  <strong>Private PII &amp; Secrets</strong>
+                  <span>
+                    Find sensitive information and redact it locally.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/sanitize-pdf"
+                className="specialist-moat-card"
+              >
+                <EyeOff size={21} />
+                <div>
+                  <strong>Sanitize PDF</strong>
+                  <span>
+                    Clean hidden data and risky document elements
+                    before sharing.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/bank-statement-to-excel"
+                className="specialist-moat-card"
+              >
+                <Table size={21} />
+                <div>
+                  <strong>Bank Statement → Excel</strong>
+                  <span>
+                    Turn statement data into editable spreadsheet
+                    output.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/document-data-extractor"
+                className="specialist-moat-card"
+              >
+                <Table size={21} />
+                <div>
+                  <strong>Universal Data Extractor</strong>
+                  <span>
+                    Pull structured information from documents
+                    without manual copying.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/extract-pdf-for-llm"
+                className="specialist-moat-card"
+              >
+                <FileCode size={21} />
+                <div>
+                  <strong>PDF for AI / LLMs</strong>
+                  <span>
+                    Prepare PDF content as clean Markdown and
+                    LLM-ready text.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/bates-numbering"
+                className="specialist-moat-card"
+              >
+                <FileDigit size={21} />
+                <div>
+                  <strong>Bates Stamping</strong>
+                  <span>
+                    Number legal, audit and compliance document
+                    sets.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+            </div>
+          </section>
+        )}
+
         {isHome && <section className="benefits" aria-label="Why 1into1"><div><span>01</span><h2>Pick a file.</h2><p>No account needed to use the local tools.</p></div><div><span>02</span><h2>Make it yours.</h2><p>Simple controls. No upload queue.</p></div><div><span>03</span><h2>Keep moving.</h2><p>Download your result and get on with your day.</p></div></section>}
         {!isInfo && <div dangerouslySetInnerHTML={{ __html: renderGuide(location.pathname) }} />}
       </main>
