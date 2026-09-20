@@ -40,9 +40,9 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
   return <div className="dialog-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }}>
     <div ref={dialogRef} className="pro-dialog" role="dialog" aria-modal="true" aria-labelledby="pro-heading" tabIndex={-1}>
       <button className="icon-button dialog-close" aria-label="Close pricing" onClick={onClose}><X size={20} /></button>
-      <div className="eyebrow">A LITTLE MORE ROOM</div>
-      <h2 id="pro-heading">Meet 1into1 Pro.</h2>
-      <p className="pro-description">For the PDFs that need more. Keep your document processing on your own device.</p>
+      <div className="eyebrow">FOR FREQUENT PDF WORK</div>
+      <h2 id="pro-heading">Go unlimited with 1into1 Pro.</h2>
+      <p className="pro-description">When the free daily tasks aren’t enough, Pro removes the task limit while keeping local PDF workflows on your device.</p>
       <div className="pro-plan-grid">
         <div className="pro-plan-option">
           <span className="pro-plan-label">Monthly</span>
@@ -59,12 +59,13 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
       </div>
       <ul className="pro-features">
         <li><Check size={17} />Unlimited tasks</li>
-        <li><Check size={17} />Lightening fast results</li>
-        <li><Check size={17} />All tools included</li>
-        <li><Check size={17} />Up to 150 MB on mobile &amp; tablet; larger files on desktop based on your device capacity</li>
+        <li><Check size={17} />All PDF tools included</li>
+        <li><Check size={17} />Desktop: Any size. Your device decides the limit.</li>
+        <li><Check size={17} />Mobile &amp; tablet: Up to 150 MB per task</li>
+        <li><Check size={17} />Activate with your license key — no Google sign-in required</li>
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
-        <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose a plan</span><ArrowRight size={16} /></a>
+        <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose Pro plan</span><ArrowRight size={16} /></a>
         <p className="pro-fineprint">Choose Monthly or Yearly securely at Lemon Squeezy checkout. Taxes, renewal and refund terms are shown at checkout.</p>
         <form className="license-form" onSubmit={handleActivate}>
           <label htmlFor="pro-license">Already purchased? Activate your license.</label>
