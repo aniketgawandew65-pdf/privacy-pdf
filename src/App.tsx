@@ -1498,18 +1498,19 @@ export default function App() {
               <div className="capacity-funnel" aria-label="File size access by plan">
                 <span className="capacity-step">
                   <strong>Free</strong>
-                  <span>Up to 10 MB</span>
+                  <span>Up to 100 MB</span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step">
                   <strong>Sign in</strong>
-                  <span>Up to 25 MB</span>
+                  <span>Up to 150 MB</span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step capacity-step-pro">
                   <strong>Pro</strong>
-                  <span>Up to 150 MB on mobile &amp; tablet</span>
-                  <span>Beyond 150 MB on desktop, with larger-file capacity based on your device.</span>
+                  <span><b>Unlimited tasks</b></span>
+                  <span>For Desktop: <b>Any size. Your device decides the limit.</b></span>
+                  <span>For mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
               </div>
             )}

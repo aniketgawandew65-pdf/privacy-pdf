@@ -11,7 +11,7 @@ import {
 
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
 const MAX_FREE_DAILY_TASKS = 2;
-export const MAX_FREE_FILE_SIZE_MB = 10;
+export const MAX_FREE_FILE_SIZE_MB = 100;
 export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = GOOGLE_BONUS_FILE_SIZE_MB;
 export const MAX_PRO_FILE_SIZE_MB = 150;
 

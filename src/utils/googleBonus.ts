@@ -10,7 +10,7 @@ const CACHE_PREFIX =
   'oneintoone_google_bonus_v1:';
 
 export const GOOGLE_BONUS_MAX = 2;
-export const GOOGLE_BONUS_FILE_SIZE_MB = 25;
+export const GOOGLE_BONUS_FILE_SIZE_MB = 150;
 
 const OFFLINE_SESSION_DAYS = 30;
 const CHANGE_EVENT =
