@@ -570,7 +570,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 sm:pb-4 mb-4 sm:mb-5 border-b border-zinc-800 text-xs">
           <div className="space-y-1">
             <div className="text-zinc-400">
-              Daily Free Credits:{' '}
+              Daily Free Tasks:{' '}
               <strong className="text-zinc-200">
                 {dailyStats.anonymousRemaining} of 2 remaining
               </strong>
@@ -579,7 +579,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
 
             {hasBonusAccount ? (
               <div className="text-emerald-400">
-                Credits:{' '}
+                Extra Tasks:{' '}
                 <strong>
                   {dailyStats.bonusRemaining} of 2 remaining
                 </strong>
@@ -587,7 +587,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               </div>
             ) : (
               <div className="text-emerald-400">
-                Sign in to unlock 2 more credits • Up to 150 MB
+                Sign in to unlock 2 more tasks • Up to 150 MB
               </div>
             )}
           </div>

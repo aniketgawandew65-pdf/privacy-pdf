@@ -38,7 +38,8 @@ a {text-decoration:none}
 .brand {display:flex;align-items:center;gap:11px;color:#18181b;font-size:22px;font-weight:750;letter-spacing:-1px;white-space:nowrap}
 .brand img {width:38px;height:42px;object-fit:contain;mix-blend-mode:multiply}
 .brand-light {font-weight:400;color:#77777e}
-.header-actions {display:flex;align-items:center;gap:12px}
+.header-actions {display:flex;align-items:center;gap:12px;flex-shrink:0}
+.google-account-login {flex:0 1 auto;min-width:0}
 .primary-button,.quiet-button,.icon-button {display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid transparent;transition:background .18s,transform .18s}
 .primary-button {background:#202023;color:white;border-color:#202023}
 .primary-button:hover {background:#3a3a3f}
@@ -129,6 +130,14 @@ a {text-decoration:none}
 .license-form {padding-top:20px;border-top:1px solid #e5e5e5}.license-form label {font-size:12px;font-weight:600;display:block;margin-bottom:9px}.license-row {display:flex;gap:8px}.license-row input {flex:1;min-width:0;border:1px solid #ddd;border-radius:9px;padding:12px;font-size:14px}.license-row button {border:1px solid #ddd}
 .form-error {color:#a82135;font-size:12px;margin-top:12px}.form-success {color:#286440;font-size:12px;margin-top:12px}
 .pro-active {padding:18px;border:1px solid #ddd;border-radius:12px;margin:20px 0;font-size:14px}.pro-active p {font-size:12px;color:#666}
+@media(max-width:1180px) and (min-width:701px){
+ .site-header {width:calc(100% - 32px);gap:10px}
+ .header-actions {gap:6px}
+ .header-actions .quiet-button,.header-actions .primary-button {padding-inline:11px}
+ .google-account-login {flex-shrink:0}
+ .google-account-login > span {display:none}
+}
+
 @media(max-width:700px){
  .site-header,.site-main,.site-footer {width:calc(100% - 32px)}
  .site-header {height:auto;min-height:72px;gap:8px;flex-wrap:wrap;padding:8px 0 10px}

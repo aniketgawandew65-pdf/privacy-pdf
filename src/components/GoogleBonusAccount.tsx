@@ -428,7 +428,7 @@ export function GoogleBonusAccount() {
             </div>
 
             <div className="text-[10px] text-emerald-400">
-              {account.bonusRemaining} credit
+              {account.bonusRemaining} task
               {account.bonusRemaining ===
               1
                 ? ''
@@ -483,11 +483,11 @@ export function GoogleBonusAccount() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="google-account-login flex flex-col items-end gap-1">
       <div ref={buttonRef} />
 
       <span className="text-[10px] text-zinc-500">
-        2 extra credits · files up to 150 MB
+        2 extra tasks · files up to 150 MB
       </span>
 
       {authError && (
