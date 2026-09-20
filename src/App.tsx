@@ -1498,11 +1498,13 @@ export default function App() {
               <div className="capacity-funnel" aria-label="File size access by plan">
                 <span className="capacity-step">
                   <strong>Free</strong>
+                  <span><b>2 tasks/day</b></span>
                   <span>Up to 100 MB</span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step">
                   <strong>Sign in</strong>
+                  <span><b>+2 extra tasks</b></span>
                   <span>Up to 150 MB</span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
@@ -1513,6 +1515,12 @@ export default function App() {
                   <span>For mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
               </div>
+            )}
+
+            {isHome && (
+              <p className="capacity-tagline">
+                Stop thinking about limits and get your work done.
+              </p>
             )}
           </>}
         </section>

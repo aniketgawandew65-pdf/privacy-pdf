@@ -190,6 +190,7 @@ a {text-decoration:none}
 .capacity-step-pro strong {color:#00764a}
 @media(min-width:701px){.capacity-step{align-items:center;text-align:center}}
 .capacity-arrow {display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#b7b7bc}
+.capacity-tagline {margin:10px auto 0!important;font-size:12px!important;line-height:1.5!important;font-weight:600;color:#232328!important;letter-spacing:-.1px}
 .pro-dialog {border:1px solid #232327;animation:dialog-arrive .22s ease-out}
 .checkout-shimmer {position:relative;isolation:isolate;overflow:hidden;background:#006e45;border-color:#005736;box-shadow:0 4px 16px #006e4525}
 .checkout-shimmer:hover {background:#005c3a}
@@ -255,6 +256,7 @@ a {text-decoration:none}
   .capacity-step > span {font-size:10px}
   .capacity-step small {font-size:9px}
   .capacity-arrow {display:none}
+  .capacity-tagline {margin-top:9px!important;font-size:11px!important;max-width:320px}
   .directory-card span {display:block;font-size:11px;color:#29292f;line-height:1.5}
   .directory-card {min-height:105px}
 }
