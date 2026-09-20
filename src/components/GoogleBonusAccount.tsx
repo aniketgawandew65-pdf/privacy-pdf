@@ -433,7 +433,7 @@ export function GoogleBonusAccount() {
               1
                 ? ''
                 : 's'}{' '}
-              left
+              left · up to 25 MB
             </div>
           </div>
 
@@ -485,6 +485,10 @@ export function GoogleBonusAccount() {
   return (
     <div className="flex flex-col items-end gap-1">
       <div ref={buttonRef} />
+
+      <span className="text-[10px] text-zinc-500">
+        2 extra credits · files up to 25 MB
+      </span>
 
       {authError && (
         <span
