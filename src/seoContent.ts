@@ -141,8 +141,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
 ,
 
   '/pdf-to-markdown': {
-    title: 'How to convert a PDF to Markdown for AI and LLM workflows',
-    intro: 'Extract readable PDF content into Markdown that is easier to use in notes, documentation and AI workflows. Processing happens in your browser.',
+    title: 'How to convert selectable PDF text to Markdown privately',
+    intro: 'Extract selectable PDF text into Markdown with optional heading and list detection, then copy or download the result for notes, documentation or AI workflows. Processing happens in your browser.',
     steps: [
       'Choose the PDF you want to convert.',
       'Let the tool extract the document text and structure.',
@@ -165,8 +165,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/extract-pdf-for-llm': {
-    title: 'How to prepare PDF content for an LLM',
-    intro: 'Turn PDF content into cleaner Markdown before using it with an AI or LLM workflow. This helps separate document extraction from the AI step.',
+    title: 'How to prepare PDF Markdown for ChatGPT, Claude and other LLMs',
+    intro: 'Extract selectable PDF text into Markdown locally, review the result, remove sections you do not need, and only then choose what content to use with ChatGPT, Claude, Ollama or another LLM.',
     steps: [
       'Choose the PDF you want to prepare.',
       'Extract the document into Markdown.',
@@ -215,27 +215,28 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/bank-statement-to-excel': {
-    title: 'How to convert a bank statement PDF to spreadsheet data',
-    intro: 'Extract table-style information from a PDF statement into spreadsheet-friendly data. Always verify financial values against the original statement before relying on the result.',
+    title: 'How to convert a bank statement PDF into Excel-ready CSV',
+    intro: 'Extract table-style transactions from a text-based bank statement PDF into CSV or TSV, then open the exported file in Excel, Google Sheets or another spreadsheet application. Verify financial values against the original statement.',
     steps: [
-      'Choose the bank statement PDF.',
+      'Choose a text-based bank statement PDF.',
       'Run the table extraction process.',
-      'Review dates, descriptions, debit, credit and balance fields where available.',
-      'Export the structured result and open it in your spreadsheet application.',
-      'Compare totals and sample transactions against the original PDF.'
+      'Review detected dates, descriptions, debit, credit and balance columns where available.',
+      'Export the result as CSV or TSV.',
+      'Open it in Excel or another spreadsheet application and compare important transactions and balances with the original PDF.'
     ],
-    example: 'For a monthly statement, check the opening balance, several transactions and the closing balance after extraction before using the spreadsheet for analysis or reconciliation.',
+    example: 'For a monthly statement, export the detected rows to CSV, open the file in Excel, then compare the opening balance, several debits and credits, and the closing balance against the original PDF before using the data for reconciliation.',
     questions: [
-      ['Will every bank statement have the same columns?', 'No. Banks use different layouts, column names and statement formats, so extracted results should always be reviewed.'],
-      ['Can it work with scanned statements?', 'A scanned statement may require OCR before table extraction can identify usable text.'],
-      ['Should I trust extracted financial values automatically?', 'No. Verify important amounts, dates and balances against the original statement before accounting, reporting or financial decisions.'],
-      ['Is the statement processed locally?', 'The PDF extraction workflow is designed to process the document in your browser rather than requiring a normal server-side document upload.']
+      ['Does this create a native XLSX file?', 'This workflow exports spreadsheet-ready CSV or TSV rather than a native XLSX workbook. CSV and TSV files can be opened directly in Excel and most spreadsheet applications.'],
+      ['Will every bank statement have the same columns?', 'No. Banks use different layouts, column names and statement formats, so the detected rows and columns should always be reviewed.'],
+      ['What if the bank statement is scanned?', 'This table extractor works from usable PDF text. Run OCR first when a scanned statement contains page images instead of selectable text.'],
+      ['Should I trust extracted financial values automatically?', 'No. Verify important amounts, dates, debits, credits and balances against the original statement before accounting, reporting or financial decisions.'],
+      ['Is the statement processed locally?', 'The extraction workflow is designed to process the PDF in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
       ['/pdf-to-csv','Extract PDF tables to CSV'],
       ['/ocr-pdf','OCR a scanned statement'],
-      ['/sanitize-pdf','Remove metadata from a PDF'],
-      ['/pdf-to-markdown','Convert document text to Markdown']
+      ['/document-data-extractor','Extract more complex document data'],
+      ['/sanitize-pdf','Remove PDF metadata before sharing']
     ]
   },
 
@@ -441,24 +442,25 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/ocr-pdf': {
-    title: 'How to make a scanned PDF searchable with OCR',
-    intro: 'Use optical character recognition to detect text in scanned PDF pages and create a more searchable document workflow locally in your browser.',
+    title: 'How to OCR a scanned PDF and make it searchable',
+    intro: 'Run English optical character recognition locally and create a downloadable PDF with an invisible text layer. The visible scan stays in place while recognised words become searchable and selectable.',
     steps: [
-      'Choose a scanned PDF or image-based document.',
-      'Start the OCR process and allow the required OCR resources to load.',
-      'Review the recognised text or searchable output.',
-      'Check names, numbers and important terms against the original scan.',
-      'Download or continue with the recognised document workflow.'
+      'Choose the scanned or image-based PDF.',
+      'Start OCR and allow the required local OCR resources to load.',
+      'Let each page be recognised and rebuilt with its searchable text layer.',
+      'Download the searchable PDF.',
+      'Open the result and test Ctrl+F or Cmd+F, then verify important names and numbers against the scan.'
     ],
-    example: 'A scanned invoice that contains only page images can be processed with OCR before extracting text or attempting table conversion.',
+    example: 'A scanned seven-page invoice bundle may look correct but contain no selectable text. OCR can preserve the visible page images while adding recognised text beneath them so you can search for an invoice number or copy a line of text.',
     questions: [
-      ['What does OCR do?', 'OCR analyses page images and attempts to recognise the visible characters as text.'],
-      ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan quality, resolution, language, fonts, handwriting, skew and image clarity. Important values should always be checked manually.'],
-      ['When should I use OCR before another tool?', 'OCR can help before text extraction, Markdown conversion or table extraction when the original PDF contains scanned images instead of selectable text.'],
-      ['Does OCR require uploading my document?', 'The OCR workflow uses browser-based processing. Required OCR resources may need to load before local recognition can run.']
+      ['What does OCR PDF mean?', 'OCR reads characters from scanned page images and converts the recognised words into machine-readable text.'],
+      ['Will the searchable PDF look different?', 'The workflow keeps the visible scanned page and adds an invisible coordinate-based text layer beneath it, so the document appearance is intended to remain unchanged while search and text selection become available.'],
+      ['Which OCR language is currently supported?', 'The current searchable-PDF workflow provides English OCR.'],
+      ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
+      ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
     related: [
-      ['/pdf-to-markdown','Convert recognised text to Markdown'],
+      ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
       ['/scan-to-pdf','Create a PDF from document photos']
