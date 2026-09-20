@@ -3,7 +3,12 @@ import { Upload, Trash2, ArrowUp, ArrowDown, Files, Loader2, CheckCircle, AlertC
 import { getLicenseStatus } from '../utils/license';
 import { ProModal } from './ProModal';
 import { mergePDFs } from '../utils/pdfEngine';
+import { mergePDFsWithQpdf } from '../utils/largeMergeEngine';
 import { useObjectUrl } from '../utils/useObjectUrl';
+import { validateTaskFiles } from '../utils/fileSizeGuard';
+import { isMobileSafetyEnvironment } from '../utils/deviceCapability';
+import { useDesktopCapacityRecommendation } from '../hooks/useDesktopCapacityRecommendation';
+import { DesktopCapacityStatus } from './DesktopCapacityStatus';
 import {
   checkTaskCredit,
   commitTaskCredit,
@@ -14,23 +19,38 @@ interface MergerProps {
   onFilesChange: (files: File[]) => void;
 }
 
-const PRO_TOTAL_SIZE_LIMIT_MB = 150;
-const PRO_TOTAL_SIZE_LIMIT_BYTES = PRO_TOTAL_SIZE_LIMIT_MB * 1024 * 1024;
+const LEGACY_FALLBACK_LIMIT_BYTES =
+  150 * 1024 * 1024;
 
 const getTotalSizeBytes = (files: File[]) =>
   files.reduce((total, file) => total + file.size, 0);
-
-const formatSizeMB = (bytes: number) =>
-  (bytes / 1024 / 1024).toFixed(2);
 
 export function Merger({ files, onFilesChange }: MergerProps) {
   const [isMerging, setIsMerging] = useState(false);
   const [isProModalOpen, setIsProModalOpen] = useState(false);
   const [isPro, setIsPro] = useState(getLicenseStatus().isPro);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [mergeStage, setMergeStage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { url: downloadUrl, createUrl, revoke: revokeDownloadUrl } = useObjectUrl();
+
+  const totalSizeBytes =
+    getTotalSizeBytes(files);
+
+  const {
+    recommendation:
+      desktopCapacityRecommendation,
+  } =
+    useDesktopCapacityRecommendation({
+      toolId:
+        'merge-pdf',
+      selectedBytes:
+        totalSizeBytes,
+      enabled:
+        files.length > 0 &&
+        isPro,
+    });
 
   // Keep Pro status in sync with localStorage
   useEffect(() => {
@@ -50,18 +70,29 @@ export function Merger({ files, onFilesChange }: MergerProps) {
 
     const combined = [...files, ...addedList];
 
-    onFilesChange(combined);
-    revokeDownloadUrl();
+    /*
+     * Validate the WHOLE merge workload, not only the newest
+     * FileList. This matters when mobile users add files in
+     * multiple selections.
+     *
+     * Desktop Pro bypasses the fixed 150 MB selection ceiling.
+     * Mobile/tablet Pro retains the 150 MB combined-task cap.
+     */
+    const sizeCheck =
+      validateTaskFiles(
+        combined,
+        'Selected files'
+      );
 
-    const totalBytes = getTotalSizeBytes(combined);
-
-    if (totalBytes > PRO_TOTAL_SIZE_LIMIT_BYTES) {
+    if (!sizeCheck.allowed) {
       setErrorMessage(
-        `Merge limit exceeded. Your files total ${formatSizeMB(totalBytes)} MB. This tool supports up to ${PRO_TOTAL_SIZE_LIMIT_MB} MB total per merge. Remove some files and try again.`
+        sizeCheck.errorMessage
       );
       return;
     }
 
+    onFilesChange(combined);
+    revokeDownloadUrl();
     setErrorMessage(null);
   };
 
@@ -89,13 +120,6 @@ export function Merger({ files, onFilesChange }: MergerProps) {
 
     const totalBytes = getTotalSizeBytes(files);
 
-    if (totalBytes > PRO_TOTAL_SIZE_LIMIT_BYTES) {
-      setErrorMessage(
-        `Merge limit exceeded. Your files total ${formatSizeMB(totalBytes)} MB. This tool supports up to ${PRO_TOTAL_SIZE_LIMIT_MB} MB total per merge. Remove some files and try again.`
-      );
-      return;
-    }
-
     const creditCheck = checkTaskCredit(totalBytes);
 
     if (!creditCheck.allowed) {
@@ -111,9 +135,88 @@ export function Merger({ files, onFilesChange }: MergerProps) {
     revokeDownloadUrl();
 
     try {
-      // Uses the dual-engine merge: native vector copy with automatic raster salvage for protected/bank PDFs
-      const mergedBytes = await mergePDFs(files);
-      const blob = new Blob([mergedBytes as unknown as BlobPart], { type: 'application/pdf' });
+      const desktopPro =
+        getLicenseStatus().isPro &&
+        !isMobileSafetyEnvironment();
+
+      let blob: Blob;
+
+      if (desktopPro) {
+        try {
+          blob =
+            await mergePDFsWithQpdf(
+              files,
+              ({ stage }) =>
+                setMergeStage(stage)
+            );
+        } catch (optimizedError) {
+          /*
+           * Keep the proven pdf-lib + raster compatibility
+           * engine for smaller/protected PDFs.
+           *
+           * Do NOT send a very large workload back into the
+           * legacy whole-document engine, because that would
+           * recreate the exact memory problem Phase 5 fixes.
+           */
+          if (
+            totalBytes >
+            LEGACY_FALLBACK_LIMIT_BYTES
+          ) {
+            console.error(
+              'Optimized Desktop merge failed:',
+              optimizedError
+            );
+
+            throw new Error(
+              'The optimized Desktop merge engine could not process one of these large PDFs. If a file is encrypted, password-protected, or damaged, unlock or repair it first and try again.'
+            );
+          }
+
+          console.warn(
+            'Optimized merge unavailable. Falling back to compatibility engine:',
+            optimizedError
+          );
+
+          setMergeStage(
+            'Using compatibility merge engine…'
+          );
+
+          const mergedBytes =
+            await mergePDFs(files);
+
+          blob =
+            new Blob(
+              [
+                mergedBytes as unknown as
+                  BlobPart,
+              ],
+              {
+                type:
+                  'application/pdf',
+              }
+            );
+        }
+      } else {
+        setMergeStage(
+          'Merging documents locally…'
+        );
+
+        const mergedBytes =
+          await mergePDFs(files);
+
+        blob =
+          new Blob(
+            [
+              mergedBytes as unknown as
+                BlobPart,
+            ],
+            {
+              type:
+                'application/pdf',
+            }
+          );
+      }
+
       createUrl(blob);
 
       // Successful result = exactly one task credit.
@@ -123,6 +226,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
       setErrorMessage(err.message || 'Error merging files. One of the documents may be password protected.');
     } finally {
       setIsMerging(false);
+      setMergeStage(null);
     }
   };
 
@@ -160,7 +264,11 @@ export function Merger({ files, onFilesChange }: MergerProps) {
         </p>
         <p className="text-xs text-zinc-500 mt-1">
           {isPro
-            ? `Pro Active • Max ${PRO_TOTAL_SIZE_LIMIT_MB} MB total`
+            ? (
+                isMobileSafetyEnvironment()
+                  ? 'Pro Active • Max 150 MB total on mobile/tablet'
+                  : 'Desktop Pro • device-aware merge capacity'
+              )
             : 'Task size depends on your current free tier'}
         </p>
       </div>
@@ -225,6 +333,14 @@ export function Merger({ files, onFilesChange }: MergerProps) {
         </div>
       )}
 
+      {desktopCapacityRecommendation && (
+        <div className="mb-6">
+          <DesktopCapacityStatus
+            recommendation={desktopCapacityRecommendation}
+          />
+        </div>
+      )}
+
       {/* Error Feedback */}
       {errorMessage && (
         <div className="p-3 mb-4 rounded-xl bg-red-950/40 border border-red-800/40 flex items-start gap-2.5 text-xs text-red-300">
@@ -239,8 +355,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
           <button
             disabled={
               files.length < 2 ||
-              isMerging ||
-              (getTotalSizeBytes(files) > PRO_TOTAL_SIZE_LIMIT_BYTES)
+              isMerging
             }
             onClick={handleMerge}
             className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-black text-sm font-semibold transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
@@ -248,7 +363,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
             {isMerging ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Merging Documents Locally...
+                {mergeStage || 'Merging Documents Locally...'}
               </>
             ) : (
               `Merge ${files.length > 0 ? files.length : ''} Files`

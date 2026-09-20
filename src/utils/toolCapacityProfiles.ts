@@ -153,12 +153,12 @@ export const TOOL_CAPACITY_PROFILES:
     pageComplexity: false,
     pixelComplexity: false,
     outputGrowth: 'large',
-    recovery: 'none',
+    recovery: 'atomic-restart',
     usesOpfs: false,
-    usesWorker: false,
-    desktopReadiness: 'upgrade-priority',
+    usesWorker: true,
+    desktopReadiness: 'conservative',
     notes:
-      'Current pdf-lib merge retains a growing merged document and serializes the final output in memory.',
+      'Desktop Pro uses qpdf WASM in an isolated Worker with WORKERFS-mounted browser Files, avoiding full JavaScript input buffers. Final qpdf output still resides in WASM memory, so capacity remains conservative until stress-tested.',
   },
 
   {
