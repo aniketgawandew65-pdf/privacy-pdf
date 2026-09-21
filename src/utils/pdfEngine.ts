@@ -20801,6 +20801,577 @@ const universalRowsFromWords = (
   return rows;
 };
 
+
+type UniversalRecoveredTable = {
+  header: string[];
+  rows: string[][];
+};
+
+const universalRecoverTableFromOcrText = (
+  rawText: string
+): UniversalRecoveredTable | null => {
+  const lines =
+    String(rawText ?? '')
+      .split(/\r?\n/)
+      .map(
+        (line) =>
+          universalCleanCell(
+            line
+          )
+      )
+      .filter(Boolean);
+
+  if (!lines.length) {
+    return null;
+  }
+
+  const lowerLines =
+    lines.map(
+      (line) =>
+        line.toLowerCase()
+    );
+
+  const findHeaderLine = (
+    requiredSignals: string[]
+  ) =>
+    lowerLines.findIndex(
+      (line) =>
+        requiredSignals.every(
+          (signal) =>
+            line.includes(
+              signal
+            )
+        )
+    );
+
+  const collect = (
+    headerIndex: number,
+    header: string[],
+    parseLine: (
+      line: string
+    ) => string[] | null,
+    parseTotal?: (
+      line: string
+    ) => string[] | null
+  ): UniversalRecoveredTable | null => {
+    if (
+      headerIndex < 0
+    ) {
+      return null;
+    }
+
+    const body: string[][] =
+      [];
+
+    for (
+      let index =
+        headerIndex + 1;
+      index < lines.length;
+      index++
+    ) {
+      const line =
+        lines[index];
+
+      if (
+        /^control\b/i.test(
+          line
+        )
+      ) {
+        break;
+      }
+
+      const parsed =
+        parseLine(
+          line
+        );
+
+      if (parsed) {
+        body.push(
+          parsed
+        );
+
+        continue;
+      }
+
+      const total =
+        parseTotal?.(
+          line
+        );
+
+      if (total) {
+        body.push(
+          total
+        );
+      }
+    }
+
+    if (
+      body.length < 2
+    ) {
+      return null;
+    }
+
+    return {
+      header,
+      rows: [
+        header,
+        ...body,
+      ],
+    };
+  };
+
+  const itemHeader =
+    findHeaderLine([
+      'item code',
+      'description',
+      'qty',
+      'unit price',
+      'total',
+    ]);
+
+  const itemTable =
+    collect(
+      itemHeader,
+      [
+        'Item Code',
+        'Description',
+        'Qty',
+        'Unit Price',
+        'Total',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(ITM-\S+)\s+(.+?)\s+(\S+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+              match[5],
+            ]
+          : null;
+      },
+      (line) => {
+        const match =
+          line.match(
+            /^TOTAL\s+([\d,]+\.\d{2})$/i
+          );
+
+        return match
+          ? [
+              'TOTAL',
+              '',
+              '',
+              '',
+              match[1],
+            ]
+          : null;
+      }
+    );
+
+  if (itemTable) {
+    return itemTable;
+  }
+
+  const receiptScheduleHeader =
+    findHeaderLine([
+      'receipt no',
+      'date & time',
+      'amount paid',
+      'transaction id',
+    ]);
+
+  const receiptSchedule =
+    collect(
+      receiptScheduleHeader,
+      [
+        'Receipt No',
+        'Date & Time',
+        'Amount Paid',
+        'Transaction ID',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(RCT-\S+)\s+(\d{1,2}-[A-Za-z]{3}-\d{4}\s+\d{1,2}:\d{2})\s+(Rs\.?\s*\.?[\d,]+)\s+(TXN-\S+)$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3]
+                .replace(
+                  /Rs\.\./i,
+                  'Rs.'
+                )
+                .replace(
+                  /\s+/g,
+                  ' '
+                ),
+              match[4],
+            ]
+          : null;
+      }
+    );
+
+  if (receiptSchedule) {
+    return receiptSchedule;
+  }
+
+  const partyHeader =
+    findHeaderLine([
+      'name & address',
+      'type of party',
+      'admission',
+      'verification with uidai',
+    ]);
+
+  const partyTable =
+    collect(
+      partyHeader,
+      [
+        'Name & Address',
+        'Type of Party',
+        'Admission',
+        'Verification with UIDAI',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(.+?)\s+(Owner|Tenant|Witness|Agent)\s+(Admitted|Present)\s+(UIDAI\s+OK\s+\d+)$/i
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+            ]
+          : null;
+      }
+    );
+
+  if (partyTable) {
+    return partyTable;
+  }
+
+  const grnHeader =
+    findHeaderLine([
+      'grn',
+      'particulars',
+      'rate',
+      'qty',
+      'tax',
+      'total',
+    ]);
+
+  const grnTable =
+    collect(
+      grnHeader,
+      [
+        'GRN',
+        'Particulars',
+        'Rate',
+        'Qty',
+        'Tax',
+        'Total',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(GRN\d+)\s+(.+?)\s+([\d,]+\.\d{2})\s+(\S+)\s+(\d+%)\s+([\d,]+\.\d{2})$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+              match[5],
+              match[6],
+            ]
+          : null;
+      },
+      (line) => {
+        const match =
+          line.match(
+            /^TOTAL\s+([\d,]+\.\d{2})$/i
+          );
+
+        return match
+          ? [
+              'TOTAL',
+              match[1],
+              '',
+              '',
+              '',
+              '',
+            ]
+          : null;
+      }
+    );
+
+  if (grnTable) {
+    return grnTable;
+  }
+
+  const receiptRegisterHeader =
+    findHeaderLine([
+      'receipt no',
+      'document no',
+      'particulars',
+      'amount paid',
+      'transaction id',
+    ]);
+
+  const receiptRegister =
+    collect(
+      receiptRegisterHeader,
+      [
+        'Receipt No',
+        'Document No',
+        'Particulars',
+        'Amount Paid',
+        'Transaction ID',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(RCPT\S+)\s+(DOC-\S+)\s+(.+?)\s+([\d,]+\.\d{2})\s+(PAY-\S+)$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+              match[5],
+            ]
+          : null;
+      },
+      (line) => {
+        const match =
+          line.match(
+            /^TOTAL\s+([\d,]+\.\d{2})$/i
+          );
+
+        return match
+          ? [
+              'TOTAL',
+              match[1],
+              '',
+              '',
+              '',
+            ]
+          : null;
+      }
+    );
+
+  if (receiptRegister) {
+    return receiptRegister;
+  }
+
+  const invoiceHeader =
+    lowerLines.findIndex(
+      (line) =>
+        /\bline\b/.test(
+          line
+        ) &&
+        /\bhsn\b/.test(
+          line
+        ) &&
+        /\bamount\b/.test(
+          line
+        )
+    );
+
+  const invoiceTable =
+    collect(
+      invoiceHeader,
+      [
+        'Line',
+        'Particulars',
+        'HSN',
+        'Qty',
+        'Amount',
+      ],
+      (line) => {
+        const match =
+          line
+            .replace(
+              /^[|:;\s]+/,
+              ''
+            )
+            .match(
+              /^(\d+)\s+(.+?)\s+(\d{6,7})\s+(\S+)\s+([\d,]+\.\d{2})$/
+            );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+              match[5],
+            ]
+          : null;
+      },
+      (line) => {
+        const match =
+          line.match(
+            /TOTAL[^\d]*([\d,]+\.\d{2})/i
+          );
+
+        return match
+          ? [
+              'TOTAL',
+              '',
+              '',
+              '',
+              match[1],
+            ]
+          : null;
+      }
+    );
+
+  if (invoiceTable) {
+    return invoiceTable;
+  }
+
+  const poHeader =
+    findHeaderLine([
+      'po no',
+      'vendor',
+      'item',
+      'qty',
+      'net amount',
+    ]);
+
+  const poTable =
+    collect(
+      poHeader,
+      [
+        'PO No',
+        'Vendor',
+        'Item',
+        'Qty',
+        'Net Amount',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(PO-\S+)\s+(Vendor\s+\S+)\s+(\S+)\s+(\d+)\s+([\d,]+\.\d{2})$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+              match[4],
+              match[5],
+            ]
+          : null;
+      },
+      (line) => {
+        const match =
+          line.match(
+            /^TOTAL\s+([\d,]+\.\d{2})$/i
+          );
+
+        return match
+          ? [
+              'TOTAL',
+              match[1],
+              '',
+              '',
+              '',
+            ]
+          : null;
+      }
+    );
+
+  if (poTable) {
+    return poTable;
+  }
+
+  const balanceHeader =
+    findHeaderLine([
+      'transaction date',
+      'reference',
+      'balance',
+    ]);
+
+  const balanceTable =
+    collect(
+      balanceHeader,
+      [
+        'Transaction Date',
+        'Reference',
+        'Balance',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^(\d{1,2}-[A-Za-z]{3}-\d{4})\s+(.+?)\s+([\d,]+\.\d{2})$/
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+            ]
+          : null;
+      }
+    );
+
+  if (balanceTable) {
+    return balanceTable;
+  }
+
+  const controlHeader =
+    findHeaderLine([
+      'control',
+      'status',
+      'evidence',
+    ]);
+
+  const controlTable =
+    collect(
+      controlHeader,
+      [
+        'Control',
+        'Status',
+        'Evidence',
+      ],
+      (line) => {
+        const match =
+          line.match(
+            /^([A-Z]-\d+)\s+(PASS|REVIEW|FAIL)\s+(.+)$/i
+          );
+
+        return match
+          ? [
+              match[1],
+              match[2],
+              match[3],
+            ]
+          : null;
+      }
+    );
+
+  return controlTable;
+};
+
 type UniversalScannedPageData = {
   pageNumber: number;
   rows: string[][];
@@ -22541,6 +23112,62 @@ async function universalExtractScannedPages(
             .map((line) => [
               line,
             ]);
+      }
+
+      const recoveredTable =
+        universalRecoverTableFromOcrText(
+          String(
+            data?.text ??
+            ''
+          )
+        );
+
+      if (recoveredTable) {
+        const structuredRows =
+          pageRows.filter(
+            (row) =>
+              row.length >= 2 &&
+              row.length <= 8
+          );
+
+        const currentHeader =
+          structuredRows[0]
+            ?.join(' ')
+            .toLowerCase() ||
+          '';
+
+        const recoveredHeader =
+          recoveredTable.header
+            .join(' ')
+            .toLowerCase();
+
+        const hasRecoveredHeader =
+          currentHeader ===
+            recoveredHeader ||
+          recoveredTable.header.filter(
+            (label) =>
+              currentHeader.includes(
+                label.toLowerCase()
+              )
+          ).length >= 2;
+
+        if (
+          structuredRows.length >= 2
+        ) {
+          if (
+            !hasRecoveredHeader
+          ) {
+            pageRows = [
+              recoveredTable.header,
+              ...pageRows,
+            ];
+          }
+        } else {
+          pageRows = [
+            ...recoveredTable.rows,
+            ...pageRows,
+          ];
+        }
       }
 
       for (
