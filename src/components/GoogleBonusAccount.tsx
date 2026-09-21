@@ -463,7 +463,7 @@ export function GoogleBonusAccount() {
               1
                 ? ''
                 : 's'}{' '}
-              left · same file-size access
+              left
             </div>
           </div>
 
@@ -517,7 +517,7 @@ export function GoogleBonusAccount() {
       <div ref={buttonRef} />
 
       <span className="text-[10px] text-zinc-500">
-        2 extra tasks · same file-size access
+        2 extra tasks
       </span>
 
       {authError && (
