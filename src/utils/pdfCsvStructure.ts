@@ -717,12 +717,36 @@ const normalizeBankRowsLossless = (
             amount;
         } else {
           /*
-           * Do not invent a direction if arithmetic
-           * cannot prove it.
+           * OCR can damage the displayed amount while still
+           * preserving the running balance. Keep that balance
+           * as the next sequence anchor instead of letting one
+           * bad row break every transaction that follows.
            */
+          transaction[5] =
+            balance;
+
+          previousBalance =
+            balanceNumber;
+
+          pendingAmount =
+            null;
+
           return false;
         }
       } else {
+        /*
+         * If the opening balance was unreadable, retain the first
+         * valid running balance so later rows can recover normally.
+         */
+        transaction[5] =
+          balance;
+
+        previousBalance =
+          balanceNumber;
+
+        pendingAmount =
+          null;
+
         return false;
       }
 
@@ -759,10 +783,28 @@ const normalizeBankRowsLossless = (
     }
 
 
+    const isOpeningBalanceRow =
+      /\bopening\s+balance\b/i.test(
+        text
+      );
+
+    const isClosingBalanceRow =
+      /\bclosing\s+balance\b/i.test(
+        text
+      );
+
+
+    /*
+     * Some real footer rows contain "Closing Balance" plus a
+     * repeated list of column names. Do not mistake those balance
+     * rows for another table header.
+     */
     if (
       looksLikeBankHeader(
         text
-      )
+      ) &&
+      !isOpeningBalanceRow &&
+      !isClosingBalanceRow
     ) {
       insideTable =
         true;
@@ -779,9 +821,7 @@ const normalizeBankRowsLossless = (
 
 
     if (
-      /\bopening\s+balance\b/i.test(
-        text
-      )
+      isOpeningBalanceRow
     ) {
       const monies =
         text.match(
@@ -825,9 +865,7 @@ const normalizeBankRowsLossless = (
 
 
     if (
-      /\bclosing\s+balance\b/i.test(
-        text
-      )
+      isClosingBalanceRow
     ) {
       const monies =
         text.match(
@@ -1069,8 +1107,12 @@ const normalizeBankRowsLossless = (
 
 
   /*
-   * Strict integrity guard:
-   * never export a silently broken bank table.
+   * Do not discard every correctly reconstructed transaction
+   * because one OCR row is imperfect. The lossless path already
+   * preserves split amount/balance lines, real Value Dates and
+   * running-balance Debit/Credit inference. Keep that work when
+   * at least one transaction was recovered; unusual non-bank
+   * inputs still fall through to the existing fallback.
    */
   const transactions =
     output.filter(
@@ -1084,41 +1126,13 @@ const normalizeBankRowsLossless = (
         )
     );
 
-  const invalid =
-    transactions.filter(
-      (
-        row
-      ) =>
-        row.length !==
-          6 ||
-        !row[5] ||
-        (
-          !row[3] &&
-          !row[4]
-        ) ||
-        (
-          Boolean(
-            row[3]
-          ) &&
-          Boolean(
-            row[4]
-          )
-        )
-    );
-
   if (
     transactions.length >
-      0 &&
-    invalid.length ===
-      0
+    0
   ) {
     return output;
   }
 
-  /*
-   * Returning [] allows the older coordinate-aware
-   * fallback below to remain available for unusual PDFs.
-   */
   return [];
 };
 
