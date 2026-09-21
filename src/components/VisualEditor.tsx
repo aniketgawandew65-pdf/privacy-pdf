@@ -2082,7 +2082,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage <= 1}
-                className="p-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Previous Page"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
@@ -2093,7 +2093,7 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({ file, onFileChange }
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
-                className="p-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 title="Next Page"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
