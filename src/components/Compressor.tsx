@@ -237,10 +237,6 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
         sizeCheck.errorMessage
       );
 
-      if (!isPro) {
-        setIsProModalOpen(true);
-      }
-
       return false;
     }
 
@@ -322,7 +318,13 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
           'This task is not available on your current plan.'
       );
 
-      setIsProModalOpen(true);
+      if (
+        limitCheck.reason ===
+        'DAILY_LIMIT'
+      ) {
+        setIsProModalOpen(true);
+      }
+
       return;
     }
 
