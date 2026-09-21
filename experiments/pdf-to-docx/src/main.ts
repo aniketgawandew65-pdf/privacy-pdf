@@ -1,5 +1,11 @@
 import "./style.css";
-import { openPdf, extractPage, deadline, LIMITS } from "./extract.ts";
+import {
+  openPdf,
+  extractPage,
+  deadline,
+  LIMITS,
+  isMobileSafetyEnvironment,
+} from "./extract.ts";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { PageModel, ConversionReport, PageSummary } from "./model.ts";
 
@@ -39,43 +45,55 @@ function estimatedComfortableBytes() {
   const nav = navigator as Navigator & { deviceMemory?: number };
   const memory = nav.deviceMemory;
   const cores = navigator.hardwareConcurrency || 4;
-  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const mobile = isMobileSafetyEnvironment();
 
-  let factor = mobile ? 0.45 : 0.8;
+  let estimate = 256 * MB;
+
   if (memory !== undefined) {
-    if (memory <= 2) factor = mobile ? 0.3 : 0.42;
-    else if (memory <= 4) factor = mobile ? 0.4 : 0.58;
-    else if (memory <= 8) factor = mobile ? 0.5 : 0.82;
-    else factor = mobile ? 0.58 : 1;
+    estimate = Math.round(memory * 1024 * MB * (mobile ? 0.04 : 0.08));
+  } else if (cores >= 12) {
+    estimate = 768 * MB;
+  } else if (cores >= 8) {
+    estimate = 512 * MB;
+  } else if (cores <= 4) {
+    estimate = 192 * MB;
   }
-  if (cores <= 4) factor *= 0.85;
 
-  return Math.max(8 * MB, Math.min(LIMITS.bytes, Math.round(LIMITS.bytes * factor)));
+  if (mobile) {
+    estimate = Math.min(estimate, LIMITS.mobileBytes);
+  }
+
+  return Math.max(96 * MB, estimate);
 }
 
 function updateCapacity(selectedBytes: number) {
   const estimated = estimatedComfortableBytes();
   const ratio = selectedBytes / Math.max(1, estimated);
-  const aboveHardLimit = selectedBytes > LIMITS.bytes;
+  const mobile = isMobileSafetyEnvironment();
+  const mobileBlocked = mobile && selectedBytes > LIMITS.mobileBytes;
 
-  const signal = aboveHardLimit || ratio > 1 ? "red" : ratio > 0.75 ? "amber" : "green";
-  const badge =
-    aboveHardLimit
-      ? "Above tool limit"
-      : signal === "red"
-        ? "High workload"
-        : signal === "amber"
-          ? "Near estimated range"
-          : "Within range";
+  const signal =
+    mobileBlocked || ratio > 1
+      ? "red"
+      : ratio > 0.75
+        ? "amber"
+        : "green";
 
-  const copy =
-    aboveHardLimit
-      ? "This file is above the current 30 MB preview limit."
-      : signal === "red"
-        ? "This file is above the comfortable estimate for this browser."
-        : signal === "amber"
-          ? "This file is close to the comfortable estimate for this browser."
-          : "This file is comfortably within the estimated range for this browser.";
+  const badge = mobileBlocked
+    ? "Mobile limit"
+    : signal === "red"
+      ? "High workload"
+      : signal === "amber"
+        ? "Above estimated range"
+        : "Within range";
+
+  const copy = mobileBlocked
+    ? "Mobile and tablet support PDFs up to 150 MB. Use Desktop for larger files."
+    : signal === "red"
+      ? "This workload is significantly above the estimated range. Processing may fail or restart on this device."
+      : signal === "amber"
+        ? "This workload is above the estimated range. You can still try it, but processing may take longer or use more memory."
+        : "This workload is comfortably within the estimated range for this device and browser.";
 
   capacityCard.dataset.signal = signal;
   $("capacity-badge").textContent = badge;
@@ -248,9 +266,6 @@ convert.onclick = async () => {
   setProcessing(true);
 
   try {
-    let characters = 0,
-      imageBytes = 0;
-
     for (let i = 1; i <= pdf.numPages; i++) {
       if (controller.signal.aborted) throw Error("Conversion cancelled.");
       status(`Analyzing layout · page ${i} of ${pdf.numPages}`);
@@ -260,14 +275,6 @@ convert.onclick = async () => {
         LIMITS.pageMs,
         `Page ${i}`,
       );
-
-      characters += page.spans.reduce((n, s) => n + s.text.length, 0);
-      imageBytes += page.pictures.reduce((n, p) => n + p.data.byteLength, 0);
-
-      if (characters > LIMITS.characters || imageBytes > 50 * MB)
-        throw Error(
-          "This document exceeds the prototype’s reconstruction memory budget. Try fewer pages.",
-        );
 
       pages.push(page);
       progress.value = (i / pdf.numPages) * 75;
@@ -280,26 +287,26 @@ convert.onclick = async () => {
       type: "module",
     });
 
-    const result = await deadline(
-      new Promise<{ bytes: ArrayBuffer; summaries: PageSummary[] }>(
-        (resolve, reject) => {
-          worker!.onmessage = (e) =>
-            e.data.type === "error"
-              ? reject(Error(e.data.message))
-              : resolve(e.data);
-          worker!.onerror = (e) =>
-            reject(Error(e.message || "Document worker failed."));
-          controller.signal.addEventListener(
-            "abort",
-            () => reject(Error("Conversion cancelled.")),
-            { once: true },
-          );
-          worker!.postMessage({ pages });
-        },
-      ),
-      60000,
-      "Creating the Word file",
-    );
+    const result = await new Promise<{
+      bytes: ArrayBuffer;
+      summaries: PageSummary[];
+    }>((resolve, reject) => {
+      worker!.onmessage = (e) =>
+        e.data.type === "error"
+          ? reject(Error(e.data.message))
+          : resolve(e.data);
+
+      worker!.onerror = (e) =>
+        reject(Error(e.message || "Document worker failed."));
+
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(Error("Conversion cancelled.")),
+        { once: true },
+      );
+
+      worker!.postMessage({ pages });
+    });
 
     if (id !== generation) return;
 
