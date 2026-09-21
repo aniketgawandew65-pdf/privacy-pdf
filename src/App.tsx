@@ -1869,7 +1869,7 @@ export default function App() {
               >
                 <ShieldCheck size={21} />
                 <div>
-                  <strong>Private PII &amp; Secrets</strong>
+                  <strong>Auto Redact PDF</strong>
                   <span>
                     Find sensitive information and redact it locally.
                   </span>
@@ -1913,7 +1913,7 @@ export default function App() {
               >
                 <Table size={21} />
                 <div>
-                  <strong>Universal Data Extractor</strong>
+                  <strong>Extract PDF Data</strong>
                   <span>
                     Pull structured information from documents
                     without manual copying.
@@ -1943,7 +1943,7 @@ export default function App() {
               >
                 <FileDigit size={21} />
                 <div>
-                  <strong>Bates Stamping</strong>
+                  <strong>Bates Numbering</strong>
                   <span>
                     Number legal, audit and compliance document
                     sets.
