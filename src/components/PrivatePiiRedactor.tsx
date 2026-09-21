@@ -25,6 +25,7 @@ import {
   checkTaskCredit,
   commitTaskCredit,
 } from "../utils/taskCreditGate";
+import { validateTaskFiles } from "../utils/fileSizeGuard";
 import {
   AlertTriangle,
   ArrowRight,
@@ -3511,10 +3512,16 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
   const handleFile = (nextFile?: File | null) => {
     if (!nextFile || !workspaceHydrated) return;
 
-    const maxSize = 150 * 1024 * 1024;
+    const sizeCheck = validateTaskFiles(
+      [nextFile],
+      "Selected file"
+    );
 
-    if (nextFile.size > maxSize) {
-      setError("Please choose a file smaller than 150 MB.");
+    if (!sizeCheck.allowed) {
+      setError(
+        sizeCheck.errorMessage ||
+          "This file is too large for the current device."
+      );
       return;
     }
 
