@@ -342,7 +342,7 @@ export const PdfToMarkdown:
                   await digestText(
                     JSON.stringify(
                       [
-                        'pdf-to-markdown-pages-v1',
+                        'pdf-to-markdown-pages-v2',
                         sourceIdentity,
                         detectHeadings,
                         detectLists,
