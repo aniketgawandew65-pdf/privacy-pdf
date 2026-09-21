@@ -1410,7 +1410,7 @@ export const DocumentDataExtractor:
               </span>
             </button>
           ) : (
-            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4 flex items-center gap-3 text-white">
+            <div className="mt-6 rounded-xl border border-[#d4d4d8] bg-[#f5f5f6] p-4 flex items-center gap-3 text-[#27272a]">
               <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
 
               <div className="min-w-0 flex-1">
