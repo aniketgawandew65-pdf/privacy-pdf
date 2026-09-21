@@ -574,7 +574,7 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
               <strong className="text-zinc-200">
                 {dailyStats.anonymousRemaining} of 2 remaining
               </strong>
-              {' '}• Up to 100 MB
+              {' '}• Desktop: Any size. Your device decides.
             </div>
 
             {hasBonusAccount ? (
@@ -583,11 +583,11 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
                 <strong>
                   {dailyStats.bonusRemaining} of 2 remaining
                 </strong>
-                {' '}• Up to 150 MB
+                {' '}• Same file-size access
               </div>
             ) : (
               <div className="text-emerald-400">
-                Sign in to unlock 2 more tasks • Up to 150 MB
+                Sign in to unlock 2 more tasks • Same file-size access
               </div>
             )}
           </div>
