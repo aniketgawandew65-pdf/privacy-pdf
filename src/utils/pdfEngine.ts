@@ -26754,11 +26754,6 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
     );
   }
 
-  if (measureCanvas) {
-    measureCanvas.width = 1;
-    measureCanvas.height = 1;
-  }
-
   unicodeImageCache.clear();
 
   return new Uint8Array(
