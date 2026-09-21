@@ -2093,7 +2093,7 @@ React.FC<AnnotatePdfProps> = ({
             onClick={() =>
               onFileChange(null)
             }
-            className="p-2 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900"
+            className="p-2 rounded-lg border border-[#d4d4d8] text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
             title="Close PDF"
           >
             <X className="w-4 h-4" />
@@ -2209,7 +2209,7 @@ React.FC<AnnotatePdfProps> = ({
               disabled={
                 !undoStack.length
               }
-              className="p-2.5 shrink-0 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white disabled:opacity-30"
+              className="p-2.5 shrink-0 rounded-xl border border-[#d4d4d8] text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 transition-colors"
               title="Undo"
             >
               <Undo2 className="w-4 h-4" />
@@ -2222,7 +2222,7 @@ React.FC<AnnotatePdfProps> = ({
               disabled={
                 !redoStack.length
               }
-              className="p-2.5 shrink-0 rounded-xl border border-zinc-800 text-zinc-400 hover:text-white disabled:opacity-30"
+              className="p-2.5 shrink-0 rounded-xl border border-[#d4d4d8] text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 transition-colors"
               title="Redo"
             >
               <Redo2 className="w-4 h-4" />
@@ -2432,7 +2432,7 @@ React.FC<AnnotatePdfProps> = ({
               className={`min-h-9 px-3 rounded-xl border flex items-center gap-2 text-xs font-medium transition ${
                 tool === 'pan'
                   ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
-                  : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white'
+                  : 'border-[#d4d4d8] bg-white text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white'
               }`}
               title="Pan / move PDF page"
             >
@@ -2470,7 +2470,7 @@ React.FC<AnnotatePdfProps> = ({
                 })
               }
 
-              className="w-full min-h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-emerald-500"
+              className="w-full min-h-10 rounded-xl border border-[#d4d4d8] bg-white px-3 text-sm text-[#18181b] outline-none focus:border-emerald-500"
               placeholder="Annotation text"
             />
           )}
@@ -2618,7 +2618,7 @@ React.FC<AnnotatePdfProps> = ({
               className={`h-8 px-2.5 rounded-lg border flex items-center gap-1.5 text-[11px] font-medium transition ${
                 tool === 'select'
                   ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
-                  : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white'
+                  : 'border-[#d4d4d8] bg-white text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white'
               }`}
 
               title="Select text, pen, rectangle, circle, arrow or highlight"
@@ -3523,7 +3523,7 @@ React.FC<AnnotatePdfProps> = ({
                 )
               }
 
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white"
+              className="p-1.5 rounded-lg text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
@@ -3556,7 +3556,7 @@ React.FC<AnnotatePdfProps> = ({
                 )
               }
 
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white"
+              className="p-1.5 rounded-lg text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
@@ -3659,7 +3659,7 @@ React.FC<ToolButtonProps> = ({
       className={`shrink-0 min-h-10 px-3 rounded-xl border flex items-center gap-2 text-xs font-medium transition ${
         active
           ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400'
-          : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white'
+          : 'border-[#d4d4d8] bg-white text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white'
       }`}
     >
       {children}
