@@ -11,14 +11,75 @@ import type { PageModel, Rule, Span } from "./model.ts";
 import { detectTables } from "./layout.ts";
 import { planTextPreservation, type GlyphRun } from "./text-policy.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
+const RANGE_CHUNK_SIZE = 256 * 1024;
+
 export const LIMITS = {
-  bytes: 30 * 1024 * 1024,
-  pages: 60,
-  characters: 400000,
+  mobileBytes: 150 * 1024 * 1024,
   pagePixels: 3_000_000,
   operations: 180000,
   pageMs: 45000,
 };
+
+interface NavigatorSafetyLike extends Navigator {
+  userAgentData?: {
+    mobile?: boolean;
+  };
+}
+
+export function isMobileSafetyEnvironment() {
+  const nav = navigator as NavigatorSafetyLike;
+  const ua = nav.userAgent || "";
+  const platform = nav.platform || "";
+  const maxTouchPoints = nav.maxTouchPoints || 0;
+
+  const isIPad =
+    /iPad/i.test(ua) ||
+    (platform === "MacIntel" && maxTouchPoints > 1);
+
+  if (isIPad || /iPhone|iPod/i.test(ua)) return true;
+  if (/Android/i.test(ua)) return true;
+  if (nav.userAgentData?.mobile === true) return true;
+
+  return false;
+}
+
+class LocalBlobRangeTransport extends PDFDataRangeTransport {
+  private readonly source: Blob;
+  private stopped = false;
+
+  constructor(source: Blob, initialData: Uint8Array) {
+    super(source.size, initialData, false);
+    this.source = source;
+  }
+
+  requestDataRange(begin: number, end: number) {
+    if (this.stopped) return;
+
+    const safeBegin = Math.max(0, Math.min(this.source.size, begin));
+    const safeEnd = Math.max(
+      safeBegin,
+      Math.min(this.source.size, end),
+    );
+
+    void this.source
+      .slice(safeBegin, safeEnd)
+      .arrayBuffer()
+      .then((buffer) => {
+        if (!this.stopped) {
+          this.onDataRange(safeBegin, new Uint8Array(buffer));
+        }
+      })
+      .catch(() => {
+        if (!this.stopped) {
+          this.onDataRange(safeBegin, new Uint8Array(0));
+        }
+      });
+  }
+
+  abort() {
+    this.stopped = true;
+  }
+}
 export function deadline<T>(
   promise: Promise<T>,
   ms: number,
@@ -46,36 +107,72 @@ export async function openPdf(
   file: File,
   signal: AbortSignal,
 ): Promise<PDFDocumentProxy> {
-  if (file.size > LIMITS.bytes)
-    throw Error("This experiment supports PDFs up to 30 MB.");
-  const data = new Uint8Array(await file.arrayBuffer());
-  if (!new TextDecoder().decode(data.subarray(0, 1024)).includes("%PDF-"))
+  if (
+    isMobileSafetyEnvironment() &&
+    file.size > LIMITS.mobileBytes
+  ) {
+    throw Error(
+      "Mobile and tablet support PDFs up to 150 MB. Use Desktop for larger files.",
+    );
+  }
+
+  const prefix = new Uint8Array(
+    await file.slice(0, Math.min(file.size, 1024)).arrayBuffer(),
+  );
+
+  if (!new TextDecoder().decode(prefix).includes("%PDF-")) {
     throw Error("This file is not a readable PDF.");
+  }
+
+  const initialData = new Uint8Array(
+    await file
+      .slice(0, Math.min(file.size, RANGE_CHUNK_SIZE))
+      .arrayBuffer(),
+  );
+
+  const rangeTransport = new LocalBlobRangeTransport(
+    file,
+    initialData,
+  );
+
   const task = getDocument({
-    data,
+    range: rangeTransport,
+    rangeChunkSize: RANGE_CHUNK_SIZE,
+    disableRange: false,
+    disableStream: true,
+    disableAutoFetch: true,
     fontExtraProperties: true,
     enableXfa: false,
     useSystemFonts: true,
+    isEvalSupported: false,
   });
-  const abort = () => void task.destroy();
-  signal.addEventListener("abort", abort, { once: true });
-  task.onPassword = () => {
+
+  const abort = () => {
+    rangeTransport.abort();
     void task.destroy();
   };
-  try {
-    const pdf = await deadline(task.promise, 20000, "Reading the PDF");
-    if (pdf.numPages > LIMITS.pages) {
-      await pdf.loadingTask.destroy();
-      throw Error("This experiment supports up to 60 pages.");
-    }
-    return pdf;
-  } catch (e) {
+
+  signal.addEventListener("abort", abort, { once: true });
+
+  task.onPassword = () => {
+    rangeTransport.abort();
     void task.destroy();
+  };
+
+  try {
+    return await deadline(task.promise, 20000, "Reading the PDF");
+  } catch (e) {
+    rangeTransport.abort();
+    void task.destroy();
+
     if (signal.aborted) throw Error("Conversion cancelled.");
-    if (String(e).match(/password|destroyed/i))
+
+    if (String(e).match(/password|destroyed/i)) {
       throw Error(
         "Password-protected PDFs are not supported. Unlock a copy first.",
       );
+    }
+
     throw e;
   }
 }
