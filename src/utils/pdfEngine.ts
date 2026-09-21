@@ -14174,7 +14174,7 @@ export async function ocrPDFToSearchable(
                       alpha:
                         false,
                     }
-                  );
+                  ) as CanvasRenderingContext2D | null;
 
 
                 if (probeCtx) {
@@ -14311,8 +14311,8 @@ export async function ocrPDFToSearchable(
                           false,
                         willReadFrequently:
                           true,
-                      } as any
-                    );
+                      }
+                    ) as CanvasRenderingContext2D | null;
 
 
                   if (rescueCtx) {
