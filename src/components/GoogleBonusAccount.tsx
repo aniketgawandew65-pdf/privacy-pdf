@@ -333,10 +333,10 @@ export function GoogleBonusAccount() {
                 setAccount(state);
 
                 trackAnalyticsEvent(
-                  'google_sign_in',
+                  'login',
                   {
-                    auth_method:
-                      'google',
+                    method:
+                      'Google',
                   }
                 );
               } catch (
