@@ -131,6 +131,9 @@ export function GoogleBonusAccount() {
   const initializedRef =
     useRef(false);
 
+  const pendingInteractiveLoginRef =
+    useRef(false);
+
   const [account, setAccount] =
     useState<GoogleBonusState | null>(
       () =>
@@ -217,6 +220,24 @@ export function GoogleBonusAccount() {
 
   useEffect(() => {
     if (
+      account &&
+      pendingInteractiveLoginRef.current
+    ) {
+      pendingInteractiveLoginRef.current =
+        false;
+
+      trackAnalyticsEvent(
+        'login',
+        {
+          method:
+            'Google',
+        }
+      );
+    }
+  }, [account]);
+
+  useEffect(() => {
+    if (
       account ||
       !online ||
       loading
@@ -267,6 +288,9 @@ export function GoogleBonusAccount() {
                 );
                 return;
               }
+
+              pendingInteractiveLoginRef.current =
+                true;
 
               setLoading(true);
               setAuthError(null);
@@ -331,17 +355,12 @@ export function GoogleBonusAccount() {
                   });
 
                 setAccount(state);
-
-                trackAnalyticsEvent(
-                  'login',
-                  {
-                    method:
-                      'Google',
-                  }
-                );
               } catch (
                 error
               ) {
+                pendingInteractiveLoginRef.current =
+                  false;
+
                 setAuthError(
                   error instanceof
                     Error
