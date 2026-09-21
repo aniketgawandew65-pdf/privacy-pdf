@@ -4,7 +4,6 @@ import {
   isMobileSafetyEnvironment,
 } from './deviceCapability';
 import {
-  GOOGLE_BONUS_FILE_SIZE_MB,
   consumeGoogleBonus,
   getActiveGoogleBonus,
 } from './googleBonus';
