@@ -5,6 +5,7 @@ import {
   linesOf,
   paragraphsOf,
   lineText,
+  flowRegions,
 } from "../src/layout.ts";
 import type { Rule, Span } from "../src/model.ts";
 const h = (y: number, x1 = 0, x2 = 200): Rule => ({
@@ -14,6 +15,57 @@ const h = (y: number, x1 = 0, x2 = 200): Rule => ({
   y2: y,
   width: 0.5,
   color: "000000",
+});
+test("unruled transaction rows keep dates, descriptions and amounts together", () => {
+  const spans = [s("Date", 4, 14), s("Details", 64, 14), s("Amount", 144, 14)];
+  for (let i = 0; i < 3; i++) {
+    const y = 34 + i * 32;
+    spans.push(
+      s(`D${i}`, 4, y),
+      s(`Item${i}`, 64, y),
+      s(`More${i}`, 64, y + 12),
+      s(`${i}.00`, 144, y),
+    );
+  }
+  const g = detectTables(
+    [
+      h(0),
+      h(20),
+      h(120),
+      v(0, 0, 120),
+      v(60, 0, 120),
+      v(140, 0, 120),
+      v(200, 0, 120),
+    ],
+    spans,
+  )[0];
+  assert.equal(g.rows.length, 4);
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(
+      g.rows[i + 1].map((c) => c.spans.map((s) => s.text)),
+      [[`D${i}`], [`Item${i}`, `More${i}`], [`${i}.00`]],
+    );
+    assert.equal(g.rows[i + 1][0].borders.top, i === 0);
+  }
+});
+test("side-by-side address blocks are grouped independently", () => {
+  const result = flowRegions(
+    [
+      s("Left one", 10, 20),
+      s("Left two", 10, 32),
+      s("Right one", 200, 21),
+      s("Right two", 200, 33),
+    ],
+    300,
+  );
+  assert.equal(result.columns, true);
+  assert.deepEqual(
+    result.regions.map((r) => r.spans.map((s) => s.text)),
+    [
+      ["Left one", "Left two"],
+      ["Right one", "Right two"],
+    ],
+  );
 });
 const v = (x: number, y1 = 0, y2 = 80): Rule => ({
   x1: x,

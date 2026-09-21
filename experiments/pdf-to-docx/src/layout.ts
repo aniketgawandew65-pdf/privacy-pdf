@@ -112,8 +112,8 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
     }
     const hs = group.filter(horizontal),
       vs = group.filter(vertical);
-    const xs = clusters(vs.map((r) => r.x1)),
-      ys = clusters(hs.map((r) => r.y1));
+    const xs = clusters(vs.map((r) => r.x1));
+    let ys = clusters(hs.map((r) => r.y1));
     if (xs.length < 3 || ys.length < 3 || xs.length > 65 || ys.length > 180)
       continue;
     const x = xs[0],
@@ -121,6 +121,46 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
       width = xs.at(-1)! - x,
       height = ys.at(-1)! - y;
     if (width < 40 || height < 15) continue;
+    // Statements often rule columns but leave transaction rows unruled.
+    // Repeated baselines in multiple columns (including an outer column)
+    // provide row anchors. Subdivide only tall bands with several anchors.
+    const inferred = new Set<number>();
+    if (xs.length >= 4) {
+      for (let band = 0; band < ys.length - 1; band++) {
+        const inside = spans.filter(
+          (s) =>
+            s.x >= x - TOL &&
+            s.x < x + width &&
+            s.y > ys[band] &&
+            s.y < ys[band + 1],
+        );
+        const anchors = linesOf(inside).filter((l) => {
+          const columns = new Set(
+            l.spans.map((s) =>
+              xs.findIndex(
+                (edge, col) =>
+                  col < xs.length - 1 &&
+                  s.x + 1 >= edge &&
+                  s.x + 1 < xs[col + 1],
+              ),
+            ),
+          );
+          columns.delete(-1);
+          return (
+            columns.size >= 2 && (columns.has(0) || columns.has(xs.length - 2))
+          );
+        });
+        if (anchors.length < 3 || ys[band + 1] - ys[band] < anchors[0].size * 6)
+          continue;
+        for (let a = 1; a < anchors.length; a++) {
+          if (anchors[a].y - anchors[a - 1].y < anchors[a].size * 1.8) continue;
+          const boundary = anchors[a].y - anchors[a].size * 1.05;
+          if (boundary > ys[band] + TOL && boundary < ys[band + 1] - TOL)
+            inferred.add(boundary);
+        }
+      }
+      ys = [...ys, ...inferred].sort((a, b) => a - b);
+    }
     const rows: Cell[][] = [];
     for (let r = 0; r < ys.length - 1; r++) {
       const row: Cell[] = [];
@@ -169,6 +209,7 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
           if (
             !below ||
             below.rowSpan === 0 ||
+            inferred.has(ys[n]) ||
             covers(group, "h", ys[n], cell.x, cell.x + cell.width)
           )
             break;
@@ -216,4 +257,35 @@ export function paragraphsOf(lines: Line[]): Line[][] {
     else groups.push([line]);
   }
   return groups;
+}
+
+/** Separate side-by-side blocks before line grouping can interleave their text. */
+export function flowRegions(spans: Span[], pageRight: number) {
+  const bands: Span[][] = [];
+  let bottom = -Infinity;
+  for (const span of [...spans].sort((a, b) => a.y - a.size - (b.y - b.size))) {
+    if (span.y - span.size > bottom + span.size * 0.9) bands.push([]);
+    bands.at(-1)!.push(span);
+    bottom = Math.max(bottom, span.y);
+  }
+  let columns = false;
+  const regions = bands.flatMap((band) => {
+    const groups: Span[][] = [];
+    let right = -Infinity;
+    const gutter = Math.max(20, Math.max(...band.map((s) => s.size)) * 2.5);
+    for (const span of [...band].sort((a, b) => a.x - b.x)) {
+      if (span.x > right + gutter) groups.push([]);
+      groups.at(-1)!.push(span);
+      right = Math.max(right, span.x + span.width);
+    }
+    if (groups.length > 1) columns = true;
+    return groups.map((group, i) => ({
+      spans: group,
+      left: Math.min(...group.map((s) => s.x)),
+      right: groups[i + 1]
+        ? Math.min(...groups[i + 1].map((s) => s.x)) - 8
+        : pageRight,
+    }));
+  });
+  return { regions, columns };
 }

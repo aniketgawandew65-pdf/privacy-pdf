@@ -17,6 +17,7 @@ import {
   LineRuleType,
   HeadingLevel,
   TabStopType,
+  type IFrameOptions,
 } from "docx";
 import type {
   PageModel,
@@ -26,7 +27,13 @@ import type {
   Cell,
   PageSummary,
 } from "./model.ts";
-import { detectTables, linesOf, paragraphsOf, lineText } from "./layout.ts";
+import {
+  detectTables,
+  linesOf,
+  paragraphsOf,
+  lineText,
+  flowRegions,
+} from "./layout.ts";
 const tw = (pt: number) => Math.max(0, Math.round(pt * 20));
 const run = (s: Span, text = s.text) =>
   new TextRun({
@@ -56,6 +63,7 @@ function paragraph(
   width: number,
   before = 0,
   inCell = false,
+  frame?: IFrameOptions,
 ): Paragraph {
   const children: TextRun[] = [],
     stops: number[] = [];
@@ -96,6 +104,7 @@ function paragraph(
     l.spans.filter((s) => s.text.trim()).every((s) => s.bold),
   );
   return new Paragraph({
+    frame,
     children,
     alignment: align,
     heading:
@@ -219,19 +228,55 @@ export async function makeDocx(
       used = new Set(
         tables.flatMap((t) => t.rows.flatMap((r) => r.flatMap((c) => c.spans))),
       );
-    const flow = paragraphsOf(linesOf(p.spans.filter((s) => !used.has(s))));
+    const unused = p.spans.filter((s) => !used.has(s));
+    const regions = flowRegions(
+      unused,
+      Math.min(p.width - 8, Math.max(...p.spans.map((s) => s.x + s.width))),
+    );
+    // Text over fixed forms/backgrounds must stay at its source position;
+    // otherwise flowing paragraphs drift across the preserved rules.
+    const positioned =
+      regions.columns ||
+      p.pictures.some(
+        (pic) =>
+          pic.background &&
+          unused.some(
+            (s) =>
+              s.x < pic.x + pic.width &&
+              s.x + s.width > pic.x &&
+              s.y > pic.y &&
+              s.y - s.size < pic.y + pic.height,
+          ),
+      );
+    const flow = positioned
+      ? regions.regions.flatMap((r) =>
+          paragraphsOf(linesOf(r.spans)).map((lines) => ({
+            lines,
+            left: r.left,
+            right: r.right,
+          })),
+        )
+      : paragraphsOf(linesOf(unused)).map((lines) => ({
+          lines,
+          left: 0,
+          right: 0,
+        }));
     const elements = [
       ...tables.map((t) => ({
         y: t.y,
         bottom: t.y + t.height,
         grid: t,
         lines: null,
+        left: 0,
+        right: 0,
       })),
-      ...flow.map((lines) => ({
+      ...flow.map(({ lines, left, right }) => ({
         y: lines[0].y - lines[0].size * 0.82,
         bottom: lines.at(-1)!.y + lines.at(-1)!.size * 0.3,
         grid: null,
         lines,
+        left,
+        right,
       })),
     ].sort((a, b) => a.y - b.y);
     const left = Math.max(
@@ -305,6 +350,19 @@ export async function makeDocx(
       if (e.grid) {
         if (gap > 0.5) children.push(spacer(gap));
         children.push(table(e.grid, left));
+      } else if (positioned) {
+        children.push(
+          paragraph(e.lines!, e.left, e.right - e.left, 0, true, {
+            type: "absolute",
+            position: { x: tw(e.left), y: tw(e.y) },
+            width: tw(e.right - e.left),
+            height: tw(e.bottom - e.y),
+            anchor: { horizontal: "page", vertical: "page" },
+            wrap: "none",
+            rule: HeightRule.ATLEAST,
+          }),
+        );
+        continue;
       } else children.push(paragraph(e.lines!, left, right - left, gap));
       cursor = e.bottom;
     }

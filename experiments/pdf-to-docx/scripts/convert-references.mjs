@@ -13,6 +13,8 @@ const pairs = [
   ["payslip", process.env.PAYSLIP_PDF],
   ["bond", process.env.BOND_PDF],
 ];
+if (process.env.STATEMENT_PDF)
+  pairs.push(["statement", process.env.STATEMENT_PDF]);
 try {
   for (const [name, path] of pairs) {
     if (!path)

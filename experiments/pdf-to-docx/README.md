@@ -39,7 +39,7 @@ The preview serves static application resources only. PDF bytes are read through
 1. PDF.js parses a local file in its bundled worker. The extractor reads text, coordinates, font hints, and drawing operators one page at a time.
 2. Horizontal and vertical vector rules are clustered into connected grids. Cell geometry determines rows, columns, horizontal spans, and rectangular vertical merges.
 3. Text inside detected cells becomes editable Word table content. Remaining text is grouped into flowing paragraphs using position, gaps, and style changes. Font names, size, emphasis, and some color/underline information become Word run formatting.
-4. A graphics-only render suppresses PDF text drawing and detected table rules. Its cropped nontext artwork is placed behind the editable content. Photographs and decoration remain images; selectable source text is not flattened into a page screenshot. Text already baked into source images cannot be recovered without OCR.
+4. A graphics render suppresses reconstructed text and detected table rules. Its cropped artwork is placed behind the editable content. Photographs, barcodes with unmapped font codes, and decorative underscore rules remain images. Any text fragments without usable mappings are preserved visually with an explicit warning; their characters are not invented or silently dropped. Readable text is not flattened into a page screenshot. Text already baked into source images cannot be recovered without OCR.
 5. A separate worker builds the DOCX using `docx`. Each PDF page supplies a Word section with its page dimensions and inferred margins. A local Blob download contains the result.
 
 The algorithm does not identify the supplied files or use their reference DOCX contents to build output. References are used only for QA.
@@ -53,7 +53,8 @@ The algorithm does not identify the supplied files or use their reference DOCX c
 - Fonts are named rather than embedded. Word processors may substitute fonts and alter wrapping. Borders are simplified to black single rules, and cell widths/heights and spacing are approximate.
 - Source page breaks are retained. Editing text can increase section height and add pages. Graphics are anchored to source page positions, so large edits can move text relative to artwork.
 - Shapes and decoration can survive as a raster graphics layer, not separately editable vector objects. Image resolution is bounded, and overlapping complex artwork is not guaranteed to match the source.
-- Unsupported encoding is detected for replacement/control characters; this is not a guarantee that every malformed font mapping can be recognized. The interface always identifies layout reconstruction as experimental.
+- Unmapped glyphs are detected from replacement/control characters and matched to their drawing operations, without font-name or document-name exceptions. Other readable text continues converting. If the affected drawing cannot be matched, or no editable text remains, conversion stops explicitly. This is not a guarantee that every malformed font mapping can be recognized.
+- Rounded table corners are extended to tangent intersections for grid detection. Repeated aligned values infer transaction rows when only column rules exist. Side-by-side blocks and text over fixed artwork use editable, positioned paragraph frames; ordinary prose continues to flow. Large edits in these positioned regions may require manual adjustment in Word.
 
 ### Resource controls
 
@@ -70,7 +71,7 @@ npm test
 npm run build
 ```
 
-There is no ESLint configuration in this experiment; strict TypeScript and Prettier checks are used. Five synthetic layout tests cover ruled tables, merged cells, rule deduplication, isolated underlines, and paragraph boundaries.
+There is no ESLint configuration in this experiment; strict TypeScript and Prettier checks are used. Twelve tests cover tables, merges, unruled transaction rows, columns, paragraph boundaries, barcode/unmapped glyph preservation, and decorative rules.
 
 With the preview running, browser QA uses locally installed Chrome. `CHROME_EXECUTABLE` can override the macOS default executable path. Set `PREVIEW_URL` when using a different port.
 
@@ -90,6 +91,8 @@ node scripts/convert-references.mjs
 ```
 
 Outputs, network diagnostics, and screenshots are written under ignored `.local/`. Private inputs and generated documents are not committed. The Python QA helper requires `pdfplumber` and `lxml`; these are only local validation dependencies, never part of conversion:
+
+Set `STATEMENT_PDF` to a third local PDF path to include the bank-statement regression. Its output is `.local/output/statement-editable.docx`.
 
 ```sh
 python scripts/validate-docx.py source.pdf output.docx reference.docx

@@ -9,6 +9,7 @@ import {
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PageModel, Rule, Span } from "./model.ts";
 import { detectTables } from "./layout.ts";
+import { planTextPreservation, type GlyphRun } from "./text-policy.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
 export const LIMITS = {
   bytes: 30 * 1024 * 1024,
@@ -119,12 +120,15 @@ export async function extractPage(
       `Page ${page.pageNumber} has too many drawing operations for this experiment.`,
     );
   const matrices: number[][] = [],
-    colors: { fill: string; stroke: string; width: number }[] = [];
+    colors: { fill: string; stroke: string; width: number; font: string }[] =
+      [];
   let matrix = [1, 0, 0, 1, 0, 0],
     fill = "000000",
     stroke = "000000",
-    lineWidth = 0.5;
+    lineWidth = 0.5,
+    currentFont = "";
   const pathRules = new Map<number, Rule[]>(),
+    glyphRuns: GlyphRun[] = [],
     textColors: { text: string; color: string }[] = [];
   const point = (x: number, y: number) => {
     const p = [x, y];
@@ -136,7 +140,7 @@ export async function extractPage(
       a = operators.argsArray[i];
     if (op === OPS.save) {
       matrices.push([...matrix]);
-      colors.push({ fill, stroke, width: lineWidth });
+      colors.push({ fill, stroke, width: lineWidth, font: currentFont });
     } else if (op === OPS.restore) {
       matrix = matrices.pop() || [1, 0, 0, 1, 0, 0];
       const c = colors.pop();
@@ -144,11 +148,12 @@ export async function extractPage(
         fill = c.fill;
         stroke = c.stroke;
         lineWidth = c.width;
+        currentFont = c.font;
       }
     } else if (op === OPS.transform) matrix = Util.transform(matrix, a);
     else if (op === OPS.paintFormXObjectBegin) {
       matrices.push([...matrix]);
-      colors.push({ fill, stroke, width: lineWidth });
+      colors.push({ fill, stroke, width: lineWidth, font: currentFont });
       if (a[0]) matrix = Util.transform(matrix, a[0]);
     } else if (op === OPS.paintFormXObjectEnd) {
       matrix = matrices.pop() || matrix;
@@ -157,19 +162,20 @@ export async function extractPage(
         fill = c.fill;
         stroke = c.stroke;
         lineWidth = c.width;
+        currentFont = c.font;
       }
     } else if (op === OPS.setFillRGBColor) fill = String(a[0]).replace("#", "");
     else if (op === OPS.setStrokeRGBColor)
       stroke = String(a[0]).replace("#", "");
     else if (op === OPS.setLineWidth) lineWidth = a[0];
+    else if (op === OPS.setFont) currentFont = a[0];
     else if (op === OPS.showText) {
-      textColors.push({
-        text: a[0]
-          .filter((g: unknown) => typeof g === "object" && g !== null)
-          .map((g: { unicode?: string }) => g.unicode || "")
-          .join(""),
-        color: fill,
-      });
+      const text = a[0]
+        .filter((g: unknown) => typeof g === "object" && g !== null)
+        .map((g: { unicode?: string }) => g.unicode || "")
+        .join("");
+      textColors.push({ text, color: fill });
+      glyphRuns.push({ text, fontName: currentFont, operatorIndex: i });
     } else if (op === OPS.constructPath) {
       const draw = a[1]?.[0] as ArrayLike<number> | undefined;
       if (!draw || typeof draw.length !== "number") continue;
@@ -203,10 +209,33 @@ export async function extractPage(
         } else if (code === 1) {
           line(draw[n++], draw[n++]);
         } else if (code === 2) {
-          n += 4;
-          x = draw[n++];
-          y = draw[n++];
-          curved = true;
+          const cx1 = draw[n++],
+            cy1 = draw[n++],
+            cx2 = draw[n++],
+            cy2 = draw[n++],
+            nx = draw[n++],
+            ny = draw[n++];
+          // Small quarter-turn curves join table rules at rounded corners.
+          // Extend the tangent segments to their square intersection for the
+          // editable grid; do not mistake arbitrary curves for table borders.
+          const dx = Math.abs(nx - x),
+            dy = Math.abs(ny - y);
+          if (
+            dx > 0 &&
+            dy > 0 &&
+            dx <= 12 &&
+            dy <= 12 &&
+            ((Math.abs(cx1 - x) < 0.1 && Math.abs(cy2 - ny) < 0.1) ||
+              (Math.abs(cy1 - y) < 0.1 && Math.abs(cx2 - nx) < 0.1))
+          ) {
+            if (Math.abs(cx1 - x) < 0.1) line(x, ny);
+            else line(nx, y);
+            line(nx, ny);
+          } else {
+            x = nx;
+            y = ny;
+            curved = true;
+          }
         } else if (code === 3) {
           n += 2;
           x = draw[n++];
@@ -229,9 +258,15 @@ export async function extractPage(
       }
     }
   }
+  const items = content.items.filter((item) => "str" in item);
+  const preservation = planTextPreservation(items, glyphRuns);
+  if (preservation.artworkItems.size)
+    model.warnings.push(
+      `Page ${page.pageNumber}: ${preservation.artworkItems.size} barcode/symbol, decorative rule or unmapped text fragment(s) preserved as artwork. These fragments are not editable; readable text remains editable.`,
+    );
   let colorCursor = 0;
-  for (const item of content.items) {
-    if (!("str" in item) || !item.str.trim()) continue;
+  for (const [index, item] of items.entries()) {
+    if (preservation.artworkItems.has(index) || !item.str.trim()) continue;
     const t = Util.transform(viewport.transform, item.transform),
       style = content.styles[item.fontName];
     let font: { name?: string; bold?: boolean; italic?: boolean } = {};
@@ -290,14 +325,14 @@ export async function extractPage(
     .join("")
     .trim();
   if (!meaningful) {
+    if (preservation.artworkItems.size)
+      throw Error(
+        `Page ${page.pageNumber} has no recoverable editable text. Its font mappings need local text recognition, which this prototype does not yet support.`,
+      );
     throw Error(
       `Page ${page.pageNumber} has no extractable text. Scanned/image-only pages require local OCR, which is not included in this first digital-PDF prototype. No screenshot-only DOCX was created.`,
     );
   }
-  if (meaningful.includes("\uFFFD") || /[\u0000-\u0008]/.test(meaningful))
-    throw Error(
-      `Page ${page.pageNumber} has unsupported text encoding. Conversion stopped to avoid missing or corrupt text.`,
-    );
   const tables = detectTables(model.rules, model.spans);
   const suppress = new Set<number>();
   for (const [index, rules] of pathRules)
@@ -314,7 +349,8 @@ export async function extractPage(
       )
     )
       suppress.add(index);
-  // Render ONLY nontext artwork. Editable text is never in this image layer.
+  // Preserve artwork and explicitly reported unmapped glyphs. Reconstructed
+  // editable text is excluded, including when a drawing run has split items.
   const hiddenText = new Set<number>([
     OPS.showText,
     OPS.showSpacedText,
@@ -337,7 +373,9 @@ export async function extractPage(
     background: "rgba(0,0,0,0)",
     annotationMode: 0,
     operationsFilter: (index) =>
-      !hiddenText.has(operators.fnArray[index]) && !suppress.has(index),
+      (!hiddenText.has(operators.fnArray[index]) ||
+        preservation.artworkOperators.has(index)) &&
+      !suppress.has(index),
   });
   const abort = () => task.cancel();
   signal.addEventListener("abort", abort, { once: true });

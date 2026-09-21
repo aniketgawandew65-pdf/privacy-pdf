@@ -2,6 +2,22 @@
 
 ## Assessment
 
+### Bank statement follow-up
+
+The supplied seven-page computer-generated statement originally failed because its barcode font maps glyphs to control codes. The converter now matches affected extraction fragments to their drawing operations and preserves them as artwork with a warning. It does not reject the rest of the document or insert the control codes into Word XML. This is generic handling, with no file-content or font-name exception.
+
+The same acceptance test exposed rounded table corners, transaction columns without horizontal row rules, and independent address blocks. Those structures now produce complete six-column editable transaction tables and separate editable paragraph frames. Text over fixed background forms retains source positioning. Two long underscore separators are preserved as decorative artwork to prevent substituted fonts from wrapping them over prose.
+
+- Source and output retain seven pages. The barcode, bank logo, watermark, and separators remain artwork; readable text is editable.
+- Per-page character inventories match all 16,430 recoverable non-whitespace source characters, excluding the barcode codes and two decorative underscore runs. The checked fields in all 108 transaction rows retain their date/value-date and debit/credit/balance associations. All seven final rendered pages were visually inspected; no text clipping or overlap was observed.
+- Build, strict TypeScript, twelve unit tests, formatting, and browser error/cancellation/privacy checks pass. Both prior acceptance files still convert with their original text and table counts.
+- Font substitution remains visible. Rounded corners become square Word table borders, some spacing differs, and the barcode's readable rotated label is converted to horizontal editable text. Positioning is approximate, and Word/WPS editing can reflow or overlap fixed regions.
+- The fix is tested in desktop Chrome and rendered in LibreOffice. It is not a promise that every computer-generated PDF has recoverable text mappings or that every layout/editor/device is supported. Scans and PDFs whose entire text lacks usable mappings still need local recognition work. Resource limits remain in place.
+
+Follow-up files: `src/text-policy.ts` and `tests/text-policy.test.ts` added; `src/extract.ts`, `src/layout.ts`, `src/docx.ts`, `tests/layout.test.ts`, `scripts/convert-references.mjs`, `README.md`, and this report updated. All are inside this experiment. Private source/output files remain ignored.
+
+### Original two-reference assessment
+
 The browser-local approach works for both supplied digital PDFs: all extracted source characters remain in order as editable Word text, both ruled tables become real Word tables, and the Bond photograph survives as an embedded image. The result is useful for reviewing feasibility, but **not ready for production integration**. Font substitution, border simplification, arbitrary document layouts, Word/WPS compatibility, and physical mobile memory behavior need more work and testing.
 
 This is an experiment on `experiment/local-pdf-to-docx`, based on freshly fetched main `3e7568b54dfa47e098717c649f32392ed100332e`. Existing application code and configuration were not changed. No merge, push, or production deployment was performed.
@@ -78,7 +94,7 @@ Fresh outputs are in `.local/output/payslip-editable.docx` and `.local/output/bo
 
 ## Exact changed-file list
 
-All 19 files below are new, relative to the repository root. No existing tracked file is modified:
+All 21 files below are new relative to the original main baseline. No pre-existing application file is modified:
 
 ```text
 experiments/pdf-to-docx/.gitignore
@@ -90,6 +106,7 @@ experiments/pdf-to-docx/package-lock.json
 experiments/pdf-to-docx/tsconfig.json
 experiments/pdf-to-docx/vite.config.ts
 experiments/pdf-to-docx/src/model.ts
+experiments/pdf-to-docx/src/text-policy.ts
 experiments/pdf-to-docx/src/extract.ts
 experiments/pdf-to-docx/src/layout.ts
 experiments/pdf-to-docx/src/docx.ts
@@ -97,6 +114,7 @@ experiments/pdf-to-docx/src/reconstruct.worker.ts
 experiments/pdf-to-docx/src/main.ts
 experiments/pdf-to-docx/src/style.css
 experiments/pdf-to-docx/tests/layout.test.ts
+experiments/pdf-to-docx/tests/text-policy.test.ts
 experiments/pdf-to-docx/scripts/check-browser.mjs
 experiments/pdf-to-docx/scripts/convert-references.mjs
 experiments/pdf-to-docx/scripts/validate-docx.py
