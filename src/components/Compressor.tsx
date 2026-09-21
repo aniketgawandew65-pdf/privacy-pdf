@@ -647,15 +647,9 @@ export function Compressor({ file, onFileChange }: CompressorProps) {
             Tap or drop PDF files to compress
           </p>
           <p className="text-xs text-zinc-500 mt-1">
-            Single or multi-file batch • {isPro
-              ? (
-                isMobileSafetyEnvironment()
-                  ? 'Max 150 MB per task'
-                  : 'Desktop Pro uses hardware-aware capacity'
-              )
-              : dailyStats.bonusRemaining > 0
-                ? 'Max 150 MB'
-                : 'Max 100 MB'}
+            Single or multi-file batch • {isMobileSafetyEnvironment()
+              ? 'Mobile & tablet: Up to 150 MB per task'
+              : 'Desktop: Any size. Your device decides.'}
           </p>
         </div>
       )}
