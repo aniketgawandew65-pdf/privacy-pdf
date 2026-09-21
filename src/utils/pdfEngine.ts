@@ -23946,11 +23946,6 @@ export async function extractMarkdownFromPDF(
               b
           );
 
-      /*
-       * Page-local median avoids storing every font size from
-       * the complete document while preserving relative
-       * heading detection.
-       */
       const medianHeight =
         heights[
           Math.floor(
@@ -23960,11 +23955,6 @@ export async function extractMarkdownFromPDF(
         ] ||
         12;
 
-      /*
-       * Statements/tables often contain uppercase names and
-       * slightly different font sizes. Those are data rows,
-       * not Markdown headings.
-       */
       const dateHeavyLineCount =
         sourceLines.filter(
           (line) => {
@@ -23992,15 +23982,17 @@ export async function extractMarkdownFromPDF(
         sourceLines.length;
         lineIndex++
       ) {
-        let lineText =
+        const sourceLine =
           sourceLines[
             lineIndex
-          ].text.trim();
+          ];
+
+        let lineText =
+          sourceLine.text
+            .trim();
 
         const avgHeight =
-          sourceLines[
-            lineIndex
-          ].avgHeight;
+          sourceLine.avgHeight;
 
         if (!lineText) {
           continue;
@@ -24024,13 +24016,140 @@ export async function extractMarkdownFromPDF(
 
 
         /*
-         * Join a genuine hyphenated word across lines.
+         * Repair PDF text layers that split ordinal suffixes
+         * into separate positioned runs/lines:
          *
-         * Old implementation removed "-" but left the next
-         * fragment on another Markdown line.
+         *   21
+         *   st
+         *   September 2026
          *
-         * Only join when the following line begins lowercase,
-         * which avoids accidentally merging a heading.
+         * becomes:
+         *
+         *   21st September 2026
+         *
+         * Geometry and font similarity keep this general and
+         * avoid matching unrelated numbers.
+         */
+        if (
+          /^\d{1,3}$/.test(
+            lineText
+          ) &&
+          lineIndex + 1 <
+            sourceLines.length
+        ) {
+          const suffixLine =
+            sourceLines[
+              lineIndex +
+                1
+            ];
+
+          const suffix =
+            suffixLine.text
+              .trim();
+
+          if (
+            /^(st|nd|rd|th)$/i.test(
+              suffix
+            ) &&
+            Math.abs(
+              suffixLine.xStart -
+              sourceLine.xStart
+            ) <=
+              Math.max(
+                10,
+                avgHeight
+              ) &&
+            Math.abs(
+              suffixLine.avgHeight -
+              avgHeight
+            ) <=
+              Math.max(
+                2,
+                avgHeight *
+                  0.25
+              )
+          ) {
+            lineText +=
+              suffix;
+
+            lineIndex +=
+              1;
+
+            const following =
+              sourceLines[
+                lineIndex +
+                  1
+              ];
+
+            if (following) {
+              const followingText =
+                following.text
+                  .trim();
+
+              const sameTextColumn =
+                Math.abs(
+                  following.xStart -
+                  sourceLine.xStart
+                ) <=
+                Math.max(
+                  12,
+                  avgHeight
+                );
+
+              const similarSize =
+                Math.abs(
+                  following.avgHeight -
+                  avgHeight
+                ) <=
+                Math.max(
+                  2,
+                  avgHeight *
+                    0.25
+                );
+
+              const nearby =
+                Math.abs(
+                  following.y -
+                  suffixLine.y
+                ) <=
+                avgHeight *
+                  3.4;
+
+              const safeContinuation =
+                followingText &&
+                !/^[-—_=~.]{3,}$/.test(
+                  followingText
+                ) &&
+                !/^[\u2022\u25E6\u2023\u2219\*\uF06C\uF0B7\u25AA\u25AB\u2043\u00B7•]\s*/.test(
+                  followingText
+                ) &&
+                !/^\d+[\.\)]\s*/.test(
+                  followingText
+                );
+
+              if (
+                sameTextColumn &&
+                similarSize &&
+                nearby &&
+                safeContinuation
+              ) {
+                lineText +=
+                  ` ${followingText}`;
+
+                lineIndex +=
+                  1;
+              }
+            }
+          }
+        }
+
+
+        /*
+         * Join a genuine word broken by a PDF line wrap.
+         * Preserve the boundary hyphen when the source token
+         * is already a compound word (state-of-the- + art),
+         * but drop a discretionary wrap hyphen for ordinary
+         * lexical words (interoper- + ability).
          */
         if (
           joinHyphenatedWords &&
@@ -24052,11 +24171,10 @@ export async function extractMarkdownFromPDF(
             )
           ) {
             lineText =
-              lineText.slice(
-                0,
-                -1
-              ) +
-              nextText;
+              joinWrappedHyphen(
+                lineText,
+                nextText
+              );
 
             lineIndex +=
               1;
@@ -24064,9 +24182,6 @@ export async function extractMarkdownFromPDF(
         }
 
 
-        /*
-         * Lists.
-         */
         if (detectLists) {
           const bulletMatch =
             lineText.match(
@@ -24106,8 +24221,10 @@ export async function extractMarkdownFromPDF(
         /*
          * Heading hierarchy.
          *
-         * Disable aggressive heading inference on
-         * transaction/table-heavy pages.
+         * Font size remains the primary signal. Pure uppercase
+         * text at ordinary body size is deliberately NOT enough
+         * to become a heading; that pattern is common in forms,
+         * status grids and machine-generated data labels.
          */
         if (
           detectHeadings &&
@@ -24118,21 +24235,29 @@ export async function extractMarkdownFromPDF(
             medianHeight *
               1.7
           ) {
-            if (
+            const previousBlock =
               markdownBlocks.length >
-                0 &&
-              markdownBlocks[
-                markdownBlocks.length -
-                  1
-              ].startsWith(
-                '# '
-              )
+                0
+                ? markdownBlocks[
+                    markdownBlocks.length -
+                      1
+                  ]
+                : '';
+
+            if (
+              previousBlock
+                .trimStart()
+                .startsWith(
+                  '# '
+                )
             ) {
               markdownBlocks[
                 markdownBlocks.length -
                   1
-              ] +=
-                ` ${lineText}`;
+              ] =
+                previousBlock
+                  .trimEnd() +
+                ` ${lineText}\n`;
             } else {
               markdownBlocks.push(
                 `\n# ${lineText}\n`
@@ -24145,7 +24270,10 @@ export async function extractMarkdownFromPDF(
           if (
             avgHeight >=
             medianHeight *
-              1.35
+              1.35 &&
+            isLikelyHeadingText(
+              lineText
+            )
           ) {
             markdownBlocks.push(
               `\n## ${lineText}\n`
@@ -24155,22 +24283,11 @@ export async function extractMarkdownFromPDF(
           }
 
           if (
-            (
-              lineText.length <
-                50 &&
-              /^[A-Z0-9\s&,:\/\-\(\)]{3,}$/.test(
-                lineText
-              ) &&
-              /[A-Z]{3,}/.test(
-                lineText
-              )
-            ) ||
-            (
-              avgHeight >=
-                medianHeight *
-                  1.15 &&
-              lineText.length <
-                80
+            avgHeight >=
+              medianHeight *
+                1.2 &&
+            isLikelyHeadingText(
+              lineText
             )
           ) {
             markdownBlocks.push(
@@ -24204,40 +24321,121 @@ export async function extractMarkdownFromPDF(
       rawText:
         string
     ) => {
+      const normalizedLines =
+        rawText
+          .split(
+            '\n'
+          )
+          .map(
+            (line) =>
+              line
+                .replace(
+                  /\s+/g,
+                  ' '
+                )
+                .trim()
+          )
+          .filter(
+            Boolean
+          );
+
+      /*
+       * A sparse selectable page number can be baked into an
+       * otherwise scanned page and then recognized again by OCR.
+       * Drop only an isolated numeric edge line when the page
+       * contains enough real OCR content to make that line look
+       * like pagination rather than document data.
+       */
       const rawLines =
-        rawText.split(
-          '\n'
+        normalizedLines.filter(
+          (
+            line,
+            index
+          ) =>
+            !(
+              normalizedLines.length >=
+                4 &&
+              /^\d{1,4}$/.test(
+                line
+              ) &&
+              (
+                index ===
+                  0 ||
+                index ===
+                  normalizedLines.length -
+                    1
+              )
+            )
         );
 
       for (
-        const rawLine of
-        rawLines
+        let lineIndex = 0;
+        lineIndex <
+        rawLines.length;
+        lineIndex++
       ) {
-        const trimmed =
-          rawLine
-            .replace(
-              /\s+/g,
-              ' '
-            )
-            .trim();
+        let trimmed =
+          rawLines[
+            lineIndex
+          ];
 
-        if (!trimmed) {
-          continue;
+        if (
+          joinHyphenatedWords &&
+          trimmed.endsWith(
+            '-'
+          ) &&
+          lineIndex + 1 <
+            rawLines.length &&
+          /^[a-zà-öø-ÿ]/.test(
+            rawLines[
+              lineIndex +
+                1
+            ]
+          )
+        ) {
+          trimmed =
+            joinWrappedHyphen(
+              trimmed,
+              rawLines[
+                lineIndex +
+                  1
+              ]
+            );
+
+          lineIndex +=
+            1;
         }
+
+        const legalHeading =
+          /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+\b/i.test(
+            trimmed
+          );
+
+        /*
+         * OCR has no trustworthy PDF font metrics. Treat the
+         * first substantive all-caps line as the generic page
+         * title, while later all-caps rows remain data unless
+         * they match a strong semantic heading pattern.
+         */
+        const firstLineHeading =
+          lineIndex ===
+            0 &&
+          trimmed.length <
+            60 &&
+          trimmed ===
+            trimmed.toUpperCase() &&
+          /[A-Za-z]{3,}/.test(
+            trimmed
+          ) &&
+          !/^\d+$/.test(
+            trimmed
+          );
 
         if (
           detectHeadings &&
-          trimmed.length <
-            60 &&
           (
-            trimmed ===
-              trimmed.toUpperCase() ||
-            /^(ARTICLE|CLAUSE|SCHEDULE)\s+[0-9IVXLCDM]+/i.test(
-              trimmed
-            )
-          ) &&
-          /[A-Za-z]{3,}/.test(
-            trimmed
+            legalHeading ||
+            firstLineHeading
           )
         ) {
           markdownBlocks.push(
