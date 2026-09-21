@@ -4677,7 +4677,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                         manualReviewFindings
                       )
                     }
-                    className="mt-3 w-full min-h-11 rounded-xl border-2 border-zinc-950 bg-zinc-950 px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2"
+                    className="mt-3 w-full min-h-11 rounded-xl border-2 border-[#3f3f46] bg-[#3f3f46] hover:bg-[#27272a] px-4 text-sm font-semibold text-white inline-flex items-center justify-center gap-2 transition-colors"
                   >
                     Continue Manual Review ({manualReviewFindings.length})
                     <ArrowRight className="w-4 h-4" />
