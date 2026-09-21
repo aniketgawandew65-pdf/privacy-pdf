@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>PDF to Editable Word · Local experiment</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="brand" href="./">1into1 <span>LAB</span></a
+        ><span class="badge">Isolated experiment</span>
+      </header>
+      <section>
+        <p class="eyebrow">LOCAL CONVERSION</p>
+        <h1>PDF → Editable Word</h1>
+        <p class="intro">Keep the words. Rebuild the structure.</p>
+        <p class="privacy">
+          Conversion happens on this device. Your PDF is not uploaded.
+        </p>
+        <label class="picker" for="file"
+          ><strong>Choose PDF</strong
+          ><span>Digital PDFs · up to 30 MB · 60 pages</span
+          ><input type="file" id="file" accept="application/pdf,.pdf"
+        /></label>
+        <p id="file-info">No file selected</p>
+        <div class="actions">
+          <button id="convert" disabled>Convert to DOCX</button
+          ><button id="cancel" class="secondary" hidden>Cancel</button>
+        </div>
+        <div id="status" role="status" aria-live="polite">
+          Ready when you are.
+        </div>
+        <progress id="progress" max="100" value="0" hidden></progress
+        ><a id="download" class="download" hidden>Download Editable DOCX</a>
+        <div id="summary" hidden></div>
+        <p class="note">
+          Experimental layout reconstruction. Text and detected tables remain
+          editable. Complex designs may shift in Word or WPS. Scanned pages need
+          OCR and are not supported in this prototype.
+        </p>
+      </section>
+      <footer>Browser only · No account · No document editor</footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
