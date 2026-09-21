@@ -145,7 +145,6 @@ export async function openPdf(
     fontExtraProperties: true,
     enableXfa: false,
     useSystemFonts: true,
-    isEvalSupported: false,
   });
 
   const abort = () => {
