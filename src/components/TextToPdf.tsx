@@ -1861,7 +1861,7 @@ export const TextToPdf: React.FC<any> = () => {
               className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
             >
               {FONT_OPTIONS.map((f) => (
-                <option key={f.value} value={f.value} className="bg-zinc-900 text-white">
+                <option key={f.value} value={f.value} className="bg-white text-[#18181b]">
                   {f.label}
                 </option>
               ))}
