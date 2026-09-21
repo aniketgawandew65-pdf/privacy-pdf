@@ -14,7 +14,7 @@
  *
  * IMPORTANT:
  * This module does NOT:
- * - remove the existing 150 MB limit
+ * - enforce upload/file-size limits
  * - alter mobile/tablet safety behavior
  * - allow or block uploads
  * - modify task credits
@@ -183,7 +183,7 @@ export interface DesktopCapacityRecommendation {
 
   /**
    * Null on mobile/tablet because this calculator is only
-   * advisory for Desktop Pro.
+   * advisory for Desktop workloads.
    */
   recommendedBytes: number | null;
 
