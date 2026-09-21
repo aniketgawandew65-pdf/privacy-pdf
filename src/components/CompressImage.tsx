@@ -704,7 +704,7 @@ export function CompressImage() {
                   <a
                     href={result.url}
                     download={result.name}
-                    className="min-h-10 px-3 rounded-xl bg-zinc-900 text-white text-sm font-medium flex items-center gap-2 shrink-0"
+                    className="min-h-10 px-3 rounded-xl bg-[#3f3f46] hover:bg-[#27272a] text-white text-sm font-medium flex items-center gap-2 shrink-0 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     Download
