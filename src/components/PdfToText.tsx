@@ -586,7 +586,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
               <button
                 type="button"
                 onClick={copyToClipboard}
-                className="flex items-center gap-1 text-zinc-300 hover:text-white transition cursor-pointer"
+                className="flex items-center gap-1 text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white rounded-md px-1.5 py-1 transition-colors cursor-pointer"
               >
                 {copied ? (
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -598,7 +598,7 @@ export function PdfToText({ file, onFileChange }: PdfToTextProps) {
               <button
                 type="button"
                 onClick={downloadTextFile}
-                className="flex items-center gap-1 text-zinc-300 hover:text-white transition cursor-pointer"
+                className="flex items-center gap-1 text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white rounded-md px-1.5 py-1 transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download .txt</span>
