@@ -3,6 +3,9 @@ import {
   recordActionExecution,
   type TaskCreditTier,
 } from './usageTracker';
+import {
+  trackAnalyticsEvent,
+} from './analytics';
 
 export interface TaskCreditResult {
   allowed: boolean;
@@ -67,6 +70,26 @@ export function checkTaskCredit(
       ? result.creditTier
       : undefined;
 
+  if (result.allowed) {
+    trackAnalyticsEvent(
+      'task_started',
+      {
+        credit_tier:
+          result.creditTier ||
+          'unknown',
+      }
+    );
+  } else {
+    trackAnalyticsEvent(
+      'task_blocked',
+      {
+        block_reason:
+          result.reason ||
+          'unknown',
+      }
+    );
+  }
+
   return result;
 }
 
@@ -85,6 +108,15 @@ export function commitTaskCredit(): void {
 
   recordActionExecution(
     creditTier
+  );
+
+  trackAnalyticsEvent(
+    'task_completed',
+    {
+      credit_tier:
+        creditTier ||
+        'unknown',
+    }
   );
 }
 
