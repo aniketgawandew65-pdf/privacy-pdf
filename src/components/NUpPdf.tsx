@@ -268,7 +268,7 @@ export const NUpPdf: React.FC<NUpPdfProps> = ({ file, onFileChange }) => {
               {isProcessing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>{progressText || 'Generating N-Up document...'}</span>
+                  <span>{progressText || 'Generating Multiple Pages per Sheet...'}</span>
                 </>
               ) : (
                 <>
