@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { X, Check, ArrowRight } from 'lucide-react';
 import { getLicenseStatus, activateLicenseKey, deactivateLicense, CHECKOUT_URL } from '../utils/license';
 import { useDialogFocus } from '../utils/useDialogFocus';
+import { trackAnalyticsEvent } from '../utils/analytics';
 
 interface ProModalProps { isOpen: boolean; onClose: () => void; checkoutUrl?: string; }
 export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProModalProps) {
@@ -18,6 +19,14 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      trackAnalyticsEvent(
+        'pro_modal_viewed'
+      );
+    }
+  }, [isOpen]);
   if (!isOpen) return null;
   const handleActivate = async (event: FormEvent) => {
     event.preventDefault();
@@ -27,7 +36,12 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
       const result = await activateLicenseKey(licenseInput.trim());
       setHasError(!result.success); setMessage(result.message);
       setIsPro(getLicenseStatus().isPro);
-      if (result.success) setLicenseInput('');
+      if (result.success) {
+        setLicenseInput('');
+        trackAnalyticsEvent(
+          'license_activated'
+        );
+      }
     } catch { setHasError(true); setMessage('Unable to activate right now. Please try again.'); }
     finally { setBusy(false); }
   };
@@ -65,7 +79,21 @@ export function ProModal({ isOpen, onClose, checkoutUrl = CHECKOUT_URL }: ProMod
         <li><Check size={17} />Activate with your license key — no Google sign-in required</li>
       </ul>
       {isPro ? <div className="pro-active"><strong>{import.meta.env.DEV && getLicenseStatus().licenseKey === 'DEV' ? 'Development Pro is active' : 'Your Pro license is active'}</strong><p>Ready for your next document.</p><button className="quiet-button" onClick={handleDeactivate} disabled={busy}>Deactivate this browser</button></div> : <>
-        <a className="primary-button checkout-shimmer" href={checkoutUrl} target="_blank" rel="noopener noreferrer"><span>Choose Pro plan</span><ArrowRight size={16} /></a>
+        <a
+          className="primary-button checkout-shimmer"
+          href={checkoutUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() =>
+            trackAnalyticsEvent(
+              'checkout_started',
+              {
+                checkout_provider:
+                  'lemon_squeezy',
+              }
+            )
+          }
+        ><span>Choose Pro plan</span><ArrowRight size={16} /></a>
         <p className="pro-fineprint">Choose Monthly or Yearly securely at Lemon Squeezy checkout. Taxes, renewal and refund terms are shown at checkout.</p>
         <form className="license-form" onSubmit={handleActivate}>
           <label htmlFor="pro-license">Already purchased? Activate your license.</label>
