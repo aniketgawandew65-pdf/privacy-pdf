@@ -3,6 +3,7 @@ import {
   GlobalWorkerOptions,
   OPS,
   Util,
+  PDFDataRangeTransport,
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "pdfjs-dist";
