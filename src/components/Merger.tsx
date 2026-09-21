@@ -75,7 +75,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
      * FileList. This matters when mobile users add files in
      * multiple selections.
      *
-     * Desktop Pro bypasses the fixed 150 MB selection ceiling.
+     * Desktop bypasses the fixed 150 MB selection ceiling for every task tier.
      * Mobile/tablet Pro retains the 150 MB combined-task cap.
      */
     const sizeCheck =
@@ -135,13 +135,12 @@ export function Merger({ files, onFilesChange }: MergerProps) {
     revokeDownloadUrl();
 
     try {
-      const desktopPro =
-        getLicenseStatus().isPro &&
+      const desktopDeviceSized =
         !isMobileSafetyEnvironment();
 
       let blob: Blob;
 
-      if (desktopPro) {
+      if (desktopDeviceSized) {
         try {
           blob =
             await mergePDFsWithQpdf(
