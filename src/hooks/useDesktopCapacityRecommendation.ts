@@ -42,11 +42,11 @@ interface UseDesktopCapacityRecommendationResult {
 }
 
 /**
- * Shared Desktop Pro capacity hook.
+ * Shared Desktop capacity hook.
  *
  * Responsibilities:
  * - Capture a fresh device/browser capability snapshot
- *   when the tool is active for Pro.
+ *   when a workload is selected on Desktop.
  * - Feed current workload signals into the shared
  *   Desktop capacity calculator.
  * - Return null when disabled.
@@ -68,6 +68,19 @@ export function useDesktopCapacityRecommendation({
   enabled,
 }: UseDesktopCapacityRecommendationInput):
 UseDesktopCapacityRecommendationResult {
+  /*
+   * Capacity guidance now belongs to the Desktop processing
+   * experience itself, not to the paid entitlement.
+   *
+   * Existing callers still pass their historical Pro-gated
+   * `enabled` flag. Treat a real selected workload as active
+   * regardless of that old entitlement flag. Mobile/tablet
+   * remains suppressed by the calculator itself.
+   */
+  const capacityEnabled =
+    selectedBytes > 0 ||
+    enabled;
+
   const [
     snapshot,
     setSnapshot,
@@ -83,7 +96,7 @@ UseDesktopCapacityRecommendationResult {
   useEffect(() => {
     let cancelled = false;
 
-    if (!enabled) {
+    if (!capacityEnabled) {
       setSnapshot(null);
       setLoading(false);
 
@@ -117,7 +130,7 @@ UseDesktopCapacityRecommendationResult {
       cancelled = true;
     };
   }, [
-    enabled,
+    capacityEnabled,
     toolId,
   ]);
 
@@ -125,7 +138,7 @@ UseDesktopCapacityRecommendationResult {
     useMemo(
       () => {
         if (
-          !enabled ||
+          !capacityEnabled ||
           !snapshot
         ) {
           return null;
@@ -150,7 +163,7 @@ UseDesktopCapacityRecommendationResult {
         );
       },
       [
-        enabled,
+        capacityEnabled,
         snapshot,
         toolId,
         selectedBytes,
