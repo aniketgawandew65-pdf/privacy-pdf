@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { generateCsvPDF, type CsvToPdfOptions } from '../utils/pdfEngine';
+import { parseDelimitedData } from '../utils/delimitedData';
 import { useObjectUrl } from '../utils/useObjectUrl';
 import { getLicenseStatus } from '../utils/license';
 import {
@@ -317,31 +318,7 @@ export const CsvToPdf: React.FC = () => {
     workspaceHydrated,
   ]);
 
-  const parseDelimitedData = (raw: string): string[][] => {
-    const lines = raw.trim().split(/\r?\n/);
-    if (!lines.length) return [];
 
-    const delimiter = lines[0].includes('\t') ? '\t' : ',';
-    return lines
-      .map((line) => {
-        if (delimiter === '\t') {
-          return line.split('\t').map((c) => c.trim().replace(/^"|"$/g, ''));
-        }
-        const regex = /(?:,|\n|^)("(?:(?:"")*[^"]*)*"|[^",\n]*|(?:\n|$))/g;
-        const row: string[] = [];
-        let match;
-        while ((match = regex.exec(line)) !== null) {
-          let val = match[1] || '';
-          if (val.startsWith('"') && val.endsWith('"')) {
-            val = val.slice(1, -1).replace(/""/g, '"');
-          }
-          row.push(val.trim());
-          if (regex.lastIndex === match.index) regex.lastIndex++;
-        }
-        return row.filter((_, idx) => idx < row.length - 1 || row[row.length - 1] !== '');
-      })
-      .filter((r) => r.length > 0 && r.some((c) => c !== ''));
-  };
 
   const handleFileDrop = (selectedFile: File) => {
     // Source file size limit
