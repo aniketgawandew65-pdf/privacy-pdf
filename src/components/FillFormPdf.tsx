@@ -380,7 +380,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
               ) : (
                 <>
                   <FileCheck2 className="w-4 h-4 stroke-[2.5]" />
-                  <span>{flatten ? 'Fill & Flatten PDF' : 'Save Filled Form PDF'}</span>
+                  <span>{flatten ? 'Save & Flatten PDF' : 'Save Filled Form PDF'}</span>
                 </>
               )}
             </button>
