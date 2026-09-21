@@ -448,7 +448,7 @@ export const OcrPdf: React.FC<OcrPdfProps> = ({ file, onFileChange }) => {
                        * discarded by the obsolete word.bbox
                        * check.
                        */
-                      'searchable-ocr-v4-normalized-coordinates',
+                      'searchable-ocr-v5-quality-rescue',
                       sourceIdentity,
                       language,
                       1.6,
