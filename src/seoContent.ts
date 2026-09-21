@@ -17,6 +17,18 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ],
     related: [['/compress-pdf-to-50kb','Start with a 50 KB target'], ['/compress-pdf-to-100kb','Start with a 100 KB target'], ['/remove-pages','Remove unnecessary pages'], ['/split-pdf','Split a large document'], ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']]
   },
+  '/pdf-to-word': {
+    title: 'Convert a digital PDF into an editable Word document',
+    intro: 'Recover editable text and detected tables from computer-created PDFs. Artwork stays in visual layers, and conversion happens on your device.',
+    steps: ['Choose a PDF with selectable text. Scanned pages are not supported by this tool.', 'Select Convert to Word and keep the tab open while pages are reconstructed.', 'Download the DOCX and review each page in your Word editor before sharing or editing.'],
+    example: 'A digital statement can become editable transaction cells with its logo and background retained. Font substitution and editing may change wrapping, spacing and page layout.',
+    questions: [
+      ['Is every PDF supported?', 'No. Scanned pages, missing character mappings and complex layouts may need other processing. Conversion notes identify preserved symbols and unsupported details.'],
+      ['Does the PDF leave my device?', 'No document is uploaded for conversion. Reading, layout reconstruction and Word generation run locally in your browser.'],
+      ['Are there size limits?', 'Mobile and tablet support up to 150 MB per task. Desktop has no arbitrary file-size or page-count cap; available device resources and page complexity determine practical capacity.'],
+      ['Will it look identical in Word?', 'Text and tables remain editable, but fonts, wrapping and complex formatting can differ between editors. Review the result before relying on its layout.']
+    ], related: [['/pdf-to-markdown','Convert to Markdown'], ['/pdf-to-csv','Extract tables to Excel'], ['/crop-pdf','Crop a PDF']]
+  },
   '/crop-pdf': {
     title: 'Crop one page or apply the same crop to an entire PDF',
     intro: 'Trim unwanted margins with a visual crop box. Apply one selection across pages when the document uses a consistent layout.',

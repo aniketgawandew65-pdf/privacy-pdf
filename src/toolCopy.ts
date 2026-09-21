@@ -42,6 +42,7 @@ export const TOOL_COPY: Record<string, string> = {
   '/pdf-to-csv': 'Extract text-based tables to CSV with adjustable row and column detection.',
   '/bank-statement-to-excel': 'Extract text-based bank-statement transactions into CSV or TSV that you can open and review in Excel or another spreadsheet app.',
   '/document-data-extractor': 'Extract structured rows from digital or scanned PDFs, review and edit the result, then export to CSV or Excel.',
+  '/pdf-to-word': 'Turn digital PDFs into editable Word documents with text, tables and artwork, privately on your device.',
   '/pdf-to-markdown': 'Turn selectable PDF text into Markdown with heading and list detection, then copy or download the result locally.',
   '/extract-pdf-for-llm': 'Prepare selectable PDF text as Markdown locally, review it, then choose what you share with ChatGPT, Claude or another LLM.',
   '/csv-to-pdf': 'Turn rows of CSV data into a paginated PDF table.',

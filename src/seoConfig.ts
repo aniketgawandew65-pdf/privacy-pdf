@@ -292,6 +292,13 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
     heading: 'Extract PDF Data',
     subheading: 'Turn digital and scanned PDFs into editable spreadsheet data with page-aware OCR fallback and local processing.',
   },
+  '/pdf-to-word': {
+    path: '/pdf-to-word',
+    title: 'PDF to Word — Editable DOCX, Private Local Conversion | 1into1',
+    description: 'Convert computer-created PDFs into editable Word documents locally in your browser. Preserve text, detected tables and artwork without uploading your files.',
+    heading: 'PDF to Word',
+    subheading: 'Convert digital PDFs to editable Word documents privately on your device.',
+  },
   '/pdf-to-markdown': {
     path: '/pdf-to-markdown',
     title: 'PDF to Markdown Converter — Private, Local & AI-Ready | 1into1',
