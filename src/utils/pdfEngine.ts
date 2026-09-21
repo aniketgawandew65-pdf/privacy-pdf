@@ -14027,6 +14027,15 @@ export async function ocrPDFToSearchable(
              * Use the same explicit structured-output contract
              * already proven by Private PII.
              */
+            /*
+             * PRIMARY PATH — intentionally unchanged.
+             *
+             * Every tile still runs through the exact same 1.6x
+             * structured Tesseract recognition path first.
+             *
+             * The rescue pass below is strictly additive and can
+             * never make a healthy primary result fail.
+             */
             const result =
               await recognizeMobileOcrTile(
                 ocrWorker,
@@ -14034,20 +14043,668 @@ export async function ocrPDFToSearchable(
               );
 
 
-            const data =
+            let data =
               result?.data ||
               {};
 
 
-            const lines =
+            let lines =
               extractMobileOcrLines(
                 data
               );
 
 
-            const rawWords:
+            let rawWords:
               any[] =
               lines.flat();
+
+
+            /*
+             * =====================================================
+             * SEARCHABLE OCR QUALITY RESCUE — LOW CONTRAST ONLY
+             * =====================================================
+             *
+             * The normal OCR path above remains the default.
+             *
+             * A second pass is considered only when:
+             * - the primary result is unusually sparse/weak, OR
+             * - the rendered tile contains a meaningful amount of
+             *   light/mid-tone ink that a normal scan can miss.
+             *
+             * The rescue bitmap keeps EXACTLY the same dimensions,
+             * so all word coordinates remain compatible with the
+             * existing invisible-text-layer math.
+             *
+             * If rescue does not score clearly better, the primary
+             * result wins unchanged.
+             */
+            try {
+              const primaryConfidence =
+                Number(
+                  data?.confidence
+                );
+
+
+              const primaryCharCount =
+                rawWords.reduce(
+                  (
+                    total,
+                    word
+                  ) =>
+                    total +
+                    String(
+                      word?.text ||
+                      ''
+                    )
+                      .replace(
+                        /\s+/g,
+                        ''
+                      )
+                      .length,
+                  0
+                );
+
+
+              const primaryWeak =
+                rawWords.length <
+                  14 ||
+                primaryCharCount <
+                  70 ||
+                (
+                  Number.isFinite(
+                    primaryConfidence
+                  ) &&
+                  primaryConfidence <
+                    48
+                );
+
+
+              /*
+               * Downsample only for the quality probe.
+               *
+               * This avoids cloning the complete tile merely to
+               * decide whether a rescue attempt is warranted.
+               */
+              const probeCanvas =
+                document.createElement(
+                  'canvas'
+                );
+
+
+              const probeScale =
+                Math.min(
+                  1,
+                  160 /
+                    Math.max(
+                      canvas.width,
+                      canvas.height
+                    )
+                );
+
+
+              probeCanvas.width =
+                Math.max(
+                  1,
+                  Math.round(
+                    canvas.width *
+                      probeScale
+                  )
+                );
+
+
+              probeCanvas.height =
+                Math.max(
+                  1,
+                  Math.round(
+                    canvas.height *
+                      probeScale
+                  )
+                );
+
+
+              let lowContrastSignal =
+                false;
+
+
+              try {
+                const probeCtx =
+                  probeCanvas.getContext(
+                    '2d',
+                    {
+                      alpha:
+                        false,
+                    }
+                  );
+
+
+                if (probeCtx) {
+                  probeCtx.drawImage(
+                    canvas,
+                    0,
+                    0,
+                    probeCanvas.width,
+                    probeCanvas.height
+                  );
+
+
+                  const pixels =
+                    probeCtx.getImageData(
+                      0,
+                      0,
+                      probeCanvas.width,
+                      probeCanvas.height
+                    ).data;
+
+
+                  let midTonePixels =
+                    0;
+
+                  let darkPixels =
+                    0;
+
+                  const totalPixels =
+                    Math.max(
+                      1,
+                      pixels.length /
+                        4
+                    );
+
+
+                  for (
+                    let pixelIndex =
+                      0;
+                    pixelIndex <
+                      pixels.length;
+                    pixelIndex +=
+                      4
+                  ) {
+                    const luminance =
+                      pixels[
+                        pixelIndex
+                      ] *
+                        0.299 +
+                      pixels[
+                        pixelIndex +
+                          1
+                      ] *
+                        0.587 +
+                      pixels[
+                        pixelIndex +
+                          2
+                      ] *
+                        0.114;
+
+
+                    if (
+                      luminance >=
+                        145 &&
+                      luminance <=
+                        232
+                    ) {
+                      midTonePixels +=
+                        1;
+                    }
+
+
+                    if (
+                      luminance <
+                      115
+                    ) {
+                      darkPixels +=
+                        1;
+                    }
+                  }
+
+
+                  const midToneRatio =
+                    midTonePixels /
+                    totalPixels;
+
+
+                  const darkRatio =
+                    darkPixels /
+                    totalPixels;
+
+
+                  lowContrastSignal =
+                    midToneRatio >
+                      0.012 &&
+                    darkRatio <
+                      0.18;
+                }
+              } finally {
+                probeCanvas.width =
+                  1;
+
+                probeCanvas.height =
+                  1;
+
+                try {
+                  probeCanvas.remove();
+                } catch (_) {}
+              }
+
+
+              if (
+                primaryWeak ||
+                lowContrastSignal
+              ) {
+                const rescueCanvas =
+                  document.createElement(
+                    'canvas'
+                  );
+
+
+                rescueCanvas.width =
+                  canvas.width;
+
+                rescueCanvas.height =
+                  canvas.height;
+
+
+                try {
+                  const rescueCtx =
+                    rescueCanvas.getContext(
+                      '2d',
+                      {
+                        alpha:
+                          false,
+                        willReadFrequently:
+                          true,
+                      } as any
+                    );
+
+
+                  if (rescueCtx) {
+                    rescueCtx.drawImage(
+                      canvas,
+                      0,
+                      0
+                    );
+
+
+                    const rescuePixels =
+                      rescueCtx.getImageData(
+                        0,
+                        0,
+                        rescueCanvas.width,
+                        rescueCanvas.height
+                      );
+
+
+                    const values =
+                      rescuePixels.data;
+
+
+                    /*
+                     * Estimate the paper/background luminance from
+                     * a tiny histogram. Using a high percentile
+                     * lets faded gray text be stretched away from
+                     * an off-white/yellow background without
+                     * changing canvas geometry.
+                     */
+                    const histogram =
+                      new Uint32Array(
+                        256
+                      );
+
+
+                    for (
+                      let pixelIndex =
+                        0;
+                      pixelIndex <
+                        values.length;
+                      pixelIndex +=
+                        4
+                    ) {
+                      const luminance =
+                        Math.max(
+                          0,
+                          Math.min(
+                            255,
+                            Math.round(
+                              values[
+                                pixelIndex
+                              ] *
+                                0.299 +
+                              values[
+                                pixelIndex +
+                                  1
+                              ] *
+                                0.587 +
+                              values[
+                                pixelIndex +
+                                  2
+                              ] *
+                                0.114
+                            )
+                          )
+                        );
+
+
+                      histogram[
+                        luminance
+                      ] +=
+                        1;
+                    }
+
+
+                    const pixelCount =
+                      Math.max(
+                        1,
+                        values.length /
+                          4
+                      );
+
+
+                    const backgroundTarget =
+                      Math.floor(
+                        pixelCount *
+                          0.86
+                      );
+
+
+                    let cumulative =
+                      0;
+
+                    let backgroundLuminance =
+                      245;
+
+
+                    for (
+                      let value =
+                        0;
+                      value <=
+                        255;
+                      value++
+                    ) {
+                      cumulative +=
+                        histogram[
+                          value
+                        ];
+
+
+                      if (
+                        cumulative >=
+                        backgroundTarget
+                      ) {
+                        backgroundLuminance =
+                          value;
+
+                        break;
+                      }
+                    }
+
+
+                    const lowPoint =
+                      Math.max(
+                        0,
+                        backgroundLuminance -
+                          92
+                      );
+
+
+                    const highPoint =
+                      Math.min(
+                        255,
+                        backgroundLuminance +
+                          5
+                      );
+
+
+                    const range =
+                      Math.max(
+                        24,
+                        highPoint -
+                          lowPoint
+                      );
+
+
+                    for (
+                      let pixelIndex =
+                        0;
+                      pixelIndex <
+                        values.length;
+                      pixelIndex +=
+                        4
+                    ) {
+                      const luminance =
+                        values[
+                          pixelIndex
+                        ] *
+                          0.299 +
+                        values[
+                          pixelIndex +
+                            1
+                        ] *
+                          0.587 +
+                        values[
+                          pixelIndex +
+                            2
+                        ] *
+                          0.114;
+
+
+                      const enhanced =
+                        Math.max(
+                          0,
+                          Math.min(
+                            255,
+                            Math.round(
+                              (
+                                (
+                                  luminance -
+                                  lowPoint
+                                ) /
+                                range
+                              ) *
+                                255
+                            )
+                          )
+                        );
+
+
+                      values[
+                        pixelIndex
+                      ] =
+                        enhanced;
+
+                      values[
+                        pixelIndex +
+                          1
+                      ] =
+                        enhanced;
+
+                      values[
+                        pixelIndex +
+                          2
+                      ] =
+                        enhanced;
+
+                      values[
+                        pixelIndex +
+                          3
+                      ] =
+                        255;
+                    }
+
+
+                    rescueCtx.putImageData(
+                      rescuePixels,
+                      0,
+                      0
+                    );
+
+
+                    const rescueResult =
+                      await recognizeMobileOcrTile(
+                        ocrWorker,
+                        rescueCanvas
+                      );
+
+
+                    const rescueData =
+                      rescueResult?.data ||
+                      {};
+
+
+                    const rescueLines =
+                      extractMobileOcrLines(
+                        rescueData
+                      );
+
+
+                    const rescueWords:
+                      any[] =
+                      rescueLines.flat();
+
+
+                    const rescueCharCount =
+                      rescueWords.reduce(
+                        (
+                          total,
+                          word
+                        ) =>
+                          total +
+                          String(
+                            word?.text ||
+                            ''
+                          )
+                            .replace(
+                              /\s+/g,
+                              ''
+                            )
+                            .length,
+                        0
+                      );
+
+
+                    const rescueConfidence =
+                      Number(
+                        rescueData?.confidence
+                      );
+
+
+                    const primaryScore =
+                      rawWords.length *
+                        4 +
+                      primaryCharCount *
+                        0.35 +
+                      (
+                        Number.isFinite(
+                          primaryConfidence
+                        )
+                          ? Math.max(
+                              0,
+                              primaryConfidence
+                            ) *
+                            0.4
+                          : 0
+                      );
+
+
+                    const rescueScore =
+                      rescueWords.length *
+                        4 +
+                      rescueCharCount *
+                        0.35 +
+                      (
+                        Number.isFinite(
+                          rescueConfidence
+                        )
+                          ? Math.max(
+                              0,
+                              rescueConfidence
+                            ) *
+                            0.4
+                          : 0
+                      );
+
+
+                    /*
+                     * Require a meaningful win. This prevents a
+                     * noisy enhancement pass from replacing a
+                     * healthy normal OCR result merely because it
+                     * hallucinated a few extra fragments.
+                     */
+                    const rescueClearlyBetter =
+                      (
+                        rawWords.length ===
+                          0 &&
+                        rescueWords.length >
+                          0
+                      ) ||
+                      (
+                        rescueScore >
+                          primaryScore *
+                            1.12 &&
+                        rescueCharCount >=
+                          Math.max(
+                            1,
+                            primaryCharCount
+                          )
+                      ) ||
+                      (
+                        Number.isFinite(
+                          primaryConfidence
+                        ) &&
+                        Number.isFinite(
+                          rescueConfidence
+                        ) &&
+                        rescueConfidence >=
+                          primaryConfidence +
+                            10 &&
+                        rescueWords.length >=
+                          Math.max(
+                            1,
+                            Math.floor(
+                              rawWords.length *
+                                0.9
+                            )
+                          )
+                      );
+
+
+                    if (
+                      rescueClearlyBetter
+                    ) {
+                      data =
+                        rescueData;
+
+                      lines =
+                        rescueLines;
+
+                      rawWords =
+                        rescueWords;
+                    }
+                  }
+                } finally {
+                  rescueCanvas.width =
+                    1;
+
+                  rescueCanvas.height =
+                    1;
+
+                  try {
+                    rescueCanvas.remove();
+                  } catch (_) {}
+                }
+              }
+            } catch (
+              rescueError
+            ) {
+              /*
+               * Quality rescue is deliberately non-blocking.
+               *
+               * Any browser/canvas/Tesseract problem here falls
+               * straight back to the already-working primary
+               * OCR result above.
+               */
+              console.warn(
+                'Searchable OCR quality rescue skipped:',
+                rescueError
+              );
+            }
 
 
             /*
