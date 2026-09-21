@@ -154,7 +154,7 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
           page.cleanup();
         } catch (_) {}
       } catch (err) {
-        console.error('Deskew preview error:', err);
+        console.error('Straighten PDF preview error:', err);
         if (isMounted) setErrorMessage((err as any)?.message || String(err));
       } finally {
         if (disposePdf) {
@@ -249,8 +249,8 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
       createUrl(blob);
       commitTaskCredit();
     } catch (err: any) {
-      console.error('Deskew error:', err);
-      setErrorMessage(err.message || 'Failed to deskew PDF.');
+      console.error('Straighten PDF error:', err);
+      setErrorMessage(err.message || 'Failed to straighten PDF.');
     } finally {
       setIsProcessing(false);
     }
@@ -319,7 +319,7 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
             <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
           )}
 
-          {/* High-DPI Live Deskew Preview with Corner Zoom Widget */}
+          {/* High-DPI Live Straighten PDF Preview with Corner Zoom Widget */}
           <div className="relative w-full h-[360px] bg-zinc-950/80 rounded-xl border border-zinc-800 flex items-center justify-center overflow-auto p-4 select-none">
             {isLoadingPreview ? (
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
@@ -327,7 +327,7 @@ export const DeskewPdf: React.FC<DeskewPdfProps> = ({ file, onFileChange }) => {
               <div className="relative flex items-center justify-center min-w-full min-h-full p-8">
                 <img
                   src={previewUrl}
-                  alt="Deskew Preview"
+                  alt="Straighten PDF Preview"
                   style={{
                     transform: `rotate(${angle}deg) scale(${zoom})`,
                     transformOrigin: 'center center',
