@@ -398,7 +398,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
             error
           ) {
             console.warn(
-              'Unable to restore interrupted PDF to CSV job:',
+              'Unable to restore interrupted PDF to Excel job:',
               error
             );
           }
@@ -506,7 +506,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
             error
           ) {
             console.warn(
-              'Unable to inspect interrupted PDF to CSV job:',
+              'Unable to inspect interrupted PDF to Excel job:',
               error
             );
           }
@@ -604,7 +604,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
               recoveryError
             ) {
               console.warn(
-                'PDF to CSV restart recovery unavailable:',
+                'PDF to Excel restart recovery unavailable:',
                 recoveryError
               );
             }
@@ -664,7 +664,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
           0
       ) {
         setErrorMessage(
-          'No tabular data detected. If this is a scanned document, use "OCR Searchable" first.'
+          'No tabular data detected. If this is a scanned document, use "OCR PDF" first.'
         );
 
         setTableData(
@@ -742,7 +742,7 @@ export const PdfToCsv: React.FC<PdfToCsvProps> = ({ file, onFileChange }) => {
        */
       setErrorMessage(
         err?.message ||
-          'Processing was interrupted. Reopen PDF to CSV to continue from the last completed page.'
+          'Processing was interrupted. Reopen PDF to Excel to continue from the last completed page.'
       );
 
       setTableData(
