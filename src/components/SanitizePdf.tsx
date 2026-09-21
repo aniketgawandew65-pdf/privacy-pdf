@@ -558,7 +558,7 @@ export const SanitizePdf: React.FC<SanitizePdfProps> = ({ file, onFileChange }) 
             <div className="pt-2 border-t border-zinc-800/60 flex items-start gap-2 text-[11px] text-zinc-500">
               <Info className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
               <span>
-                Deep Sanitize rebuilds only the visible page appearance into a clean PDF. Links, forms, comments, attachments, scripts, bookmarks and selectable/OCR text layers are intentionally removed. To black out visible sensitive details, use <strong>Redact</strong>.
+                Deep Sanitize rebuilds only the visible page appearance into a clean PDF. Links, forms, comments, attachments, scripts, bookmarks and selectable/OCR text layers are intentionally removed. To black out visible sensitive details, use <strong>Redact PDF</strong>.
               </span>
             </div>
           </div>
