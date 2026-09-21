@@ -396,12 +396,37 @@ const synchronizeExistingXmp =
         )
       );
 
-      metadataObject.setContents(
-        new TextEncoder()
-          .encode(
-            xml
+      const replacementStream =
+        PDFRawStream.of(
+          metadataObject.dict,
+          new TextEncoder()
+            .encode(
+              xml
+            )
+        );
+
+      const existingRef =
+        pdfDoc.context.getObjectRef(
+          metadataObject
+        );
+
+      if (
+        existingRef
+      ) {
+        pdfDoc.context.assign(
+          existingRef,
+          replacementStream
+        );
+      } else {
+        pdfDoc.catalog.set(
+          PDFName.of(
+            'Metadata'
+          ),
+          pdfDoc.context.register(
+            replacementStream
           )
-      );
+        );
+      }
 
       return true;
     } catch (
