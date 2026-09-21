@@ -832,10 +832,17 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                   {securityNotice && (
                     <div
                       role="status"
-                      className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/40 flex items-start gap-2.5 text-xs text-amber-200"
+                      className="p-3.5 rounded-xl bg-zinc-950 border border-amber-500/50 flex items-start gap-2.5 text-xs text-zinc-200 shadow-sm"
                     >
-                      <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-                      <span>{securityNotice}</span>
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-1 leading-relaxed">
+                        <p className="font-semibold text-zinc-100">
+                          Permission protection removed
+                        </p>
+                        <p>
+                          {securityNotice}
+                        </p>
+                      </div>
                     </div>
                   )}
                   <a
