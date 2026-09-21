@@ -789,7 +789,7 @@ export const GrayscalePdf: React.FC<GrayscalePdfProps> = ({ file, onFileChange }
         setErrorMessage(
           err?.message ||
             String(err) ||
-            'Processing was interrupted. Reopen B&W / Grayscale to continue from the last completed page.'
+            'Processing was interrupted. Reopen B&W / Grayscale PDF to continue from the last completed page.'
         );
       } finally {
         processingInFlightRef.current =
