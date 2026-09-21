@@ -1,4 +1,3 @@
-import { getLicenseStatus } from './license';
 import { isMobileSafetyEnvironment } from './deviceCapability';
 import { checkActionAllowed } from './usageTracker';
 
@@ -34,32 +33,20 @@ export function validateTaskFiles(
     totalBytes / 1024 / 1024;
 
   /*
-   * Desktop Pro no longer uses the shared fixed 150 MB
-   * selection gate.
+   * Desktop now uses the same device-sized local-processing policy
+   * for Free, Google bonus, and Pro tasks.
    *
-   * This does NOT mean unlimited processing capacity.
-   * Desktop Pro will use the separate hardware/tool-aware
-   * recommendation system.
+   * This does NOT mean infinite processing capacity. The browser,
+   * hardware, and tool-specific resource checks still determine
+   * practical limits.
    *
-   * Mobile and tablet Pro remain hard-limited to 150 MB.
-   * Free/Google tiers retain the existing shared gate.
+   * Mobile/tablet keeps the shared 150 MB safety ceiling.
    */
-  /*
-   * Callers may explicitly provide policy context, as App.tsx does.
-   *
-   * Older/tool-level callers can omit it and inherit the current
-   * runtime entitlement + device classification automatically.
-   */
-  const effectiveIsPro =
-    options.isPro ??
-    getLicenseStatus().isPro;
-
   const effectiveMobileSafetyEnvironment =
     options.isMobileSafetyEnvironment ??
     isMobileSafetyEnvironment();
 
-  const adaptiveDesktopPro =
-    effectiveIsPro === true &&
+  const adaptiveDesktop =
     effectiveMobileSafetyEnvironment === false;
 
   /*
@@ -93,7 +80,7 @@ export function validateTaskFiles(
   }
 
   if (
-    adaptiveDesktopPro ||
+    adaptiveDesktop ||
     totalBytes <= HARD_TASK_LIMIT_BYTES
   ) {
     return {
