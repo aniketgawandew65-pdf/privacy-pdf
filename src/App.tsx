@@ -1670,20 +1670,22 @@ export default function App() {
                 <span className="capacity-step">
                   <strong>Free</strong>
                   <span><b>2 tasks/day</b></span>
-                  <span>Desktop: <b>Any size. Your device decides.</b></span>
+                  <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
                   <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step">
                   <strong>Sign in</strong>
                   <span><b>+2 extra tasks</b></span>
-                  <span>Same file-size access</span>
+                  <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
+                  <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step capacity-step-pro">
                   <strong>Pro</strong>
                   <span><b>Unlimited tasks</b></span>
-                  <span>Same device-sized access</span>
+                  <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
+                  <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
               </div>
             )}
