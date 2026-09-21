@@ -262,13 +262,9 @@ export function Merger({ files, onFilesChange }: MergerProps) {
           Click or drop PDF files here to merge
         </p>
         <p className="text-xs text-zinc-500 mt-1">
-          {isPro
-            ? (
-                isMobileSafetyEnvironment()
-                  ? 'Pro Active • Max 150 MB total on mobile/tablet'
-                  : 'Desktop Pro • device-aware merge capacity'
-              )
-            : 'Task size depends on your current free tier'}
+          {isMobileSafetyEnvironment()
+            ? 'Mobile & tablet: Up to 150 MB total per task'
+            : 'Desktop: Any size. Your device decides.'}
         </p>
       </div>
 
