@@ -570,7 +570,7 @@ export const DocumentDataExtractor:
                   await digestText(
                     JSON.stringify(
                       [
-                        'universal-data-extractor-v1',
+                        'universal-data-extractor-v3',
                         sourceIdentity,
                         ',',
                         4,
