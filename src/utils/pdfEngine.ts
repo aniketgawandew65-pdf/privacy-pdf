@@ -25973,154 +25973,797 @@ export async function generateCsvPDF(options: CsvToPdfOptions): Promise<Uint8Arr
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 36;
   const printableWidth = pageWidth - margin * 2;
-  const bottomThreshold = pageHeight - margin - 24; // Leave room for footer
+  const bottomThreshold = pageHeight - margin - 24;
+  const lineHeight = fontSize * 1.3;
 
-  const colCount = Math.max(...rows.map((r) => r.length), 1);
+  const colCount = Math.max(...rows.map((row) => row.length), 1);
   const headerRow = rows[0] || [];
   const dataRows = rows.slice(1);
 
-  // 1. Calculate Proportional Column Widths based on max content length per column
+  const getCell = (
+    row: string[],
+    column: number
+  ) => String(row[column] ?? '');
+
+  /*
+   * ---------------------------------------------------------
+   * TEXT MEASUREMENT / WRAPPING
+   * ---------------------------------------------------------
+   *
+   * jsPDF's built-in Helvetica is WinAnsi only. Normal Latin
+   * remains vector text. Lines containing broader Unicode are
+   * measured and rendered locally through a browser canvas so
+   * the PDF does not corrupt global scripts into byte garbage.
+   */
+  let measureCanvas: HTMLCanvasElement | null = null;
+  let measureContext: CanvasRenderingContext2D | null = null;
+
+  const ensureMeasureContext = () => {
+    if (
+      measureContext ||
+      typeof document === 'undefined'
+    ) {
+      return measureContext;
+    }
+
+    measureCanvas = document.createElement('canvas');
+    measureCanvas.width = 1;
+    measureCanvas.height = 1;
+    measureContext = measureCanvas.getContext('2d');
+
+    return measureContext;
+  };
+
+  const requiresUnicodeRaster = (value: string) =>
+    /[^\u0000-\u00FF]/u.test(value);
+
+  const measureText = (
+    value: string,
+    bold = false
+  ) => {
+    if (!value) return 0;
+
+    if (requiresUnicodeRaster(value)) {
+      const context = ensureMeasureContext();
+
+      if (context) {
+        context.font =
+          `${bold ? '700' : '400'} ${fontSize}px Arial, "Arial Unicode MS", "Noto Sans", sans-serif`;
+
+        return context.measureText(value).width;
+      }
+    }
+
+    doc.setFont(
+      'helvetica',
+      bold ? 'bold' : 'normal'
+    );
+    doc.setFontSize(fontSize);
+
+    return doc.getTextWidth(value);
+  };
+
+  const splitLongToken = (
+    token: string,
+    maxWidth: number,
+    bold = false
+  ) => {
+    const chunks: string[] = [];
+    let current = '';
+
+    for (const character of Array.from(token)) {
+      const candidate = current + character;
+
+      if (
+        current &&
+        measureText(candidate, bold) > maxWidth
+      ) {
+        chunks.push(current);
+        current = character;
+      } else {
+        current = candidate;
+      }
+    }
+
+    if (current || chunks.length === 0) {
+      chunks.push(current);
+    }
+
+    return chunks;
+  };
+
+  const wrapLogicalLine = (
+    line: string,
+    maxWidth: number,
+    bold = false
+  ) => {
+    if (line === '') return [''];
+
+    const tokens =
+      line.match(/\s+|\S+/gu) || [line];
+
+    const wrapped: string[] = [];
+    let current = '';
+
+    for (const token of tokens) {
+      const candidate = current + token;
+
+      if (
+        candidate &&
+        measureText(candidate, bold) <= maxWidth
+      ) {
+        current = candidate;
+        continue;
+      }
+
+      if (current) {
+        wrapped.push(current);
+        current = '';
+      }
+
+      if (measureText(token, bold) <= maxWidth) {
+        current = token;
+        continue;
+      }
+
+      const pieces = splitLongToken(
+        token,
+        maxWidth,
+        bold
+      );
+
+      for (
+        let pieceIndex = 0;
+        pieceIndex < pieces.length;
+        pieceIndex++
+      ) {
+        const piece = pieces[pieceIndex];
+
+        if (pieceIndex === pieces.length - 1) {
+          current = piece;
+        } else {
+          wrapped.push(piece);
+        }
+      }
+    }
+
+    if (current || wrapped.length === 0) {
+      wrapped.push(current);
+    }
+
+    return wrapped;
+  };
+
+  const wrapCellText = (
+    value: string,
+    maxWidth: number,
+    bold = false
+  ) => {
+    const logicalLines = value.split(/\r\n|\r|\n/);
+    const wrapped: string[] = [];
+
+    for (const logicalLine of logicalLines) {
+      wrapped.push(
+        ...wrapLogicalLine(
+          logicalLine,
+          Math.max(8, maxWidth),
+          bold
+        )
+      );
+    }
+
+    return wrapped.length ? wrapped : [''];
+  };
+
+  const unicodeImageCache = new Map<
+    string,
+    {
+      dataUrl: string;
+      alias: string;
+    }
+  >();
+
+  const stringHash = (value: string) => {
+    let hash = 2166136261;
+
+    for (let index = 0; index < value.length; index++) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return (hash >>> 0).toString(36);
+  };
+
+  const drawTextLine = (
+    value: string,
+    x: number,
+    baselineY: number,
+    maxWidth: number,
+    bold: boolean,
+    color: [number, number, number]
+  ) => {
+    if (!value) return;
+
+    if (
+      requiresUnicodeRaster(value) &&
+      typeof document !== 'undefined'
+    ) {
+      const cacheKey =
+        `${bold ? 'b' : 'n'}|${fontSize}|${maxWidth.toFixed(2)}|${color.join(',')}|${value}`;
+
+      let cached = unicodeImageCache.get(cacheKey);
+
+      if (!cached) {
+        const scale = 3;
+        const imageHeight = lineHeight;
+        const canvas = document.createElement('canvas');
+
+        canvas.width = Math.max(
+          1,
+          Math.ceil(maxWidth * scale)
+        );
+
+        canvas.height = Math.max(
+          1,
+          Math.ceil(imageHeight * scale)
+        );
+
+        const context = canvas.getContext('2d');
+
+        if (context) {
+          context.scale(scale, scale);
+          context.clearRect(0, 0, maxWidth, imageHeight);
+          context.font =
+            `${bold ? '700' : '400'} ${fontSize}px Arial, "Arial Unicode MS", "Noto Sans", sans-serif`;
+
+          context.textBaseline = 'alphabetic';
+          context.fillStyle =
+            `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+
+          context.fillText(
+            value,
+            0,
+            fontSize + 1
+          );
+
+          cached = {
+            dataUrl: canvas.toDataURL('image/png'),
+            alias: `csv-u-${stringHash(cacheKey)}`,
+          };
+
+          unicodeImageCache.set(cacheKey, cached);
+        }
+
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+
+      if (cached) {
+        doc.addImage(
+          cached.dataUrl,
+          'PNG',
+          x,
+          baselineY - fontSize - 1,
+          maxWidth,
+          lineHeight,
+          cached.alias,
+          'FAST'
+        );
+
+        return;
+      }
+    }
+
+    doc.setFont(
+      'helvetica',
+      bold ? 'bold' : 'normal'
+    );
+
+    doc.setFontSize(fontSize);
+    doc.setTextColor(color[0], color[1], color[2]);
+    doc.text(value, x, baselineY);
+  };
+
+  /*
+   * ---------------------------------------------------------
+   * COLUMN WIDTHS / HORIZONTAL PANELS
+   * ---------------------------------------------------------
+   *
+   * A minimum readable width is real: it is never scaled back
+   * down merely to force every column onto one sheet.
+   */
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(fontSize);
 
-  const colMaxChars = new Array(colCount).fill(3);
-  for (const row of rows) {
-    for (let c = 0; c < colCount; c++) {
-      const val = (row[c] || '').trim();
-      if (val.length > colMaxChars[c]) {
-        colMaxChars[c] = Math.min(val.length, 60); // Cap max influence
+  const minColumnWidth = 62;
+  const maxColumnWidth = 180;
+
+  const desiredWidths = new Array(colCount)
+    .fill(minColumnWidth)
+    .map((_, column) => {
+      let desired = minColumnWidth;
+
+      for (const row of rows) {
+        const value = getCell(row, column);
+        const logicalLines = value.split(/\r\n|\r|\n/);
+
+        for (const logicalLine of logicalLines) {
+          const sample =
+            logicalLine.length > 140
+              ? logicalLine.slice(0, 140)
+              : logicalLine;
+
+          const words = sample.match(/\S+/gu) || [''];
+
+          const longestWord = words.reduce(
+            (longest, word) =>
+              measureText(word) > measureText(longest)
+                ? word
+                : longest,
+            ''
+          );
+
+          const natural =
+            Math.min(
+              maxColumnWidth - 12,
+              Math.max(
+                measureText(longestWord),
+                measureText(sample.slice(0, 28))
+              )
+            ) + 12;
+
+          desired = Math.max(
+            desired,
+            Math.min(maxColumnWidth, natural)
+          );
+        }
       }
-    }
-  }
 
-  const totalChars = colMaxChars.reduce((sum, n) => sum + n, 0);
-  const colWidths = colMaxChars.map((chars) => Math.max(50, (chars / totalChars) * printableWidth));
+      return Math.min(
+        maxColumnWidth,
+        Math.max(minColumnWidth, desired)
+      );
+    });
 
-  const currentTotalWidth = colWidths.reduce((sum, w) => sum + w, 0);
-  if (currentTotalWidth > 0) {
-    const scale = printableWidth / currentTotalWidth;
-    for (let i = 0; i < colWidths.length; i++) {
-      colWidths[i] *= scale;
+  type ColumnPanel = {
+    indexes: number[];
+    widths: number[];
+  };
+
+  const totalDesiredWidth =
+    desiredWidths.reduce(
+      (sum, width) => sum + width,
+      0
+    );
+
+  const panels: ColumnPanel[] = [];
+
+  if (totalDesiredWidth <= printableWidth) {
+    panels.push({
+      indexes: Array.from(
+        { length: colCount },
+        (_, index) => index
+      ),
+      widths: desiredWidths.slice(),
+    });
+  } else {
+    const repeatAnchor =
+      colCount > 2 &&
+      desiredWidths[0] <= printableWidth * 0.24;
+
+    let nextColumn = 0;
+    let panelNumber = 0;
+
+    while (nextColumn < colCount) {
+      const indexes: number[] = [];
+      const widths: number[] = [];
+      let used = 0;
+
+      if (
+        panelNumber > 0 &&
+        repeatAnchor &&
+        nextColumn !== 0
+      ) {
+        indexes.push(0);
+        widths.push(desiredWidths[0]);
+        used += desiredWidths[0];
+      }
+
+      let addedDataColumn = false;
+
+      while (nextColumn < colCount) {
+        if (
+          panelNumber > 0 &&
+          repeatAnchor &&
+          nextColumn === 0
+        ) {
+          nextColumn += 1;
+          continue;
+        }
+
+        const width = desiredWidths[nextColumn];
+
+        if (
+          addedDataColumn &&
+          used + width > printableWidth
+        ) {
+          break;
+        }
+
+        indexes.push(nextColumn);
+        widths.push(width);
+        used += width;
+        addedDataColumn = true;
+        nextColumn += 1;
+      }
+
+      /*
+       * Defensive fallback for an unusually wide single column.
+       */
+      if (!addedDataColumn && nextColumn < colCount) {
+        indexes.push(nextColumn);
+        widths.push(
+          Math.min(
+            printableWidth - used,
+            desiredWidths[nextColumn]
+          )
+        );
+        nextColumn += 1;
+      }
+
+      panels.push({
+        indexes,
+        widths,
+      });
+
+      panelNumber += 1;
     }
   }
 
   let cursorY = margin;
 
-  if (title.trim()) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor(24, 24, 27);
-    doc.text(title.trim(), margin, cursorY + 12);
-    cursorY += 28;
-  }
+  const drawTitle = (
+    panelIndex: number
+  ) => {
+    const hasTitle = Boolean(title.trim());
 
-  const drawHeader = () => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(fontSize);
+    if (hasTitle) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(24, 24, 27);
+      doc.text(
+        title.trim(),
+        margin,
+        cursorY + 12
+      );
+    }
+
+    if (panels.length > 1) {
+      const panel = panels[panelIndex];
+      const visibleColumns = panel.indexes
+        .filter(
+          (column, index) =>
+            !(
+              panelIndex > 0 &&
+              index === 0 &&
+              column === 0
+            )
+        )
+        .map((column) => column + 1);
+
+      const firstColumn =
+        visibleColumns[0] || 1;
+
+      const lastColumn =
+        visibleColumns[
+          visibleColumns.length - 1
+        ] || firstColumn;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(113, 113, 122);
+
+      doc.text(
+        `Columns ${firstColumn}–${lastColumn} of ${colCount}`,
+        pageWidth - margin,
+        cursorY + 11,
+        { align: 'right' }
+      );
+    }
+
+    if (hasTitle || panels.length > 1) {
+      cursorY += 28;
+    }
+  };
+
+  const drawHeader = (
+    panel: ColumnPanel
+  ) => {
+    const headerLines = panel.indexes.map(
+      (column, panelColumn) =>
+        wrapCellText(
+          getCell(headerRow, column),
+          panel.widths[panelColumn] - 12,
+          true
+        )
+    );
+
+    const maxHeaderLines = Math.max(
+      1,
+      ...headerLines.map((lines) => lines.length)
+    );
+
+    const headerHeight = Math.max(
+      22,
+      maxHeaderLines * lineHeight + 10
+    );
 
     if (theme === 'emerald') {
       doc.setFillColor(16, 185, 129);
-      doc.setTextColor(255, 255, 255);
     } else {
       doc.setFillColor(244, 244, 245);
-      doc.setTextColor(24, 24, 27);
     }
 
-    let maxHeaderLines = 1;
-    const headerLinesPerCol: string[][] = [];
-    for (let c = 0; c < colCount; c++) {
-      const cellText = (headerRow[c] || '').trim();
-      const wrapped = doc.splitTextToSize(cellText, colWidths[c] - 12);
-      headerLinesPerCol.push(wrapped);
-      if (wrapped.length > maxHeaderLines) maxHeaderLines = wrapped.length;
-    }
+    const panelWidth = panel.widths.reduce(
+      (sum, width) => sum + width,
+      0
+    );
 
-    const headerHeight = Math.max(22, maxHeaderLines * (fontSize * 1.3) + 10);
+    doc.rect(
+      margin,
+      cursorY,
+      panelWidth,
+      headerHeight,
+      'F'
+    );
 
-    doc.rect(margin, cursorY, printableWidth, headerHeight, 'F');
     doc.setDrawColor(212, 212, 216);
-    doc.line(margin, cursorY + headerHeight, margin + printableWidth, cursorY + headerHeight);
+    doc.line(
+      margin,
+      cursorY + headerHeight,
+      margin + panelWidth,
+      cursorY + headerHeight
+    );
 
-    for (let c = 0; c < colCount; c++) {
-      let cellX = margin;
-      for (let i = 0; i < c; i++) cellX += colWidths[i];
+    const textColor: [number, number, number] =
+      theme === 'emerald'
+        ? [255, 255, 255]
+        : [24, 24, 27];
 
-      const wrapped = headerLinesPerCol[c];
+    let cellX = margin;
+
+    for (
+      let panelColumn = 0;
+      panelColumn < panel.indexes.length;
+      panelColumn++
+    ) {
+      const width = panel.widths[panelColumn];
+      const lines = headerLines[panelColumn];
       let textY = cursorY + 14;
-      for (const line of wrapped) {
-        doc.text(line, cellX + 6, textY);
-        textY += fontSize * 1.3;
+
+      for (const line of lines) {
+        drawTextLine(
+          line,
+          cellX + 6,
+          textY,
+          width - 12,
+          true,
+          textColor
+        );
+
+        textY += lineHeight;
       }
+
+      cellX += width;
     }
 
     cursorY += headerHeight;
   };
 
-  drawHeader();
+  const addContinuationPage = (
+    panel: ColumnPanel
+  ) => {
+    doc.addPage();
+    cursorY = margin;
+    drawHeader(panel);
+  };
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(fontSize);
+  const drawRowChunk = (
+    panel: ColumnPanel,
+    linesPerColumn: string[][],
+    startLine: number,
+    lineCount: number,
+    rowIndex: number
+  ) => {
+    const chunkHeight = Math.max(
+      20,
+      lineCount * lineHeight + 8
+    );
 
-  for (let r = 0; r < dataRows.length; r++) {
-    const row = dataRows[r];
+    const panelWidth = panel.widths.reduce(
+      (sum, width) => sum + width,
+      0
+    );
 
-    const linesPerCol: string[][] = [];
-    let maxLines = 1;
-    for (let c = 0; c < colCount; c++) {
-      const cellText = (row[c] || '').trim();
-      const wrapped = doc.splitTextToSize(cellText, colWidths[c] - 12);
-      linesPerCol.push(wrapped);
-      if (wrapped.length > maxLines) maxLines = wrapped.length;
-    }
-
-    const dynRowHeight = Math.max(20, maxLines * (fontSize * 1.3) + 8);
-
-    if (cursorY + dynRowHeight > bottomThreshold) {
-      doc.addPage();
-      cursorY = margin;
-      drawHeader();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(fontSize);
-    }
-
-    if (theme === 'striped' && r % 2 === 1) {
+    if (theme === 'striped' && rowIndex % 2 === 1) {
       doc.setFillColor(250, 250, 250);
-      doc.rect(margin, cursorY, printableWidth, dynRowHeight, 'F');
     } else {
       doc.setFillColor(255, 255, 255);
-      doc.rect(margin, cursorY, printableWidth, dynRowHeight, 'F');
     }
+
+    doc.rect(
+      margin,
+      cursorY,
+      panelWidth,
+      chunkHeight,
+      'F'
+    );
 
     doc.setDrawColor(228, 228, 231);
-    doc.line(margin, cursorY + dynRowHeight, margin + printableWidth, cursorY + dynRowHeight);
+    doc.line(
+      margin,
+      cursorY + chunkHeight,
+      margin + panelWidth,
+      cursorY + chunkHeight
+    );
 
-    doc.setTextColor(63, 63, 70);
-    for (let c = 0; c < colCount; c++) {
-      let cellX = margin;
-      for (let i = 0; i < c; i++) cellX += colWidths[i];
+    let cellX = margin;
 
-      const wrapped = linesPerCol[c];
+    for (
+      let panelColumn = 0;
+      panelColumn < panel.indexes.length;
+      panelColumn++
+    ) {
+      const width = panel.widths[panelColumn];
+      const lines = linesPerColumn[panelColumn]
+        .slice(
+          startLine,
+          startLine + lineCount
+        );
+
       let textY = cursorY + 12;
-      for (const line of wrapped) {
-        doc.text(line, cellX + 6, textY);
-        textY += fontSize * 1.3;
+
+      for (const line of lines) {
+        drawTextLine(
+          line,
+          cellX + 6,
+          textY,
+          width - 12,
+          false,
+          [63, 63, 70]
+        );
+
+        textY += lineHeight;
       }
+
+      cellX += width;
     }
 
-    cursorY += dynRowHeight;
+    cursorY += chunkHeight;
+  };
+
+  for (
+    let panelIndex = 0;
+    panelIndex < panels.length;
+    panelIndex++
+  ) {
+    const panel = panels[panelIndex];
+
+    if (panelIndex > 0) {
+      doc.addPage();
+      cursorY = margin;
+    }
+
+    drawTitle(panelIndex);
+    drawHeader(panel);
+
+    for (
+      let rowIndex = 0;
+      rowIndex < dataRows.length;
+      rowIndex++
+    ) {
+      const row = dataRows[rowIndex];
+
+      const linesPerColumn = panel.indexes.map(
+        (column, panelColumn) =>
+          wrapCellText(
+            getCell(row, column),
+            panel.widths[panelColumn] - 12
+          )
+      );
+
+      const maxLines = Math.max(
+        1,
+        ...linesPerColumn.map((lines) => lines.length)
+      );
+
+      let consumedLines = 0;
+
+      while (consumedLines < maxLines) {
+        let availableHeight =
+          bottomThreshold - cursorY;
+
+        if (availableHeight < 20) {
+          addContinuationPage(panel);
+          availableHeight =
+            bottomThreshold - cursorY;
+        }
+
+        const availableLineCount = Math.max(
+          1,
+          Math.floor(
+            (availableHeight - 8) / lineHeight
+          )
+        );
+
+        const remainingLines =
+          maxLines - consumedLines;
+
+        const lineCount = Math.min(
+          remainingLines,
+          availableLineCount
+        );
+
+        const requiredHeight = Math.max(
+          20,
+          lineCount * lineHeight + 8
+        );
+
+        if (
+          requiredHeight > availableHeight &&
+          cursorY > margin
+        ) {
+          addContinuationPage(panel);
+          continue;
+        }
+
+        drawRowChunk(
+          panel,
+          linesPerColumn,
+          consumedLines,
+          lineCount,
+          rowIndex
+        );
+
+        consumedLines += lineCount;
+
+        if (consumedLines < maxLines) {
+          addContinuationPage(panel);
+        }
+      }
+    }
   }
 
-  // Stamp Page Numbers across all pages
+  /*
+   * Page numbering remains global even when a wide table is
+   * split into multiple horizontal column panels.
+   */
   const totalPages = doc.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
+
+  for (let page = 1; page <= totalPages; page++) {
+    doc.setPage(page);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
-    doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 16, { align: 'right' });
+
+    doc.text(
+      `Page ${page} of ${totalPages}`,
+      pageWidth - margin,
+      pageHeight - 16,
+      { align: 'right' }
+    );
   }
 
-  return new Uint8Array(doc.output('arraybuffer'));
+  if (measureCanvas) {
+    measureCanvas.width = 1;
+    measureCanvas.height = 1;
+  }
+
+  unicodeImageCache.clear();
+
+  return new Uint8Array(
+    doc.output('arraybuffer')
+  );
 }
 
 // ============================================================================
