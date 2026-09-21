@@ -73,6 +73,8 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
   const [isProcessing, setIsProcessing] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [securityNotice, setSecurityNotice] =
+    useState<string | null>(null);
   const [recoveryPending, setRecoveryPending] =
     useState(false);
 
@@ -97,6 +99,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       setDownloadUrl(null);
       setError(null);
+      setSecurityNotice(null);
       return;
     }
 
@@ -342,6 +345,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
 
     setIsProcessing(true);
     setError(null);
+    setSecurityNotice(null);
 
     persistMetadataDraft({
       title,
@@ -389,7 +393,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
         }
       );
 
-      const outputBytes =
+      const updateResult =
         await exclusivelyProcess(
           async () =>
             await updatePDFMetadataSafe(
@@ -402,6 +406,9 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
               }
             )
         );
+
+      const outputBytes =
+        updateResult.bytes;
 
       const cleanBuffer =
         outputBytes.buffer.slice(
@@ -437,6 +444,19 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
       setDownloadUrl(
         url
       );
+
+      if (
+        updateResult
+          .permissionProtectionRemoved
+      ) {
+        setSecurityNotice(
+          'This PDF used permission-only protection. To update its metadata safely, that permission layer was removed in the downloaded copy. Page content was not rasterized.'
+        );
+      } else {
+        setSecurityNotice(
+          null
+        );
+      }
 
       clearProcessingRecovery();
 
@@ -575,6 +595,7 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
     onFileChange(null);
     setDownloadUrl(null);
     setError(null);
+    setSecurityNotice(null);
   };
 
   return (
@@ -808,6 +829,15 @@ export const EditMetadata: React.FC<EditMetadataProps> = ({ file, onFileChange }
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
                     <span>Metadata updated successfully!</span>
                   </div>
+                  {securityNotice && (
+                    <div
+                      role="status"
+                      className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/40 flex items-start gap-2.5 text-xs text-amber-200"
+                    >
+                      <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                      <span>{securityNotice}</span>
+                    </div>
+                  )}
                   <a
                     href={downloadUrl}
                     download={`${file.name.replace(/\.[^/.]+$/, '')}_updated.pdf`}
