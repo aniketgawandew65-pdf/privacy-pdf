@@ -4274,7 +4274,7 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             </div>
 
             <h2 className="text-xl sm:text-2xl font-semibold mt-2 tracking-tight">
-              Private PII &amp; Secrets Auto-Redactor
+              Auto Redact PDF
             </h2>
 
             <p className="text-sm text-zinc-950 mt-2 max-w-2xl leading-6">
