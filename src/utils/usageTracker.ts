@@ -12,9 +12,20 @@ import {
 const DAILY_LIMIT_KEY = 'oneintoone_daily_usage';
 const USAGE_CHANGE_EVENT = 'oneintoone:daily-usage-changed';
 const MAX_FREE_DAILY_TASKS = 2;
-export const MAX_FREE_FILE_SIZE_MB = 100;
-export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = GOOGLE_BONUS_FILE_SIZE_MB;
-export const MAX_PRO_FILE_SIZE_MB = 150;
+
+/*
+ * File-size policy:
+ * - Desktop: no artificial task-credit size cap for any tier.
+ *   The user's hardware/browser/tool determines practical capacity.
+ * - Mobile/tablet: 150 MB combined input per task for every tier.
+ *
+ * Keep the legacy exported names as compatibility aliases so no
+ * existing caller breaks while the policy is now shared by all tiers.
+ */
+export const MAX_MOBILE_TASK_SIZE_MB = 150;
+export const MAX_FREE_FILE_SIZE_MB = MAX_MOBILE_TASK_SIZE_MB;
+export const MAX_GOOGLE_BONUS_FILE_SIZE_MB = MAX_MOBILE_TASK_SIZE_MB;
+export const MAX_PRO_FILE_SIZE_MB = MAX_MOBILE_TASK_SIZE_MB;
 
 export type TaskCreditTier =
   | 'pro'
@@ -164,29 +175,35 @@ export function checkActionAllowed(fileSizeBytes?: number): {
       ? undefined
       : fileSizeBytes / (1024 * 1024);
 
-  if (isPro) {
-    /*
-     * Mobile/tablet Pro retains the hard 150 MB combined
-     * task ceiling.
-     *
-     * Desktop Pro has no fixed task-credit size ceiling.
-     * Actual Desktop processing capacity is handled by the
-     * separate hardware/browser/tool-aware recommendation
-     * system and later concrete resource checks.
-     */
-    if (
-      mobileSafetyEnvironment &&
-      sizeInMb !== undefined &&
-      sizeInMb > MAX_PRO_FILE_SIZE_MB
-    ) {
-      return {
-        allowed: false,
-        reason: 'FILE_SIZE_LIMIT',
-        errorMessage:
-          `Mobile and tablet Pro support up to ${MAX_PRO_FILE_SIZE_MB}MB per task.`,
-      };
-    }
+  /*
+   * Shared size policy for every tier.
+   *
+   * Desktop:
+   * No artificial file-size cap. The separate capability/resource
+   * systems and the browser/device itself determine what can run.
+   *
+   * Mobile/tablet:
+   * Retain the 150 MB combined-input safety ceiling because browser
+   * memory is materially more constrained.
+   */
+  if (
+    mobileSafetyEnvironment &&
+    sizeInMb !== undefined &&
+    sizeInMb > MAX_MOBILE_TASK_SIZE_MB
+  ) {
+    return {
+      allowed: false,
+      reason: 'FILE_SIZE_LIMIT',
+      errorMessage:
+        `Mobile and tablet support up to ${MAX_MOBILE_TASK_SIZE_MB}MB per task. Use a desktop for larger files.`,
+    };
+  }
 
+  /*
+   * Pro removes task-count limits. Size capability is otherwise the
+   * same engine users can taste on the free tier.
+   */
+  if (isPro) {
     return {
       allowed: true,
       creditTier: 'pro',
@@ -200,60 +217,13 @@ export function checkActionAllowed(fileSizeBytes?: number): {
   const bonusRemaining =
     bonusAccount?.bonusRemaining ?? 0;
 
-  const proSizeUpgradeMessage =
-    mobileSafetyEnvironment
-      ? `Upgrade to Pro for files up to ${MAX_PRO_FILE_SIZE_MB}MB.`
-      : 'Upgrade to Desktop Pro for hardware-aware processing with no fixed upload-size cap.';
-
   /*
-   * Anything above 150 MB requires Pro.
-   */
-  if (
-    sizeInMb !== undefined &&
-    sizeInMb > MAX_GOOGLE_BONUS_FILE_SIZE_MB
-  ) {
-    return {
-      allowed: false,
-      reason: 'FILE_SIZE_LIMIT',
-      errorMessage:
-        bonusAccount
-          ? `Extra tasks support files up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
-            proSizeUpgradeMessage
-          : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 more tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB. ` +
-            proSizeUpgradeMessage,
-    };
-  }
-
-  /*
-   * Files above 100 MB can NEVER consume a daily anonymous
-   * credit. They require an available bonus credit.
-   */
-  if (
-    sizeInMb !== undefined &&
-    sizeInMb > MAX_FREE_FILE_SIZE_MB
-  ) {
-    if (bonusRemaining > 0) {
-      return {
-        allowed: true,
-        creditTier: 'google',
-      };
-    }
-
-    return {
-      allowed: false,
-      reason: 'FILE_SIZE_LIMIT',
-      errorMessage:
-        bonusAccount
-          ? `Your extra tasks are used up. Daily free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            proSizeUpgradeMessage
-          : `No-signup free tasks support files up to ${MAX_FREE_FILE_SIZE_MB}MB. ` +
-            `Sign in to unlock 2 more tasks up to ${MAX_GOOGLE_BONUS_FILE_SIZE_MB}MB.`,
-    };
-  }
-
-  /*
-   * Files up to 100 MB consume daily credits first.
+   * Free users receive the full local-processing capability for
+   * their limited tasks:
+   * - 2 daily anonymous tasks first
+   * - then up to 2 Google bonus tasks when available
+   *
+   * File size does not choose the credit tier anymore.
    */
   if (usage.anonymousRemaining > 0) {
     return {
@@ -262,10 +232,6 @@ export function checkActionAllowed(fileSizeBytes?: number): {
     };
   }
 
-  /*
-   * Once daily credits are gone, bonus credits can also
-   * handle files up to 100 MB.
-   */
   if (bonusRemaining > 0) {
     return {
       allowed: true,
