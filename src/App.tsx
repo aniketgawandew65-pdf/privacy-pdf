@@ -69,6 +69,9 @@ import {
 } from 'lucide-react';
 import { validateTaskFiles } from './utils/fileSizeGuard';
 import {
+  trackAnalyticsEvent,
+} from './utils/analytics';
+import {
   getDeviceCapabilitySnapshot,
   isMobileSafetyEnvironment as detectMobileSafetyEnvironment,
 } from './utils/deviceCapability';
@@ -431,6 +434,74 @@ export default function App() {
       window.removeEventListener(
         "pageshow",
         handlePageShow
+      );
+    };
+  }, []);
+
+  /*
+   * ==========================================================
+   * PRIVACY-SAFE RESULT DOWNLOAD ANALYTICS
+   * ==========================================================
+   *
+   * Track only that a generated download was triggered.
+   * Never send the file name or document contents to analytics.
+   */
+  useEffect(() => {
+    const handleDownloadClick =
+      (
+        event: MouseEvent
+      ) => {
+        const target =
+          event.target;
+
+        if (
+          !(target instanceof Element)
+        ) {
+          return;
+        }
+
+        const anchor =
+          target.closest(
+            'a[download]'
+          ) as HTMLAnchorElement | null;
+
+        if (!anchor) {
+          return;
+        }
+
+        const downloadName =
+          (
+            anchor.getAttribute(
+              'download'
+            ) || ''
+          ).toLowerCase();
+
+        const extensionMatch =
+          downloadName.match(
+            /\.([a-z0-9]+)$/
+          );
+
+        trackAnalyticsEvent(
+          'result_downloaded',
+          {
+            output_type:
+              extensionMatch?.[1] ||
+              'unknown',
+          }
+        );
+      };
+
+    document.addEventListener(
+      'click',
+      handleDownloadClick,
+      true
+    );
+
+    return () => {
+      document.removeEventListener(
+        'click',
+        handleDownloadClick,
+        true
       );
     };
   }, []);
@@ -1444,7 +1515,18 @@ export default function App() {
       event.preventDefault();
       event.stopPropagation();
       input.value = '';
+      return;
     }
+
+    trackAnalyticsEvent(
+      'file_selected',
+      {
+        file_count:
+          input.files.length,
+        selection_method:
+          'picker',
+      }
+    );
   };
 
   const handleWorkspaceDropCapture = (
@@ -1457,7 +1539,18 @@ export default function App() {
     if (!validateIncomingFiles(files)) {
       event.preventDefault();
       event.stopPropagation();
+      return;
     }
+
+    trackAnalyticsEvent(
+      'file_selected',
+      {
+        file_count:
+          files.length,
+        selection_method:
+          'drop',
+      }
+    );
   };
 
   const handleContinueToManualRedaction = (
