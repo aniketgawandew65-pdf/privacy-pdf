@@ -479,13 +479,13 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
           any
       ) {
         console.error(
-          'Bates Stamping error:',
+          'Bates Numbering error:',
           err
         );
 
         setErrorMessage(
           err?.message ||
-            'Bates stamping was interrupted. Reopen the tool to continue from the last completed page.'
+            'Bates numbering was interrupted. Reopen the tool to continue from the last completed page.'
         );
       } finally {
         processingInFlightRef.current =
@@ -834,7 +834,7 @@ export const BatesNumbering: React.FC<BatesNumberingProps> = ({ file, onFileChan
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-center gap-2 text-xs text-emerald-400 bg-emerald-950/30 p-3 rounded-lg border border-emerald-800/30 font-medium">
-                <CheckCircle2 className="w-4 h-4" /> Bates Stamping Applied Successfully
+                <CheckCircle2 className="w-4 h-4" /> Bates Numbering Applied Successfully
               </div>
               <a
                 href={downloadUrl}
