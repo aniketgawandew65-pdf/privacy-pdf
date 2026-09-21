@@ -1666,24 +1666,24 @@ export default function App() {
               </div>
             )}
             {!isPro && (
-              <div className="capacity-funnel" aria-label="File size access by plan">
+              <div className="capacity-funnel" aria-label="Task and device-size access by plan">
                 <span className="capacity-step">
                   <strong>Free</strong>
                   <span><b>2 tasks/day</b></span>
-                  <span>Up to 100 MB</span>
+                  <span>Desktop: <b>Any size. Your device decides.</b></span>
+                  <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step">
                   <strong>Sign in</strong>
                   <span><b>+2 extra tasks</b></span>
-                  <span>Up to 150 MB</span>
+                  <span>Same file-size access</span>
                 </span>
                 <span className="capacity-arrow" aria-hidden="true">•</span>
                 <span className="capacity-step capacity-step-pro">
                   <strong>Pro</strong>
                   <span><b>Unlimited tasks</b></span>
-                  <span>For Desktop: <b>Any size. Your device decides the limit.</b></span>
-                  <span>For mobile &amp; tablet: Up to <b>150 MB</b></span>
+                  <span>Same device-sized access</span>
                 </span>
               </div>
             )}
