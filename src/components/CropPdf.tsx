@@ -1155,7 +1155,7 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
                 setPdfDoc(null);
                 setDownloadUrl(null);
               }}
-              className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition"
+              className="p-1.5 rounded-lg text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1165,35 +1165,41 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
             <DesktopCapacityStatus recommendation={desktopCapacityRecommendation} />
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-3">
-            <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-[#d4d4d8] rounded-xl p-3 shadow-sm">
+            <div className="flex items-center gap-1 bg-[#f5f5f6] border border-[#d4d4d8] rounded-lg p-1">
               <button
                 type="button"
+                aria-label="Previous page"
+                title="Previous page"
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage <= 1}
-                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white disabled:opacity-30"
+                className="p-1.5 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <span className="text-xs font-mono px-2 text-zinc-300">
+              <span className="text-xs font-mono px-2 text-[#27272a]">
                 {currentPage} / {numPages}
               </span>
               <button
                 type="button"
+                aria-label="Next page"
+                title="Next page"
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage >= numPages}
-                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white disabled:opacity-30"
+                className="p-1.5 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex items-center bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
+            <div className="flex items-center bg-[#f5f5f6] border border-[#d4d4d8] rounded-lg p-1">
               <button
                 type="button"
                 onClick={() => setMode("crop")}
+                aria-pressed={mode === "crop"}
+                title="Crop mode"
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition ${
-                  mode === "crop" ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-white"
+                  mode === "crop" ? "bg-[#00764a] text-white shadow-sm" : "text-[#3f3f46] hover:bg-white hover:text-[#18181b]"
                 }`}
               >
                 <CropIcon className="w-3.5 h-3.5" />
@@ -1202,8 +1208,10 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               <button
                 type="button"
                 onClick={() => setMode("pan")}
+                aria-pressed={mode === "pan"}
+                title="Pan mode"
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition ${
-                  mode === "pan" ? "bg-emerald-500 text-black shadow-sm" : "text-zinc-400 hover:text-white"
+                  mode === "pan" ? "bg-[#00764a] text-white shadow-sm" : "text-[#3f3f46] hover:bg-white hover:text-[#18181b]"
                 }`}
               >
                 <Move className="w-3.5 h-3.5" />
@@ -1211,39 +1219,45 @@ export const CropPdf: React.FC<CropPdfProps> = ({ file: propFile, onFileChange }
               </button>
             </div>
 
-            <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800/80 rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-[#f5f5f6] border border-[#d4d4d8] rounded-lg p-1">
               <button
                 type="button"
+                aria-label="Zoom out"
+                title="Zoom out"
                 onClick={() => { setDownloadUrl(null); setZoom((prev) => Math.max(0.5, Math.round((prev - 0.1) * 10) / 10)); }}
-                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                className="p-1.5 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-xs font-mono px-2 text-zinc-300 min-w-[3rem] text-center">
+              <span className="text-xs font-mono px-2 text-[#27272a] min-w-[3rem] text-center">
                 {Math.round(zoom * 100)}%
               </span>
               <button
                 type="button"
+                aria-label="Zoom in"
+                title="Zoom in"
                 onClick={() => { setDownloadUrl(null); setZoom((prev) => Math.min(3.0, Math.round((prev + 0.1) * 10) / 10)); }}
-                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                className="p-1.5 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
+                aria-label="Reset zoom"
+                title="Reset zoom"
                 onClick={() => { setDownloadUrl(null); setZoom(1.0); }}
-                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition"
+                className="p-1.5 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white transition-colors"
               >
                 <RotateCcw className="w-3 h-3" />
               </button>
             </div>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-[#27272a]">
               <input
                 type="checkbox"
                 checked={applyToAll}
                 onChange={(e) => { setDownloadUrl(null); setApplyToAll(e.target.checked); }}
-                className="rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-0"
+                className="rounded border-[#a1a1aa] bg-white text-[#00764a] focus:ring-[#00764a]"
               />
               <span>Apply to all {numPages} pages</span>
             </label>
