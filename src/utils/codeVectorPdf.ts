@@ -67,8 +67,12 @@ const expandTabs = (
 };
 
 const findRanges = (
-  line: string
-): Range[] => {
+  line: string,
+  initialBlockComment = false
+): {
+  ranges: Range[];
+  inBlockComment: boolean;
+} => {
   const ranges: Range[] = [];
 
   const occupied =
@@ -89,21 +93,21 @@ const findRanges = (
     }
 
     for (
-      let i = start;
-      i < end;
-      i++
+      let index = start;
+      index < end;
+      index++
     ) {
-      if (occupied[i]) {
+      if (occupied[index]) {
         return;
       }
     }
 
     for (
-      let i = start;
-      i < end;
-      i++
+      let index = start;
+      index < end;
+      index++
     ) {
-      occupied[i] = true;
+      occupied[index] = true;
     }
 
     ranges.push({
@@ -113,60 +117,176 @@ const findRanges = (
     });
   };
 
-  /*
-   * Strings first so regex strings such as:
-   *
-   * r"\bkill\s+myself\b"
-   *
-   * stay one untouched source range.
-   */
-  const stringRegex =
-    /(["'`])(?:\\.|(?!\1)[^\\])*\1/g;
+  let inBlockComment =
+    initialBlockComment;
 
-  for (
-    const match of
-    line.matchAll(
-      stringRegex
-    )
-  ) {
-    const start =
-      match.index || 0;
-
-    add(
-      start,
-      start +
-        match[0].length,
-      'string'
-    );
-  }
+  let index = 0;
 
   /*
-   * Comments.
+   * Stateful lexical scan.
+   *
+   * This keeps /* ... *\/ comments highlighted across source
+   * lines, while strings are claimed before // or # can be
+   * mistaken for comments.
    */
-  for (
-    let i = 0;
-    i < line.length;
-    i++
+  while (
+    index < line.length
   ) {
-    if (occupied[i]) {
+    if (inBlockComment) {
+      const close =
+        line.indexOf(
+          '*/',
+          index
+        );
+
+      if (close < 0) {
+        add(
+          index,
+          line.length,
+          'comment'
+        );
+
+        index =
+          line.length;
+
+        break;
+      }
+
+      add(
+        index,
+        close + 2,
+        'comment'
+      );
+
+      inBlockComment = false;
+      index = close + 2;
+      continue;
+    }
+
+    const char =
+      line[index];
+
+    if (
+      char === '"' ||
+      char === "'" ||
+      char === '`'
+    ) {
+      const quote =
+        char;
+
+      let end =
+        index + 1;
+
+      while (
+        end < line.length
+      ) {
+        if (
+          line[end] === '\\'
+        ) {
+          end += 2;
+          continue;
+        }
+
+        if (
+          line[end] === quote
+        ) {
+          end += 1;
+          break;
+        }
+
+        end += 1;
+      }
+
+      add(
+        index,
+        Math.min(
+          end,
+          line.length
+        ),
+        'string'
+      );
+
+      index =
+        Math.max(
+          end,
+          index + 1
+        );
+
       continue;
     }
 
     if (
-      (
-        line[i] === '/' &&
-        line[i + 1] === '/'
-      ) ||
-      line[i] === '#'
+      char === '/' &&
+      line[index + 1] === '*'
+    ) {
+      const close =
+        line.indexOf(
+          '*/',
+          index + 2
+        );
+
+      if (close < 0) {
+        add(
+          index,
+          line.length,
+          'comment'
+        );
+
+        inBlockComment = true;
+        break;
+      }
+
+      add(
+        index,
+        close + 2,
+        'comment'
+      );
+
+      index =
+        close + 2;
+
+      continue;
+    }
+
+    if (
+      char === '/' &&
+      line[index + 1] === '/'
     ) {
       add(
-        i,
+        index,
         line.length,
         'comment'
       );
 
       break;
     }
+
+    /*
+     * Python/shell comment marker.
+     *
+     * Only treat # as a comment delimiter at the beginning of
+     * a line or after whitespace. This avoids coloring CSS
+     * values such as #fff and url(#fragment) as comments.
+     */
+    if (
+      char === '#' &&
+      (
+        index === 0 ||
+        /\s/.test(
+          line[index - 1]
+        )
+      )
+    ) {
+      add(
+        index,
+        line.length,
+        'comment'
+      );
+
+      break;
+    }
+
+    index += 1;
   }
 
   /*
@@ -187,6 +307,12 @@ const findRanges = (
     const end =
       start +
       match[0].length;
+
+    if (
+      occupied[start]
+    ) {
+      continue;
+    }
 
     if (
       KEYWORDS.has(
@@ -240,6 +366,12 @@ const findRanges = (
     const start =
       match.index || 0;
 
+    if (
+      occupied[start]
+    ) {
+      continue;
+    }
+
     add(
       start,
       start +
@@ -248,73 +380,209 @@ const findRanges = (
     );
   }
 
-  return ranges.sort(
-    (a, b) =>
-      a.start - b.start
-  );
+  return {
+    ranges:
+      ranges.sort(
+        (a, b) =>
+          a.start - b.start
+      ),
+
+    inBlockComment,
+  };
 };
 
-const drawWarning = (
-  pdf: jsPDF,
-  x: number,
-  baseline: number,
-  fontSize: number,
-  color: RGB
-) => {
-  const h =
-    fontSize * 0.85;
 
-  const w =
-    h * 0.95;
+const requiresUnicodeRaster =
+  (
+    value: string
+  ) =>
+    /[^\u0000-\u00FF]/u.test(
+      value
+    );
 
-  const top =
-    baseline -
-    h * 0.78;
 
-  pdf.setDrawColor(
-    color[0],
-    color[1],
-    color[2]
-  );
+const chunkLineSafely = (
+  line: string,
+  maxChars: number
+): Array<{
+  text: string;
+  start: number;
+}> => {
+  if (!line.length) {
+    return [
+      {
+        text: '',
+        start: 0,
+      },
+    ];
+  }
 
-  pdf.setLineWidth(
-    0.7
-  );
-
-  pdf.triangle(
-    x + w / 2,
-    top,
-    x,
-    top + h,
-    x + w,
-    top + h,
-    'S'
-  );
-
-  pdf.setFont(
-    'courier',
-    'bold'
-  );
-
-  pdf.setFontSize(
-    Math.max(
-      5,
-      fontSize * 0.6
+  /*
+   * Keep the original fast path for ordinary ASCII/Latin code.
+   */
+  if (
+    !requiresUnicodeRaster(
+      line
     )
-  );
+  ) {
+    const chunks:
+      Array<{
+        text: string;
+        start: number;
+      }> = [];
 
-  pdf.text(
-    '!',
-    x + w / 2,
-    baseline -
-      h * 0.08,
-    {
-      align: 'center',
+    for (
+      let start = 0;
+      start < line.length;
+      start += maxChars
+    ) {
+      chunks.push({
+        text:
+          line.slice(
+            start,
+            start +
+              maxChars
+          ),
+
+        start,
+      });
     }
-  );
 
-  return w;
+    return chunks;
+  }
+
+  /*
+   * Unicode source must never be sliced through a surrogate
+   * pair, combining sequence, emoji modifier or ZWJ cluster.
+   *
+   * Intl.Segmenter is browser-native and does not require
+   * network access. Fall back to code points if unavailable.
+   */
+  const Segmenter =
+    (
+      Intl as any
+    ).Segmenter;
+
+  const segments:
+    Array<{
+      segment: string;
+      index: number;
+    }> =
+    Segmenter
+      ? Array.from(
+          new Segmenter(
+            undefined,
+            {
+              granularity:
+                'grapheme',
+            }
+          ).segment(
+            line
+          )
+        ).map(
+          (
+            part: any
+          ) => ({
+            segment:
+              part.segment,
+
+            index:
+              part.index,
+          })
+        )
+      : (() => {
+          const result:
+            Array<{
+              segment: string;
+              index: number;
+            }> = [];
+
+          let index = 0;
+
+          for (
+            const symbol of
+            Array.from(
+              line
+            )
+          ) {
+            result.push({
+              segment:
+                symbol,
+
+              index,
+            });
+
+            index +=
+              symbol.length;
+          }
+
+          return result;
+        })();
+
+  const chunks:
+    Array<{
+      text: string;
+      start: number;
+    }> = [];
+
+  let current =
+    '';
+
+  let currentStart =
+    0;
+
+  let visualCount =
+    0;
+
+  for (
+    const part of
+    segments
+  ) {
+    if (
+      current &&
+      visualCount >=
+        maxChars
+    ) {
+      chunks.push({
+        text:
+          current,
+
+        start:
+          currentStart,
+      });
+
+      current =
+        '';
+
+      visualCount =
+        0;
+    }
+
+    if (!current) {
+      currentStart =
+        part.index;
+    }
+
+    current +=
+      part.segment;
+
+    visualCount +=
+      1;
+  }
+
+  if (current) {
+    chunks.push({
+      text:
+        current,
+
+      start:
+        currentStart,
+    });
+  }
+
+  return chunks;
 };
+
 
 export async function generateCodeVectorPDF(
   options: CodeVectorPdfOptions
@@ -626,7 +894,50 @@ export async function generateCodeVectorPDF(
       }
     };
 
-  const drawExactText =
+  const unicodeRasterCache =
+    new Map<
+      string,
+      {
+        dataUrl: string;
+        alias: string;
+      }
+    >();
+
+
+  const hashString =
+    (
+      value: string
+    ) => {
+      let hash =
+        2166136261;
+
+      for (
+        let index = 0;
+        index < value.length;
+        index++
+      ) {
+        hash ^=
+          value.charCodeAt(
+            index
+          );
+
+        hash =
+          Math.imul(
+            hash,
+            16777619
+          );
+      }
+
+      return (
+        hash >>>
+        0
+      ).toString(
+        36
+      );
+    };
+
+
+  const drawVectorExactText =
     (
       value: string,
       y: number
@@ -647,116 +958,284 @@ export async function generateCodeVectorPDF(
       );
 
       /*
-       * Normal source text is written in one run.
-       *
-       * Only the unsupported warning symbol is handled
-       * separately as vector artwork.
+       * PDF literal strings use backslash as an escape marker.
+       * Writing regex-heavy source as one PDF string can make
+       * viewers/text extractors reinterpret sequences such as
+       * \\s or \\b. Split every source backslash into its own
+       * text run at the exact monospace grid position.
        */
+      let runStart =
+        0;
+
+      for (
+        let index = 0;
+        index < value.length;
+        index++
+      ) {
+        if (
+          value[index] !==
+          '\\'
+        ) {
+          continue;
+        }
+
+        if (
+          index >
+          runStart
+        ) {
+          pdf.text(
+            value.slice(
+              runStart,
+              index
+            ),
+            codeX +
+              runStart *
+                charWidth,
+            y
+          );
+        }
+
+        pdf.text(
+          '\\',
+          codeX +
+            index *
+              charWidth,
+          y
+        );
+
+        runStart =
+          index + 1;
+      }
+
       if (
-        !value.includes(
-          '\u26A0'
-        )
+        runStart <
+        value.length
       ) {
         pdf.text(
+          value.slice(
+            runStart
+          ),
+          codeX +
+            runStart *
+              charWidth,
+          y
+        );
+      }
+    };
+
+
+  const drawUnicodeText =
+    (
+      value: string,
+      y: number
+    ) => {
+      if (
+        typeof document ===
+        'undefined'
+      ) {
+        drawVectorExactText(
           value,
-          codeX,
           y
         );
 
         return;
       }
 
-      let x =
-        codeX;
+      const cacheKey =
+        [
+          theme,
+          fontSize,
+          codeWidth,
+          value,
+        ].join(
+          '|'
+        );
 
-      let buffer =
-        '';
+      let cached =
+        unicodeRasterCache.get(
+          cacheKey
+        );
 
-      const flush =
-        () => {
-          if (!buffer) {
-            return;
-          }
+      if (!cached) {
+        const scale =
+          4;
 
-          pdf.setFont(
-            'courier',
-            'normal'
+        const canvas =
+          document.createElement(
+            'canvas'
           );
 
-          pdf.setFontSize(
-            fontSize
+        canvas.width =
+          Math.max(
+            1,
+            Math.ceil(
+              codeWidth *
+                scale
+            )
           );
 
-          pdf.text(
-            buffer,
-            x,
+        canvas.height =
+          Math.max(
+            1,
+            Math.ceil(
+              lineHeight *
+                1.25 *
+                scale
+            )
+          );
+
+        const context =
+          canvas.getContext(
+            '2d'
+          );
+
+        if (!context) {
+          drawVectorExactText(
+            value,
             y
           );
 
-          x +=
-            pdf.getTextWidth(
-              buffer
-            );
+          return;
+        }
 
-          buffer = '';
+        context.scale(
+          scale,
+          scale
+        );
+
+        context.clearRect(
+          0,
+          0,
+          codeWidth,
+          lineHeight *
+            1.25
+        );
+
+        context.font =
+          `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Noto Sans Mono", "Noto Sans", monospace`;
+
+        context.textBaseline =
+          'alphabetic';
+
+        context.textAlign =
+          'left';
+
+        context.direction =
+          'ltr';
+
+        context.fillStyle =
+          `rgb(${text[0]}, ${text[1]}, ${text[2]})`;
+
+        const measured =
+          context.measureText(
+            value
+          ).width;
+
+        const maxWidth =
+          Math.max(
+            1,
+            codeWidth -
+              1
+          );
+
+        if (
+          measured >
+          maxWidth
+        ) {
+          context.save();
+
+          context.scale(
+            maxWidth /
+              measured,
+            1
+          );
+
+          context.fillText(
+            value,
+            0,
+            fontSize
+          );
+
+          context.restore();
+        } else {
+          context.fillText(
+            value,
+            0,
+            fontSize
+          );
+        }
+
+        cached = {
+          dataUrl:
+            canvas.toDataURL(
+              'image/png'
+            ),
+
+          alias:
+            `code-u-${hashString(
+              cacheKey
+            )}`,
         };
 
-      for (
-        let i = 0;
-        i < value.length;
-        i++
-      ) {
-        const char =
-          value[i];
+        unicodeRasterCache.set(
+          cacheKey,
+          cached
+        );
 
-        if (
-          char === '\u26A0'
-        ) {
-          flush();
+        canvas.width =
+          1;
 
-          x +=
-            drawWarning(
-              pdf,
-              x,
-              y,
-              fontSize,
-              text
-            ) +
-            charWidth * 0.3;
-
-          if (
-            value[
-              i + 1
-            ] ===
-            '\uFE0F'
-          ) {
-            i++;
-          }
-
-          continue;
-        }
-
-        if (
-          char ===
-            '\uFE0F' ||
-          char ===
-            '\uFE0E' ||
-          char ===
-            '\u200D'
-        ) {
-          continue;
-        }
-
-        buffer += char;
+        canvas.height =
+          1;
       }
 
-      flush();
+      pdf.addImage(
+        cached.dataUrl,
+        'PNG',
+        codeX,
+        y -
+          fontSize *
+            0.9,
+        codeWidth,
+        lineHeight *
+          1.05,
+        cached.alias,
+        'FAST'
+      );
+    };
+
+
+  const drawExactText =
+    (
+      value: string,
+      y: number
+    ) => {
+      if (
+        requiresUnicodeRaster(
+          value
+        )
+      ) {
+        drawUnicodeText(
+          value,
+          y
+        );
+
+        return;
+      }
+
+      drawVectorExactText(
+        value,
+        y
+      );
     };
 
   let y =
     firstY;
 
   drawPage();
+
+  let inBlockComment =
+    false;
 
   for (
     let lineIndex = 0;
@@ -775,44 +1254,23 @@ export async function generateCodeVectorPDF(
         ]
       );
 
-    const ranges =
+    const rangeResult =
       findRanges(
-        line
+        line,
+        inBlockComment
       );
 
-    const chunks:
-      Array<{
-        text: string;
-        start: number;
-      }> = [];
+    const ranges =
+      rangeResult.ranges;
 
-    if (
-      line.length === 0
-    ) {
-      chunks.push({
-        text: '',
-        start: 0,
-      });
-    } else {
-      for (
-        let start = 0;
-        start <
-        line.length;
-        start +=
+    inBlockComment =
+      rangeResult.inBlockComment;
+
+    const chunks =
+      chunkLineSafely(
+        line,
         maxChars
-      ) {
-        chunks.push({
-          text:
-            line.slice(
-              start,
-              start +
-                maxChars
-            ),
-
-          start,
-        });
-      }
-    }
+      );
 
     for (
       let chunkIndex = 0;
@@ -982,6 +1440,8 @@ export async function generateCodeVectorPDF(
       }
     );
   }
+
+  unicodeRasterCache.clear();
 
   return new Uint8Array(
     pdf.output(
