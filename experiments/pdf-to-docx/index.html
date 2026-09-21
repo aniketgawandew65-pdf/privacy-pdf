@@ -6,58 +6,88 @@
     <meta name="robots" content="noindex,nofollow" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*; img-src 'self' blob: data: https://www.1into1.com; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>PDF to Word · 1into1 PDF Preview</title>
   </head>
   <body>
     <div class="app-shell">
       <header class="site-header">
-        <a class="brand" href="./" aria-label="1into1 PDF preview home">
+        <a class="brand" href="https://www.1into1.com/" aria-label="1into1 PDF home">
+          <img src="https://www.1into1.com/logo.png" alt="" width="40" height="40" />
           <span>1into1<span class="brand-light"> PDF</span></span>
         </a>
-        <span class="preview-pill">Preview tool</span>
+
+        <div class="header-actions">
+          <a class="quiet-button" href="https://www.1into1.com/">
+            <span>▦</span>
+            <span>All tools</span>
+            <span>⌄</span>
+          </a>
+          <a class="primary-button" href="https://www.1into1.com/">
+            <span>Get Pro</span>
+            <span>→</span>
+          </a>
+        </div>
       </header>
 
       <main class="site-main">
-        <section class="page-intro" aria-labelledby="page-title">
+        <section class="page-intro">
           <div class="eyebrow">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6l-7-3Z"></path>
-              <path d="m9.5 12 1.7 1.7 3.5-3.8"></path>
-            </svg>
+            <span class="shield">◇</span>
             YOUR FILES. YOUR DEVICE.
           </div>
-          <h1 id="page-title">PDF to Word</h1>
+
+          <h1>PDF to Word</h1>
+
           <p>
-            Turn digital PDFs into editable Word documents while keeping
-            readable text, detected tables and document structure.
+            Convert PDFs into editable Word documents while keeping readable
+            text, detected tables and document structure.
           </p>
 
           <div class="trust-points" aria-label="Local PDF tool benefits">
-            <span><b>⚡</b>Fast local conversion</span>
+            <span><b>⚡</b>Lightning fast</span>
             <span><b>⌁</b>No internet needed</span>
-            <span><b>✓</b>Files stay private</span>
+            <span><b>◇</b>100% private</span>
             <span><b>○</b>No signup</span>
           </div>
 
-          <div class="capacity-funnel" aria-label="Current preview capability">
+          <div class="capacity-funnel" aria-label="Task and device-size access by plan">
             <span class="capacity-step">
-              <strong>Digital PDFs</strong>
-              <span>Editable text + detected tables</span>
+              <strong>Free</strong>
+              <span><b>2 tasks/day</b></span>
+              <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
+              <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
             </span>
+
             <span class="capacity-arrow" aria-hidden="true">•</span>
+
             <span class="capacity-step">
-              <strong>Current preview limit</strong>
-              <span><b>30 MB</b> • up to <b>60 pages</b></span>
+              <strong>Sign in</strong>
+              <span><b>+2 extra tasks</b></span>
+              <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
+              <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
             </span>
+
             <span class="capacity-arrow" aria-hidden="true">•</span>
+
             <span class="capacity-step capacity-step-pro">
-              <strong>Local processing</strong>
-              <span>Your PDF never leaves this device</span>
+              <strong>Pro</strong>
+              <span><b>Unlimited tasks</b></span>
+              <span><b>Desktop:</b> <b>Any size. Your device decides.</b></span>
+              <span>Mobile &amp; tablet: Up to <b>150 MB</b></span>
             </span>
           </div>
         </section>
+
+        <nav class="quick-tools" aria-label="Popular PDF tools">
+          <a href="https://www.1into1.com/compress-pdf">▥ <span>Compress</span></a>
+          <a href="https://www.1into1.com/merge-pdf">▣ <span>Merge</span></a>
+          <a href="https://www.1into1.com/split-pdf">✂ <span>Split</span></a>
+          <a href="https://www.1into1.com/sign-pdf">✎ <span>Sign PDF</span></a>
+          <a href="https://www.1into1.com/image-converter">▧ <span>Image to PDF</span></a>
+          <a class="find-tool" href="https://www.1into1.com/">⌕ <span>Find a tool</span></a>
+        </nav>
 
         <section id="workspace" class="tool-workspace" aria-label="PDF to Word workspace">
           <div class="tool-card">
@@ -66,36 +96,35 @@
               class="drop-zone"
               role="button"
               tabindex="0"
-              aria-label="Drop a PDF or choose a PDF to convert to Word"
+              aria-label="Drop a PDF to convert to Word"
             >
-              <div class="upload-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M12 16V4"></path>
-                  <path d="m7.5 8.5 4.5-4.5 4.5 4.5"></path>
-                  <path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"></path>
-                </svg>
-              </div>
-              <p class="drop-title">Drop a PDF here or choose a file</p>
+              <div class="upload-icon" aria-hidden="true">⇧</div>
+              <p class="drop-title">Drop a PDF to convert to Word (.docx)</p>
               <p class="drop-copy">
-                Digital PDFs • Max 30 MB • Max 60 pages
+                Editable text and detected tables • Zero server uploads
               </p>
-              <button id="choose-file" class="choose-button" type="button">Choose PDF</button>
+              <button id="choose-file" type="button" class="choose-button">
+                Choose PDF
+              </button>
               <input id="file" type="file" accept="application/pdf,.pdf" hidden />
             </div>
 
             <div id="selected-panel" class="selected-panel" hidden>
               <div class="file-card">
-                <div class="file-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M6 3h8l4 4v14H6z"></path>
-                    <path d="M14 3v5h5"></path>
-                  </svg>
-                </div>
+                <div class="file-icon" aria-hidden="true">▤</div>
                 <div class="file-details">
                   <strong id="file-name">Selected PDF</strong>
-                  <span id="file-info">Reading file…</span>
+                  <span id="file-info">Reading PDF…</span>
                 </div>
-                <button id="remove-file" class="icon-button" type="button" aria-label="Remove selected PDF">×</button>
+                <button
+                  id="remove-file"
+                  type="button"
+                  class="remove-button"
+                  aria-label="Remove selected PDF"
+                  title="Remove file"
+                >
+                  ×
+                </button>
               </div>
 
               <section id="capacity-card" class="capacity-card" aria-label="Desktop processing capacity">
@@ -103,9 +132,9 @@
                   <div class="capacity-heading">
                     <div class="gauge-icon" aria-hidden="true">◔</div>
                     <div>
-                      <strong>Device capacity</strong>
+                      <p class="capacity-title">Desktop capacity</p>
                       <p id="capacity-copy">
-                        Estimating a comfortable workload for this browser.
+                        Estimating this workload for your device and browser.
                       </p>
                     </div>
                   </div>
@@ -118,7 +147,7 @@
                     <strong id="selected-size">—</strong>
                   </div>
                   <div>
-                    <span>Estimated comfortable range</span>
+                    <span>Estimated capacity</span>
                     <strong id="estimated-size">—</strong>
                   </div>
                 </div>
@@ -126,25 +155,20 @@
                 <div class="capacity-bar" aria-hidden="true">
                   <span id="capacity-fill"></span>
                 </div>
+
                 <p class="capacity-note">
-                  This estimate is device guidance only. The current preview engine
-                  still has a hard limit of 30 MB and 60 pages.
+                  Capacity is estimated from your device, browser and this tool's
+                  processing architecture. It is guidance, not a required file size
+                  or guaranteed maximum.
                 </p>
               </section>
 
-              <div class="capability-grid" aria-label="What this converter keeps">
-                <div>
-                  <span>Editable text</span>
-                  <strong>Readable PDF text stays editable in Word.</strong>
-                </div>
-                <div>
-                  <span>Detected tables</span>
-                  <strong>Ruled and supported transaction tables are rebuilt.</strong>
-                </div>
-                <div>
-                  <span>Artwork</span>
-                  <strong>Photos, logos and unsupported glyphs stay visual.</strong>
-                </div>
+              <div class="support-note">
+                <strong>Editable conversion</strong>
+                <span>
+                  Digital PDF text and supported tables are rebuilt in Word.
+                  Scanned/image-only pages still need OCR and are not supported in this preview.
+                </span>
               </div>
 
               <div class="actions">
@@ -158,9 +182,9 @@
 
               <div id="processing-card" class="processing-card" hidden aria-live="polite">
                 <div class="spinner" aria-hidden="true"></div>
-                <div>
-                  <strong id="status">Ready to convert.</strong>
-                  <span>Everything is processed locally in this browser.</span>
+                <div class="processing-copy">
+                  <strong id="status">Preparing local conversion…</strong>
+                  <span>Your document stays on this device.</span>
                 </div>
                 <progress id="progress" max="100" value="0" hidden></progress>
               </div>
@@ -172,12 +196,14 @@
               <div id="result-card" class="result-card" hidden>
                 <div class="result-heading">
                   <div>
-                    <span>Conversion complete</span>
+                    <span class="result-label">Conversion complete</span>
                     <strong>Your editable Word file is ready.</strong>
                   </div>
                   <span class="success-mark" aria-hidden="true">✓</span>
                 </div>
+
                 <div id="summary" class="summary" hidden></div>
+
                 <a id="download" class="download-action" hidden>
                   Download Word (.docx)
                 </a>
@@ -189,25 +215,47 @@
         </section>
 
         <div class="workspace-note">
-          <span>◈</span>
+          <span class="note-shield">◇</span>
           <span>PDF processing stays on your device.</span>
-          <span>Scanned/image-only pages are not supported in this preview.</span>
+          <a href="https://www.1into1.com/privacy">How it works</a>
         </div>
 
-        <section class="tool-note" aria-label="Conversion note">
-          <span class="tool-note-label">CURRENT PREVIEW</span>
-          <h2>Editable first. Pixel-perfect when the PDF allows it.</h2>
+        <section class="seo-guide">
+          <h2>Convert PDF to editable Word locally</h2>
           <p>
-            Text and detected tables are reconstructed as editable Word content.
-            Complex designs, substituted fonts and fixed-position layouts can shift
-            when opened or edited in Word or WPS.
+            Rebuild readable PDF text, supported tables, photos and document
+            artwork into a downloadable DOCX without uploading the PDF to a server.
+          </p>
+
+          <h3>What stays editable?</h3>
+          <p>
+            Readable text and detected table structures are rebuilt as Word
+            content. Photos, logos, barcodes and unsupported visual elements can
+            remain artwork so content is not silently lost.
+          </p>
+
+          <h3>What can still shift?</h3>
+          <p>
+            Font substitution, fixed-position designs and complex PDF layouts can
+            reflow when opened or edited in Word or WPS.
           </p>
         </section>
       </main>
 
       <footer class="site-footer">
-        <strong>1into1 PDF</strong>
-        <span>Local PDF → Word experiment</span>
+        <div class="footer-top">
+          <a href="https://www.1into1.com/" class="footer-brand">1into1 PDF</a>
+          <a href="https://www.1into1.com/blog">PDF guides</a>
+        </div>
+
+        <div class="footer-bottom">
+          <span>© 2026 1into1</span>
+          <div>
+            <a href="https://www.1into1.com/privacy">Privacy</a>
+            <a href="https://www.1into1.com/terms">Terms</a>
+            <a href="https://www.1into1.com/">Pricing</a>
+          </div>
+        </div>
       </footer>
     </div>
 
