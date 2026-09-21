@@ -611,6 +611,15 @@ export async function generateCodeVectorPDF(
       compress: true,
     });
 
+  /*
+   * QA marker: lets us verify that a generated preview PDF
+   * came from this exact Unicode/source-fidelity renderer.
+   */
+  pdf.setProperties({
+    creator:
+      '1into1 Code PDF exact-render-v2',
+  });
+
   const pageWidth =
     pdf.internal.pageSize
       .getWidth();
@@ -1024,7 +1033,7 @@ export async function generateCodeVectorPDF(
     };
 
 
-  const drawUnicodeText =
+  const drawRasterExactText =
     (
       value: string,
       y: number
@@ -1112,7 +1121,7 @@ export async function generateCodeVectorPDF(
         );
 
         context.font =
-          `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Noto Sans Mono", "Noto Sans", monospace`;
+          `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Noto Sans Mono", "Noto Sans", "Kohinoor Devanagari", "Kohinoor Bangla", "Tamil Sangam MN", "Nirmala UI", "Hiragino Sans", "Yu Gothic", "PingFang SC", "Microsoft YaHei", "Apple SD Gothic Neo", "Malgun Gothic", "Geeza Pro", "Segoe UI", "Arial Hebrew", "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
 
         context.textBaseline =
           'alphabetic';
@@ -1210,12 +1219,27 @@ export async function generateCodeVectorPDF(
       value: string,
       y: number
     ) => {
+      /*
+       * jsPDF's built-in Courier path is reliable for ordinary
+       * ASCII source, but PDF literal-string escaping and the
+       * WinAnsi font path are not reliable enough for:
+       *
+       * - regex/backslash-heavy code (\\s, \\b, \\/)
+       * - global Unicode scripts
+       * - emoji / combining / ZWJ sequences
+       *
+       * Render only those exceptional lines through the browser
+       * canvas. Ordinary code remains selectable vector text.
+       */
       if (
         requiresUnicodeRaster(
           value
+        ) ||
+        value.includes(
+          '\\'
         )
       ) {
-        drawUnicodeText(
+        drawRasterExactText(
           value,
           y
         );
