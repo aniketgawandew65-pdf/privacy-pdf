@@ -76,7 +76,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
      * multiple selections.
      *
      * Desktop bypasses the fixed 150 MB selection ceiling for every task tier.
-     * Mobile/tablet Pro retains the 150 MB combined-task cap.
+     * Mobile/tablet retains the 150 MB combined-task cap for every tier.
      */
     const sizeCheck =
       validateTaskFiles(
