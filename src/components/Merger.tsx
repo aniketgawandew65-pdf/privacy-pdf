@@ -302,7 +302,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
                 <button
                   disabled={i === 0}
                   onClick={() => moveFile(i, 'up')}
-                  className="p-1 rounded text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="p-1 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   title="Move Up"
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
@@ -310,7 +310,7 @@ export function Merger({ files, onFilesChange }: MergerProps) {
                 <button
                   disabled={i === files.length - 1}
                   onClick={() => moveFile(i, 'down')}
-                  className="p-1 rounded text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="p-1 rounded text-[#3f3f46] hover:bg-[#3f3f46] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   title="Move Down"
                 >
                   <ArrowDown className="w-3.5 h-3.5" />
