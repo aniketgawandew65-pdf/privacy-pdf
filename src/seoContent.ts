@@ -815,7 +815,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     example: "Several photographed pages of a signed document can be arranged in reading order and combined into one PDF for easier sharing.",
     questions: [
       ["Can I combine multiple images into one PDF?", "Yes. Arrange the images in the order you want before creating the PDF."],
-      ["What image formats can I use?", "The available image workflows support common browser-friendly formats, and the main Image Converter provides additional format options."],
+      ["What image formats can I use?", "The available image workflows support common browser-friendly formats, and the main Image to PDF & other formats tool provides additional format options."],
       ["Will image quality change?", "PDF creation may affect image dimensions or compression depending on the workflow, so inspect the final document."],
       ["What if I photographed a paper document?", "Use the Scan to PDF workflow when you want document-photo features designed specifically for scanned pages."]
     ],
