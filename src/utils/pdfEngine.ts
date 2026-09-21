@@ -23095,6 +23095,9 @@ export async function extractMarkdownFromPDF(
   type StructuredLine = {
     text: string;
     avgHeight: number;
+    xStart: number;
+    xEnd: number;
+    y: number;
   };
 
 
@@ -23114,8 +23117,9 @@ export async function extractMarkdownFromPDF(
       }
 
       /*
-       * Operate on this page only.
-       * No document-wide coordinate array is retained.
+       * First build visual baseline rows. Keep geometry so a
+       * genuine two-column page can be read column-by-column
+       * instead of interleaving left/right text on each Y row.
        */
       items.sort(
         (
@@ -23142,10 +23146,10 @@ export async function extractMarkdownFromPDF(
         }
       );
 
-      const lines:
-        StructuredLine[] = [];
+      const baselineRows:
+        TextItemData[][] = [];
 
-      let currentLine:
+      let currentRow:
         TextItemData[] = [];
 
       let currentY:
@@ -23153,49 +23157,26 @@ export async function extractMarkdownFromPDF(
         null =
         null;
 
-      const flushLine =
+      const flushRow =
         () => {
           if (
-            currentLine.length ===
-            0
+            currentRow.length
           ) {
-            return;
+            baselineRows.push(
+              currentRow
+                .slice()
+                .sort(
+                  (
+                    a,
+                    b
+                  ) =>
+                    a.x -
+                    b.x
+                )
+            );
           }
 
-          const lineText =
-            currentLine
-              .map(
-                (item) =>
-                  item.str
-              )
-              .join(' ')
-              .replace(
-                /\s+/g,
-                ' '
-              )
-              .trim();
-
-          if (lineText) {
-            const avgHeight =
-              currentLine.reduce(
-                (
-                  total,
-                  item
-                ) =>
-                  total +
-                  item.height,
-                0
-              ) /
-              currentLine.length;
-
-            lines.push({
-              text:
-                lineText,
-              avgHeight,
-            });
-          }
-
-          currentLine = [];
+          currentRow = [];
           currentY = null;
         };
 
@@ -23212,16 +23193,12 @@ export async function extractMarkdownFromPDF(
           ) <=
             4
         ) {
-          currentLine.push(
+          currentRow.push(
             item
           );
 
-          /*
-           * Running average makes lines with tiny baseline
-           * differences more stable than locking to item #1.
-           */
           currentY =
-            currentLine.reduce(
+            currentRow.reduce(
               (
                 total,
                 current
@@ -23230,11 +23207,11 @@ export async function extractMarkdownFromPDF(
                 current.y,
               0
             ) /
-            currentLine.length;
+            currentRow.length;
         } else {
-          flushLine();
+          flushRow();
 
-          currentLine = [
+          currentRow = [
             item,
           ];
 
@@ -23243,9 +23220,694 @@ export async function extractMarkdownFromPDF(
         }
       }
 
-      flushLine();
+      flushRow();
 
-      return lines;
+      const makeLine =
+        (
+          row:
+            TextItemData[]
+        ):
+          StructuredLine |
+          null => {
+          if (!row.length) {
+            return null;
+          }
+
+          const ordered =
+            row
+              .slice()
+              .sort(
+                (
+                  a,
+                  b
+                ) =>
+                  a.x -
+                  b.x
+              );
+
+          const text =
+            ordered
+              .map(
+                (item) =>
+                  item.str
+              )
+              .join(' ')
+              .replace(
+                /\s+/g,
+                ' '
+              )
+              .trim();
+
+          if (!text) {
+            return null;
+          }
+
+          return {
+            text,
+
+            avgHeight:
+              ordered.reduce(
+                (
+                  total,
+                  item
+                ) =>
+                  total +
+                  item.height,
+                0
+              ) /
+              ordered.length,
+
+            xStart:
+              Math.min(
+                ...ordered.map(
+                  (item) =>
+                    item.x
+                )
+              ),
+
+            xEnd:
+              Math.max(
+                ...ordered.map(
+                  (item) =>
+                    item.x +
+                    Math.max(
+                      0,
+                      item.width
+                    )
+                )
+              ),
+
+            y:
+              ordered.reduce(
+                (
+                  total,
+                  item
+                ) =>
+                  total +
+                  item.y,
+                0
+              ) /
+              ordered.length,
+          };
+        };
+
+      const normalLines =
+        baselineRows
+          .map(
+            makeLine
+          )
+          .filter(
+            (
+              line
+            ):
+              line is
+                StructuredLine =>
+              Boolean(
+                line
+              )
+          );
+
+      if (
+        normalLines.length <
+        6
+      ) {
+        return normalLines;
+      }
+
+      /*
+       * Do not reinterpret transaction/table-heavy pages as
+       * newspaper columns. Multiple dates per row and repeated
+       * multi-gap rows are strong table signals.
+       */
+      const dateHeavyRows =
+        normalLines.filter(
+          (line) => {
+            const matches =
+              line.text.match(
+                /\b\d{1,2}[-\/]([A-Za-z]{3}|\d{1,2})[-\/]\d{2,4}\b/g
+              );
+
+            return Boolean(
+              matches &&
+              matches.length >=
+                2
+            );
+          }
+        ).length;
+
+      if (
+        dateHeavyRows >=
+        3
+      ) {
+        return normalLines;
+      }
+
+      const pageLeft =
+        Math.min(
+          ...items.map(
+            (item) =>
+              item.x
+          )
+        );
+
+      const pageRight =
+        Math.max(
+          ...items.map(
+            (item) =>
+              item.x +
+              Math.max(
+                0,
+                item.width
+              )
+          )
+        );
+
+      const pageWidth =
+        Math.max(
+          1,
+          pageRight -
+          pageLeft
+        );
+
+      const largeGapThreshold =
+        Math.max(
+          52,
+          pageWidth *
+            0.09
+        );
+
+      let multiGapRows =
+        0;
+
+      const splitCandidates:
+        number[] = [];
+
+      for (
+        const row of
+        baselineRows
+      ) {
+        if (
+          row.length <
+          2
+        ) {
+          continue;
+        }
+
+        const gaps:
+          {
+            size: number;
+            midpoint: number;
+          }[] = [];
+
+        for (
+          let index = 1;
+          index <
+          row.length;
+          index++
+        ) {
+          const previous =
+            row[
+              index -
+              1
+            ];
+
+          const current =
+            row[
+              index
+            ];
+
+          const previousEnd =
+            previous.x +
+            Math.max(
+              0,
+              previous.width
+            );
+
+          const gap =
+            current.x -
+            previousEnd;
+
+          if (
+            gap >
+            largeGapThreshold
+          ) {
+            gaps.push({
+              size:
+                gap,
+
+              midpoint:
+                previousEnd +
+                gap /
+                  2,
+            });
+          }
+        }
+
+        if (
+          gaps.length >=
+          2
+        ) {
+          multiGapRows +=
+            1;
+        }
+
+        if (
+          gaps.length ===
+          1
+        ) {
+          splitCandidates.push(
+            gaps[0]
+              .midpoint
+          );
+        }
+      }
+
+      if (
+        multiGapRows >=
+        3 ||
+        splitCandidates.length <
+        3
+      ) {
+        return normalLines;
+      }
+
+      const sortedCandidates =
+        splitCandidates
+          .slice()
+          .sort(
+            (
+              a,
+              b
+            ) =>
+              a -
+              b
+          );
+
+      const candidateMedian =
+        sortedCandidates[
+          Math.floor(
+            sortedCandidates.length /
+            2
+          )
+        ];
+
+      const candidateTolerance =
+        Math.max(
+          28,
+          pageWidth *
+            0.05
+        );
+
+      const stableCandidates =
+        splitCandidates.filter(
+          (candidate) =>
+            Math.abs(
+              candidate -
+              candidateMedian
+            ) <=
+            candidateTolerance
+        );
+
+      if (
+        stableCandidates.length <
+        3
+      ) {
+        return normalLines;
+      }
+
+      const splitX =
+        stableCandidates.reduce(
+          (
+            total,
+            candidate
+          ) =>
+            total +
+            candidate,
+          0
+        ) /
+        stableCandidates.length;
+
+      const splitRatio =
+        (
+          splitX -
+          pageLeft
+        ) /
+        pageWidth;
+
+      if (
+        splitRatio <
+          0.32 ||
+        splitRatio >
+          0.68
+      ) {
+        return normalLines;
+      }
+
+      type SplitRow = {
+        y: number;
+        left: TextItemData[];
+        right: TextItemData[];
+        original: TextItemData[];
+      };
+
+      const splitRows:
+        SplitRow[] =
+        baselineRows.map(
+          (row) => {
+            const left:
+              TextItemData[] = [];
+
+            const right:
+              TextItemData[] = [];
+
+            for (
+              const item of
+              row
+            ) {
+              const center =
+                item.x +
+                Math.max(
+                  0,
+                  item.width
+                ) /
+                  2;
+
+              if (
+                center <
+                splitX
+              ) {
+                left.push(
+                  item
+                );
+              } else {
+                right.push(
+                  item
+                );
+              }
+            }
+
+            return {
+              y:
+                row.reduce(
+                  (
+                    total,
+                    item
+                  ) =>
+                    total +
+                    item.y,
+                  0
+                ) /
+                row.length,
+
+              left,
+              right,
+              original:
+                row,
+            };
+          }
+        );
+
+      const dualRows =
+        splitRows.filter(
+          (row) => {
+            if (
+              !row.left.length ||
+              !row.right.length
+            ) {
+              return false;
+            }
+
+            const leftEnd =
+              Math.max(
+                ...row.left.map(
+                  (item) =>
+                    item.x +
+                    Math.max(
+                      0,
+                      item.width
+                    )
+                )
+              );
+
+            const rightStart =
+              Math.min(
+                ...row.right.map(
+                  (item) =>
+                    item.x
+                )
+              );
+
+            return (
+              rightStart -
+              leftEnd >
+              largeGapThreshold *
+                0.65
+            );
+          }
+        );
+
+      if (
+        dualRows.length <
+        3
+      ) {
+        return normalLines;
+      }
+
+      const topColumnY =
+        Math.max(
+          ...dualRows.map(
+            (row) =>
+              row.y
+          )
+        );
+
+      const bottomColumnY =
+        Math.min(
+          ...dualRows.map(
+            (row) =>
+              row.y
+          )
+        );
+
+      const rowTolerance =
+        6;
+
+      const topLines:
+        StructuredLine[] = [];
+
+      const leftLines:
+        StructuredLine[] = [];
+
+      const rightLines:
+        StructuredLine[] = [];
+
+      const bottomLines:
+        StructuredLine[] = [];
+
+      for (
+        const row of
+        splitRows
+      ) {
+        if (
+          row.y >
+          topColumnY +
+            rowTolerance
+        ) {
+          const line =
+            makeLine(
+              row.original
+            );
+
+          if (line) {
+            topLines.push(
+              line
+            );
+          }
+
+          continue;
+        }
+
+        if (
+          row.y <
+          bottomColumnY -
+            rowTolerance
+        ) {
+          const line =
+            makeLine(
+              row.original
+            );
+
+          if (line) {
+            bottomLines.push(
+              line
+            );
+          }
+
+          continue;
+        }
+
+        const leftLine =
+          makeLine(
+            row.left
+          );
+
+        if (leftLine) {
+          leftLines.push(
+            leftLine
+          );
+        }
+
+        const rightLine =
+          makeLine(
+            row.right
+          );
+
+        if (rightLine) {
+          rightLines.push(
+            rightLine
+          );
+        }
+      }
+
+      const descendingY =
+        (
+          a:
+            StructuredLine,
+          b:
+            StructuredLine
+        ) =>
+          b.y -
+          a.y;
+
+      topLines.sort(
+        descendingY
+      );
+
+      leftLines.sort(
+        descendingY
+      );
+
+      rightLines.sort(
+        descendingY
+      );
+
+      bottomLines.sort(
+        descendingY
+      );
+
+      return [
+        ...topLines,
+        ...leftLines,
+        ...rightLines,
+        ...bottomLines,
+      ];
+    };
+
+
+  const joinWrappedHyphen =
+    (
+      left:
+        string,
+      right:
+        string
+    ) => {
+      const trailingToken =
+        left
+          .trim()
+          .split(
+            /\s+/
+          )
+          .at(
+            -1
+          ) ||
+        '';
+
+      /*
+       * A wrapped lexical word like "interoper-" + "ability"
+       * loses the discretionary wrap hyphen. A compound such
+       * as "state-of-the-" + "art" keeps its semantic hyphen.
+       */
+      const keepHyphen =
+        trailingToken
+          .slice(
+            0,
+            -1
+          )
+          .includes(
+            '-'
+          );
+
+      return (
+        left.slice(
+          0,
+          -1
+        ) +
+        (
+          keepHyphen
+            ? '-'
+            : ''
+        ) +
+        right
+      );
+    };
+
+
+  const isLikelyHeadingText =
+    (
+      value:
+        string
+    ) => {
+      const text =
+        value.trim();
+
+      if (
+        text.length <
+          2 ||
+        text.length >
+          80 ||
+        /[.!?;,]$/.test(
+          text
+        ) ||
+        /https?:\/\/|\S+@\S+/i.test(
+          text
+        )
+      ) {
+        return false;
+      }
+
+      const words =
+        text
+          .split(
+            /\s+/
+          )
+          .filter(
+            Boolean
+          );
+
+      if (
+        words.length >
+        12
+      ) {
+        return false;
+      }
+
+      /*
+       * Sentence-like callouts can be slightly larger than body
+       * text without being semantic headings.
+       */
+      if (
+        /^(this|that|these|those|there|it|we|you|they|he|she)\s+(is|are|was|were|has|have|will|can|should|must)\b/i.test(
+          text
+        )
+      ) {
+        return false;
+      }
+
+      return (
+        /[A-Za-z]{2,}/.test(
+          text
+        )
+      );
     };
 
 
