@@ -20741,9 +20741,9 @@ const universalRowsFromWords = (
      */
     const gapThreshold =
       Math.max(
-        22,
-        medianHeight * 1.65,
-        pageWidth * 0.014
+        18,
+        medianHeight * 1.25,
+        pageWidth * 0.0095
       );
 
     const chunks: string[] = [];
@@ -20918,8 +20918,65 @@ const universalStrictKeyValueRows = (
     }
 
     /*
-     * OCR often puts the label on one row and
-     * the actual amount/value on the next row.
+     * OCR often puts a short form label on one row and a plain
+     * textual value on the very next row. Preserve those pairs
+     * before applying the stricter numeric/date look-ahead below.
+     */
+    const looksLikeStandaloneField =
+      cells.length === 1 &&
+      fieldPattern.test(text) &&
+      text.length <= 55 &&
+      !/\b(form|information|register|table|corpus|extractor|qa)\b/i.test(
+        text
+      );
+
+    if (
+      looksLikeStandaloneField
+    ) {
+      const next =
+        rows[
+          rowIndex + 1
+        ];
+
+      if (next) {
+        const nextText =
+          next
+            .map(
+              universalCleanCell
+            )
+            .filter(Boolean)
+            .join(' ');
+
+        const nextIsAnotherField =
+          fieldPattern.test(
+            nextText
+          ) &&
+          nextText.length <= 55;
+
+        const nextIsNoise =
+          /^(?:control\b|page\b|universal document extractor qa corpus\b)/i.test(
+            nextText
+          );
+
+        if (
+          nextText &&
+          !nextIsAnotherField &&
+          !nextIsNoise &&
+          nextText.length <= 180
+        ) {
+          add(
+            text,
+            nextText
+          );
+
+          continue;
+        }
+      }
+    }
+
+    /*
+     * Numeric/date/financial values may be displaced by more
+     * than one OCR row, so keep the existing wider look-ahead.
      */
     if (
       fieldPattern.test(text) &&
@@ -21214,12 +21271,37 @@ const universalBuildPageSections = (
       rows
     );
 
+  const kvDataRows =
+    Math.max(
+      0,
+      kvRows.length - 1
+    );
+
+  const formLabelPattern =
+    /^(?:document no\.?|document type|date of execution|date of registration|registration number(?:\/year)?|village name|area|stamp duty|registration fee|presentor name|owner name|owner details|tenant name|tenant details|identity proof|occupation|mobile(?: number)?|email(?: id)?|phone|address|name|pan|aadhaar|passport(?: no\.)?|agent details|rented property|property description|pin code|remark|period|license fee|deposit)\b/i;
+
+  const formLabelRows =
+    rows.filter(
+      (row) =>
+        formLabelPattern.test(
+          row[0] || ''
+        )
+    ).length;
+
+  const strongFormShape =
+    kvDataRows >= 4 &&
+    (
+      formSignals >= 2 ||
+      formLabelRows >= 4
+    );
+
   const looksLikeProse =
     proseSignals >= 2 ||
     proseRatio >= 0.3 ||
     (
       rows.length >= 5 &&
-      structuredRatio < 0.28
+      structuredRatio < 0.28 &&
+      !strongFormShape
     );
 
   /*
@@ -21229,9 +21311,16 @@ const universalBuildPageSections = (
    */
   if (
     kvRows.length >= 4 &&
-    formSignals >= 2 &&
+    (
+      formSignals >= 2 ||
+      formLabelRows >= 4
+    ) &&
     !looksLikeProse &&
-    tableSignals < 2
+    (
+      tableSignals < 2 ||
+      kvDataRows >= 6 ||
+      formLabelRows >= 6
+    )
   ) {
     const sections:
       UniversalDocumentSection[] = [
@@ -21330,21 +21419,36 @@ const universalBuildPageSections = (
       )
   ).length;
 
+  const topCompactStructuredRows =
+    topStructuredRows.filter(
+      (row) =>
+        row.join(' ')
+          .length <= 100
+    );
+
   const topLooksLikeTable =
     topStructuredRows.length >=
       3 &&
     (
-      topTableSignals >= 1 ||
+      topTableSignals >= 2 ||
       (
+        !looksLikeProse &&
         topRows.length > 0 &&
-        topStructuredRows.length /
+        topCompactStructuredRows.length >= 3 &&
+        topCompactStructuredRows.length /
           topRows.length >=
-          0.45
+          0.35
       )
     );
 
   const strongTable =
-    tableSignals >= 2 ||
+    (
+      tableSignals >= 2 &&
+      (
+        !looksLikeProse ||
+        topTableSignals >= 2
+      )
+    ) ||
     topLooksLikeTable ||
     (
       !looksLikeProse &&
@@ -21364,6 +21468,168 @@ const universalBuildPageSections = (
           row.length >= 2 &&
           row.length <= 8
       );
+
+    /*
+     * Tesseract occasionally reads an entire shaded header row as
+     * one text line even though the body rows are correctly split.
+     * Recover only well-known spreadsheet header labels; never
+     * synthesize values or reorder data rows.
+     */
+    const headerVocabulary = [
+      'item code',
+      'description',
+      'qty',
+      'unit price',
+      'total',
+      'grn',
+      'particulars',
+      'rate',
+      'tax',
+      'receipt no',
+      'document no',
+      'amount paid',
+      'transaction id',
+      'name & address',
+      'type of party',
+      'admission',
+      'verification with uidai',
+      'line',
+      'hsn',
+      'amount',
+      'po no',
+      'vendor',
+      'item',
+      'net amount',
+      'transaction date',
+      'reference',
+      'balance',
+      'control',
+      'status',
+      'evidence',
+      'date & time',
+    ];
+
+    const splitHeaderLine = (
+      value: string
+    ) => {
+      const lower =
+        value.toLowerCase();
+
+      const matches =
+        headerVocabulary
+          .map(
+            (label) => ({
+              label,
+              index:
+                lower.indexOf(
+                  label
+                ),
+              end:
+                lower.indexOf(
+                  label
+                ) +
+                label.length,
+            })
+          )
+          .filter(
+            (entry) =>
+              entry.index >= 0
+          )
+          .sort(
+            (a, b) =>
+              a.index -
+                b.index ||
+              b.label.length -
+                a.label.length
+          );
+
+      const selected:
+        typeof matches =
+          [];
+
+      for (
+        const entry of
+        matches
+      ) {
+        const overlaps =
+          selected.some(
+            (existing) =>
+              entry.index <
+                existing.end &&
+              entry.end >
+                existing.index
+          );
+
+        if (
+          !overlaps
+        ) {
+          selected.push(
+            entry
+          );
+        }
+      }
+
+      return selected
+        .sort(
+          (a, b) =>
+            a.index -
+            b.index
+        )
+        .map(
+          (entry) =>
+            entry.label
+              .replace(
+                /\b\w/g,
+                (letter) =>
+                  letter.toUpperCase()
+              )
+        );
+    };
+
+    const currentHeaderText =
+      tableRows[0]
+        ?.join(' ')
+        .toLowerCase() ||
+      '';
+
+    const currentHeaderSignals =
+      headerVocabulary.filter(
+        (label) =>
+          currentHeaderText.includes(
+            label
+          )
+      ).length;
+
+    if (
+      currentHeaderSignals < 2
+    ) {
+      for (
+        const row of
+        rows
+      ) {
+        if (
+          row.length !== 1
+        ) {
+          continue;
+        }
+
+        const recoveredHeader =
+          splitHeaderLine(
+            row[0]
+          );
+
+        if (
+          recoveredHeader.length >= 2 &&
+          recoveredHeader.length <= 8
+        ) {
+          tableRows.unshift(
+            recoveredHeader
+          );
+
+          break;
+        }
+      }
+    }
 
     if (
       tableRows.length >= 2
@@ -21386,7 +21652,13 @@ const universalBuildPageSections = (
         .filter(
           (row) =>
             row.length === 1 &&
-            row[0].length >= 35
+            row[0].length >= 70 &&
+            !/universal document extractor qa corpus/i.test(
+              row[0]
+            ) &&
+            !/^control\b/i.test(
+              row[0]
+            )
         )
         .map((row) => [
           row.join(' '),
@@ -22160,60 +22432,98 @@ async function universalExtractScannedPages(
             );
       }
 
-      const words:
-        UniversalOcrWord[] =
-        rawWords
-          .map((word: any) => {
-            const box =
-              word?.bbox;
+      const mapUniversalWords =
+        (
+          minimumConfidence:
+            number
+        ):
+          UniversalOcrWord[] =>
+          rawWords
+            .map((word: any) => {
+              const box =
+                word?.bbox;
 
-            return {
-              text:
-                universalCleanCell(
-                  word?.text ?? ''
-                ),
-              x0:
-                Number(
-                  box?.x0 ?? 0
-                ),
-              x1:
-                Number(
-                  box?.x1 ?? 0
-                ),
-              y0:
-                Number(
-                  box?.y0 ?? 0
-                ),
-              y1:
-                Number(
-                  box?.y1 ?? 0
-                ),
-              confidence:
-                Number(
-                  word?.confidence ??
-                    word?.conf ??
-                    0
-                ),
-            };
-          })
-          .filter(
-            (
-              word:
-                UniversalOcrWord
-            ) =>
-              word.text &&
-              word.x1 >
-                word.x0 &&
-              word.y1 >
-                word.y0 &&
-              word.confidence >= 20
-          );
+              return {
+                text:
+                  universalCleanCell(
+                    word?.text ?? ''
+                  ),
+                x0:
+                  Number(
+                    box?.x0 ?? 0
+                  ),
+                x1:
+                  Number(
+                    box?.x1 ?? 0
+                  ),
+                y0:
+                  Number(
+                    box?.y0 ?? 0
+                  ),
+                y1:
+                  Number(
+                    box?.y1 ?? 0
+                  ),
+                confidence:
+                  Number(
+                    word?.confidence ??
+                      word?.conf ??
+                      0
+                  ),
+              };
+            })
+            .filter(
+              (
+                word:
+                  UniversalOcrWord
+              ) =>
+                word.text &&
+                word.x1 >
+                  word.x0 &&
+                word.y1 >
+                  word.y0 &&
+                word.confidence >=
+                  minimumConfidence
+            );
+
+      const words =
+        mapUniversalWords(
+          20
+        );
 
       let pageRows =
         universalRowsFromWords(
           words,
           canvas.width
         );
+
+      /*
+       * Some grid-heavy pages produce a tiny high-confidence word
+       * set (title/footer only) while Tesseract still returned many
+       * usable low-confidence table words. Reuse those existing OCR
+       * words instead of rerunning OCR or discarding the table.
+       */
+      if (
+        pageRows.length <= 4 &&
+        rawWords.length >
+          words.length + 8
+      ) {
+        const relaxedRows =
+          universalRowsFromWords(
+            mapUniversalWords(
+              5
+            ),
+            canvas.width
+          );
+
+        if (
+          relaxedRows.length >
+          pageRows.length + 3
+        ) {
+          pageRows =
+            relaxedRows;
+        }
+      }
 
       if (
         pageRows.length === 0 &&
