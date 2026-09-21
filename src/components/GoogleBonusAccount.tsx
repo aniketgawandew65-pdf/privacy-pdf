@@ -18,6 +18,9 @@ import {
   subscribeGoogleBonus,
   type GoogleBonusState,
 } from '../utils/googleBonus';
+import {
+  trackAnalyticsEvent,
+} from '../utils/analytics';
 
 declare global {
   interface Window {
@@ -328,6 +331,14 @@ export function GoogleBonusAccount() {
                   });
 
                 setAccount(state);
+
+                trackAnalyticsEvent(
+                  'google_sign_in',
+                  {
+                    auth_method:
+                      'google',
+                  }
+                );
               } catch (
                 error
               ) {
