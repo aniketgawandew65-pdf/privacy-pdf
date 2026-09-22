@@ -605,7 +605,8 @@ export async function makeDocx(
       warnings: [...p.warnings,
         ...(rotated.some((s) => !usesWordArt(s) && verticalTextFlow(s.rotation ?? 0) === "horz") ? ["180-degree text uses editable Word shape rotation. Some editors, including the tested LibreOffice renderer, display this text horizontally. Review orientation in your Word editor."] : []),
         ...(rotated.some(usesWordArt) ? ["Diagonal text is preserved as editable WordArt. Font weight and text-path editing support can differ between Word editors."] : []),
-        ...(tables.some((t) => t.inferred) ? ["Some unruled tables were inferred from repeated alignment. Review their cell boundaries."] : []),
+        ...(tables.some((t) => t.hybrid) ? ["Some partially ruled tables were reconstructed from repeated row separators and column alignment. Review their cell boundaries."] : []),
+        ...(tables.some((t) => t.inferred && !t.hybrid) ? ["Some unruled tables were inferred from repeated alignment. Review their cell boundaries."] : []),
       ],
     });
     return {
