@@ -120,12 +120,12 @@ const materializeListMarkers = (
     );
 
     const start =
-      list instanceof HTMLOListElement
+      list.tagName === 'OL'
         ? list.start || 1
         : 1;
 
     const type =
-      list instanceof HTMLOListElement
+      list.tagName === 'OL'
         ? list.getAttribute('type') || '1'
         : '';
 
@@ -148,7 +148,7 @@ const materializeListMarkers = (
       const ordinal = start + index;
       let label = '•';
 
-      if (list instanceof HTMLOListElement) {
+      if (list.tagName === 'OL') {
         label =
           type === 'a' || type === 'A'
             ? alphaMarker(ordinal)
@@ -164,7 +164,7 @@ const materializeListMarkers = (
       marker.textContent = label;
       marker.style.display = 'inline-block';
       marker.style.minWidth =
-        list instanceof HTMLOListElement
+        list.tagName === 'OL'
           ? '1.8em'
           : '1.2em';
       marker.style.marginRight = '0.35em';
@@ -251,7 +251,7 @@ const materializeFormControls = (
       source.getBoundingClientRect();
 
     target.style.display =
-      source instanceof HTMLTextAreaElement
+      source.tagName === 'TEXTAREA'
         ? 'inline-block'
         : 'inline-flex';
 
