@@ -294,10 +294,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/pdf-to-word': {
     path: '/pdf-to-word',
-    title: 'PDF to Word — Editable DOCX, Private Local Conversion | 1into1',
-    description: 'Convert computer-created PDFs into editable Word documents locally in your browser. Preserve text, detected tables and artwork without uploading your files.',
-    heading: 'PDF to Word',
-    subheading: 'Convert digital PDFs to editable Word documents privately on your device.',
+    title: 'PDF to Word Without Uploading — Private Editable DOCX | 1into1',
+    description: 'Convert computer-created PDFs to editable Word DOCX files in your browser without uploading the PDF. Keep text, detected tables and artwork local and private.',
+    heading: 'Convert PDF to Word Without Uploading',
+    subheading: 'Create an editable Word document directly in your browser. Your PDF stays on your device, with no server upload or signup required.',
   },
   '/pdf-to-markdown': {
     path: '/pdf-to-markdown',
