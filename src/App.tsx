@@ -156,6 +156,7 @@ interface NavTool {
 
 const TOOLS_LIST: NavTool[] = [
   { name: 'Compress', path: '/compress-pdf', category: 'organize', icon: Sliders },
+  { name: 'PDF to Word', path: '/pdf-to-word', category: 'convert', icon: FileText },
   { name: 'Merge', path: '/merge-pdf', category: 'organize', icon: Files },
   { name: 'Split', path: '/split-pdf', category: 'organize', icon: Scissors },
   { name: 'Organize', path: '/organize-pdf', category: 'organize', icon: LayoutGrid },
@@ -195,7 +196,6 @@ const TOOLS_LIST: NavTool[] = [
   { name: 'Page Numbers', path: '/page-numbers', category: 'convert', icon: Hash },
   { name: 'PDF to Excel', path: '/pdf-to-csv', category: 'convert', icon: Table },
   { name: 'Extract PDF Data', path: '/document-data-extractor', category: 'convert', icon: Table },
-  { name: 'PDF to Word', path: '/pdf-to-word', category: 'convert', icon: FileText },
   { name: 'PDF to Markdown', path: '/pdf-to-markdown', category: 'convert', icon: FileCode },
   { name: 'CSV to PDF', path: '/csv-to-pdf', category: 'convert', icon: Table },
   { name: 'Edit PDF', path: '/edit-pdf', category: 'organize', icon: FileEdit },
@@ -1643,7 +1643,7 @@ export default function App() {
   const isBlog = Boolean(blogMeta(location.pathname));
   const isInfo = ['/privacy', '/terms'].includes(location.pathname) || isBlog;
   const closeDirectory = () => { setDirectoryOpen(false); setSearch(''); };
-  const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/merge-pdf','/split-pdf','/sign-pdf','/image-converter'].includes(tool.path));
+  const popular = TOOLS_LIST.filter(tool => ['/compress-pdf','/pdf-to-word','/merge-pdf','/split-pdf','/sign-pdf','/image-converter'].includes(tool.path));
 
 
   return (
