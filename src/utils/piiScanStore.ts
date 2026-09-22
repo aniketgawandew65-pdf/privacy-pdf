@@ -1,6 +1,6 @@
 /** Atomic, per-page IndexedDB records. The original PDF remains in OPFS.
  * Bump version whenever recognition settings, geometry or detector rules change. */
-const VERSION = 'pii-regions-v3';
+const VERSION = 'pii-regions-v4';
 const DATABASE = 'oneinto1-pii-scan';
 const STORE = 'pages';
 export type OcrRegion = {
