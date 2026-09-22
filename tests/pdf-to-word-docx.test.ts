@@ -92,6 +92,22 @@ test('hybrid statement records stop before footer regions and remain editable', 
   assert.doesNotMatch(tableXml,/www\.example\.test|Never share passwords/);
 });
 
+test('visual-hybrid mode anchors complex-page source lines independently', async()=>{
+  const spans=[
+    {...span('First exact line',40,100),width:120,scale:60},
+    {...span('Second exact line',40,112),width:130,scale:60},
+  ];
+  const rules=Array.from({length:130},(_,i)=>({
+    x1:10+i%20,y1:200+i,x2:30+i%20,y2:205+i,width:.5,color:'CCCCCC',
+  }));
+  const result=await makeDocx([{number:1,width:612,height:792,spans,rules,pictures:[],warnings:[]}]);
+  const xml=strFromU8(unzipSync(new Uint8Array(result.bytes))['word/document.xml']);
+  assert.equal((xml.match(/<w:framePr\b/g)||[]).length,2);
+  assert.equal((xml.match(/>First exact line<\/w:t>/g)||[]).length,1);
+  assert.equal((xml.match(/>Second exact line<\/w:t>/g)||[]).length,1);
+  assert.ok(result.summaries[0].warnings.some(w=>w.includes('adaptive visual-hybrid reconstruction')));
+});
+
 test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{')+'<\\/w:t>','g'))||[]).length,1);
 });
 
