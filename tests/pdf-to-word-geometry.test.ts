@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFont, fontProfile, advanceScale } from '../src/utils/pdfToWord/fonts.ts';
+import { classifyFont, fontProfile, advanceScale, metricMatchedFont } from '../src/utils/pdfToWord/fonts.ts';
 import { twips, emu, textBoxGeometry, verticalTextFlow, isObliqueTransform } from '../src/utils/pdfToWord/geometry.ts';
 import { detectTables, inferAlignedTables } from '../src/utils/pdfToWord/layout.ts';
+import { chooseReconstructionStrategy } from '../src/utils/pdfToWord/strategy.ts';
 import { makeDocx } from '../src/utils/pdfToWord/docx.ts';
 import { unzipSync, strFromU8 } from 'fflate';
 import type { Span } from '../src/utils/pdfToWord/model.ts';
@@ -18,6 +19,31 @@ test('font descriptors and generic fallback families classify opaque subset name
  assert.equal(fontProfile({name:'Symbol'}).fontClass,'symbolic');
  assert.equal(advanceScale(54,60),90);
 });
+test('font matching normalizes weight suffixes and chooses the closest installed metric',()=>{
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-SemiBold'}).family,'Mulish');
+ assert.equal(classifyFont({name:'Mulish-Black'}),'sans-serif');
+ const widths:Record<string,number>={Arial:105,Aptos:101,Calibri:110,Mulish:99};
+ const measure:any={font:'',measureText:()=>({width:widths[Object.keys(widths).find(name=>measure.font.includes(name))||'Arial']})};
+ const match=metricMatchedFont({
+  name:'ABCDEF+Mulish-SemiBold',text:'Statement total',size:10,sourceWidth:100,bold:true,
+  measure,isAvailable:(family)=>['Arial','Aptos','Calibri'].includes(family),
+ });
+ assert.equal(match.family,'Aptos');
+ assert.ok((match.error??1)<0.02);
+});
+
+test('adaptive strategy reserves visual hybrid mode for structurally complex pages',()=>{
+ const base={number:1,width:612,height:792,spans:[s('Plain paragraph',40,80)],rules:[],pictures:[],warnings:[]};
+ assert.equal(chooseReconstructionStrategy(base,[],false,false).mode,'flow');
+ const complex={
+  ...base,
+  spans:Array.from({length:20},(_,i)=>({...s('T'+i,40+(i%4)*100,80+Math.floor(i/4)*20),scale:i<3?60:100})),
+  rules:Array.from({length:130},(_,i)=>({x1:20,x2:590,y1:100+i,y2:100+i,width:.5,color:'CCCCCC'})),
+  pictures:[{x:0,y:0,width:612,height:300,data:new Uint8Array([1]),background:true}],
+ };
+ assert.equal(chooseReconstructionStrategy(complex,[],true,true).mode,'visual-hybrid');
+});
+
 test('signed page coordinates and rotated centres convert without drift',()=>{
  assert.equal(twips(-3.5),-70);assert.equal(emu(72),914400);
  assert.equal(verticalTextFlow(89.99999),'vert');assert.equal(verticalTextFlow(-90),'vert270');
