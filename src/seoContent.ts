@@ -18,16 +18,23 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [['/compress-pdf-to-50kb','Start with a 50 KB target'], ['/compress-pdf-to-100kb','Start with a 100 KB target'], ['/remove-pages','Remove unnecessary pages'], ['/split-pdf','Split a large document'], ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']]
   },
   '/pdf-to-word': {
-    title: 'Convert a digital PDF into an editable Word document',
-    intro: 'Recover editable text and detected tables from computer-created PDFs. Artwork stays in visual layers, and conversion happens on your device.',
-    steps: ['Choose a PDF with selectable text. Scanned pages are not supported by this tool.', 'Select Convert to Word and keep the tab open while pages are reconstructed.', 'Download the DOCX and review each page in your Word editor before sharing or editing.'],
-    example: 'A digital statement can become editable transaction cells with its logo and background retained. Font substitution and editing may change wrapping, spacing and page layout.',
+    title: 'Convert PDF to Word without uploading your file',
+    intro: 'Turn a computer-created PDF into an editable Word DOCX directly in your browser. The PDF stays on your device while text, detected tables and artwork are reconstructed locally.',
+    steps: ['Choose a PDF with selectable text. Scanned or image-only pages need OCR first.', 'Select Convert to Word. The conversion runs locally in your browser without sending the PDF to a document-processing server.', 'Download the editable DOCX and review important text, tables, numbers and page layout in your Word editor before sharing or editing.'],
+    example: 'A digital bank statement or business report can become editable Word content while preserving text, detected tables, logos and background artwork where the source structure allows it. Font substitution and editing can still change wrapping or spacing.',
     questions: [
-      ['Is every PDF supported?', 'No. Scanned pages, missing character mappings and complex layouts may need other processing. Conversion notes identify preserved symbols and unsupported details.'],
-      ['Does the PDF leave my device?', 'No document is uploaded for conversion. Reading, layout reconstruction and Word generation run locally in your browser.'],
+      ['Can I convert a PDF to Word without uploading it?', 'Yes. For supported digital PDFs, reading, layout reconstruction and DOCX generation happen locally in your browser, so the document is not uploaded to a conversion server.'],
+      ['Is the resulting Word document editable?', 'Yes. Reconstructed text and detected tables are created as editable Word content where possible, while visual artwork is preserved separately when it cannot be represented as normal editable text.'],
+      ['Do I need to sign up to use PDF to Word?', 'No signup is required to start converting supported PDFs. Your normal task allowance still applies.'],
+      ['Is every PDF supported?', 'No. This tool is designed for computer-created PDFs with selectable text. Scanned pages, missing character mappings and unusually complex layouts can require OCR or manual review.'],
       ['Are there size limits?', 'Mobile and tablet support up to 150 MB per task. Desktop has no arbitrary file-size or page-count cap; available device resources and page complexity determine practical capacity.'],
-      ['Will it look identical in Word?', 'Text and tables remain editable, but fonts, wrapping and complex formatting can differ between editors. Review the result before relying on its layout.']
-    ], related: [['/pdf-to-markdown','Convert to Markdown'], ['/pdf-to-csv','Extract tables to Excel'], ['/crop-pdf','Crop a PDF']]
+      ['Will it look identical in Word?', 'Not always. Text and tables remain editable, but fonts, wrapping, transformed artwork and complex formatting can differ between Word editors. Review the result before relying on exact layout.']
+    ],
+    related: [
+      ['/pdf-to-csv','Extract PDF tables to Excel-ready data'],
+      ['/edit-pdf','Edit the PDF directly in your browser'],
+      ['/pdf-to-markdown','Convert PDF to Markdown locally']
+    ]
   },
   '/crop-pdf': {
     title: 'Crop one page or apply the same crop to an entire PDF',
@@ -123,6 +130,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/annotate-pdf','Draw and annotate a PDF'],
       ['/sign-pdf','Add a signature'],
       ['/watermark-pdf','Add a watermark'],
+      ['/pdf-to-word','Convert PDF to editable Word without uploading'],
       ['/redact-pdf','Permanently redact content']
     ]
   },
@@ -273,6 +281,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/bank-statement-to-excel','Convert a bank statement to spreadsheet data'],
       ['/ocr-pdf','OCR scanned tables'],
       ['/pdf-to-text','Extract raw PDF text'],
+      ['/pdf-to-word','Convert PDF to editable Word without uploading'],
       ['/pdf-to-markdown','Convert PDF to Markdown']
     ]
   },
