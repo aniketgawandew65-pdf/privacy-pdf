@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import {
   materializeHtmlPdfStaticDom,
   needsRasterExactText,
+  rasterizeBoxShadow,
   rasterizeImageSource,
   rasterizeLinearGradient,
   rasterizeTextLine,
@@ -1383,6 +1384,35 @@ export async function generateStyledVectorHtmlPDF(
               continue;
             }
 
+            /*
+             * Preserve real CSS clipping/ellipsis semantics.
+             * Horizontal normalization is for accidental page
+             * overflow, not intentional nowrap clip regions.
+             */
+            const preservesInlineOverflow =
+              style.textOverflow ===
+                'ellipsis' ||
+              (
+                style.whiteSpace ===
+                  'nowrap' &&
+                (
+                  style.overflow ===
+                    'hidden' ||
+                  style.overflow ===
+                    'clip' ||
+                  style.overflowX ===
+                    'hidden' ||
+                  style.overflowX ===
+                    'clip'
+                )
+              );
+
+            if (
+              preservesInlineOverflow
+            ) {
+              continue;
+            }
+
             if (
               style.display ===
                 'flex' ||
@@ -2110,6 +2140,126 @@ export async function generateStyledVectorHtmlPDF(
           )
       );
 
+    /*
+     * Box shadows are paint effects rather than layout boxes.
+     * Draw only the shadow halo first so the existing vector
+     * backgrounds/borders remain authoritative.
+     */
+    for (
+      const element of
+      elements
+    ) {
+      const style =
+        win.getComputedStyle(
+          element
+        );
+
+      if (
+        style.display ===
+          'none' ||
+        style.visibility ===
+          'hidden' ||
+        Number(
+          style.opacity ||
+            '1'
+        ) <=
+          0.001 ||
+        style.boxShadow ===
+          'none'
+      ) {
+        continue;
+      }
+
+      const rect =
+        element
+          .getBoundingClientRect();
+
+      if (
+        rect.width <
+          1 ||
+        rect.height <
+          1
+      ) {
+        continue;
+      }
+
+      const shadow =
+        rasterizeBoxShadow(
+          style.boxShadow,
+          rect.width,
+          rect.height,
+          Math.max(
+            0,
+            parseFloat(
+              style.borderRadius ||
+                '0'
+            ) ||
+              0
+          )
+        );
+
+      if (
+        !shadow
+      ) {
+        continue;
+      }
+
+      const xPx =
+        rect.left -
+        rootLeft -
+        shadow.offsetX;
+
+      const yPx =
+        rect.top -
+        rootTop -
+        shadow.offsetY;
+
+      const centerYPx =
+        yPx +
+        shadow.height /
+          2;
+
+      const pageIndex =
+        Math.max(
+          0,
+          Math.min(
+            pageCount -
+              1,
+            Math.floor(
+              centerYPx /
+                pageSlicePx
+            )
+          )
+        );
+
+      const pageLocalY =
+        yPx -
+        pageIndex *
+          pageSlicePx;
+
+      pdf.setPage(
+        pageIndex +
+          1
+      );
+
+      pdf.addImage(
+        shadow.dataUrl,
+        'PNG',
+        margin +
+          xPx *
+            scale,
+        margin +
+          pageLocalY *
+            scale,
+        shadow.width *
+          scale,
+        shadow.height *
+          scale,
+        undefined,
+        'FAST'
+      );
+    }
+
     for (
       const element of
       elements
@@ -2657,9 +2807,18 @@ export async function generateStyledVectorHtmlPDF(
                 16
             );
 
+          type VisualRect = {
+            left: number;
+            right: number;
+            top: number;
+            bottom: number;
+            width: number;
+            height: number;
+          };
+
           type VisualWord = {
             text: string;
-            rect: DOMRect;
+            rect: VisualRect;
           };
 
           const visualWords:
@@ -2702,25 +2861,268 @@ export async function generateStyledVectorHtmlPDF(
                   .getClientRects()
               );
 
-            /*
-             * Normal words have one rectangle.
-             * If a browser splits an unusually long word,
-             * retaining the first painted segment is safer
-             * than duplicating that word in the PDF.
-             */
-            const rect =
-              rects[0];
+            const toVisualRect =
+              (
+                rect:
+                  DOMRect
+              ): VisualRect => ({
+                left:
+                  rect.left,
+                right:
+                  rect.right,
+                top:
+                  rect.top,
+                bottom:
+                  rect.bottom,
+                width:
+                  rect.width,
+                height:
+                  rect.height,
+              });
 
             if (
-              rect &&
-              rect.width > 0 &&
-              rect.height > 0
+              rects.length <=
+                1
             ) {
-              visualWords.push({
-                text:
-                  match[0],
-                rect,
-              });
+              const rect =
+                rects[0];
+
+              if (
+                rect &&
+                rect.width >
+                  0 &&
+                rect.height >
+                  0
+              ) {
+                visualWords.push({
+                  text:
+                    match[0],
+                  rect:
+                    toVisualRect(
+                      rect
+                    ),
+                });
+              }
+            } else {
+              /*
+               * A long unbroken token can paint across several
+               * browser lines. Range.getClientRects() reports
+               * those line fragments. Reconstruct the exact
+               * substring belonging to each painted fragment so
+               * the PDF never redraws the whole token on line 1.
+               */
+              const graphemes:
+                Array<{
+                  segment:
+                    string;
+                  index:
+                    number;
+                }> =
+                  typeof Intl !==
+                    'undefined' &&
+                  'Segmenter' in
+                    Intl
+                    ? Array.from(
+                        new Intl.Segmenter(
+                          undefined,
+                          {
+                            granularity:
+                              'grapheme',
+                          }
+                        ).segment(
+                          match[0]
+                        ),
+                        (
+                          item
+                        ) => ({
+                          segment:
+                            item.segment,
+                          index:
+                            item.index,
+                        })
+                      )
+                    : (() => {
+                        const items:
+                          Array<{
+                            segment:
+                              string;
+                            index:
+                              number;
+                          }> =
+                            [];
+
+                        let offset =
+                          0;
+
+                        for (
+                          const segment of
+                          Array.from(
+                            match[0]
+                          )
+                        ) {
+                          items.push({
+                            segment,
+                            index:
+                              offset,
+                          });
+
+                          offset +=
+                            segment.length;
+                        }
+
+                        return items;
+                      })();
+
+              let current:
+                VisualWord |
+                null =
+                  null;
+
+              for (
+                const grapheme of
+                graphemes
+              ) {
+                const partRange =
+                  doc.createRange();
+
+                partRange.setStart(
+                  textNode,
+                  match.index +
+                    grapheme.index
+                );
+
+                partRange.setEnd(
+                  textNode,
+                  match.index +
+                    grapheme.index +
+                    grapheme.segment
+                      .length
+                );
+
+                const partRect =
+                  Array.from(
+                    partRange
+                      .getClientRects()
+                  )[0];
+
+                partRange.detach?.();
+
+                if (
+                  !partRect ||
+                  partRect.width <=
+                    0 ||
+                  partRect.height <=
+                    0
+                ) {
+                  continue;
+                }
+
+                const rect =
+                  toVisualRect(
+                    partRect
+                  );
+
+                const centerY =
+                  rect.top +
+                  rect.height /
+                    2;
+
+                const currentCenterY =
+                  current
+                    ? current.rect.top +
+                      current.rect.height /
+                        2
+                    : Number.NaN;
+
+                const sameLine =
+                  Boolean(
+                    current
+                  ) &&
+                  Math.abs(
+                    currentCenterY -
+                    centerY
+                  ) <=
+                    Math.max(
+                      2,
+                      Math.min(
+                        6,
+                        Math.max(
+                          current!
+                            .rect
+                            .height,
+                          rect.height
+                        ) *
+                          0.32
+                      )
+                    );
+
+                if (
+                  sameLine &&
+                  current
+                ) {
+                  current.text +=
+                    grapheme.segment;
+
+                  current.rect = {
+                    left:
+                      Math.min(
+                        current.rect
+                          .left,
+                        rect.left
+                      ),
+                    right:
+                      Math.max(
+                        current.rect
+                          .right,
+                        rect.right
+                      ),
+                    top:
+                      Math.min(
+                        current.rect
+                          .top,
+                        rect.top
+                      ),
+                    bottom:
+                      Math.max(
+                        current.rect
+                          .bottom,
+                        rect.bottom
+                      ),
+                    width:
+                      Math.max(
+                        current.rect
+                          .right,
+                        rect.right
+                      ) -
+                      Math.min(
+                        current.rect
+                          .left,
+                        rect.left
+                      ),
+                    height:
+                      Math.max(
+                        current.rect
+                          .bottom,
+                        rect.bottom
+                      ) -
+                      Math.min(
+                        current.rect
+                          .top,
+                        rect.top
+                      ),
+                  };
+                } else {
+                  current = {
+                    text:
+                      grapheme.segment,
+                    rect,
+                  };
+
+                  visualWords.push(
+                    current
+                  );
+                }
+              }
             }
 
             range.detach?.();
@@ -3023,6 +3425,18 @@ export async function generateStyledVectorHtmlPDF(
                     .getBoundingClientRect()
                 : null;
 
+            if (
+              clipRect &&
+              (
+                bottom <=
+                  clipRect.top ||
+                top >=
+                  clipRect.bottom
+              )
+            ) {
+              continue;
+            }
+
             const visibleLeft =
               clipRect
                 ? Math.max(
@@ -3079,6 +3493,69 @@ export async function generateStyledVectorHtmlPDF(
               if (
                 raster
               ) {
+                if (
+                  clipRect
+                ) {
+                  const clipTopPx =
+                    Math.max(
+                      clipRect.top -
+                        rootTop,
+                      pageIndex *
+                        pageSlicePx
+                    );
+
+                  const clipBottomPx =
+                    Math.min(
+                      clipRect.bottom -
+                        rootTop,
+                      (
+                        pageIndex +
+                        1
+                      ) *
+                        pageSlicePx
+                    );
+
+                  const clipHeightPx =
+                    Math.max(
+                      0,
+                      clipBottomPx -
+                        clipTopPx
+                    );
+
+                  if (
+                    clipHeightPx <=
+                      0
+                  ) {
+                    continue;
+                  }
+
+                  pdf.saveGraphicsState();
+
+                  pdf.rect(
+                    margin +
+                      (
+                        clipRect.left -
+                        rootLeft
+                      ) *
+                        scale,
+                    margin +
+                      (
+                        clipTopPx -
+                        pageIndex *
+                          pageSlicePx
+                      ) *
+                        scale,
+                    clipRect.width *
+                      scale,
+                    clipHeightPx *
+                      scale,
+                    null as any
+                  );
+
+                  pdf.clip();
+                  pdf.discardPath();
+                }
+
                 pdf.addImage(
                   raster,
                   'PNG',
@@ -3098,6 +3575,12 @@ export async function generateStyledVectorHtmlPDF(
                   undefined,
                   'FAST'
                 );
+
+                if (
+                  clipRect
+                ) {
+                  pdf.restoreGraphicsState();
+                }
 
                 continue;
               }
