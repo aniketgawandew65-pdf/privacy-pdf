@@ -95,15 +95,17 @@ export function PdfToWord({ file, onFileChange }: Props) {
     controller.current = run;
     setBusy(true); setError(null); setReport(null); revokeNow(); setProgress(0); setStatus('Reading PDF…');
 
+    let recoveryEnabled = false;
+
     try {
       await exclusivelyProcess(async () => {
         run.signal.throwIfAborted();
         const check = checkTaskCredit(file);
         if (!check.allowed) throw new Error(check.errorMessage || 'This task is not available on your current plan.');
 
-        let recoveryEnabled = false;
         try {
-          await saveWorkspaceFiles([file]);
+          const sourceSaved = await saveWorkspaceFiles([file]);
+          if (!sourceSaved) throw new Error('Local source recovery storage is unavailable.');
           await preparePdfToWordRecovery(file);
           recoveryEnabled = true;
         } catch (recoveryError) {
@@ -141,6 +143,7 @@ export function PdfToWord({ file, onFileChange }: Props) {
         await discardRecovery();
         setStatus('Conversion cancelled. No task credit used.');
       } else {
+        if (!recoveryEnabled) clearProcessingRecovery();
         setError(cause instanceof Error ? cause.message : 'Unable to convert this PDF.');
       }
     } finally {
