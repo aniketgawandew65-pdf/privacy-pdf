@@ -3888,7 +3888,6 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 );
               }
             }
-          }
 
           /*
            * SECOND-STAGE DETECTION FROM THE SAME OCR WORDS
