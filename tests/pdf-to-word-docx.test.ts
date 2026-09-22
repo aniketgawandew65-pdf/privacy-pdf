@@ -58,6 +58,32 @@ test('a page-edge table retains editable cells and source geometry in its own pa
   assert.doesNotMatch(xml,/documentProtection|<pic:pic/);
 });
 
+
+test('hybrid statement records render as one native editable Word table instead of overlapping frames', async()=>{
+  const xs=[40,90,170,390,470,540], ys=[90,120,165,210,255,300];
+  const spans=[
+    span('S No.',44,106),span('Date',94,106),span('Remarks',174,106),span('Withdrawal',394,106),span('Balance',474,106),
+    ...Array.from({length:4},(_,r)=>{
+      const top=138+r*45;
+      return [
+        span(String(r+1),44,top),span('24.08.202'+r,94,top),
+        span('Merchant '+(r+1),174,top),span('UPI/reference/'+(r+1)+'/long narrative',174,top+11),
+        span(String((r+1)*20)+'.00',404,top),span(String(850-r*20)+'.75',484,top),
+      ];
+    }).flat(),
+  ];
+  const rules=[
+    ...ys.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
+    ...xs.map(x=>({x1:x,x2:x,y1:90,y2:120,width:.75,color:'888888'})),
+  ];
+  const {bytes}=await makeDocx([{number:1,width:595,height:842,spans,rules,pictures:[],warnings:[]}]);
+  const xml=strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
+  assert.equal((xml.match(/<w:tbl>/g)||[]).length,1);
+  assert.equal((xml.match(/<w:framePr/g)||[]).length,0);
+  for(const text of ['Merchant 1','UPI/reference/1/long narrative','20.00','850.75'])
+    assert.equal((xml.match(new RegExp('>'+text.replace(/[.*+?^$()|[\\]\\]/g,'\\test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{')+'<\\/w:t>','g'))||[]).length,1);
+});
+
 test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{
   const diagonal={...span('CONFIDENTIAL & <sample>',-50,400),width:650,size:50,rotation:323,opacity:.16,ink:{x:0,y:-36,width:650,height:36}};
   const {bytes}=await makeDocx([{number:1,width:612,height:792,spans:[diagonal,span('Account 00123 amount 456.78',40,200)],rules:[],pictures:[],warnings:[]}]);
