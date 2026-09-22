@@ -90,6 +90,218 @@ function covers(
   }
   return false;
 }
+
+type HorizontalBand = { y: number; left: number; right: number };
+
+function mergeRanges(ranges: [number, number][], gap = 6): [number, number][] {
+  const sorted = ranges
+    .map(([a, b]) => [Math.min(a, b), Math.max(a, b)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const range of sorted) {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1] + gap) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range] as [number, number]);
+  }
+  return merged;
+}
+
+function horizontalBands(rules: Rule[]): HorizontalBand[] {
+  const hs = rules.filter(horizontal);
+  const ys = clusters(hs.map((r) => r.y1), 1.5);
+  return ys.flatMap((y) => {
+    const merged = mergeRanges(
+      hs
+        .filter((r) => Math.abs(r.y1 - y) <= TOL)
+        .map((r) => [r.x1, r.x2]),
+    );
+    if (!merged.length) return [];
+    const [left, right] = merged.reduce((best, range) =>
+      range[1] - range[0] > best[1] - best[0] ? range : best,
+    );
+    return right - left >= 80 ? [{ y, left, right }] : [];
+  }).sort((a, b) => a.y - b.y);
+}
+
+function bandOverlap(a: HorizontalBand, b: HorizontalBand) {
+  const intersection = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+  return intersection / Math.max(1, Math.min(a.right - a.left, b.right - b.left));
+}
+
+function gridOverlap(a: Grid, b: Grid) {
+  const left = Math.max(a.x, b.x), right = Math.min(a.x + a.width, b.x + b.width);
+  const top = Math.max(a.y, b.y), bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= left || bottom <= top) return 0;
+  return ((right - left) * (bottom - top)) /
+    Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+}
+
+function stableColumnStarts(spans: Span[], ys: number[], left: number, right: number) {
+  const rows = Math.max(1, ys.length - 1);
+  const tolerance = Math.max(3, Math.min(6, Math.max(...spans.map((s) => s.size), 8) * 0.45));
+  const groups: { values: number[]; rows: Set<number> }[] = [];
+  for (const span of spans) {
+    if (span.x < left - TOL || span.x > right + TOL) continue;
+    const row = ys.findIndex((y, i) => i < ys.length - 1 && span.y > y && span.y <= ys[i + 1] + span.size);
+    if (row < 0) continue;
+    let group = groups.find((g) => Math.abs(g.values.reduce((a, b) => a + b, 0) / g.values.length - span.x) <= tolerance);
+    if (!group) {
+      group = { values: [], rows: new Set<number>() };
+      groups.push(group);
+    }
+    group.values.push(span.x);
+    group.rows.add(row);
+  }
+  const minimumRows = Math.max(3, Math.ceil(rows * 0.4));
+  return groups
+    .filter((g) => g.rows.size >= minimumRows)
+    .map((g) => g.values.reduce((a, b) => a + b, 0) / g.values.length)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * High-confidence hybrid tables: repeated horizontal row separators define
+ * records while vertical rules may exist only in the header. This pattern is
+ * common in statements, invoices, ledgers and ERP reports. Existing fully
+ * ruled and simple aligned-table detection remains unchanged; this is an
+ * additive fallback for the structural gap between those two cases.
+ */
+export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
+  spans = spans.filter((s) => !isRotated(s));
+  if (spans.length < 9) return [];
+  const bands = horizontalBands(rules);
+  if (bands.length < 4) return [];
+
+  const runs: HorizontalBand[][] = [];
+  for (const band of bands) {
+    const current = runs.at(-1), previous = current?.at(-1);
+    const gapLimit = Math.max(90, Math.min(160, (band.right - band.left) * 0.28));
+    if (
+      previous &&
+      band.y - previous.y > 2 &&
+      band.y - previous.y <= gapLimit &&
+      bandOverlap(previous, band) >= 0.9 &&
+      Math.abs(previous.left - band.left) <= 10 &&
+      Math.abs(previous.right - band.right) <= 10
+    ) current!.push(band);
+    else runs.push([band]);
+  }
+
+  const verticals = rules.filter(vertical);
+  const tables: Grid[] = [];
+  for (const run of runs) {
+    if (run.length < 4 || run.length > 180) continue;
+    const left = run.reduce((n, b) => n + b.left, 0) / run.length;
+    const right = run.reduce((n, b) => n + b.right, 0) / run.length;
+    const ys = run.map((b) => b.y);
+    const width = right - left, height = ys.at(-1)! - ys[0];
+    if (width < 120 || height < 30) continue;
+
+    const inside = spans.filter((s) =>
+      s.x + s.width >= left - TOL &&
+      s.x <= right + TOL &&
+      s.y >= ys[0] - s.size &&
+      s.y <= ys.at(-1)! + s.size,
+    );
+    if (inside.length < 9) continue;
+
+    const verticalXs = clusters(
+      verticals
+        .filter((v) => {
+          const x = v.x1;
+          const top = Math.min(v.y1, v.y2), bottom = Math.max(v.y1, v.y2);
+          return x >= left - 6 && x <= right + 6 &&
+            bottom >= ys[0] - 4 && top <= ys.at(-1)! + 4 &&
+            bottom - top >= 12;
+        })
+        .map((v) => v.x1),
+      3,
+    );
+
+    let xs = clusters([left, ...verticalXs, right], 3)
+      .filter((x) => x >= left - 6 && x <= right + 6)
+      .sort((a, b) => a - b);
+
+    // Some generators draw no body/header verticals at all. In that case,
+    // repeated text start positions across several rows provide conservative
+    // column anchors. Convert those anchors to whitespace boundaries.
+    if (xs.length < 4) {
+      const starts = stableColumnStarts(inside, ys, left, right);
+      if (starts.length >= 3) {
+        const boundaries = [left];
+        for (let i = 1; i < starts.length; i++)
+          boundaries.push((starts[i - 1] + starts[i]) / 2);
+        boundaries.push(right);
+        xs = clusters(boundaries, 3).sort((a, b) => a - b);
+      }
+    }
+    if (xs.length < 4 || xs.length > 32) continue;
+
+    const rows: Cell[][] = [];
+    for (let r = 0; r < ys.length - 1; r++) {
+      const row: Cell[] = [];
+      for (let c = 0; c < xs.length - 1; c++) {
+        const cell: Cell = {
+          col: c, span: 1, rowSpan: 1,
+          x: xs[c], y: ys[r],
+          width: xs[c + 1] - xs[c], height: ys[r + 1] - ys[r],
+          spans: [],
+          borders: {
+            top: covers(rules, "h", ys[r], xs[c], xs[c + 1]),
+            bottom: covers(rules, "h", ys[r + 1], xs[c], xs[c + 1]),
+            left: covers(rules, "v", xs[c], ys[r], ys[r + 1]),
+            right: covers(rules, "v", xs[c + 1], ys[r], ys[r + 1]),
+          },
+          borderStyles: {},
+        };
+        for (const [side, axis, pos, start, end] of [
+          ["top", "h", cell.y, cell.x, cell.x + cell.width],
+          ["bottom", "h", cell.y + cell.height, cell.x, cell.x + cell.width],
+          ["left", "v", cell.x, cell.y, cell.y + cell.height],
+          ["right", "v", cell.x + cell.width, cell.y, cell.y + cell.height],
+        ] as const) {
+          const edge = rules.filter((rule) => axis === "h"
+            ? horizontal(rule) && Math.abs(rule.y1 - pos) <= TOL &&
+              Math.max(rule.x1, rule.x2) > start && Math.min(rule.x1, rule.x2) < end
+            : vertical(rule) && Math.abs(rule.x1 - pos) <= TOL &&
+              Math.max(rule.y1, rule.y2) > start && Math.min(rule.y1, rule.y2) < end)
+            .sort((a, b) => b.width - a.width)[0];
+          if (edge) cell.borderStyles![side] = { width: edge.width, color: edge.color, artwork: edge.artwork };
+        }
+        row.push(cell);
+      }
+      rows.push(row);
+    }
+
+    const cells = rows.flat();
+    for (const span of inside) {
+      const cx = span.x + Math.min(span.width / 2, 3);
+      const cy = span.y - span.size * 0.35;
+      const cell = cells.find((c) =>
+        cx >= c.x - TOL && cx < c.x + c.width + 0.1 &&
+        cy >= c.y - 1 && cy < c.y + c.height + 1,
+      );
+      if (cell) cell.spans.push(span);
+    }
+
+    const populatedRows = rows.filter((row) => row.filter((c) => c.spans.length).length >= 2);
+    const populatedColumns = new Set(cells.filter((c) => c.spans.length).map((c) => c.col));
+    if (
+      populatedRows.length < Math.max(3, Math.ceil(rows.length * 0.5)) ||
+      populatedColumns.size < 3
+    ) continue;
+
+    tables.push({
+      x: xs[0], y: ys[0],
+      width: xs.at(-1)! - xs[0], height,
+      xs, ys, rows,
+      inferred: true,
+      hybrid: true,
+    });
+  }
+  return tables;
+}
+
 /** Infer grids from intersecting vector rules; no labels, templates or file names. */
 export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
   spans = spans.filter((s) => !isRotated(s));
@@ -253,7 +465,11 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
       tables.push({ x, y, width, height, xs, ys, rows });
   }
   const occupied = new Set(tables.flatMap((t) => t.rows.flatMap((r) => r.flatMap((c) => c.spans))));
-  tables.push(...inferAlignedTables(spans.filter((s) => !occupied.has(s))));
+  const hybrid = inferHybridRuledTables(rules, spans.filter((s) => !occupied.has(s)))
+    .filter((candidate) => !tables.some((existing) => gridOverlap(candidate, existing) > 0.55));
+  tables.push(...hybrid);
+  const occupiedAfterHybrid = new Set(tables.flatMap((t) => t.rows.flatMap((r) => r.flatMap((c) => c.spans))));
+  tables.push(...inferAlignedTables(spans.filter((s) => !occupiedAfterHybrid.has(s))));
   return tables.sort((a, b) => a.y - b.y || a.x - b.x);
 }
 
