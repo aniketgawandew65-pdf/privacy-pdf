@@ -40,7 +40,7 @@ test('aligned unruled data becomes a table but two-column prose does not',()=>{
 });
 
 test('partially ruled multi-line records become one editable hybrid table',()=>{
- const xs=[40,90,170,390,470,540], ys=[90,120,165,210,255,300];
+ const xs=[40,90,170,390,470,540], tableYs=[90,120,165,210,255,300], footerYs=[390,410];
  const spans=[
   s('S No.',44,106),s('Date',94,106),s('Remarks',174,106),s('Withdrawal',394,106),s('Balance',474,106),
   ...Array.from({length:4},(_,r)=>{
@@ -51,15 +51,21 @@ test('partially ruled multi-line records become one editable hybrid table',()=>{
     s(String((r+1)*20)+'.00',404,top),s(String(850-r*20)+'.75',484,top),
    ];
   }).flat(),
+  s('www.example.test',220,355),s('Call 1800-000',350,355),
+  {...s('Never share passwords with anyone',60,404),width:430},
  ];
+ const allYs=[...tableYs,...footerYs];
  const rules=[
-  ...ys.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
+  ...allYs.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
   ...xs.map(x=>({x1:x,x2:x,y1:90,y2:120,width:.75,color:'888888'})),
  ];
  const grids=detectTables(rules,spans);
  assert.equal(grids.length,1);
  assert.equal(grids[0].hybrid,true);
  assert.equal(grids[0].rows.length,5);
+ assert.equal(grids[0].ys.at(-1),300);
+ const captured=grids[0].rows.flat().flatMap(c=>c.spans.map(x=>x.text));
+ assert.equal(captured.some(text=>text.includes('www.example.test')||text.includes('Never share passwords')),false);
  assert.equal(grids[0].rows[1][2].spans.map(x=>x.text).join('|'),'Merchant 1|UPI/reference/1/long narrative');
  assert.equal(grids[0].rows[1][3].spans[0].text,'20.00');
  assert.equal(grids[0].rows[1][4].spans[0].text,'850.75');
