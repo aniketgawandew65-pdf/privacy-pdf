@@ -17,6 +17,7 @@ import {
 } from '../utils/mobileOcrEngine';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getLicenseStatus } from "../utils/license";
+import { isMobileSafetyEnvironment } from "../utils/deviceCapability";
 import {
   useDesktopCapacityRecommendation,
 } from "../hooks/useDesktopCapacityRecommendation";
@@ -45,6 +46,7 @@ import {
   pdfjsLib,
 } from "../utils/pdfjs";
 import {
+  redactPDF,
   type PageRedaction,
 } from "../utils/pdfEngine";
 import {
@@ -339,7 +341,7 @@ const DETECTORS: Detector[] = [
      */
     category: "Address",
     regex:
-      /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|permanent\s+address|present\s+address|residential\s+address|rented\s+property\s+address|owner\s+address|tenant(?:'s)?\s+address|licensor\s+address|licensee\s+address|residing\s+at|residence|address)(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]?\s*([^\r\n]{5,180}?)(?=\s+(?:(?:owner|tenant|licensor|licensee)\s+)?(?:mobile|phone|email|e-mail|pan|occupation|city|state|pin(?:code)?|age|gender)\b|$)/gi,
+      /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|permanent\s+address|present\s+address|residential\s+address|rented\s+property\s+address|owner\s+address|tenant(?:'s)?\s+address|licensor\s+address|licensee\s+address|residing\s+at|residence|address)(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]?\s*([^\r\n]{5,180}?)(?=\s+(?:(?:owner|tenant|licensor|licensee)\s+)?(?:mobile|phone|email|e-mail|pan|occupation|age|gender)\b|\s+(?:city|state|pin(?:code)?)\s*[:=-]|$)/gi,
     captureGroup: 1,
   },
   {
@@ -374,7 +376,7 @@ const DETECTORS: Detector[] = [
      */
     category: "India UIDAI Reference",
     regex:
-      /\b(?:uidai|uid|aadhaar(?:\s*\/\s*|\s+)ref(?:erence)?|aadhar(?:\s*\/\s*|\s+)ref(?:erence)?)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{12,24})\b/gi,
+      /\b(?:(?:uidai|uid)(?:\s+(?:ref(?:erence)?|number|no\.?|#))?|(?:aadhaar|aadhar)(?:\s*\/\s*|\s+)ref(?:erence)?)(?:\s+(?:number|no\.?|#))?\s*[:=-]?\s*(\d{12,24})\b/gi,
     captureGroup: 1,
   },
   {
@@ -441,17 +443,18 @@ const DETECTORS: Detector[] = [
   {
     category: "Phone",
     regex:
-      /(?<!\w)(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]\d{3,4}(?!\w)/g,
+      /(?<!\w)\+\d[\d\s().-]{5,}\d(?!\w)/g,
     validate: validPhone,
   },
   {
     /*
-     * Indian form fields often store mobile numbers as one
-     * continuous 10-digit value.
+     * Labelled phone fields may use spaces, dashes, dots or
+     * parentheses. Keep the label as the precision signal and
+     * validate the normalized digit count separately.
      */
     category: "Phone",
     regex:
-      /\b(?:mobile|mob(?:ile)?\s+no\.?|phone|contact(?:\s+no\.?)?)\s*[:=-]?\s*((?:\+?91[\s.-]?)?[6-9]\d{9})\b/gi,
+      /\b(?:mobile(?:\s+(?:number|no\.?|#))?|mob(?:ile)?(?:\s+(?:number|no\.?|#))?|phone(?:\s+(?:number|no\.?|#))?|contact(?:\s+(?:number|no\.?|#))?)\s*[:=-]?\s*(\+?\d[\d\s().-]{5,}\d)\b/gi,
     captureGroup: 1,
     validate: validPhone,
   },
@@ -500,6 +503,7 @@ const DETECTORS: Detector[] = [
     regex:
       /\b(?:password|passwd|pwd|secret|api[_ -]?key|access[_ -]?token|auth[_ -]?token)\s*[:=]\s*["']?([^\s"'`,;]{6,})["']?/gi,
     captureGroup: 1,
+    validate: (value) => /[A-Za-z0-9]/.test(value),
   },
 ];
 
@@ -1337,6 +1341,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       y: number;
       width: number;
       height: number;
+      baselineX: number;
+      baselineY: number;
+      advanceX: number;
+      advanceY: number;
+      topOffsetX: number;
+      topOffsetY: number;
     };
 
     const groupIntoLines = (input: PositionedSpan[]) => {
@@ -1463,12 +1473,50 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
           const endRatio =
             (overlapEnd - span.start) / textLength;
 
+          const startBaseX =
+            span.baselineX +
+            span.advanceX * startRatio;
+
+          const startBaseY =
+            span.baselineY +
+            span.advanceY * startRatio;
+
+          const endBaseX =
+            span.baselineX +
+            span.advanceX * endRatio;
+
+          const endBaseY =
+            span.baselineY +
+            span.advanceY * endRatio;
+
+          const corners = [
+            [startBaseX, startBaseY],
+            [endBaseX, endBaseY],
+            [
+              startBaseX + span.topOffsetX,
+              startBaseY + span.topOffsetY,
+            ],
+            [
+              endBaseX + span.topOffsetX,
+              endBaseY + span.topOffsetY,
+            ],
+          ];
+
+          const xs = corners.map((point) => point[0]);
+          const ys = corners.map((point) => point[1]);
+
           segments.push({
-            x0: span.x + span.width * startRatio,
-            x1: span.x + span.width * endRatio,
-            y0: span.y,
-            y1: span.y + span.height,
-            height: span.height,
+            x0: Math.min(...xs),
+            x1: Math.max(...xs),
+            y0: Math.min(...ys),
+            y1: Math.max(...ys),
+            height: Math.max(
+              span.height,
+              Math.hypot(
+                span.topOffsetX,
+                span.topOffsetY
+              )
+            ),
           });
         }
 
@@ -2091,12 +2139,15 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             rawItem.transform
           );
 
-          const fontHeight = Math.max(
-            7,
+          const verticalMagnitude =
             Math.hypot(
               transformed[2],
               transformed[3]
-            )
+            );
+
+          const fontHeight = Math.max(
+            7,
+            verticalMagnitude
           );
 
           const width = Math.max(
@@ -2107,12 +2158,104 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             ) * viewport.scale
           );
 
+          const horizontalMagnitude =
+            Math.hypot(
+              transformed[0],
+              transformed[1]
+            );
+
+          const advanceX =
+            horizontalMagnitude > 0
+              ? (
+                  transformed[0] /
+                  horizontalMagnitude
+                ) * width
+              : width;
+
+          const advanceY =
+            horizontalMagnitude > 0
+              ? (
+                  transformed[1] /
+                  horizontalMagnitude
+                ) * width
+              : 0;
+
+          const topScale =
+            verticalMagnitude > 0
+              ? fontHeight /
+                verticalMagnitude
+              : 0;
+
+          const topOffsetX =
+            transformed[2] *
+            topScale;
+
+          const topOffsetY =
+            transformed[3] *
+            topScale;
+
+          const baselineX =
+            transformed[4];
+
+          const baselineY =
+            transformed[5];
+
+          const corners = [
+            [baselineX, baselineY],
+            [
+              baselineX + advanceX,
+              baselineY + advanceY,
+            ],
+            [
+              baselineX + topOffsetX,
+              baselineY + topOffsetY,
+            ],
+            [
+              baselineX + advanceX + topOffsetX,
+              baselineY + advanceY + topOffsetY,
+            ],
+          ];
+
+          const xs =
+            corners.map(
+              (point) => point[0]
+            );
+
+          const ys =
+            corners.map(
+              (point) => point[1]
+            );
+
+          const left =
+            Math.min(...xs);
+
+          const top =
+            Math.min(...ys);
+
+          const right =
+            Math.max(...xs);
+
+          const bottom =
+            Math.max(...ys);
+
           digitalSpans.push({
             text: rawItem.str,
-            x: transformed[4],
-            y: transformed[5] - fontHeight,
-            width,
-            height: fontHeight,
+            x: left,
+            y: top,
+            width: Math.max(
+              2,
+              right - left
+            ),
+            height: Math.max(
+              2,
+              bottom - top
+            ),
+            baselineX,
+            baselineY,
+            advanceX,
+            advanceY,
+            topOffsetX,
+            topOffsetY,
           });
         }
 
@@ -3976,19 +4119,65 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
       "Creating secure redacted pages…"
     );
 
-    const workingPdf =
-      await redactPDFToFile(
-        file,
-        buildPayload(),
-        (
-          current,
-          total
-        ) => {
-          setStatus(
-            `Securely redacting page ${current} of ${total}…`
-          );
-        }
-      );
+    const payload =
+      buildPayload();
+
+    const onRedactionProgress =
+      (
+        current: number,
+        total: number
+      ) => {
+        setStatus(
+          `Securely redacting page ${current} of ${total}…`
+        );
+      };
+
+    let workingPdf: File;
+
+    if (
+      !isMobileSafetyEnvironment()
+    ) {
+      /*
+       * Desktop uses the existing hybrid secure redactor:
+       * only affected pages are flattened; untouched pages
+       * remain vector/selectable. Mobile keeps the existing
+       * bounded-memory streaming path unchanged.
+       */
+      const bytes =
+        await redactPDF(
+          file,
+          payload,
+          onRedactionProgress
+        );
+
+      const baseName =
+        file.name.replace(
+          /\.pdf$/i,
+          ""
+        ) || "document";
+
+      workingPdf =
+        new File(
+          [
+            bytes as unknown as
+              BlobPart,
+          ],
+          `${baseName}-redacted.pdf`,
+          {
+            type:
+              "application/pdf",
+            lastModified:
+              Date.now(),
+          }
+        );
+    } else {
+      workingPdf =
+        await redactPDFToFile(
+          file,
+          payload,
+          onRedactionProgress
+        );
+    }
 
     await new Promise<void>(
       (
