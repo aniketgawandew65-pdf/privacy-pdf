@@ -1,6 +1,6 @@
 // Concrete capabilities, not unverified claims of competitor exclusivity.
 export const TOOL_COPY: Record<string, string> = {
-  '/compress-pdf': 'Choose your target KB. Precision compression, with no PDF upload.',
+  '/compress-pdf': 'Compress to a target KB size or reduce file size without uploading your PDF.',
   '/compress-pdf-to-50kb': 'Aim for a 50KB PDF target for strict upload limits, then reopen the result and check small text, signatures and stamps.',
   '/compress-pdf-to-100kb': 'Aim for a 100KB PDF target for forms and application portals, with compression running locally in your browser.',
   '/compress-pdf-to-200kb': 'Aim for a 200KB PDF target while giving document text and scanned details more room than smaller limits.',
