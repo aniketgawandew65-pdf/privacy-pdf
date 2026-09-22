@@ -5,17 +5,19 @@ export interface Guide {
 }
 export const TOOL_GUIDES: Record<string, Guide> = {
   '/compress-pdf': {
-    title: 'How to compress a PDF to a target size',
-    intro: 'Choose a KB target for an upload limit, or use Standard compression when keeping detail matters more than an exact size. Your PDF is processed on your device.',
-    steps: ['Choose your PDF above and select Target Size.', 'Set the target in KB. Check the clarity warning, especially for documents with many scanned pages.', 'Compress, download, and reopen the result. Check small text, signatures and stamps before submitting it.'],
-    example: 'A 50 KB limit shared across nine pages leaves about 5.6 KB per page before PDF overhead. That is a very small image budget. A one-page form and a nine-page scan can look very different at the same target.',
+    title: 'Compress a PDF to an exact KB size without uploading it',
+    intro: 'Reduce PDF file size directly in your browser. Enter a target in KB when a form, email or upload portal has a strict limit, or use Standard compression when you simply need a smaller PDF. The document stays on your device during processing.',
+    steps: ['Choose your PDF and select Target Size when you need a specific KB limit, or Standard when you only need a smaller file.', 'Enter the target size in KB and review the clarity warning, especially for long or scanned documents.', 'Compress, download and reopen the result. Check small text, numbers, signatures and stamps before submitting it.'],
+    example: 'If an application portal accepts a PDF up to 200 KB, you can enter that target instead of guessing between vague compression levels. A short digital document usually has more quality headroom than a long image-heavy scan at the same target.',
     questions: [
-      ['Will the result match the KB I choose?', 'Target mode reduces image quality and resolution until the result fits, then pads a smaller result to the selected byte size. This tool uses 1 KB = 1,024 bytes. A valid multi-page PDF still has a minimum size; not every document can fit every target.'],
-      ['Why does the compressed PDF look blurry?', 'Very small targets require fewer pixels and stronger JPEG compression. Try a larger allowed size, remove unnecessary pages first, or split the document if the receiving site allows it.'],
+      ['Can I compress a PDF to an exact KB size?', 'Target Size mode works toward the KB value you enter by adjusting image resolution and quality, and can pad a smaller result to the selected byte size. Every valid PDF has structural overhead, so not every document can fit every very small target.'],
+      ['Is my PDF uploaded while it is compressed?', 'No normal document-processing upload is required. Compression runs locally in your browser, so the PDF stays on your device while the tool works.'],
+      ['Do I need to sign up to compress a PDF?', 'No signup is required to start a supported compression task. Your normal task allowance still applies.'],
+      ['Why does the compressed PDF look blurry?', 'Very small targets require fewer pixels and stronger JPEG compression. Use the largest size your destination permits, or remove unnecessary pages first when readability suffers.'],
       ['Will text remain selectable?', 'This compressor renders pages as images. Selectable text, interactive form fields and existing digital-signature validation may not survive. Keep the original file.'],
-      ['What if the upload portal still rejects it?', 'Some portals use 1 KB = 1,000 bytes, while this tool uses 1,024. Choose a lower available target for some headroom and check the portal’s file-type and page-count rules too.']
+      ['What if the upload portal still rejects it?', 'Some portals use 1 KB = 1,000 bytes, while this tool uses 1,024. Choose a slightly lower target for headroom and check the portal’s file-type and page-count rules too.']
     ],
-    related: [['/compress-pdf-to-50kb','Start with a 50 KB target'], ['/compress-pdf-to-100kb','Start with a 100 KB target'], ['/remove-pages','Remove unnecessary pages'], ['/split-pdf','Split a large document'], ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']]
+    related: [['/compress-pdf-to-50kb','Compress PDF to 50 KB'], ['/compress-pdf-to-100kb','Compress PDF to 100 KB'], ['/compress-pdf-to-200kb','Compress PDF to 200 KB'], ['/compress-pdf-to-500kb','Compress PDF to 500 KB'], ['/blog/reduce-pdf-for-upload-limit','Read the PDF upload-limit guide']]
   },
   '/pdf-to-word': {
     title: 'Convert PDF to Word without uploading your file',
@@ -586,7 +588,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['What if 50 KB is too small for my document?', 'Remove unnecessary pages, split the PDF if permitted, or use a larger accepted limit such as 100 KB or 200 KB.']
     ],
     related: [
-      ['/compress-pdf','Choose a custom PDF target'],
+      ['/compress-pdf','Compress PDF to another exact size'],
       ['/compress-pdf-to-100kb','Try a 100 KB target'],
       ['/compress-pdf-to-200kb','Try a 200 KB target'],
       ['/remove-pages','Remove unnecessary pages'],
@@ -616,7 +618,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/compress-pdf-to-50kb','Use a stricter 50 KB target'],
       ['/compress-pdf-to-200kb','Try a 200 KB target'],
       ['/compress-pdf-to-500kb','Try a 500 KB target'],
-      ['/compress-pdf','Choose a custom PDF target'],
+      ['/compress-pdf','Compress PDF to another exact size'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
   },
@@ -643,7 +645,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/compress-pdf-to-100kb','Use a 100 KB target'],
       ['/compress-pdf-to-500kb','Use a 500 KB target'],
       ['/remove-pages','Remove pages before compression'],
-      ['/compress-pdf','Choose a custom PDF size']
+      ['/compress-pdf','Compress PDF to another exact size']
     ]
   },
 
@@ -667,7 +669,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/compress-pdf-to-100kb','Use a smaller 100 KB target'],
       ['/compress-pdf-to-200kb','Use a smaller 200 KB target'],
-      ['/compress-pdf','Choose another PDF target size'],
+      ['/compress-pdf','Compress PDF to another exact size'],
       ['/crop-pdf','Crop unnecessary margins'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
