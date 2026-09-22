@@ -206,18 +206,19 @@ function trimHybridTail(ys: number[], xs: number[], spans: Span[]) {
     .map((row) => row.height);
   const typical = median(denseHeights) || median(stats.map((row) => row.height)) || 1;
 
-  let keep = stats.length;
-  while (keep > 3) {
-    const row = stats[keep - 1];
+  const tableLike = (row: (typeof stats)[number]) => {
     const normalHeight = row.height <= typical * 1.55 + 2;
-    const tableLike =
+    return (
       row.columns.size >= 4 ||
       (row.columns.size >= 3 && (row.edge || row.height <= typical * 1.35 + 2)) ||
-      (row.columns.size >= 2 && row.edge && normalHeight);
-    if (tableLike) break;
-    keep -= 1;
-  }
-  return keep === stats.length ? ys : ys.slice(0, keep + 1);
+      (row.columns.size >= 2 && row.edge && normalHeight)
+    );
+  };
+
+  let start = 0, end = stats.length;
+  while (end - start > 3 && !tableLike(stats[start])) start += 1;
+  while (end - start > 3 && !tableLike(stats[end - 1])) end -= 1;
+  return start === 0 && end === stats.length ? ys : ys.slice(start, end + 1);
 }
 
 function fitsHybridCell(span: Span, cell: Cell) {
