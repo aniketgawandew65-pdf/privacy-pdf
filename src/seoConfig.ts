@@ -25,10 +25,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/compress-pdf': {
     path: '/compress-pdf',
-    title: 'Compress PDF Online to Exact Size — Private & Local | 1into1',
-    description: 'Compress PDF online to a chosen KB target or reduce file size with standard compression. Your document is processed locally in your browser.',
-    heading: 'Compress PDF Online to Exact File Size',
-    subheading: 'Reduce PDF size or choose a specific KB target without uploading your document for processing.',
+    title: 'Compress PDF to Exact Size Without Uploading | 1into1',
+    description: 'Compress a PDF to a chosen KB target or reduce its file size directly in your browser. No PDF upload or signup required for local compression.',
+    heading: 'Compress PDF to Exact Size Without Uploading',
+    subheading: 'Choose a target size in KB or use standard compression. Your PDF stays on your device while the browser does the work.',
   },
   '/merge-pdf': {
     path: '/merge-pdf',
