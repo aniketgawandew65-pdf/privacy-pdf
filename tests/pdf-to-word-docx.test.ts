@@ -59,8 +59,8 @@ test('a page-edge table retains editable cells and source geometry in its own pa
 });
 
 
-test('hybrid statement records render as one native editable Word table instead of overlapping frames', async()=>{
-  const xs=[40,90,170,390,470,540], ys=[90,120,165,210,255,300];
+test('hybrid statement records stop before footer regions and remain editable', async()=>{
+  const xs=[40,90,170,390,470,540], tableYs=[90,120,165,210,255,300], footerYs=[390,410];
   const spans=[
     span('S No.',44,106),span('Date',94,106),span('Remarks',174,106),span('Withdrawal',394,106),span('Balance',474,106),
     ...Array.from({length:4},(_,r)=>{
@@ -71,17 +71,28 @@ test('hybrid statement records render as one native editable Word table instead 
         span(String((r+1)*20)+'.00',404,top),span(String(850-r*20)+'.75',484,top),
       ];
     }).flat(),
+    span('www.example.test',220,355),span('Call 1800-000',350,355),
+    {...span('Never share passwords with anyone',60,404),width:430},
   ];
+  const allYs=[...tableYs,...footerYs];
   const rules=[
-    ...ys.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
+    ...allYs.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
     ...xs.map(x=>({x1:x,x2:x,y1:90,y2:120,width:.75,color:'888888'})),
   ];
   const {bytes}=await makeDocx([{number:1,width:595,height:842,spans,rules,pictures:[],warnings:[]}]);
   const xml=strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
   assert.equal((xml.match(/<w:tbl>/g)||[]).length,1);
-  assert.equal((xml.match(/<w:framePr/g)||[]).length,0);
-  for(const text of ['Merchant 1','UPI/reference/1/long narrative','20.00','850.75'])
-    assert.equal((xml.match(new RegExp('>'+text.replace(/[.*+?^$()|[\\]\\]/g,'\\test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{')+'<\\/w:t>','g'))||[]).length,1);
+  assert.match(xml,/>Merchant 1<\/w:t>/);
+  assert.match(xml,/>UPI\/reference\/1\/long narrative<\/w:t>/);
+  assert.match(xml,/>20\.00<\/w:t>/);
+  assert.match(xml,/>850\.75<\/w:t>/);
+  assert.match(xml,/>www\.example\.test<\/w:t>/);
+  assert.match(xml,/>Never share passwords with anyone<\/w:t>/);
+  const tableXml=xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/)?.[0] || '';
+  assert.doesNotMatch(tableXml,/www\.example\.test|Never share passwords/);
+});
+
+test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{')+'<\\/w:t>','g'))||[]).length,1);
 });
 
 test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{
