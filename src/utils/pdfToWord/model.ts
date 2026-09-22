@@ -78,6 +78,8 @@ export interface Grid {
   ys: number[];
   rows: Cell[][];
   inferred?: boolean;
+  /** High-confidence table reconstructed from repeated row separators plus partial column rules/alignment. */
+  hybrid?: boolean;
 }
 export interface PageSummary {
   page: number;
