@@ -372,9 +372,16 @@ export const buildWatermarkStampPdf =
 
 
     for (
-      const size of
-      pageSizes
+      let pageIndex = 0;
+      pageIndex <
+        pageSizes.length;
+      pageIndex++
     ) {
+      const size =
+        pageSizes[
+          pageIndex
+        ];
+
       const width =
         Math.max(
           1,
@@ -534,6 +541,34 @@ export const buildWatermarkStampPdf =
           height,
         }
       );
+
+
+      /*
+       * Creating hundreds/thousands of tiny overlay pages is
+       * CPU work on the UI thread even though the original PDF
+       * itself stays in the qpdf Worker.
+       *
+       * Give the browser regular event-loop opportunities so a
+       * large stamp document never makes the tab appear hung.
+       */
+      if (
+        (
+          pageIndex +
+          1
+        ) %
+          8 ===
+        0
+      ) {
+        await new Promise<void>(
+          (
+            resolve
+          ) =>
+            setTimeout(
+              resolve,
+              0
+            )
+        );
+      }
     }
 
 
