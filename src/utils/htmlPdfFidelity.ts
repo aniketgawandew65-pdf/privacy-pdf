@@ -825,6 +825,364 @@ export const rasterizeImageSource = async (
   }
 };
 
+
+export type RasterizedBoxShadow = {
+  dataUrl: string;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+};
+
+export const rasterizeBoxShadow = (
+  boxShadow: string,
+  width: number,
+  height: number,
+  borderRadius: number
+): RasterizedBoxShadow | null => {
+  const value =
+    String(
+      boxShadow ||
+      ''
+    ).trim();
+
+  if (
+    !value ||
+    value === 'none' ||
+    value.includes(
+      'inset'
+    )
+  ) {
+    return null;
+  }
+
+  const first =
+    value
+      .split(/,(?![^(]*\))/)
+      [0]
+      ?.trim() ||
+    '';
+
+  const colorMatch =
+    first.match(
+      /(rgba?\([^)]+\)|#[0-9a-f]{3,8})/i
+    );
+
+  if (
+    !colorMatch
+  ) {
+    return null;
+  }
+
+  const color =
+    parseCssColor(
+      colorMatch[1]
+    );
+
+  if (
+    !color ||
+    color.a <=
+      0.001
+  ) {
+    return null;
+  }
+
+  const numericPart =
+    first
+      .replace(
+        colorMatch[0],
+        ' '
+      )
+      .trim();
+
+  const lengths =
+    numericPart
+      .match(
+        /-?\d+(?:\.\d+)?px/g
+      )
+      ?.map(
+        (
+          token
+        ) =>
+          Number(
+            token.replace(
+              /px$/i,
+              ''
+            )
+          )
+      ) ||
+    [];
+
+  if (
+    lengths.length <
+      2
+  ) {
+    return null;
+  }
+
+  const offsetX =
+    lengths[0] ||
+    0;
+
+  const offsetY =
+    lengths[1] ||
+    0;
+
+  const blur =
+    Math.max(
+      0,
+      lengths[2] ||
+      0
+    );
+
+  const spread =
+    lengths[3] ||
+    0;
+
+  const padX =
+    Math.ceil(
+      blur *
+        2 +
+      Math.abs(
+        offsetX
+      ) +
+      Math.max(
+        0,
+        spread
+      ) +
+      4
+    );
+
+  const padY =
+    Math.ceil(
+      blur *
+        2 +
+      Math.abs(
+        offsetY
+      ) +
+      Math.max(
+        0,
+        spread
+      ) +
+      4
+    );
+
+  const cssWidth =
+    Math.max(
+      1,
+      width +
+      padX *
+        2
+    );
+
+  const cssHeight =
+    Math.max(
+      1,
+      height +
+      padY *
+        2
+    );
+
+  const pixelRatio =
+    Math.min(
+      2,
+      Math.max(
+        1,
+        window.devicePixelRatio ||
+          1
+      )
+    );
+
+  const canvas =
+    document.createElement(
+      'canvas'
+    );
+
+  canvas.width =
+    Math.max(
+      1,
+      Math.min(
+        4096,
+        Math.ceil(
+          cssWidth *
+          pixelRatio
+        )
+      )
+    );
+
+  canvas.height =
+    Math.max(
+      1,
+      Math.min(
+        4096,
+        Math.ceil(
+          cssHeight *
+          pixelRatio
+        )
+      )
+    );
+
+  const context =
+    canvas.getContext(
+      '2d'
+    );
+
+  if (
+    !context
+  ) {
+    return null;
+  }
+
+  context.scale(
+    pixelRatio,
+    pixelRatio
+  );
+
+  const x =
+    padX +
+    spread;
+
+  const y =
+    padY +
+    spread;
+
+  const w =
+    Math.max(
+      1,
+      width -
+      spread *
+        2
+    );
+
+  const h =
+    Math.max(
+      1,
+      height -
+      spread *
+        2
+    );
+
+  const radius =
+    Math.max(
+      0,
+      Math.min(
+        borderRadius,
+        w /
+          2,
+        h /
+          2
+      )
+    );
+
+  const paintShape =
+    () => {
+      context.beginPath();
+
+      if (
+        radius >
+          0 &&
+        'roundRect' in
+          context
+      ) {
+        (
+          context as
+            CanvasRenderingContext2D & {
+              roundRect:
+                (
+                  x: number,
+                  y: number,
+                  w: number,
+                  h: number,
+                  radii:
+                    number
+                ) =>
+                  void;
+            }
+        ).roundRect(
+          x,
+          y,
+          w,
+          h,
+          radius
+        );
+      } else {
+        context.rect(
+          x,
+          y,
+          w,
+          h
+        );
+      }
+    };
+
+  context.shadowColor =
+    'rgba(' +
+    String(
+      color.r
+    ) +
+    ', ' +
+    String(
+      color.g
+    ) +
+    ', ' +
+    String(
+      color.b
+    ) +
+    ', ' +
+    String(
+      color.a
+    ) +
+    ')';
+
+  context.shadowBlur =
+    blur;
+
+  context.shadowOffsetX =
+    offsetX;
+
+  context.shadowOffsetY =
+    offsetY;
+
+  context.fillStyle =
+    'rgba(0,0,0,1)';
+
+  paintShape();
+  context.fill();
+
+  context.save();
+  context.globalCompositeOperation =
+    'destination-out';
+  context.shadowColor =
+    'rgba(0,0,0,0)';
+  context.shadowBlur =
+    0;
+  context.shadowOffsetX =
+    0;
+  context.shadowOffsetY =
+    0;
+
+  paintShape();
+  context.fillStyle =
+    'rgba(0,0,0,1)';
+  context.fill();
+  context.restore();
+
+  return {
+    dataUrl:
+      canvas.toDataURL(
+        'image/png'
+      ),
+    offsetX:
+      padX,
+    offsetY:
+      padY,
+    width:
+      cssWidth,
+    height:
+      cssHeight,
+  };
+};
+
 export const rasterizeTextLine = (
   text: string,
   style: CSSStyleDeclaration,
@@ -1070,46 +1428,190 @@ export const rasterizeTextLine = (
             values[0]
           );
 
-        context.save();
+        const measuredWidth =
+          Math.max(
+            1,
+            context.measureText(
+              output
+            ).width +
+              4
+          );
 
-        context.translate(
-          availableWidth / 2,
-          height / 2
-        );
-
-        context.rotate(
-          angle
-        );
-
-        context.textAlign =
-          style.direction ===
-            'rtl'
-            ? 'right'
-            : 'left';
-
-        context.fillText(
-          output,
-          style.direction ===
-            'rtl'
-            ? availableWidth /
-              2 -
-              1
-            : -availableWidth /
-              2 +
-              1,
-          Math.min(
-            height *
-              0.32,
+        const sourceHeight =
+          Math.max(
             fontSize *
-              0.35
-          )
-        );
+              1.45,
+            height
+          );
 
-        context.restore();
+        const sourceCanvas =
+          document.createElement(
+            'canvas'
+          );
 
-        return canvas.toDataURL(
-          'image/png'
-        );
+        sourceCanvas.width =
+          Math.max(
+            1,
+            Math.ceil(
+              measuredWidth *
+              pixelRatio
+            )
+          );
+
+        sourceCanvas.height =
+          Math.max(
+            1,
+            Math.ceil(
+              sourceHeight *
+              pixelRatio
+            )
+          );
+
+        const sourceContext =
+          sourceCanvas.getContext(
+            '2d'
+          );
+
+        if (
+          sourceContext
+        ) {
+          sourceContext.scale(
+            pixelRatio,
+            pixelRatio
+          );
+
+          sourceContext.font =
+            context.font;
+
+          sourceContext.textBaseline =
+            'alphabetic';
+
+          sourceContext.direction =
+            style.direction ===
+              'rtl'
+              ? 'rtl'
+              : 'ltr';
+
+          sourceContext.textAlign =
+            style.direction ===
+              'rtl'
+              ? 'right'
+              : 'left';
+
+          sourceContext.fillStyle =
+            context.fillStyle;
+
+          sourceContext.fillText(
+            output,
+            style.direction ===
+              'rtl'
+              ? measuredWidth -
+                2
+              : 2,
+            Math.min(
+              sourceHeight -
+                2,
+              fontSize *
+                1.08
+            )
+          );
+
+          const cos =
+            Math.abs(
+              Math.cos(
+                angle
+              )
+            );
+
+          const sin =
+            Math.abs(
+              Math.sin(
+                angle
+              )
+            );
+
+          const rotatedWidth =
+            Math.max(
+              1,
+              measuredWidth *
+                cos +
+              sourceHeight *
+                sin +
+              6
+            );
+
+          const rotatedHeight =
+            Math.max(
+              1,
+              measuredWidth *
+                sin +
+              sourceHeight *
+                cos +
+              6
+            );
+
+          const rotatedCanvas =
+            document.createElement(
+              'canvas'
+            );
+
+          rotatedCanvas.width =
+            Math.max(
+              1,
+              Math.ceil(
+                rotatedWidth *
+                pixelRatio
+              )
+            );
+
+          rotatedCanvas.height =
+            Math.max(
+              1,
+              Math.ceil(
+                rotatedHeight *
+                pixelRatio
+              )
+            );
+
+          const rotatedContext =
+            rotatedCanvas.getContext(
+              '2d'
+            );
+
+          if (
+            rotatedContext
+          ) {
+            rotatedContext.scale(
+              pixelRatio,
+              pixelRatio
+            );
+
+            rotatedContext.translate(
+              rotatedWidth /
+                2,
+              rotatedHeight /
+                2
+            );
+
+            rotatedContext.rotate(
+              angle
+            );
+
+            rotatedContext.drawImage(
+              sourceCanvas,
+              -measuredWidth /
+                2,
+              -sourceHeight /
+                2,
+              measuredWidth,
+              sourceHeight
+            );
+
+            return rotatedCanvas.toDataURL(
+              'image/png'
+            );
+          }
+        }
       }
     }
   }
