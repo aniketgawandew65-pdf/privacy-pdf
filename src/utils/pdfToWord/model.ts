@@ -13,6 +13,9 @@ export interface Span {
   underline?: boolean;
   fontClass?: FontClass;
   outputFont?: string;
+  /** Source face weight (100-900). Word has no numeric run-weight property,
+   * so 500/600 faces are preserved as non-synthetic-bold fallback text. */
+  fontWeight?: number;
   scale?: number;
   ascent?: number;
   descent?: number;
