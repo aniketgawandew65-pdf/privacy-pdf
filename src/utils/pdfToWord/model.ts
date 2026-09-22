@@ -1,3 +1,4 @@
+export type FontClass = "serif" | "sans-serif" | "monospace" | "symbolic";
 /** Geometry uses the PDF.js viewport: points, top-left origin; Span.y is a baseline. */
 export interface Span {
   text: string;
@@ -10,7 +11,16 @@ export interface Span {
   italic: boolean;
   color: string;
   underline?: boolean;
+  fontClass?: FontClass;
+  outputFont?: string;
+  scale?: number;
+  ascent?: number;
+  descent?: number;
+  rotation?: number;
+  direction?: "ltr" | "rtl";
+  sourceOrder?: number;
 }
+export interface BorderAppearance { width: number; color: string; artwork?: boolean }
 export interface Rule {
   x1: number;
   y1: number;
@@ -18,6 +28,7 @@ export interface Rule {
   y2: number;
   width: number;
   color: string;
+  artwork?: boolean;
 }
 export interface Picture {
   x: number;
@@ -52,6 +63,7 @@ export interface Cell {
   width: number;
   height: number;
   spans: Span[];
+  borderStyles?: Partial<Record<"top" | "bottom" | "left" | "right", BorderAppearance>>;
   borders: { top: boolean; bottom: boolean; left: boolean; right: boolean };
 }
 export interface Grid {
@@ -62,6 +74,7 @@ export interface Grid {
   xs: number[];
   ys: number[];
   rows: Cell[][];
+  inferred?: boolean;
 }
 export interface PageSummary {
   page: number;

@@ -10,6 +10,8 @@ import {
 import workerUrl from "pdfjs-word-dist/build/pdf.worker.min.mjs?url";
 import type { PageModel, Rule, Span } from "./model.ts";
 import { detectTables } from "./layout.ts";
+import { fontProfile, advanceScale, type FontHints } from "./fonts.ts";
+import { normalizeAngle, isObliqueTransform } from "./geometry.ts";
 import { planTextPreservation, type GlyphRun } from "./text-policy.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const RANGE_CHUNK_SIZE = 256 * 1024;
@@ -104,12 +106,14 @@ export async function openPdf(
     throw Error("This file is not a readable PDF.");
   }
 
+  signal.throwIfAborted();
   const initialData = new Uint8Array(
     await file
       .slice(0, Math.min(file.size, RANGE_CHUNK_SIZE))
       .arrayBuffer(),
   );
 
+  signal.throwIfAborted();
   const rangeTransport = new LocalBlobRangeTransport(
     file,
     initialData,
@@ -155,24 +159,12 @@ export async function openPdf(
     throw e;
   }
 }
-function fontFamily(raw: string) {
-  const name = raw
-    .replace(/^[A-Z]{6}\+/, "")
-    .replace(/PSMT$|PS-BoldMT$|PS-ItalicMT$|PS-BoldItalicMT$/i, "")
-    .replace(
-      /[-,](BoldItalic|BoldOblique|Bold|Italic|Oblique|Regular|Roman|Medium)$/i,
-      "",
-    );
-  if (/TimesNewRoman/i.test(name)) return "Times New Roman";
-  if (/HelveticaNeue/i.test(name)) return "Helvetica Neue";
-  if (/Helvetica/i.test(name)) return "Helvetica";
-  if (/Arial/i.test(name)) return "Arial";
-  return name || "Arial";
-}
 export async function extractPage(
   page: PDFPageProxy,
   signal: AbortSignal,
 ): Promise<PageModel> {
+  signal.throwIfAborted();
+  const measure = document.createElement("canvas").getContext("2d")!;
   const viewport = page.getViewport({ scale: 1 }),
     model: PageModel = {
       number: page.pageNumber,
@@ -270,7 +262,7 @@ export async function extractPage(
             y1: p[1],
             x2: q[0],
             y2: q[1],
-            width: lineWidth,
+            width: lineWidth * Math.hypot(matrix[0], matrix[1]),
             color: stroke,
           });
         else curved = true;
@@ -307,6 +299,7 @@ export async function extractPage(
             if (Math.abs(cx1 - x) < 0.1) line(x, ny);
             else line(nx, y);
             line(nx, ny);
+            curved = true;
           } else {
             x = nx;
             y = ny;
@@ -329,8 +322,10 @@ export async function extractPage(
           OPS.eoFillStroke,
         ].includes(a[0])
       ) {
-        model.rules.push(...rules);
-        if (!curved) pathRules.set(i, rules);
+        // Curves and filled paths stay intact in the text-free artwork layer.
+        const decorated = curved || [OPS.fillStroke, OPS.eoFillStroke].includes(a[0]);
+        model.rules.push(...rules.map((r) => ({ ...r, artwork: decorated })));
+        if (!decorated) pathRules.set(i, rules);
       }
     }
   }
@@ -345,19 +340,33 @@ export async function extractPage(
     if (preservation.artworkItems.has(index) || !item.str.trim()) continue;
     const t = Util.transform(viewport.transform, item.transform),
       style = content.styles[item.fontName];
-    let font: { name?: string; bold?: boolean; italic?: boolean } = {};
+    let font: FontHints = {};
     try {
       font = page.commonObjs.get(item.fontName) || {};
     } catch {
       /* Font hints can be unavailable. */
     }
-    const raw = font.name || style.fontFamily || "Arial",
-      size = Math.hypot(t[2], t[3]);
-    if (Math.abs(t[1]) > Math.abs(t[0]) * 0.08) {
-      model.warnings.push(
-        "Rotated text was converted in reading order; its rotation is not preserved.",
-      );
+    const raw = font.name || style.fontFamily || "Unknown";
+    const profile = fontProfile({ ...font, name: raw, fallbackName: font.fallbackName || style.fontFamily });
+    const size = Math.hypot(t[2], t[3]);
+    const rotation = normalizeAngle(Math.atan2(t[1], t[0]) * 180 / Math.PI);
+    const bold = !!font.bold || /bold|black|heavy/i.test(raw);
+    const italic = !!font.italic || /italic|oblique/i.test(raw) || isObliqueTransform(t);
+    // Preserve installed source families; otherwise use a class-aware fallback.
+    const installed = !/Helvetica|Unknown/i.test(profile.family) && document.fonts.check(`${size}px "${profile.family}"`) &&
+      // FontFaceSet.check also returns true for nonexistent system families.
+      (() => { measure.font = `${size}px monospace`; const a = measure.measureText("Wim0123").width;
+        measure.font = `${size}px "${profile.family}", monospace`; return Math.abs(measure.measureText("Wim0123").width - a) > 0.01; })();
+    const outputFont = installed ? profile.family : profile.fallback;
+    if (!installed && profile.family !== profile.fallback) {
+      model.warnings.push("Some source fonts were replaced with a matching font class. Text remains editable; spacing can differ between Word editors.");
     }
+    measure.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px "${outputFont}"`;
+    const metrics = measure.measureText(item.str);
+    const scale = advanceScale(Math.abs(item.width) * viewport.userUnit, metrics.width);
+    const ascent = (metrics.fontBoundingBoxAscent || size * (style.ascent || 0.8)) / size;
+    const descent = (metrics.fontBoundingBoxDescent || size * Math.abs(style.descent || 0.2)) / size;
+    if (scale < 60 || scale > 160) model.warnings.push("Some text needs substantial width scaling to match the source; check its appearance in your Word editor.");
     let color = "000000";
     const clean = item.str.replace(/\s/g, "");
     for (
@@ -375,14 +384,12 @@ export async function extractPage(
       text: item.str,
       x: t[4],
       y: t[5],
-      width: Math.abs(item.width),
+      width: Math.abs(item.width) * viewport.userUnit,
       size,
-      font: fontFamily(raw),
-      bold: !!font.bold || /bold|black|heavy/i.test(raw),
-      italic:
-        !!font.italic ||
-        /italic|oblique/i.test(raw) ||
-        Math.abs(t[2]) > size * 0.1,
+      font: profile.family,
+      fontClass: profile.fontClass, outputFont, scale, ascent, descent, rotation,
+      direction: item.dir === "rtl" ? "rtl" : "ltr", sourceOrder: index,
+      bold, italic,
       color: /^[0-9a-f]{6}$/i.test(color) ? color : "000000",
     };
     span.underline = model.rules.some(

@@ -1,3 +1,4 @@
+import { isRotated } from "./geometry.ts";
 import type { Span, Rule, Line, Grid, Cell } from "./model.ts";
 const TOL = 2.6;
 export function clusters(values: number[], tolerance = TOL): number[] {
@@ -91,6 +92,7 @@ function covers(
 }
 /** Infer grids from intersecting vector rules; no labels, templates or file names. */
 export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
+  spans = spans.filter((s) => !isRotated(s));
   const candidates = rules.filter((r) => horizontal(r) || vertical(r));
   if (candidates.length > 3500)
     throw Error("This page has too many drawing rules to analyze safely.");
@@ -220,6 +222,21 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
         }
       }
     const cells = rows.flat().filter((c) => c.rowSpan > 0);
+    for (const c of cells) {
+      c.borderStyles = {};
+      for (const [side, axis, pos, start, end] of [
+        ["top", "h", c.y, c.x, c.x + c.width],
+        ["bottom", "h", c.y + c.height, c.x, c.x + c.width],
+        ["left", "v", c.x, c.y, c.y + c.height],
+        ["right", "v", c.x + c.width, c.y, c.y + c.height],
+      ] as const) {
+        const edge = group.filter((r) => axis === "h"
+          ? horizontal(r) && Math.abs(r.y1 - pos) <= TOL && Math.max(r.x1,r.x2) > start && Math.min(r.x1,r.x2) < end
+          : vertical(r) && Math.abs(r.x1 - pos) <= TOL && Math.max(r.y1,r.y2) > start && Math.min(r.y1,r.y2) < end)
+          .sort((a,b) => b.width-a.width)[0];
+        if (edge) c.borderStyles[side] = { width: edge.width, color: edge.color, artwork: edge.artwork };
+      }
+    }
     for (const s of spans) {
       const cx = s.x + Math.min(s.width / 2, 3),
         cy = s.y - s.size * 0.35;
@@ -235,7 +252,55 @@ export function detectTables(rules: Rule[], spans: Span[]): Grid[] {
     if (cells.filter((c) => c.spans.length).length >= 2)
       tables.push({ x, y, width, height, xs, ys, rows });
   }
+  const occupied = new Set(tables.flatMap((t) => t.rows.flatMap((r) => r.flatMap((c) => c.spans))));
+  tables.push(...inferAlignedTables(spans.filter((s) => !occupied.has(s))));
   return tables.sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+/** Conservative unruled grids: at least three aligned columns and three rows.
+ * Two-column prose/address blocks deliberately remain independent paragraphs.
+ * Ambiguous/multiline unruled layouts are left as editable positioned text.
+ */
+export function inferAlignedTables(spans: Span[]): Grid[] {
+  const rows = linesOf(spans).map((line) => {
+    const cells: Span[][] = [];
+    let end = -Infinity;
+    for (const span of line.spans) {
+      if (span.x - end > Math.max(12, span.size * 1.5)) cells.push([]);
+      cells.at(-1)!.push(span);
+      end = span.x + span.width;
+    }
+    return { line, cells };
+  });
+  const tables: Grid[] = [];
+  for (let start = 0; start < rows.length;) {
+    const first = rows[start];
+    if (first.cells.length < 3) { start++; continue; }
+    let end = start + 1;
+    while (end < rows.length && rows[end].cells.length === first.cells.length &&
+      rows[end].line.y - rows[end-1].line.y < first.line.size * 4 &&
+      rows[end].cells.every((c,i) => Math.abs(c[0].x-first.cells[i][0].x) < Math.max(3, first.line.size*0.3))) end++;
+    if (end-start < 3) { start++; continue; }
+    const group = rows.slice(start,end);
+    const xs = first.cells.map((c) => c[0].x);
+    xs.push(Math.max(...group.map((r) => r.line.right)) + first.line.size * 0.25);
+    // Boundaries lie in the whitespace before the next column, rather than
+    // through text. No made-up visible borders are introduced.
+    for (let c=1;c<xs.length-1;c++) {
+      const previousRight = Math.max(...group.flatMap((r)=>r.cells[c-1].map((s)=>s.x+s.width)));
+      xs[c] = (previousRight+xs[c])/2;
+    }
+    xs[0] -= first.line.size*0.25;
+    const ys = group.map((r)=>r.line.y-r.line.size);
+    ys.push(group.at(-1)!.line.y+group.at(-1)!.line.size*0.3);
+    const gridRows = group.map((r,i)=>r.cells.map((cell,c): Cell=>({
+      col:c, span:1, rowSpan:1, x:xs[c], y:ys[i], width:xs[c+1]-xs[c], height:ys[i+1]-ys[i], spans:cell,
+      borders:{top:false,bottom:false,left:false,right:false},
+    })));
+    tables.push({x:xs[0],y:ys[0],width:xs.at(-1)!-xs[0],height:ys.at(-1)!-ys[0],xs,ys,rows:gridRows,inferred:true});
+    start=end;
+  }
+  return tables;
 }
 export function paragraphsOf(lines: Line[]): Line[][] {
   const groups: Line[][] = [];

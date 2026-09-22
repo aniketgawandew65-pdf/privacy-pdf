@@ -19,6 +19,7 @@ import {
   TabStopType,
   TableAnchorType,
   OverlapType,
+  ImportedXmlComponent,
   type IFrameOptions,
 } from "docx";
 import type {
@@ -33,15 +34,18 @@ import {
   detectTables,
   linesOf,
   paragraphsOf,
-  lineText,
   flowRegions,
 } from "./layout.ts";
-const tw = (pt: number) => Math.max(0, Math.round(pt * 20));
+import { twips as tw, emu, isRotated, baselineOffset, lineHeight, textBoxGeometry, verticalTextFlow } from "./geometry.ts";
+import { fontProfile } from "./fonts.ts";
+const fontFor = (s: Span) => s.outputFont || fontProfile({ name: s.font }).fallback;
 const run = (s: Span, text = s.text) =>
   new TextRun({
     text,
-    // Helvetica is frequently substituted with Times in Word/LibreOffice.
-    font: /Helvetica|Arial|sans/i.test(s.font) ? "Arial" : s.font,
+    font: fontFor(s),
+    scale: s.scale,
+    rightToLeft: s.direction === "rtl",
+    sizeComplexScript: Math.round(s.size * 2),
     size: Math.round(s.size * 2),
     bold: s.bold,
     italics: s.italic,
@@ -60,6 +64,14 @@ function alignment(lines: Line[], x: number, width: number) {
     return AlignmentType.RIGHT;
   return AlignmentType.LEFT;
 }
+function paragraphLineHeight(lines: Line[]) {
+  const deltas = lines.slice(1).map((line, i) => line.y - lines[i].y).sort((a, b) => a - b);
+  return deltas.length ? deltas[Math.floor(deltas.length / 2)] : Math.max(...lines[0].spans.map(lineHeight));
+}
+function paragraphTop(lines: Line[]) {
+  const height = paragraphLineHeight(lines);
+  return Math.min(...lines[0].spans.map((s) => s.y - baselineOffset(s, height)));
+}
 function paragraph(
   lines: Line[],
   x: number,
@@ -67,15 +79,16 @@ function paragraph(
   before = 0,
   inCell = false,
   frame?: IFrameOptions,
+  borderInset = 0,
 ): Paragraph {
   const children: TextRun[] = [],
     stops: number[] = [];
   const align = alignment(lines, x, width);
   for (let n = 0; n < lines.length; n++) {
     if (n) {
-      if (inCell) children.push(new TextRun({ break: 1 }));
-      else if (!/[-\u2010\u00ad]$/.test(lineText(lines[n - 1])))
-        children.push(run(lines[n].spans[0], " "));
+      // Keep source line breaks inside editable paragraphs. Joining lines can
+      // add a wrapped line and displace an otherwise correctly placed footer.
+      children.push(new TextRun({ break: 1 }));
     }
     let end = lines[n].x;
     for (let k = 0; k < lines[n].spans.length; k++) {
@@ -91,24 +104,24 @@ function paragraph(
         !/^\s/.test(s.text)
       )
         children.push(run(s, " "));
-      children.push(run(s));
+      const sourceExtent = lines[n].right - x;
+      // A receiving editor can substitute a slightly wider font than the
+      // browser measured. Reserve half an em at a cell's right edge, only
+      // compressing source lines that would otherwise consume that space.
+      const editingRoom = frame ? 0 : Math.max(...lines[n].spans.map((s) => s.size)) / 2;
+      const fit = inCell ? Math.min(1, Math.max(1, width - borderInset - editingRoom) / Math.max(1, sourceExtent)) : 1;
+      children.push(run({ ...s, scale: Math.max(1, Math.floor((s.scale ?? 100) * fit)) }));
       end = s.x + s.width;
     }
   }
-  const size = Math.max(...lines.map((l) => l.size));
-  const deltas = lines
-    .slice(1)
-    .map((l, i) => l.y - lines[i].y)
-    .sort((a, b) => a - b);
-  const lineHeight = deltas.length
-    ? deltas[Math.floor(deltas.length / 2)]
-    : size * 1.12;
+  const paragraphHeight = paragraphLineHeight(lines);
   const bold = lines.every((l) =>
     l.spans.filter((s) => s.text.trim()).every((s) => s.bold),
   );
   return new Paragraph({
     frame,
     children,
+    bidirectional: lines[0].spans[0].direction === "rtl",
     alignment: align,
     heading:
       !inCell && bold && lines.length === 1
@@ -120,7 +133,7 @@ function paragraph(
     spacing: {
       before: tw(before),
       after: 0,
-      line: tw(lineHeight),
+      line: tw(paragraphHeight),
       lineRule: LineRuleType.EXACT,
     },
     widowControl: false,
@@ -142,22 +155,35 @@ function cellParagraphs(c: Cell): Paragraph[] {
         spacing: { after: 0, before: 0, line: 1, lineRule: LineRuleType.EXACT },
       }),
     ];
-  const top = Math.max(0, lines[0].y - lines[0].size * 0.82 - c.y);
+  const padding = cellPadding(c);
   // Preserve the source baselines inside cells; group lines into editable paragraphs.
   return paragraphsOf(lines).map((group, i, groups) =>
     paragraph(
       group,
-      c.x + 4,
-      c.width - 8,
+      c.x + padding.left,
+      c.width - padding.left - padding.right,
       i
         ? Math.max(
             0,
-            group[0].y - groups[i - 1].at(-1)!.y - group[0].size * 1.12,
+            paragraphTop(group) - Math.max(...groups[i - 1].at(-1)!.spans.map((s) => s.y + s.size * (s.descent ?? 0.2))),
           )
-        : top,
+        : Math.max(0, paragraphTop(group) - c.y),
       true,
+      undefined,
+      ((c.borderStyles?.left?.width ?? 0) + (c.borderStyles?.right?.width ?? 0)) / 2,
     ),
   );
+}
+function cellPadding(c: Cell) {
+  if (!c.spans.length) return { left: 0, right: 0 };
+  // The PDF's visible text extent, not a fixed four-point Word margin.
+  const left = Math.max(0, Math.min(...c.spans.map((s) => s.x)) - c.x);
+  const right = Math.max(0, c.x + c.width - Math.max(...c.spans.map((s) => s.x + s.width)));
+  // Keep some editing room; source indentation lives in paragraph geometry.
+  const align = alignment(linesOf(c.spans), c.x, c.width);
+  // Left-aligned PDF runs already encode their exact advance. An additional
+  // right margin consumes that advance (Word also reserves border space).
+  return { left: Math.min(left, c.width * 0.05), right: align === AlignmentType.LEFT ? 0 : Math.min(right, c.width * 0.05) };
 }
 function table(grid: Grid): Table {
   return new Table({
@@ -199,15 +225,15 @@ function table(grid: Grid): Table {
                   columnSpan: c.span,
                   rowSpan: c.rowSpan,
                   verticalAlign: VerticalAlign.TOP,
-                  margins: { top: 0, bottom: 0, left: tw(4), right: tw(4) },
+                  margins: { top: 0, bottom: 0, left: tw(cellPadding(c).left), right: tw(cellPadding(c).right) },
                   borders: Object.fromEntries(
                     Object.entries(c.borders).map(([side, on]) => [
                       side,
-                      on
+                      on && !c.borderStyles?.[side as keyof Cell["borders"]]?.artwork
                         ? {
                             style: BorderStyle.SINGLE,
-                            size: 4,
-                            color: "000000",
+                            size: Math.max(2, Math.min(96, Math.round((c.borderStyles?.[side as keyof Cell["borders"]]?.width ?? 0.5) * 8))),
+                            color: c.borderStyles?.[side as keyof Cell["borders"]]?.color || "000000",
                           }
                         : noBorder,
                     ]),
@@ -231,6 +257,54 @@ function spacer(points: number) {
     widowControl: false,
   });
 }
+
+const xmlText = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
+
+/** DrawingML textboxes keep rotated text editable. Both the shape transform
+ * and its anchor use the same viewport geometry; text must not wrap merely
+ * because fallback advance widths round differently in a receiving editor.
+ */
+function rotatedText(span: Span, id: number): Paragraph {
+  const sourceBox = textBoxGeometry(span);
+  // Orthogonal text flow is supported by more Word readers than shape rotation.
+  // Swap the rectangle about the same centre, then rotate its editable text flow.
+  const vertical = verticalTextFlow(sourceBox.angle);
+  const quarterTurn = vertical !== "horz";
+  const box = quarterTurn ? {
+    ...sourceBox,
+    x: sourceBox.x + (sourceBox.width - sourceBox.height) / 2,
+    y: sourceBox.y + (sourceBox.height - sourceBox.width) / 2,
+    width: sourceBox.height, height: sourceBox.width, angle: 0,
+  } : sourceBox;
+  const p = spacer(0.05);
+  const font = xmlText(fontFor(span));
+  p.addChildElement(ImportedXmlComponent.fromXmlString(`<w:r><w:drawing>
+    <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+      xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+      xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+      distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1" behindDoc="0" locked="1" layoutInCell="0" allowOverlap="1">
+      <wp:simplePos x="0" y="0"/>
+      <wp:positionH relativeFrom="page"><wp:posOffset>${emu(box.x)}</wp:posOffset></wp:positionH>
+      <wp:positionV relativeFrom="page"><wp:posOffset>${emu(box.y)}</wp:posOffset></wp:positionV>
+      <wp:extent cx="${emu(box.width)}" cy="${emu(box.height)}"/>
+      <wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>
+      <wp:docPr id="${id + 1000000}" name="Editable rotated PDF text ${id}"/>
+      <wp:cNvGraphicFramePr/>
+      <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp><wps:cNvSpPr txBox="0"/>
+        <wps:spPr><a:xfrm rot="${Math.round(box.angle * 60000)}"><a:off x="0" y="0"/><a:ext cx="${emu(box.width)}" cy="${emu(box.height)}"/></a:xfrm>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></wps:spPr>
+        <wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="${tw(sourceBox.height)}" w:lineRule="exact"/></w:pPr>
+        <w:r><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:cs="${font}" w:eastAsia="${font}"/>
+        <w:sz w:val="${Math.round(span.size * 2)}"/><w:color w:val="${span.color}"/><w:w w:val="${span.scale ?? 100}"/>
+        ${span.bold ? '<w:b/>' : ''}${span.italic ? '<w:i/>' : ''}${span.underline ? '<w:u w:val="single"/>' : ''}
+        </w:rPr><w:t xml:space="preserve">${xmlText(span.text)}</w:t></w:r></w:p></w:txbxContent></wps:txbx>
+        <wps:bodyPr rot="0" vert="${vertical}" upright="0" wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></wps:bodyPr>
+        </wps:wsp>
+      </a:graphicData></a:graphic>
+    </wp:anchor></w:drawing></w:r>`));
+  return p;
+}
 export async function makeDocx(
   pages: PageModel[],
 ): Promise<{ bytes: ArrayBuffer; summaries: PageSummary[] }> {
@@ -240,14 +314,20 @@ export async function makeDocx(
       used = new Set(
         tables.flatMap((t) => t.rows.flatMap((r) => r.flatMap((c) => c.spans))),
       );
-    const unused = p.spans.filter((s) => !used.has(s));
+    const rotated = p.spans.filter(isRotated);
+    const unused = p.spans.filter((s) => !used.has(s) && !isRotated(s));
     const regions = flowRegions(
       unused,
-      Math.min(p.width - 8, Math.max(...p.spans.map((s) => s.x + s.width))),
+      p.width,
     );
     // Text over fixed forms/backgrounds must stay at its source position;
     // otherwise flowing paragraphs drift across the preserved rules.
+    const sourceLines = linesOf(unused);
+    const intentionalGap = sourceLines.some((line, index) => index > 0 &&
+      line.y - sourceLines[index - 1].y > Math.max(line.size, sourceLines[index - 1].size) * 2.5);
     const positioned =
+      intentionalGap ||
+      rotated.length > 0 ||
       tables.length > 0 ||
       regions.columns ||
       p.pictures.some(
@@ -284,8 +364,8 @@ export async function makeDocx(
         right: 0,
       })),
       ...flow.map(({ lines, left, right }) => ({
-        y: lines[0].y - lines[0].size * 0.82,
-        bottom: lines.at(-1)!.y + lines.at(-1)!.size * 0.3,
+        y: paragraphTop(lines),
+        bottom: Math.max(...lines.at(-1)!.spans.map((s) => s.y + s.size * (s.descent ?? 0.2))),
         grid: null,
         lines,
         left,
@@ -332,11 +412,11 @@ export async function makeDocx(
           floating: {
             horizontalPosition: {
               relative: "page",
-              offset: Math.round(pic.x * 12700),
+              offset: emu(pic.x),
             },
             verticalPosition: {
               relative: "page",
-              offset: Math.round(pic.y * 12700),
+              offset: emu(pic.y),
             },
             behindDocument: true,
             allowOverlap: true,
@@ -358,6 +438,7 @@ export async function makeDocx(
       );
       cursor += 0.05;
     }
+    for (const [index, span] of rotated.entries()) children.push(rotatedText(span, p.number * 20000 + index));
     for (const e of elements) {
       const gap = Math.max(0, e.y - cursor);
       if (e.grid) {
@@ -401,7 +482,10 @@ export async function makeDocx(
       ),
       pictures: p.pictures.length,
       paragraphs: flow.length,
-      warnings: p.warnings,
+      warnings: [...p.warnings,
+        ...(rotated.some((s) => verticalTextFlow(s.rotation ?? 0) === "horz") ? ["180-degree or arbitrary-angle text uses editable Word shape rotation. Some editors, including the tested LibreOffice renderer, display this text horizontally. Review orientation in your Word editor."] : []),
+        ...(tables.some((t) => t.inferred) ? ["Some unruled tables were inferred from repeated alignment. Review their cell boundaries."] : []),
+      ],
     });
     return {
       properties: {
@@ -444,13 +528,13 @@ export async function makeDocx(
       /[&<>"]/g,
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
     );
-  const fonts = [...new Set(pages.flatMap((p) => p.spans.map((s) => s.font)))];
+  const fonts = [...new Set(pages.flatMap((p) => p.spans.map(fontFor)))];
   const fontTable =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
     fonts
       .map((name) => {
-        const sans = /Arial|Helvetica|sans|Calibri|Aptos/i.test(name),
-          mono = /Courier|mono/i.test(name);
+        const profile = fontProfile({ name });
+        const sans = profile.fontClass === "sans-serif", mono = profile.fontClass === "monospace";
         return `<w:font w:name="${escapeXml(name)}"><w:altName w:val="${mono ? "Courier New" : sans ? "Arial" : "Times New Roman"}"/><w:family w:val="${mono ? "modern" : sans ? "swiss" : "roman"}"/><w:pitch w:val="${mono ? "fixed" : "variable"}"/></w:font>`;
       })
       .join("") +
