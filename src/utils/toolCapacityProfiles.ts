@@ -979,11 +979,11 @@ export const TOOL_CAPACITY_PROFILES:
     pageComplexity: true,
     pixelComplexity: true,
     outputGrowth: 'variable',
-    recovery: 'atomic-restart',
-    usesOpfs: false,
+    recovery: 'page-checkpoint',
+    usesOpfs: true,
     usesWorker: true,
     desktopReadiness: 'conservative',
-    notes: 'Range-backed source reading and sequential page extraction; reconstructed pages and DOCX packaging still consume document-sized memory.',
+    notes: 'Range-backed source reading with durable page checkpoints; reconstructed pages and DOCX packaging still consume document-sized memory.',
   },
 
   {
