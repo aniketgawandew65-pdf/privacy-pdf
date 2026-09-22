@@ -5,6 +5,7 @@ export interface FontHints {
   fallbackName?: string;
   flags?: number;
   bold?: boolean;
+  black?: boolean;
   italic?: boolean;
   ascent?: number;
   descent?: number;
@@ -17,7 +18,7 @@ export function classifyFont(hints: FontHints): FontClass {
   if ((hints.flags ?? 0) & 1 || /mono|courier|consolas|typewriter/i.test(name + fallback)) return 'monospace';
   if (/symbol|dingbat|wingding/i.test(name)) return 'symbolic';
   if ((hints.flags ?? 0) & 2) return 'serif';
-  if (/sans|helvetica|arial|gotham|aptos|calibri|verdana|futura|grotesk|gothic|roboto|inter(?:-|$)/i.test(name)) return 'sans-serif';
+  if (/sans|helvetica|arial|gotham|aptos|calibri|verdana|futura|grotesk|gothic|roboto|inter(?:-|$)|mulish/i.test(name)) return 'sans-serif';
   if (/times|georgia|garamond|baskerville|palatino|cambria|serif|roman/i.test(name)) return 'serif';
   if (/sans/i.test(fallback)) return 'sans-serif';
   if (/serif/i.test(fallback)) return 'serif';
@@ -25,13 +26,33 @@ export function classifyFont(hints: FontHints): FontClass {
   return 'sans-serif';
 }
 
+export function sourceFontWeight(hints: FontHints): number {
+  const name = (hints.name || '').replace(/^[A-Z]{6}\+/, '');
+  // Prefer an explicit face name over PDF.js' coarse bold flag. Some subset
+  // PDFs report Regular and SemiBold faces as bold; blindly trusting that
+  // flag makes every editable Word run synthetic 700-weight text.
+  if (/extra[-_ ]?black|ultra[-_ ]?black|heavy/i.test(name)) return 900;
+  if (/extra[-_ ]?bold|ultra[-_ ]?bold/i.test(name)) return 800;
+  if (/semi[-_ ]?bold|demi[-_ ]?bold/i.test(name)) return 600;
+  if (/medium/i.test(name)) return 500;
+  if (/extra[-_ ]?light|ultra[-_ ]?light/i.test(name)) return 200;
+  if (/\blight\b/i.test(name)) return 300;
+  if (/\bthin\b/i.test(name)) return 100;
+  if (/black/i.test(name)) return 900;
+  if (/bold/i.test(name)) return 700;
+  if (/regular|roman|book|normal/i.test(name)) return 400;
+  if (hints.black) return 900;
+  if (hints.bold) return 700;
+  return 400;
+}
+
 export function fontProfile(hints: FontHints) {
   const family = (hints.name || '').replace(/^[A-Z]{6}\+/, '')
     .replace(/PSMT$|PS-BoldMT$|PS-ItalicMT$|PS-BoldItalicMT$/i, '')
-    .replace(/[-,](BoldItalic|BoldOblique|Bold|Italic|Oblique|Regular|Roman|Medium)$/i, '') || 'Unknown';
+    .replace(/[-_, ](BoldItalic|BoldOblique|ExtraBold|UltraBold|SemiBold|DemiBold|Bold|Black|Heavy|Italic|Oblique|Regular|Roman|Book|Medium|ExtraLight|UltraLight|Light|Thin)$/i, '') || 'Unknown';
   const fontClass = classifyFont(hints);
   const fallback = fontClass === 'monospace' ? 'Courier New' : fontClass === 'serif' ? 'Times New Roman' : 'Arial';
-  return { family, fontClass, fallback };
+  return { family, fontClass, fallback, weight: sourceFontWeight(hints) };
 }
 
 /** Calibrate fallback text advance against the PDF, without changing the text. */
