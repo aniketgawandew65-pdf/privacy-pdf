@@ -1925,6 +1925,16 @@ export async function generateStyledVectorHtmlPDF(
           true,
       });
 
+    /*
+     * QA marker: lets us prove a downloaded torture-test PDF
+     * came from this exact final HTML renderer rather than a
+     * stale Cloudflare preview/build.
+     */
+    pdf.setProperties({
+      creator:
+        '1into1 HTML PDF final-fidelity-v3',
+    });
+
     while (
       pdf.getNumberOfPages() <
       pageCount
