@@ -1,4 +1,12 @@
 import { jsPDF } from 'jspdf';
+import {
+  materializeHtmlPdfStaticDom,
+  needsRasterExactText,
+  rasterizeImageSource,
+  rasterizeLinearGradient,
+  rasterizeTextLine,
+  sanitizeHtmlPdfSourceDocument,
+} from './htmlPdfFidelity';
 
 type HtmlVectorColor = {
   r: number;
@@ -1042,14 +1050,9 @@ export async function generateStyledVectorHtmlPDF(
         'text/html'
       );
 
-  sourceDoc
-    .querySelectorAll(
-      'script,link,img,picture,svg,canvas,video,audio,iframe,object,embed,noscript,template'
-    )
-    .forEach(
-      (node) =>
-        node.remove()
-    );
+  sanitizeHtmlPdfSourceDocument(
+    sourceDoc
+  );
 
   const safetyStyle =
     sourceDoc
@@ -1193,6 +1196,11 @@ export async function generateStyledVectorHtmlPDF(
 
     applyUtilityClasses(
       doc
+    );
+
+    materializeHtmlPdfStaticDom(
+      doc,
+      win
     );
 
     /*
@@ -2335,6 +2343,174 @@ export async function generateStyledVectorHtmlPDF(
       }
     }
 
+    /*
+     * Keep the existing vector layout, tables and page flow.
+     * Only browser graphics that jsPDF cannot reproduce with
+     * its native primitives are rasterized in-place.
+     */
+    for (
+      const element of
+      elements
+    ) {
+      const style =
+        win.getComputedStyle(
+          element
+        );
+
+      if (
+        style.display ===
+          'none' ||
+        style.visibility ===
+          'hidden' ||
+        Number(
+          style.opacity ||
+            '1'
+        ) <=
+          0.001
+      ) {
+        continue;
+      }
+
+      const rect =
+        element
+          .getBoundingClientRect();
+
+      if (
+        rect.width <
+          1 ||
+        rect.height <
+          1 ||
+        rect.bottom <
+          rootTop ||
+        rect.top -
+          rootTop >
+          contentHeight
+      ) {
+        continue;
+      }
+
+      let raster:
+        string |
+        null =
+          null;
+
+      const tagName =
+        element.tagName
+          .toLowerCase();
+
+      if (
+        tagName ===
+          'img'
+      ) {
+        const src =
+          element.getAttribute(
+            'src'
+          ) ||
+          '';
+
+        if (
+          /^data:image\//i.test(
+            src
+          )
+        ) {
+          raster =
+            await rasterizeImageSource(
+              src,
+              rect.width,
+              rect.height
+            );
+        }
+      } else if (
+        tagName ===
+          'svg'
+      ) {
+        const markup =
+          new XMLSerializer()
+            .serializeToString(
+              element
+            );
+
+        raster =
+          await rasterizeImageSource(
+            'data:image/svg+xml;charset=utf-8,' +
+              encodeURIComponent(
+                markup
+              ),
+            rect.width,
+            rect.height
+          );
+      } else if (
+        /^linear-gradient\(/i.test(
+          style.backgroundImage
+        )
+      ) {
+        raster =
+          rasterizeLinearGradient(
+            style.backgroundImage,
+            rect.width,
+            rect.height
+          );
+      }
+
+      if (
+        !raster
+      ) {
+        continue;
+      }
+
+      const xPx =
+        rect.left -
+        rootLeft;
+
+      const yPx =
+        rect.top -
+        rootTop;
+
+      const pageIndex =
+        Math.max(
+          0,
+          Math.min(
+            pageCount -
+              1,
+            Math.floor(
+              (
+                yPx +
+                rect.height *
+                  0.5
+              ) /
+                pageSlicePx
+            )
+          )
+        );
+
+      const pageLocalY =
+        yPx -
+        pageIndex *
+          pageSlicePx;
+
+      pdf.setPage(
+        pageIndex +
+          1
+      );
+
+      pdf.addImage(
+        raster,
+        'PNG',
+        margin +
+          xPx *
+            scale,
+        margin +
+          pageLocalY *
+            scale,
+        rect.width *
+          scale,
+        rect.height *
+          scale,
+        undefined,
+        'FAST'
+      );
+    }
+
     onProgress?.(
       3,
       4,
@@ -2367,6 +2543,9 @@ export async function generateStyledVectorHtmlPDF(
 
       if (
         parent &&
+        !parent.closest(
+          'svg'
+        ) &&
         rawText.trim()
       ) {
         const style =
@@ -2627,43 +2806,59 @@ export async function generateStyledVectorHtmlPDF(
                 a,
                 b
               ) =>
-                a.rect.left -
-                b.rect.left
+                style.direction ===
+                  'rtl'
+                  ? b.rect.left -
+                    a.rect.left
+                  : a.rect.left -
+                    b.rect.left
             );
 
-            let lineText =
-              cleanVectorText(
-                line
-                  .map(
-                    (
-                      word
-                    ) =>
-                      word.text
-                  )
-                  .join(' ')
-              );
+            let exactLineText =
+              line
+                .map(
+                  (
+                    word
+                  ) =>
+                    word.text
+                )
+                .join(
+                  ' '
+                );
 
             if (
               style.textTransform ===
               'uppercase'
             ) {
-              lineText =
-                lineText.toUpperCase();
+              exactLineText =
+                exactLineText.toUpperCase();
             } else if (
               style.textTransform ===
               'lowercase'
             ) {
-              lineText =
-                lineText.toLowerCase();
+              exactLineText =
+                exactLineText.toLowerCase();
             }
 
-            lineText =
-              lineText
+            exactLineText =
+              exactLineText
                 .replace(
                   /\s+/g,
                   ' '
                 )
                 .trim();
+
+            const lineNeedsExactRaster =
+              needsRasterExactText(
+                exactLineText
+              );
+
+            let lineText =
+              lineNeedsExactRaster
+                ? exactLineText
+                : cleanVectorText(
+                    exactLineText
+                  );
 
             if (!lineText) {
               continue;
@@ -2758,6 +2953,135 @@ export async function generateStyledVectorHtmlPDF(
               pageIndex +
                 1
             );
+
+            let clipAncestor:
+              HTMLElement |
+              null =
+                null;
+
+            let ancestor:
+              HTMLElement |
+              null =
+                parent;
+
+            while (
+              ancestor &&
+              ancestor !==
+                body
+            ) {
+              const ancestorStyle =
+                win.getComputedStyle(
+                  ancestor
+                );
+
+              if (
+                ancestorStyle.overflow ===
+                  'hidden' ||
+                ancestorStyle.overflow ===
+                  'clip' ||
+                ancestorStyle.overflowX ===
+                  'hidden' ||
+                ancestorStyle.overflowX ===
+                  'clip' ||
+                ancestorStyle.overflowY ===
+                  'hidden' ||
+                ancestorStyle.overflowY ===
+                  'clip'
+              ) {
+                clipAncestor =
+                  ancestor;
+                break;
+              }
+
+              ancestor =
+                ancestor.parentElement;
+            }
+
+            const clipRect =
+              clipAncestor
+                ? clipAncestor
+                    .getBoundingClientRect()
+                : null;
+
+            const visibleLeft =
+              clipRect
+                ? Math.max(
+                    left,
+                    clipRect.left
+                  )
+                : left;
+
+            const visibleRight =
+              clipRect
+                ? Math.min(
+                    right,
+                    clipRect.right
+                  )
+                : right;
+
+            const visibleWidth =
+              Math.max(
+                0,
+                visibleRight -
+                  visibleLeft
+              );
+
+            const clipStyle =
+              clipAncestor
+                ? win.getComputedStyle(
+                    clipAncestor
+                  )
+                : null;
+
+            if (
+              (
+                lineNeedsExactRaster ||
+                Boolean(
+                  clipAncestor
+                )
+              ) &&
+              visibleWidth >
+                0
+            ) {
+              const raster =
+                rasterizeTextLine(
+                  exactLineText,
+                  style,
+                  visibleWidth,
+                  lineHeightPx,
+                  left -
+                    visibleLeft,
+                  clipStyle
+                    ?.textOverflow ===
+                    'ellipsis'
+                );
+
+              if (
+                raster
+              ) {
+                pdf.addImage(
+                  raster,
+                  'PNG',
+                  margin +
+                    (
+                      visibleLeft -
+                      rootLeft
+                    ) *
+                      scale,
+                  margin +
+                    pageLocalY *
+                      scale,
+                  visibleWidth *
+                    scale,
+                  lineHeightPx *
+                    scale,
+                  undefined,
+                  'FAST'
+                );
+
+                continue;
+              }
+            }
 
             pdf.setFont(
               font,
