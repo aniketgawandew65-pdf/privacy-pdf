@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFont, fontProfile, advanceScale } from '../src/utils/pdfToWord/fonts.ts';
+import { classifyFont, fontProfile, advanceScale, sourceFontWeight } from '../src/utils/pdfToWord/fonts.ts';
 import { twips, emu, textBoxGeometry, verticalTextFlow, isObliqueTransform } from '../src/utils/pdfToWord/geometry.ts';
 import { detectTables, inferAlignedTables } from '../src/utils/pdfToWord/layout.ts';
 import { makeDocx } from '../src/utils/pdfToWord/docx.ts';
@@ -18,6 +18,18 @@ test('font descriptors and generic fallback families classify opaque subset name
  assert.equal(fontProfile({name:'Symbol'}).fontClass,'symbolic');
  assert.equal(advanceScale(54,60),90);
 });
+test('explicit PDF face names override unreliable coarse bold flags',()=>{
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-Regular',bold:true}).family,'Mulish');
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-SemiBold',bold:true}).family,'Mulish');
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-Black',bold:false}).family,'Mulish');
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Regular',bold:true}),400);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Medium',bold:true}),500);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-SemiBold',bold:true}),600);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Bold',bold:false}),700);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Black',bold:false}),900);
+ assert.equal(sourceFontWeight({name:'OpaqueSubset',bold:true}),700);
+});
+
 test('signed page coordinates and rotated centres convert without drift',()=>{
  assert.equal(twips(-3.5),-70);assert.equal(emu(72),914400);
  assert.equal(verticalTextFlow(89.99999),'vert');assert.equal(verticalTextFlow(-90),'vert270');
@@ -38,6 +50,41 @@ test('aligned unruled data becomes a table but two-column prose does not',()=>{
  assert.equal(inferAlignedTables(cells.filter((_,i)=>i%3!==2)).length,0);
  assert.equal(inferAlignedTables(cells.slice(0,6)).length,0);
 });
+
+test('partially ruled multi-line records become one editable hybrid table',()=>{
+ const xs=[40,90,170,390,470,540], tableYs=[90,120,165,210,255,300], footerYs=[390,410];
+ const spans=[
+  s('S No.',44,106),s('Date',94,106),s('Remarks',174,106),s('Withdrawal',394,106),s('Balance',474,106),
+  ...Array.from({length:4},(_,r)=>{
+   const top=138+r*45;
+   return [
+    s(String(r+1),44,top),s('24.08.202'+r,94,top),
+    s('Merchant '+(r+1),174,top),s('UPI/reference/'+(r+1)+'/long narrative',174,top+11),
+    s(String((r+1)*20)+'.00',404,top),s(String(850-r*20)+'.75',484,top),
+   ];
+  }).flat(),
+  s('www.example.test',220,355),s('Call 1800-000',350,355),
+  {...s('Never share passwords with anyone',60,404),width:430},
+ ];
+ const allYs=[...tableYs,...footerYs];
+ const rules=[
+  ...allYs.flatMap(y=>xs.slice(0,-1).map((x,i)=>({x1:x,x2:xs[i+1],y1:y,y2:y,width:.5,color:'BBBBBB'}))),
+  ...xs.map(x=>({x1:x,x2:x,y1:90,y2:120,width:.75,color:'888888'})),
+ ];
+ const grids=detectTables(rules,spans);
+ assert.equal(grids.length,1);
+ assert.equal(grids[0].hybrid,true);
+ assert.equal(grids[0].rows.length,5);
+ assert.equal(grids[0].ys.at(-1),300);
+ const captured=grids[0].rows.flat().flatMap(c=>c.spans.map(x=>x.text));
+ assert.equal(captured.some(text=>text.includes('www.example.test')||text.includes('Never share passwords')),false);
+ assert.equal(grids[0].rows[1][2].spans.map(x=>x.text).join('|'),'Merchant 1|UPI/reference/1/long narrative');
+ assert.equal(grids[0].rows[1][3].spans[0].text,'20.00');
+ assert.equal(grids[0].rows[1][4].spans[0].text,'850.75');
+ assert.equal(grids[0].rows[2][2].borders.left,false);
+ assert.equal(grids[0].rows[0][2].borders.left,true);
+});
+
 test('table border style survives while rounded chrome stays in artwork',async()=>{
  const spans=[s('a',44,110),s('b',144,110),s('c',44,140),s('d',144,140)];
  const rules=[...[96,120,160].map(y=>({x1:40,x2:240,y1:y,y2:y,width:1.5,color:'225588',artwork:y===96})),...[40,140,240].map(x=>({x1:x,x2:x,y1:96,y2:160,width:.75,color:'AA3322'}))];

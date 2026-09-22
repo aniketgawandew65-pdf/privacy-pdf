@@ -13,7 +13,7 @@ export async function makeCorpus(directory) {
     ['logo-heavy','art'], ['rotated-text','rotate'], ['landscape','landscape'],
     ['mixed-page-sizes','mixed'], ['different-fonts','fonts'], ['mixed-artwork','art'],
     ['unruled-table','unruled'], ['rounded-header','rounded'], ['cropped-rotated-page','crop'],
-    ['page-containment','containment'],
+    ['page-containment','containment'], ['hybrid-statement','hybrid'],
   ];
   const manifest = [];
   for (const [name, type] of specs) {
@@ -46,6 +46,36 @@ export async function makeCorpus(directory) {
             text(['Reference','REF-000001','REF-000002','REF-000003'][n],384,ys[n]-15,9);
           });
         }
+
+      } else if(type==='hybrid') {
+        const xs=[40,90,170,390,470,540], ys=[height-100,height-132,height-180,height-228,height-276,height-324];
+        page.drawRectangle({x:40,y:ys[1],width:500,height:32,color:rgb(.86,.88,.9)});
+        for(const y of ys) for(let c=0;c<xs.length-1;c++)
+          page.drawLine({start:{x:xs[c],y},end:{x:xs[c+1],y},thickness:.6,color:rgb(.6,.62,.65)});
+        // Column rules intentionally exist only in the header. Body records are
+        // separated by horizontal rules and repeated alignment, matching many
+        // bank, card, ERP and utility statement generators.
+        for(const x of xs) page.drawLine({start:{x,y:ys[0]},end:{x,y:ys[1]},thickness:.8,color:rgb(.45,.47,.5)});
+        const headers=['S No.','Date','Remarks','Withdrawal','Balance'];
+        [44,94,174,394,474].forEach((x,i)=>text(headers[i],x,ys[0]-20,9,bold));
+        for(let r=0;r<4;r++){
+          const y=ys[r+1]-18;
+          text(String(r+1),44,y,9,bold);
+          text('24.08.202'+r,94,y,9,bold);
+          text('Merchant '+(r+1),174,y,9,bold);
+          text('UPI/reference/'+(r+1)+'/long editable narrative',174,y-11,8,sans);
+          text(String((r+1)*20)+'.00',404,y,9,bold);
+          text(String(850-r*20)+'.75',484,y,9,bold);
+        }
+        text('Partially ruled statement table: body has no vertical borders.',40,ys.at(-1)-28,9,serif);
+        // Unrelated footer rules deliberately resemble table separators. They
+        // must remain outside the inferred editable table.
+        const footerTop=ys.at(-1)-90, footerBottom=footerTop-20;
+        for(const y of [footerTop,footerBottom]) for(let c=0;c<xs.length-1;c++)
+          page.drawLine({start:{x:xs[c],y},end:{x:xs[c+1],y},thickness:.6,color:rgb(.75,.75,.75)});
+        text('www.example.test',220,footerTop+25,8,bold);
+        text('Call 1800-000',350,footerTop+25,8,bold);
+        text('Never share passwords with anyone.',70,footerTop-14,8,bold);
       } else if(['table','merged','rounded','unruled'].includes(type)) {
         const xs=[40,120,320,440,560], ys=[height-100,height-124,height-156,height-194,height-230];
         const hasRule=type!=='unruled';
