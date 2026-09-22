@@ -154,10 +154,10 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                   setPosition('bottom-center');
                   setDownloadUrl(null);
                 }}
-                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
+                className={`page-number-position-button ${
                   position === 'bottom-center'
-                    ? 'bg-emerald-600 border-emerald-600 text-white'
-                    : 'bg-white dark:bg-zinc-950 border-zinc-400 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400'
+                    ? 'page-number-position-active'
+                    : 'page-number-position-inactive'
                 }`}
               >
                 Bottom Center
@@ -168,10 +168,10 @@ export const PageNumbers: React.FC<PageNumbersProps> = ({ file, onFileChange }) 
                   setPosition('bottom-right');
                   setDownloadUrl(null);
                 }}
-                className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all cursor-pointer ${
+                className={`page-number-position-button ${
                   position === 'bottom-right'
-                    ? 'bg-emerald-600 border-emerald-600 text-white'
-                    : 'bg-white dark:bg-zinc-950 border-zinc-400 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400'
+                    ? 'page-number-position-active'
+                    : 'page-number-position-inactive'
                 }`}
               >
                 Bottom Right
