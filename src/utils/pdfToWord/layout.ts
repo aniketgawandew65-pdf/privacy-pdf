@@ -159,6 +159,75 @@ function stableColumnStarts(spans: Span[], ys: number[], left: number, right: nu
     .sort((a, b) => a - b);
 }
 
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function hybridColumn(span: Span, xs: number[]) {
+  const x = span.x + Math.min(span.width / 2, 3);
+  return xs.findIndex(
+    (edge, col) =>
+      col < xs.length - 1 &&
+      x >= edge - TOL &&
+      x < xs[col + 1] + 0.1,
+  );
+}
+
+/**
+ * Footer rules, signature separators and decorative bands often continue
+ * below a partially ruled table. Trim only the trailing intervals which no
+ * longer behave like table records. This is geometry-only: no labels, bank
+ * names or document-specific text are used.
+ */
+function trimHybridTail(ys: number[], xs: number[], spans: Span[]) {
+  if (ys.length <= 4) return ys;
+  const stats = ys.slice(0, -1).map((top, row) => {
+    const bottom = ys[row + 1];
+    const columns = new Set<number>();
+    for (const span of spans) {
+      const cy = span.y - span.size * 0.35;
+      if (cy < top - 1 || cy >= bottom + 1) continue;
+      const col = hybridColumn(span, xs);
+      if (col >= 0) columns.add(col);
+    }
+    return {
+      columns,
+      height: bottom - top,
+      edge: columns.has(0) || columns.has(xs.length - 2),
+    };
+  });
+  const denseHeights = stats
+    .filter((row) => row.columns.size >= 3)
+    .map((row) => row.height);
+  const typical = median(denseHeights) || median(stats.map((row) => row.height)) || 1;
+
+  let keep = stats.length;
+  while (keep > 3) {
+    const row = stats[keep - 1];
+    const normalHeight = row.height <= typical * 1.55 + 2;
+    const tableLike =
+      row.columns.size >= 4 ||
+      (row.columns.size >= 3 && (row.edge || row.height <= typical * 1.35 + 2)) ||
+      (row.columns.size >= 2 && row.edge && normalHeight);
+    if (tableLike) break;
+    keep -= 1;
+  }
+  return keep === stats.length ? ys : ys.slice(0, keep + 1);
+}
+
+function fitsHybridCell(span: Span, cell: Cell) {
+  const overflow = span.x + span.width - (cell.x + cell.width);
+  return (
+    overflow <= Math.max(8, span.size * 1.5) ||
+    span.width <= cell.width * 1.45
+  );
+}
+
 /**
  * High-confidence hybrid tables: repeated horizontal row separators define
  * records while vertical rules may exist only in the header. This pattern is
@@ -193,9 +262,9 @@ export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
     if (run.length < 4 || run.length > 180) continue;
     const left = run.reduce((n, b) => n + b.left, 0) / run.length;
     const right = run.reduce((n, b) => n + b.right, 0) / run.length;
-    const ys = run.map((b) => b.y);
-    const width = right - left, height = ys.at(-1)! - ys[0];
-    if (width < 120 || height < 30) continue;
+    let ys = run.map((b) => b.y);
+    const width = right - left, initialHeight = ys.at(-1)! - ys[0];
+    if (width < 120 || initialHeight < 30) continue;
 
     const inside = spans.filter((s) =>
       s.x + s.width >= left - TOL &&
@@ -236,6 +305,9 @@ export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
       }
     }
     if (xs.length < 4 || xs.length > 32) continue;
+
+    ys = trimHybridTail(ys, xs, inside);
+    if (ys.length < 4) continue;
 
     const rows: Cell[][] = [];
     for (let r = 0; r < ys.length - 1; r++) {
@@ -281,7 +353,7 @@ export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
         cx >= c.x - TOL && cx < c.x + c.width + 0.1 &&
         cy >= c.y - 1 && cy < c.y + c.height + 1,
       );
-      if (cell) cell.spans.push(span);
+      if (cell && fitsHybridCell(span, cell)) cell.spans.push(span);
     }
 
     const populatedRows = rows.filter((row) => row.filter((c) => c.spans.length).length >= 2);
@@ -293,7 +365,7 @@ export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
 
     tables.push({
       x: xs[0], y: ys[0],
-      width: xs.at(-1)! - xs[0], height,
+      width: xs.at(-1)! - xs[0], height: ys.at(-1)! - ys[0],
       xs, ys, rows,
       inferred: true,
       hybrid: true,
