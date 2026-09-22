@@ -36,9 +36,6 @@ import {
 import {
   watermarkPdfInWorker,
 } from '../utils/watermarkWorkerClient';
-import {
-  saveWorkspaceFiles,
-} from '../utils/localWorkspace';
 
 interface WatermarkProps {
   file: File | null;
@@ -835,25 +832,19 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
             LARGE_FILE_BYTES
           ) {
             /*
-             * Make sure our existing OPFS workspace has the
-             * source before beginning the large operation.
+             * The original File is already browser-backed and the
+             * qpdf Worker mounts it through WORKERFS without copying
+             * the complete source into JavaScript memory.
              *
-             * If Safari ever recreates the page, App.tsx can
-             * restore the source while the processing recovery
-             * marker is still active.
+             * Do not create an additional 100-150 MB OPFS source
+             * copy here. The duplicate persistence job was a major
+             * source of WebKit process recreation on very large PDFs.
+             *
+             * Release the live preview BEFORE walking page metadata
+             * so canvas/PDF.js memory does not overlap with the
+             * large-file preparation stage.
              */
-            try {
-              await saveWorkspaceFiles(
-                [file]
-              );
-            } catch (
-              workspaceError
-            ) {
-              console.warn(
-                'Unable to prepare Watermark restart recovery:',
-                workspaceError
-              );
-            }
+            await releaseLargeWatermarkResources();
 
 
             let sizePdf =
@@ -924,21 +915,23 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
                 }
 
 
-                if (
-                  pageNumber %
-                    8 ===
-                  0
-                ) {
-                  await new Promise<void>(
-                    (
-                      resolve
-                    ) =>
-                      setTimeout(
-                        resolve,
-                        0
-                      )
-                  );
-                }
+                /*
+                 * Yield after every page.
+                 *
+                 * getPage()/page-tree work can arrive in bursts from
+                 * PDF.js. On very large documents, yielding every
+                 * page keeps Chrome/Safari's UI event loop responsive
+                 * instead of triggering "Wait or Exit page" warnings.
+                 */
+                await new Promise<void>(
+                  (
+                    resolve
+                  ) =>
+                    setTimeout(
+                      resolve,
+                      0
+                    )
+                );
               }
             } finally {
               if (
@@ -958,13 +951,10 @@ export const Watermark: React.FC<WatermarkProps> = ({ file, onFileChange }) => {
 
 
             /*
-             * PDF.js has served its purpose.
-             * Free it BEFORE qpdf allocates anything for the
-             * 148-150 MB original.
+             * The preview document/canvas were already released
+             * before page-size discovery. At this point only the
+             * compact stamp PDF remains on the main thread.
              */
-            await releaseLargeWatermarkResources();
-
-
             const outputBlob =
               await watermarkPdfInWorker(
                 file,
