@@ -1,10 +1,16 @@
 import { openPdf, extractPage, deadline, LIMITS } from './extract';
 import type { ConversionReport, PageModel, PageSummary } from './model';
 
+export type PdfToWordRecoveryHooks = {
+  readPage?: (pageNumber: number) => Promise<PageModel | null>;
+  writePage?: (pageNumber: number, page: PageModel) => Promise<void>;
+};
+
 export async function convertPdfToWord(
   file: File,
   signal: AbortSignal,
   onProgress: (message: string, percent: number, pages: number) => void,
+  recovery: PdfToWordRecoveryHooks = {},
 ): Promise<{ blob: Blob; report: ConversionReport }> {
   const started = performance.now();
   signal.throwIfAborted();
@@ -14,11 +20,40 @@ export async function convertPdfToWord(
   try {
     for (let page = 1; page <= pdf.numPages; page++) {
       signal.throwIfAborted();
-      onProgress(`Reading page ${page} of ${pdf.numPages}…`, 75 * (page - 1) / pdf.numPages, pdf.numPages);
-      pages.push(await deadline(
+
+      const restored = recovery.readPage
+        ? await recovery.readPage(page)
+        : null;
+
+      if (restored) {
+        pages.push(restored);
+        onProgress(
+          `Restored page ${page} of ${pdf.numPages}…`,
+          75 * page / pdf.numPages,
+          pdf.numPages,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        continue;
+      }
+
+      onProgress(
+        `Reading page ${page} of ${pdf.numPages}…`,
+        75 * (page - 1) / pdf.numPages,
+        pdf.numPages,
+      );
+
+      const extracted = await deadline(
         pdf.getPage(page).then((source) => extractPage(source, signal)),
-        LIMITS.pageMs, `Page ${page}`,
-      ));
+        LIMITS.pageMs,
+        `Page ${page}`,
+      );
+
+      pages.push(extracted);
+
+      if (recovery.writePage) {
+        await recovery.writePage(page, extracted);
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     signal.throwIfAborted();
