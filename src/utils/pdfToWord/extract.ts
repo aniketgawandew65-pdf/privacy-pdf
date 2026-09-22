@@ -13,6 +13,12 @@ import { detectTables } from "./layout.ts";
 import { fontProfile, advanceScale, type FontHints } from "./fonts.ts";
 import { normalizeAngle, isObliqueTransform } from "./geometry.ts";
 import { planTextPreservation, type GlyphRun } from "./text-policy.ts";
+import {
+  laterOpaqueImageCovering,
+  mapTextItemsToOperatorEnds,
+  spanInkRect,
+  type OpaqueImageOccluder,
+} from "./occlusion.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const RANGE_CHUNK_SIZE = 256 * 1024;
 
@@ -198,6 +204,7 @@ export async function extractPage(
     opacity = 1;
   const pathRules = new Map<number, Rule[]>(),
     glyphRuns: GlyphRun[] = [],
+    opaqueImageOccluders: OpaqueImageOccluder[] = [],
     textColors: { text: string; color: string; opacity: number }[] = [];
   const point = (x: number, y: number) => {
     const p = [x, y];
@@ -250,6 +257,34 @@ export async function extractPage(
         .join("");
       textColors.push({ text, color: fill, opacity });
       glyphRuns.push({ text, fontName: currentFont, operatorIndex: i });
+    } else if (
+      op === OPS.paintImageXObject ||
+      op === OPS.paintInlineImageXObject
+    ) {
+      // PDF images paint into the current unit square. Record only geometry
+      // and painter order here; actual pixel opacity is verified later from
+      // the already-rendered text-free artwork before any text is suppressed.
+      const corners = [
+        point(0, 0),
+        point(1, 0),
+        point(0, 1),
+        point(1, 1),
+      ];
+      const xs = corners.map((p) => p[0]),
+        ys = corners.map((p) => p[1]),
+        x = Math.min(...xs),
+        y = Math.min(...ys),
+        width = Math.max(...xs) - x,
+        height = Math.max(...ys) - y;
+      if (width > 0.5 && height > 0.5)
+        opaqueImageOccluders.push({
+          operatorIndex: i,
+          x,
+          y,
+          width,
+          height,
+          opacity,
+        });
     } else if (op === OPS.constructPath) {
       const draw = a[1]?.[0] as ArrayLike<number> | undefined;
       if (!draw || typeof draw.length !== "number") continue;
@@ -337,6 +372,8 @@ export async function extractPage(
   }
   const items = content.items.filter((item) => "str" in item);
   const preservation = planTextPreservation(items, glyphRuns);
+  const itemOperatorEnds = mapTextItemsToOperatorEnds(items, glyphRuns),
+    spanOperatorEnds: number[] = [];
   if (preservation.artworkItems.size)
     model.warnings.push(
       `Page ${page.pageNumber}: ${preservation.artworkItems.size} barcode/symbol, decorative rule or unmapped text fragment(s) preserved as artwork. These fragments are not editable; readable text remains editable.`,
@@ -419,6 +456,7 @@ export async function extractPage(
         Math.abs(r.x2 - r.x1) < span.width * 1.4,
     );
     model.spans.push(span);
+    spanOperatorEnds.push(itemOperatorEnds[index] ?? -1);
   }
   const meaningful = model.spans
     .map((s) => s.text)
@@ -482,6 +520,55 @@ export async function extractPage(
   try {
     await deadline(task.promise, LIMITS.pageMs, "Rendering page artwork");
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+    // A PDF can paint text and then cover it with later opaque artwork. Text
+    // extraction still exposes that hidden run, so reconstructing it in Word
+    // would incorrectly resurrect content which is not visible in the source.
+    // Only remove a run when BOTH checks agree:
+    // 1) a later opaque image fully covers its visible ink bounds; and
+    // 2) the already-rendered text-free artwork is actually opaque there.
+    // This leaves normal text-on-background, tables, watermarks and rotated
+    // editable text untouched.
+    const artworkOpacityCoverage = (span: Span) => {
+      const rect = spanInkRect(span);
+      const x0 = Math.max(0, Math.floor(rect.x * scale)),
+        y0 = Math.max(0, Math.floor(rect.y * scale)),
+        x1 = Math.min(canvas.width, Math.ceil((rect.x + rect.width) * scale)),
+        y1 = Math.min(canvas.height, Math.ceil((rect.y + rect.height) * scale));
+      if (x1 <= x0 || y1 <= y0) return 0;
+
+      const area = (x1 - x0) * (y1 - y0),
+        step = Math.max(1, Math.floor(Math.sqrt(area / 4000)));
+      let opaque = 0,
+        sampled = 0;
+      for (let y = y0; y < y1; y += step)
+        for (let x = x0; x < x1; x += step) {
+          sampled++;
+          if (pixels[(y * canvas.width + x) * 4 + 3] >= 245) opaque++;
+        }
+      return sampled ? opaque / sampled : 0;
+    };
+
+    const occluded = new Set<Span>();
+    for (let index = 0; index < model.spans.length; index++) {
+      const span = model.spans[index];
+      if (
+        laterOpaqueImageCovering(
+          span,
+          spanOperatorEnds[index] ?? -1,
+          opaqueImageOccluders,
+        ) &&
+        artworkOpacityCoverage(span) >= 0.96
+      )
+        occluded.add(span);
+    }
+    if (occluded.size) {
+      model.spans = model.spans.filter((span) => !occluded.has(span));
+      model.warnings.push(
+        `Page ${page.pageNumber}: ${occluded.size} fully occluded PDF text fragment(s) were left hidden to match the visible source page.`,
+      );
+    }
+
     let left = canvas.width,
       top = canvas.height,
       right = 0,
