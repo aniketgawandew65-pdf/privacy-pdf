@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build && node scripts/build-seo.mjs && node scripts/audit-seo.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seo:audit": "node scripts/audit-seo.mjs"
+    "seo:audit": "node scripts/audit-seo.mjs",
+    "test:pdf-to-word": "node --experimental-strip-types --test tests/pdf-to-word-*.test.ts"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.0",
@@ -16,6 +17,7 @@
     "@neslinesli93/qpdf-wasm": "^0.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "browser-image-compression": "^2.0.2",
+    "docx": "9.7.1",
     "exceljs": "^4.4.0",
     "fflate": "^0.8.3",
     "heic2any": "^0.0.4",
@@ -26,6 +28,7 @@
     "lucide-react": "^1.40.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "3.11.174",
+    "pdfjs-word-dist": "npm:pdfjs-dist@6.3.289",
     "pdfstudio": "^0.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
