@@ -92,9 +92,6 @@ test('hybrid statement records stop before footer regions and remain editable', 
   assert.doesNotMatch(tableXml,/www\.example\.test|Never share passwords/);
 });
 
-test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{')+'<\\/w:t>','g'))||[]).length,1);
-});
-
 test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{
   const diagonal={...span('CONFIDENTIAL & <sample>',-50,400),width:650,size:50,rotation:323,opacity:.16,ink:{x:0,y:-36,width:650,height:36}};
   const {bytes}=await makeDocx([{number:1,width:612,height:792,spans:[diagonal,span('Account 00123 amount 456.78',40,200)],rules:[],pictures:[],warnings:[]}]);
