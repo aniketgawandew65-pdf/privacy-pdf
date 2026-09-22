@@ -6,6 +6,7 @@ import {
   rasterizeLinearGradient,
   rasterizeTextLine,
   sanitizeHtmlPdfSourceDocument,
+  styleNeedsRasterText,
 } from './htmlPdfFidelity';
 
 type HtmlVectorColor = {
@@ -2450,6 +2451,22 @@ export async function generateStyledVectorHtmlPDF(
             rect.width,
             rect.height
           );
+      } else {
+        const dataBackground =
+          style.backgroundImage.match(
+            /^url\(["']?(data:image\/[^"')]+)["']?\)$/i
+          );
+
+        if (
+          dataBackground
+        ) {
+          raster =
+            await rasterizeImageSource(
+              dataBackground[1],
+              rect.width,
+              rect.height
+            );
+        }
       }
 
       if (
@@ -2851,6 +2868,9 @@ export async function generateStyledVectorHtmlPDF(
             const lineNeedsExactRaster =
               needsRasterExactText(
                 exactLineText
+              ) ||
+              styleNeedsRasterText(
+                style
               );
 
             let lineText =
