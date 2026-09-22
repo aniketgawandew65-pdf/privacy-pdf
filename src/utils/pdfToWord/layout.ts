@@ -180,11 +180,11 @@ function hybridColumn(span: Span, xs: number[]) {
 
 /**
  * Footer rules, signature separators and decorative bands often continue
- * below a partially ruled table. Trim only the trailing intervals which no
+ * around a partially ruled table. Trim leading/trailing intervals which no
  * longer behave like table records. This is geometry-only: no labels, bank
  * names or document-specific text are used.
  */
-function trimHybridTail(ys: number[], xs: number[], spans: Span[]) {
+function trimHybridMargins(ys: number[], xs: number[], spans: Span[]) {
   if (ys.length <= 4) return ys;
   const stats = ys.slice(0, -1).map((top, row) => {
     const bottom = ys[row + 1];
@@ -307,7 +307,7 @@ export function inferHybridRuledTables(rules: Rule[], spans: Span[]): Grid[] {
     }
     if (xs.length < 4 || xs.length > 32) continue;
 
-    ys = trimHybridTail(ys, xs, inside);
+    ys = trimHybridMargins(ys, xs, inside);
     if (ys.length < 4) continue;
 
     const rows: Cell[][] = [];
