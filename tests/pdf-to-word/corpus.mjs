@@ -13,6 +13,7 @@ export async function makeCorpus(directory) {
     ['logo-heavy','art'], ['rotated-text','rotate'], ['landscape','landscape'],
     ['mixed-page-sizes','mixed'], ['different-fonts','fonts'], ['mixed-artwork','art'],
     ['unruled-table','unruled'], ['rounded-header','rounded'], ['cropped-rotated-page','crop'],
+    ['page-containment','containment'],
   ];
   const manifest = [];
   for (const [name, type] of specs) {
@@ -21,13 +22,31 @@ export async function makeCorpus(directory) {
     const serif = await pdf.embedFont(StandardFonts.TimesRoman);
     const mono = await pdf.embedFont(StandardFonts.Courier);
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-    const pageSizes = type === 'mixed' ? [[612,792],[792,612],[420,595]] : [type === 'landscape' ? [792,612] : [612,792]];
+    const pageSizes = type === 'containment' ? [[595,842],[595,842],[612,792]] : type === 'mixed' ? [[612,792],[792,612],[420,595]] : [type === 'landscape' ? [792,612] : [612,792]];
     for (let index=0;index<pageSizes.length;index++) {
       const [width,height]=pageSizes[index]; const page=pdf.addPage([width,height]);
       const text=(value,x,y,size=11,font=sans,angle=0,color=rgb(.1,.15,.2))=>page.drawText(value,{x,y,size,font,rotate:degrees(angle),color});
       text('Digital reconstruction fixture',40,height-45,18,bold);
       text(`Page ${index+1} | Reference 2048-07`,40,25,9,serif);
-      if(['table','merged','rounded','unruled'].includes(type)) {
+      if(type==='containment') {
+        text(`ISOLATED-SOURCE-${index+1}`,40,height-70,10);
+        if(index===1) {
+          page.drawCircle({x:300,y:450,size:110,color:rgb(.1,.5,.7)});
+          for(let n=0;n<5;n++)text(`Editable account 0010-000${n} amount 1,234.5${n}`,40,360-n*18,10);
+          page.drawText('TRANSLUCENT DOCUMENT',{x:-50,y:180,size:46,font:bold,rotate:degrees(37),opacity:.16,color:rgb(.85,.1,.1)});
+          page.drawText('OPAQUE CONTROL',{x:100,y:110,size:20,font:sans,rotate:degrees(-20),opacity:1,color:rgb(.85,.1,.1)});
+        } else {
+          const top=index===0?88:height-110;
+          const xs=[40,210,380,550],ys=[0,1,2,3,4].map(n=>top-n*22);
+          for(const y of ys)page.drawLine({start:{x:40,y},end:{x:550,y},thickness:.5});
+          for(const x of xs)page.drawLine({start:{x,y:top},end:{x,y:top-88},thickness:.5});
+          ['Metric','Revenue','EBITDA','Users'].forEach((value,n)=>{
+            text(`${value}-${index+1}`,44,ys[n]-15,9);
+            text(['Value','12.84M','2.40M','98,421'][n],214,ys[n]-15,9);
+            text(['Reference','REF-000001','REF-000002','REF-000003'][n],384,ys[n]-15,9);
+          });
+        }
+      } else if(['table','merged','rounded','unruled'].includes(type)) {
         const xs=[40,120,320,440,560], ys=[height-100,height-124,height-156,height-194,height-230];
         const hasRule=type!=='unruled';
         if(type==='rounded') {

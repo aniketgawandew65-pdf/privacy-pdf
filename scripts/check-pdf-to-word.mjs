@@ -5,7 +5,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const root=path.resolve(process.env.WORD_QA_DIR || 'node_modules/.cache/pdf-to-word-qa');
 const base=process.env.PREVIEW_URL || 'http://127.0.0.1:5194';
 const manifest=await makeCorpus(path.join(root,'inputs'));
-for(const [name,key] of [['statement','STATEMENT_PDF'],['payslip','PAYSLIP_PDF'],['bond','BOND_PDF']]) if(process.env[key]) manifest.push({name,file:process.env[key]});
+for(const [name,key] of [['statement','STATEMENT_PDF'],['payslip','PAYSLIP_PDF'],['bond','BOND_PDF'],['torture','TORTURE_PDF']]) if(process.env[key]) manifest.push({name,file:process.env[key]});
 await mkdir(path.join(root,'outputs'),{recursive:true});
 await writeFile(path.join(root,'manifest.json'),JSON.stringify(manifest,null,2));
 const browser=await chromium.launch({channel:process.env.CHROME_CHANNEL || 'chrome',headless:true});

@@ -188,16 +188,17 @@ export async function extractPage(
       `Page ${page.pageNumber} has too many drawing operations to reconstruct safely.`,
     );
   const matrices: number[][] = [],
-    colors: { fill: string; stroke: string; width: number; font: string }[] =
+    colors: { fill: string; stroke: string; width: number; font: string; opacity: number }[] =
       [];
   let matrix = [1, 0, 0, 1, 0, 0],
     fill = "000000",
     stroke = "000000",
     lineWidth = 0.5,
-    currentFont = "";
+    currentFont = "",
+    opacity = 1;
   const pathRules = new Map<number, Rule[]>(),
     glyphRuns: GlyphRun[] = [],
-    textColors: { text: string; color: string }[] = [];
+    textColors: { text: string; color: string; opacity: number }[] = [];
   const point = (x: number, y: number) => {
     const p = [x, y];
     Util.applyTransform(p, matrix);
@@ -208,7 +209,7 @@ export async function extractPage(
       a = operators.argsArray[i];
     if (op === OPS.save) {
       matrices.push([...matrix]);
-      colors.push({ fill, stroke, width: lineWidth, font: currentFont });
+      colors.push({ fill, stroke, width: lineWidth, font: currentFont, opacity });
     } else if (op === OPS.restore) {
       matrix = matrices.pop() || [1, 0, 0, 1, 0, 0];
       const c = colors.pop();
@@ -217,11 +218,12 @@ export async function extractPage(
         stroke = c.stroke;
         lineWidth = c.width;
         currentFont = c.font;
+        opacity = c.opacity;
       }
     } else if (op === OPS.transform) matrix = Util.transform(matrix, a);
     else if (op === OPS.paintFormXObjectBegin) {
       matrices.push([...matrix]);
-      colors.push({ fill, stroke, width: lineWidth, font: currentFont });
+      colors.push({ fill, stroke, width: lineWidth, font: currentFont, opacity });
       if (a[0]) matrix = Util.transform(matrix, a[0]);
     } else if (op === OPS.paintFormXObjectEnd) {
       matrix = matrices.pop() || matrix;
@@ -231,18 +233,22 @@ export async function extractPage(
         stroke = c.stroke;
         lineWidth = c.width;
         currentFont = c.font;
+        opacity = c.opacity;
       }
     } else if (op === OPS.setFillRGBColor) fill = String(a[0]).replace("#", "");
     else if (op === OPS.setStrokeRGBColor)
       stroke = String(a[0]).replace("#", "");
     else if (op === OPS.setLineWidth) lineWidth = a[0];
     else if (op === OPS.setFont) currentFont = a[0];
+    else if (op === OPS.setGState) {
+      for (const [key, value] of a[0]) if (key === "ca") opacity = Math.max(0, Math.min(1, value));
+    }
     else if (op === OPS.showText) {
       const text = a[0]
         .filter((g: unknown) => typeof g === "object" && g !== null)
         .map((g: { unicode?: string }) => g.unicode || "")
         .join("");
-      textColors.push({ text, color: fill });
+      textColors.push({ text, color: fill, opacity });
       glyphRuns.push({ text, fontName: currentFont, operatorIndex: i });
     } else if (op === OPS.constructPath) {
       const draw = a[1]?.[0] as ArrayLike<number> | undefined;
@@ -367,7 +373,7 @@ export async function extractPage(
     const ascent = (metrics.fontBoundingBoxAscent || size * (style.ascent || 0.8)) / size;
     const descent = (metrics.fontBoundingBoxDescent || size * Math.abs(style.descent || 0.2)) / size;
     if (scale < 60 || scale > 160) model.warnings.push("Some text needs substantial width scaling to match the source; check its appearance in your Word editor.");
-    let color = "000000";
+    let color = "000000", textOpacity = 1;
     const clean = item.str.replace(/\s/g, "");
     for (
       let j = colorCursor;
@@ -376,6 +382,7 @@ export async function extractPage(
     ) {
       if (textColors[j].text.replace(/\s/g, "").includes(clean)) {
         color = textColors[j].color;
+        textOpacity = textColors[j].opacity;
         colorCursor = j;
         break;
       }
@@ -390,6 +397,13 @@ export async function extractPage(
       fontClass: profile.fontClass, outputFont, scale, ascent, descent, rotation,
       direction: item.dir === "rtl" ? "rtl" : "ltr", sourceOrder: index,
       bold, italic,
+      opacity: textOpacity,
+      ink: {
+        x: -metrics.actualBoundingBoxLeft * scale / 100,
+        y: -metrics.actualBoundingBoxAscent,
+        width: (metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight) * scale / 100,
+        height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+      },
       color: /^[0-9a-f]{6}$/i.test(color) ? color : "000000",
     };
     span.underline = model.rules.some(

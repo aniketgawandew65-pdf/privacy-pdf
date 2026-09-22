@@ -6,7 +6,7 @@ import json,sys,re,zipfile,collections
 from pathlib import Path
 from lxml import etree
 from pypdf import PdfReader
-root=Path(sys.argv[1]); ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main','wp':'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'}
+root=Path(sys.argv[1]); ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main','wp':'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','v':'urn:schemas-microsoft-com:vml'}
 clean=lambda value: re.sub(r'\s','',value)
 reports=[]
 for meta in sorted((root/'outputs').glob('*.json')):
@@ -16,7 +16,7 @@ for meta in sorted((root/'outputs').glob('*.json')):
   for member in z.namelist():
    if member.endswith(('.xml','.rels')):etree.fromstring(z.read(member))
   xml=etree.fromstring(z.read('word/document.xml'))
-  expected=''.join(s['text'] for p in source for s in p['spans']);actual=''.join(xml.xpath('//w:t/text()',namespaces=ns))
+  expected=''.join(s['text'] for p in source for s in p['spans']);actual=''.join(xml.xpath('//w:t/text()|//v:textpath/@string',namespaces=ns))
   assert collections.Counter(clean(expected))==collections.Counter(clean(actual)),f'{name}: character inventory'
   assert not xml.xpath('//w:documentProtection',namespaces=ns)
   tables=xml.xpath('//w:tbl',namespaces=ns); source_tables=[t for p in source for t in p['tables']]
@@ -24,8 +24,12 @@ for meta in sorted((root/'outputs').glob('*.json')):
   errors=[]
   for table,grid in zip(tables,source_tables):
    pos=table.find('w:tblPr/w:tblpPr',ns)
-   for attr,key in [('tblpX','x'),('tblpY','y')]:
-    delta=abs(float(pos.get('{'+ns['w']+'}'+attr))/20-grid[key]);errors.append(delta);assert delta<=.026
+   for attr,key,axis in [('tblpX','x','H'),('tblpY','y','V')]:
+    if pos is not None:value=float(pos.get('{'+ns['w']+'}'+attr))/20
+    else:
+     anchor=table.xpath('ancestor::wp:anchor',namespaces=ns)[0]
+     value=float(anchor.find(f'wp:position{axis}/wp:posOffset',ns).text)/12700
+    delta=abs(value-grid[key]);errors.append(delta);assert delta<=.026
    widths=table.xpath('w:tblGrid/w:gridCol/@w:w',namespaces=ns)
    for i,width in enumerate(widths):assert abs(float(width)/20-(grid['xs'][i+1]-grid['xs'][i]))<=.026
    actual_cells=[c for c in table.xpath('w:tr/w:tc',namespaces=ns) if not c.xpath('w:tcPr/w:vMerge[not(@w:val) or @w:val="continue"]',namespaces=ns)]

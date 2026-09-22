@@ -50,9 +50,10 @@ test('rotated text stays editable exactly once and carries source rotation',asyn
  const spans=[0,90,180,270,30].map((rotation,i)=>({...s(`Label${i}`,80+i*70,300),rotation}));
  const result=await makeDocx([{number:1,width:612,height:792,spans,rules:[],pictures:[],warnings:[]}]);
  const xml=strFromU8(unzipSync(new Uint8Array(result.bytes))['word/document.xml']);
- for(let i=0;i<5;i++)assert.equal((xml.match(new RegExp(`>Label${i}</w:t>`,'g'))||[]).length,1);
- for(const rotation of [180,30])assert.ok(xml.includes(`rot="${rotation*60000}"`));
- assert.equal((xml.match(/<w:txbxContent>/g)||[]).length,4);
+ for(let i=0;i<5;i++)assert.equal((xml.match(new RegExp(`(?:>Label${i}</w:t>|string="Label${i}")`,'g'))||[]).length,1);
+ assert.ok(xml.includes(`rot="${180*60000}"`));
+ assert.ok(xml.includes('rotation:30;'));
+ assert.equal((xml.match(/<w:txbxContent>/g)||[]).length,3);
  assert.ok(xml.includes('vert="vert"'));assert.ok(xml.includes('vert="vert270"'));
  assert.ok(result.summaries[0].warnings.some(w=>w.includes('180-degree')));
 });

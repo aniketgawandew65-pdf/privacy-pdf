@@ -19,6 +19,9 @@ export interface Span {
   rotation?: number;
   direction?: "ltr" | "rtl";
   sourceOrder?: number;
+  opacity?: number;
+  /** Visible fallback glyph bounds relative to the baseline, in points. */
+  ink?: { x: number; y: number; width: number; height: number };
 }
 export interface BorderAppearance { width: number; color: string; artwork?: boolean }
 export interface Rule {

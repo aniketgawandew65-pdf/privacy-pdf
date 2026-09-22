@@ -22,6 +22,7 @@ import {
   ImportedXmlComponent,
   type IFrameOptions,
 } from "docx";
+import JSZip from "jszip";
 import type {
   PageModel,
   Span,
@@ -185,21 +186,21 @@ function cellPadding(c: Cell) {
   // right margin consumes that advance (Word also reserves border space).
   return { left: Math.min(left, c.width * 0.05), right: align === AlignmentType.LEFT ? 0 : Math.min(right, c.width * 0.05) };
 }
-function table(grid: Grid): Table {
+function table(grid: Grid, floating = true): Table {
   return new Table({
     width: { size: tw(grid.width), type: WidthType.DXA },
     columnWidths: grid.xs.slice(1).map((x, i) => tw(x - grid.xs[i])),
     layout: TableLayoutType.FIXED,
     // PDF viewport coordinates are page-relative points. Word table positions
     // use twips; unlike flow spacers, these cannot accumulate paragraph height.
-    float: {
+    float: floating ? {
       horizontalAnchor: TableAnchorType.PAGE,
       verticalAnchor: TableAnchorType.PAGE,
       absoluteHorizontalPosition: tw(grid.x),
       absoluteVerticalPosition: tw(grid.y),
       topFromText: 0, bottomFromText: 0, leftFromText: 0, rightFromText: 0,
       overlap: OverlapType.OVERLAP,
-    },
+    } : undefined,
     borders: {
       top: noBorder,
       bottom: noBorder,
@@ -258,13 +259,130 @@ function spacer(points: number) {
   });
 }
 
+/**
+ * Word section breaks normally preserve one source PDF page per DOCX page.
+ * LibreOffice 25.2 can collapse an otherwise valid nextPage section when the
+ * reconstructed page is dominated by positioned content. Reinforce each
+ * intermediate section paragraph with an explicit page break as well.
+ */
+async function reinforceSourcePageBreaks(
+  bytes: Uint8Array,
+  expectedBoundaries: number,
+): Promise<Uint8Array> {
+  if (!expectedBoundaries) return bytes;
+
+  const archive = await JSZip.loadAsync(bytes);
+  const documentFile = archive.file("word/document.xml");
+  if (!documentFile)
+    throw Error("Generated DOCX is missing word/document.xml.");
+
+  const xml = await documentFile.async("string");
+  let boundaries = 0;
+
+  const reinforced = xml.replace(
+    /(<w:p><w:pPr><w:sectPr\b[\s\S]*?<\/w:sectPr><\/w:pPr>)(<\/w:p>)/g,
+    (_match, start: string, end: string) => {
+      boundaries += 1;
+      return `${start}<w:r><w:br w:type="page"/></w:r>${end}`;
+    },
+  );
+
+  if (boundaries !== expectedBoundaries)
+    throw Error(
+      `Generated DOCX has ${boundaries} intermediate page boundaries; expected ${expectedBoundaries}.`,
+    );
+
+  archive.file("word/document.xml", reinforced);
+
+  return archive.generateAsync({
+    type: "uint8array",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  });
+}
+
 const xmlText = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
+
+/** A native table touching the page edge must not paginate into the next
+ * source page. A page-anchored text box contains its real editable cells.
+ * Interior tables retain the existing floating-table representation.
+ */
+function containedTable(grid: Grid, id: number): Paragraph {
+  const element = (name: string, attributes: Record<string, string>, children: (ImportedXmlComponent | string)[] = []) => {
+    const node = new ImportedXmlComponent(name, attributes);
+    children.forEach((child) => node.push(child));
+    return node;
+  };
+  const content = new ImportedXmlComponent("w:txbxContent");
+  content.push(table(grid, false));
+  content.push(spacer(0.05));
+  // Allow the outer border's half-stroke and mandatory final paragraph.
+  const width = emu(grid.width + 1), height = emu(grid.height + 1);
+  const shape = element("wps:wsp", {}, [
+    element("wps:cNvSpPr", { txBox: "1" }),
+    element("wps:spPr", {}, [
+      element("a:xfrm", {}, [element("a:off", { x: "0", y: "0" }), element("a:ext", { cx: String(width), cy: String(height) })]),
+      element("a:prstGeom", { prst: "rect" }, [element("a:avLst", {})]),
+      element("a:noFill", {}), element("a:ln", {}, [element("a:noFill", {})]),
+    ]),
+    element("wps:txbx", {}, [content]),
+    element("wps:bodyPr", { rot: "0", vert: "horz", wrap: "none", lIns: "0", tIns: "0", rIns: "0", bIns: "0", anchor: "t" }, [element("a:noAutofit", {})]),
+  ]);
+  const anchor = element("wp:anchor", {
+    "xmlns:wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+    "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "xmlns:wps": "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
+    distT: "0", distB: "0", distL: "0", distR: "0", simplePos: "0", relativeHeight: "2",
+    behindDoc: "0", locked: "1", layoutInCell: "0", allowOverlap: "1",
+  }, [
+    element("wp:simplePos", { x: "0", y: "0" }),
+    element("wp:positionH", { relativeFrom: "page" }, [element("wp:posOffset", {}, [String(emu(grid.x))])]),
+    element("wp:positionV", { relativeFrom: "page" }, [element("wp:posOffset", {}, [String(emu(grid.y))])]),
+    element("wp:extent", { cx: String(width), cy: String(height) }),
+    element("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" }),
+    element("wp:wrapNone", {}),
+    element("wp:docPr", { id: String(id), name: "Editable page-edge PDF table" }),
+    element("wp:cNvGraphicFramePr", {}),
+    element("a:graphic", {}, [element("a:graphicData", { uri: "http://schemas.microsoft.com/office/word/2010/wordprocessingShape" }, [shape])]),
+  ]);
+  const host = spacer(0.05);
+  host.addChildElement(element("w:r", {}, [element("w:drawing", {}, [anchor])]));
+  return host;
+}
+
+const usesWordArt = (span: Span) => {
+  const angle = textBoxGeometry(span).angle;
+  return Math.abs(angle - Math.round(angle / 90) * 90) > 0.5;
+};
+
+/** WordArt's text path rotates in readers which ignore textbox rotation.
+ * It remains native editable text, not a raster or duplicate hidden text.
+ * Unlike a paragraph box, its extent describes glyph ink, not line leading.
+ */
+function diagonalText(span: Span, id: number): Paragraph {
+  const angle = textBoxGeometry(span).angle, rad = angle * Math.PI / 180;
+  const ink = span.ink ?? { x: 0, y: -span.size * 0.75, width: span.width, height: span.size };
+  const width = Math.max(1, ink.width), height = Math.max(1, ink.height);
+  const dx = ink.x + width / 2, dy = ink.y + height / 2;
+  const x = span.x + Math.cos(rad) * dx - Math.sin(rad) * dy - width / 2;
+  const y = span.y + Math.sin(rad) * dx + Math.cos(rad) * dy - height / 2;
+  const p = spacer(0.05);
+  p.addChildElement(ImportedXmlComponent.fromXmlString(`<w:r><w:pict xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+    <v:shapetype id="PDFTextPath${id}" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,0l@8,0m@5,21600l@6,21600e">
+    <v:formulas><v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/><v:f eqn="sum 0 0 @2"/><v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/><v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/><v:f eqn="if @0 @4 21600"/></v:formulas>
+    <v:path textpathok="t"/><v:textpath on="t" fitshape="t"/></v:shapetype>
+    <v:shape id="PDFDiagonal${id}" type="#PDFTextPath${id}" style="position:absolute;margin-left:${x}pt;margin-top:${y}pt;width:${width}pt;height:${height}pt;rotation:${angle};z-index:1;mso-position-horizontal-relative:page;mso-position-vertical-relative:page" fillcolor="#${span.color}" stroked="f">
+    <v:fill opacity="${span.opacity ?? 1}"/><v:textpath style="font-family:&quot;${xmlText(fontFor(span))}&quot;;font-size:${span.size}pt;font-weight:${span.bold ? "bold" : "normal"};font-style:${span.italic ? "italic" : "normal"}" string="${xmlText(span.text)}"/>
+    </v:shape></w:pict></w:r>`));
+  return p;
+}
 
 /** DrawingML textboxes keep rotated text editable. Both the shape transform
  * and its anchor use the same viewport geometry; text must not wrap merely
  * because fallback advance widths round differently in a receiving editor.
  */
 function rotatedText(span: Span, id: number): Paragraph {
+  if (usesWordArt(span)) return diagonalText(span, id);
   const sourceBox = textBoxGeometry(span);
   // Orthogonal text flow is supported by more Word readers than shape rotation.
   // Swap the rectangle about the same centre, then rotate its editable text flow.
@@ -439,10 +557,12 @@ export async function makeDocx(
       cursor += 0.05;
     }
     for (const [index, span] of rotated.entries()) children.push(rotatedText(span, p.number * 20000 + index));
-    for (const e of elements) {
+    for (const [elementIndex, e] of elements.entries()) {
       const gap = Math.max(0, e.y - cursor);
       if (e.grid) {
-        children.push(table(e.grid));
+        children.push(e.grid.y + e.grid.height > p.height - 36
+          ? containedTable(e.grid, 3000000 + p.number * 20000 + elementIndex)
+          : table(e.grid));
         // A floating table does not advance the main text story.
         children.push(spacer(0.05));
         continue;
@@ -483,7 +603,8 @@ export async function makeDocx(
       pictures: p.pictures.length,
       paragraphs: flow.length,
       warnings: [...p.warnings,
-        ...(rotated.some((s) => verticalTextFlow(s.rotation ?? 0) === "horz") ? ["180-degree or arbitrary-angle text uses editable Word shape rotation. Some editors, including the tested LibreOffice renderer, display this text horizontally. Review orientation in your Word editor."] : []),
+        ...(rotated.some((s) => !usesWordArt(s) && verticalTextFlow(s.rotation ?? 0) === "horz") ? ["180-degree text uses editable Word shape rotation. Some editors, including the tested LibreOffice renderer, display this text horizontally. Review orientation in your Word editor."] : []),
+        ...(rotated.some(usesWordArt) ? ["Diagonal text is preserved as editable WordArt. Font weight and text-path editing support can differ between Word editors."] : []),
         ...(tables.some((t) => t.inferred) ? ["Some unruled tables were inferred from repeated alignment. Review their cell boundaries."] : []),
       ],
     });
@@ -542,5 +663,14 @@ export async function makeDocx(
   const blob = await Packer.toBlob(document, false, [
     { path: "word/fontTable.xml", data: fontTable },
   ]);
-  return { bytes: await blob.arrayBuffer(), summaries };
+  const packed = new Uint8Array(await blob.arrayBuffer());
+  const reinforced = await reinforceSourcePageBreaks(
+    packed,
+    Math.max(0, pages.length - 1),
+  );
+  const bytes = reinforced.buffer.slice(
+    reinforced.byteOffset,
+    reinforced.byteOffset + reinforced.byteLength,
+  ) as ArrayBuffer;
+  return { bytes, summaries };
 }

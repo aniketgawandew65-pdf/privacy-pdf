@@ -37,3 +37,34 @@ test('header whitespace cannot move a real editable table away from page coordin
   assert.doesNotMatch(xml, /documentProtection/);
   assert.match(xml, /w:ascii="Arial"/);
 });
+
+test('a page-edge table retains editable cells and source geometry in its own page container', async () => {
+  const page: PageModel = {
+    number: 1, width: 612, height: 792, pictures: [], warnings: [],
+    spans: [span('Heading',40,50), ...[718,740,762,784].flatMap((y,n)=>[span(`Row${n}`,44,y),span(`REF-000${n}`,144,y)])],
+    rules: [
+      ...[704,726,748,770,792].map(y=>({x1:40,x2:240,y1:y,y2:y})),
+      ...[40,140,240].map(x=>({x1:x,x2:x,y1:704,y2:792})),
+    ],
+  };
+  const {bytes}=await makeDocx([page,{...page,number:2}]);
+  const xml=strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
+  assert.doesNotMatch(xml,/<undefined>|<w:tblpPr/);
+  assert.equal((xml.match(/<w:tbl>/g)||[]).length,2);
+  assert.equal((xml.match(/<w:tc>/g)||[]).length,16);
+  assert.equal((xml.match(/<w:sectPr>/g)||[]).length,2);
+  assert.equal((xml.match(/<wp:posOffset>8940800<\/wp:posOffset>/g)||[]).length,2);
+  for(let n=0;n<4;n++)assert.equal((xml.match(new RegExp(`>REF-000${n}</w:t>`,'g'))||[]).length,2);
+  assert.doesNotMatch(xml,/documentProtection|<pic:pic/);
+});
+
+test('diagonal watermark retains editable escaped text, ink bounds and source transparency', async()=>{
+  const diagonal={...span('CONFIDENTIAL & <sample>',-50,400),width:650,size:50,rotation:323,opacity:.16,ink:{x:0,y:-36,width:650,height:36}};
+  const {bytes}=await makeDocx([{number:1,width:612,height:792,spans:[diagonal,span('Account 00123 amount 456.78',40,200)],rules:[],pictures:[],warnings:[]}]);
+  const xml=strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
+  assert.equal((xml.match(/string="CONFIDENTIAL &amp; &lt;sample&gt;"/g)||[]).length,1);
+  assert.match(xml,/height:36pt;rotation:323;/);
+  assert.match(xml,/<v:fill opacity="0.16"/);
+  assert.match(xml,/>Account 00123 amount 456.78<\/w:t>/);
+  assert.doesNotMatch(xml,/<pic:pic|<w:vanish/);
+});
