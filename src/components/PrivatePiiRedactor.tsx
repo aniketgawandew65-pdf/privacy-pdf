@@ -337,11 +337,26 @@ const DETECTORS: Detector[] = [
   },
   {
     /*
+     * Dense PDF tables often extract as:
+     *   Name Dr Aarav Testperson
+     * without punctuation between the label and value.
+     *
+     * Keep this deliberately narrow: the honorific prevents
+     * ordinary prose containing the word "name" from becoming
+     * a false positive.
+     */
+    category: "Name",
+    regex:
+      /\bname\s+((?:mr|mrs|ms|miss|dr)\.?\s+[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,5})\b/gi,
+    captureGroup: 1,
+  },
+  {
+    /*
      * Broader structured/bilingual address labels.
      */
     category: "Address",
     regex:
-      /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|permanent\s+address|present\s+address|residential\s+address|rented\s+property\s+address|owner\s+address|tenant(?:'s)?\s+address|licensor\s+address|licensee\s+address|residing\s+at|residence|address)(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]?\s*([^\r\n]{5,180}?)(?=\s+(?:(?:owner|tenant|licensor|licensee)\s+)?(?:mobile|phone|email|e-mail|pan|occupation|age|gender)\b|\s+(?:city|state|pin(?:code)?)\s*[:=-]|$)/gi,
+      /\b(?:home\s+address|billing\s+address|shipping\s+address|postal\s+address|permanent\s+address|present\s+address|residential\s+address|rented\s+property\s+address|owner\s+address|tenant(?:'s)?\s+address|licensor\s+address|licensee\s+address|residing\s+at|residence|(?<!mac\s)(?<!email\s)(?<!ip\s)(?<!web\s)address)(?:\s*[/|]\s*[^:\r\n]{0,56})?\s*[:=-]?\s*([^\r\n]{5,180}?)(?=\s+(?:(?:owner|tenant|licensor|licensee)\s+)?(?:mobile|phone|email|e-mail|pan|occupation|age|gender)\b|\s+(?:city|state|pin(?:code)?)\s*[:=-]|$)/gi,
     captureGroup: 1,
   },
   {
@@ -616,6 +631,149 @@ const detectText = (text: string) => {
   }
 
   return accepted.sort((a, b) => a.start - b.start);
+};
+
+
+/*
+ * OCR-ONLY RECOVERY
+ *
+ * Tesseract can preserve the structure of a sensitive value while
+ * misreading one or two glyphs. These patterns only run on OCR
+ * output; they do not weaken the strict vector/text-layer detectors.
+ */
+const detectOcrRecoveryText = (text: string) => {
+  const matches: {
+    category: FindingCategory;
+    value: string;
+    start: number;
+    end: number;
+  }[] = [];
+
+  const add = (
+    category: FindingCategory,
+    regex: RegExp,
+    captureGroup = 0,
+    validate?: (value: string) => boolean
+  ) => {
+    const copy =
+      new RegExp(
+        regex.source,
+        regex.flags
+      );
+
+    for (const match of text.matchAll(copy)) {
+      const full =
+        match[0];
+
+      const value =
+        captureGroup > 0 &&
+        match[captureGroup]
+          ? match[captureGroup]
+          : full;
+
+      if (
+        validate &&
+        !validate(value)
+      ) {
+        continue;
+      }
+
+      const fullStart =
+        match.index ?? 0;
+
+      const inside =
+        full.indexOf(value);
+
+      const start =
+        fullStart +
+        Math.max(
+          0,
+          inside
+        );
+
+      matches.push({
+        category,
+        value,
+        start,
+        end:
+          start +
+          value.length,
+      });
+    }
+  };
+
+  /*
+   * Honorific-led names remain strong identifiers even when
+   * OCR loses the literal "Name:" label.
+   */
+  add(
+    "Name",
+    /\b(?:mr|mrs|ms|miss|dr)\.?\s+[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){1,4}\b/gi
+  );
+
+  /*
+   * Recover conventional street addresses without guessing
+   * arbitrary prose.
+   */
+  add(
+    "Address",
+    /\b(?:[A-Z]\s+)?\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,6}\s+(?:street|st|road|rd|avenue|ave|lane|ln|drive|boulevard|blvd|way|court|ct|highway|hwy)\b(?:\s*,\s*[A-Za-z0-9.' -]{2,32}){0,2}/gi
+  );
+
+  /*
+   * JWT structure normally survives OCR better than the exact
+   * eyJ prefix. Keep the three long dot-separated segments.
+   */
+  add(
+    "JWT",
+    /\b[A-Za-z0-9_|}{()\-]{8,}\s*\.\s*[A-Za-z0-9_|}{()\-]{8,}\s*\.\s*[A-Za-z0-9_|}{()\-]{8,}\b/g
+  );
+
+  /*
+   * OCR can confuse the leading "s" in sk-* with o/0/5.
+   * The minimum compact length keeps this high confidence.
+   */
+  add(
+    "OpenAI API Key",
+    /\b([sSoO05][kK]\s*-\s*[A-Za-z0-9_-]{3,}(?:\s+(?!name\b|email\b|mobile\b|phone\b|address\b|password\b)[A-Za-z0-9_-]{4,}){0,2})/gi,
+    1,
+    (value) =>
+      value
+        .replace(
+          /\s/g,
+          ""
+        )
+        .length >= 24
+  );
+
+  /*
+   * GitHub token prefixes are short and OCR-prone. Require a
+   * prefix shaped like ghp/gho/ghu/ghs/ghr plus a long body.
+   */
+  add(
+    "GitHub Token",
+    /\b([gGoO0qQ][hHnN]?[pPoOuUsSrR]\s*_\s*[A-Za-z0-9]{24,})\b/g,
+    1
+  );
+
+  /*
+   * OCR may insert one space inside a password value. Stop at
+   * the next common field label instead of swallowing the row.
+   */
+  add(
+    "Password / Secret",
+    /\b(?:password|passwd|pwd|secret)\s*[:=]\s*([A-Za-z0-9!@#$%^&*._-]+(?:\s+(?!(?:mobile|phone|email|name|address|aadhaar|pan|iban|account|passport|dob)\b)[A-Za-z0-9!@#$%^&*._-]+){0,2})/gi,
+    1,
+    (value) =>
+      value
+        .replace(
+          /\s/g,
+          ""
+        )
+        .length >= 6
+  );
+
+  return matches;
 };
 
 
@@ -2075,7 +2233,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             page.cleanup();
           } catch (_) {}
 
-          await savePage(true);
+          await savePage(
+            true,
+            isMobileSafetyEnvironment()
+              ? 1.6
+              : 2
+          );
           continue;
         }
 
@@ -2119,7 +2282,12 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
             page.cleanup();
           } catch (_) {}
 
-          await savePage(true);
+          await savePage(
+            true,
+            isMobileSafetyEnvironment()
+              ? 1.6
+              : 2
+          );
           continue;
         }
 
@@ -2453,7 +2621,30 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     if (!lineText.trim()) return [];
 
-    const matches = detectText(lineText);
+    const baseMatches =
+      detectText(
+        lineText
+      );
+
+    const recoveryMatches =
+      detectOcrRecoveryText(
+        lineText
+      ).filter(
+        (candidate) =>
+          !baseMatches.some(
+            (existing) =>
+              candidate.start <
+                existing.end &&
+              candidate.end >
+                existing.start
+          )
+      );
+
+    const matches = [
+      ...baseMatches,
+      ...recoveryMatches,
+    ];
+
     const results: Finding[] = [];
 
     matches.forEach((match, matchIndex) => {
@@ -2742,6 +2933,269 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
 
     return result;
   };
+
+  const regroupOcrPageWords = (
+    input: OcrWordBox[]
+  ): OcrWordBox[][] => {
+    const sorted =
+      input
+        .filter(
+          (word) =>
+            word.text.trim() &&
+            [
+              word.x0,
+              word.y0,
+              word.x1,
+              word.y1,
+            ].every(
+              Number.isFinite
+            ) &&
+            word.x1 >
+              word.x0 &&
+            word.y1 >
+              word.y0
+        )
+        .sort(
+          (a, b) => {
+            const ay =
+              (
+                a.y0 +
+                a.y1
+              ) /
+              2;
+
+            const by =
+              (
+                b.y0 +
+                b.y1
+              ) /
+              2;
+
+            if (
+              Math.abs(
+                ay -
+                by
+              ) >
+              8
+            ) {
+              return ay - by;
+            }
+
+            return (
+              a.x0 -
+              b.x0
+            );
+          }
+        );
+
+    const deduped:
+      OcrWordBox[] =
+      [];
+
+    for (const word of sorted) {
+      const normalized =
+        word.text
+          .replace(
+            /\s/g,
+            ""
+          )
+          .toLowerCase();
+
+      const duplicate =
+        deduped.some(
+          (existing) => {
+            if (
+              existing.text
+                .replace(
+                  /\s/g,
+                  ""
+                )
+                .toLowerCase() !==
+              normalized
+            ) {
+              return false;
+            }
+
+            const left =
+              Math.max(
+                word.x0,
+                existing.x0
+              );
+
+            const top =
+              Math.max(
+                word.y0,
+                existing.y0
+              );
+
+            const right =
+              Math.min(
+                word.x1,
+                existing.x1
+              );
+
+            const bottom =
+              Math.min(
+                word.y1,
+                existing.y1
+              );
+
+            const intersection =
+              Math.max(
+                0,
+                right - left
+              ) *
+              Math.max(
+                0,
+                bottom - top
+              );
+
+            const wordArea =
+              (
+                word.x1 -
+                word.x0
+              ) *
+              (
+                word.y1 -
+                word.y0
+              );
+
+            const existingArea =
+              (
+                existing.x1 -
+                existing.x0
+              ) *
+              (
+                existing.y1 -
+                existing.y0
+              );
+
+            return (
+              intersection /
+                Math.max(
+                  1,
+                  Math.min(
+                    wordArea,
+                    existingArea
+                  )
+                ) >=
+              0.65
+            );
+          }
+        );
+
+      if (!duplicate) {
+        deduped.push(
+          word
+        );
+      }
+    }
+
+    const lines:
+      Array<{
+        centerY: number;
+        avgHeight: number;
+        words: OcrWordBox[];
+      }> =
+      [];
+
+    for (const word of deduped) {
+      const height =
+        word.y1 -
+        word.y0;
+
+      const centerY =
+        (
+          word.y0 +
+          word.y1
+        ) /
+        2;
+
+      let target =
+        lines.find(
+          (line) => {
+            const tolerance =
+              Math.max(
+                7,
+                Math.min(
+                  28,
+                  Math.max(
+                    line.avgHeight,
+                    height
+                  ) *
+                    0.75
+                )
+              );
+
+            return (
+              Math.abs(
+                line.centerY -
+                  centerY
+              ) <=
+              tolerance
+            );
+          }
+        );
+
+      if (!target) {
+        target = {
+          centerY,
+          avgHeight:
+            height,
+          words: [],
+        };
+
+        lines.push(
+          target
+        );
+      }
+
+      target.words.push(
+        word
+      );
+
+      const count =
+        target.words.length;
+
+      target.centerY =
+        (
+          target.centerY *
+            (
+              count -
+              1
+            ) +
+          centerY
+        ) /
+        count;
+
+      target.avgHeight =
+        (
+          target.avgHeight *
+            (
+              count -
+              1
+            ) +
+          height
+        ) /
+        count;
+    }
+
+    return lines
+      .sort(
+        (a, b) =>
+          a.centerY -
+          b.centerY
+      )
+      .map(
+        (line) =>
+          line.words.sort(
+            (a, b) =>
+              a.x0 -
+              b.x0
+          )
+      );
+  };
+
 
   const scanPdfWithOcr = async (
     nextFile: File,
@@ -3434,7 +3888,150 @@ export const PrivatePiiRedactor: React.FC<PrivatePiiRedactorProps> = ({
                 );
               }
             }
-          } finally {
+          }
+
+          /*
+           * SECOND-STAGE DETECTION FROM THE SAME OCR WORDS
+           *
+           * No second OCR recognition is performed. We only
+           * re-group the positioned words ourselves so a bad
+           * Tesseract line split cannot hide a supported value.
+           */
+          const regroupedLines =
+            regroupOcrPageWords(
+              pageWordsForCache.map(
+                ([
+                  text,
+                  x0,
+                  y0,
+                  x1,
+                  y1,
+                ]) => ({
+                  text,
+                  x0,
+                  y0,
+                  x1,
+                  y1,
+                })
+              )
+            );
+
+          const alreadyOnPage =
+            () =>
+              nextFindings.slice(
+                findingStart
+              );
+
+          for (
+            let regroupedIndex = 0;
+            regroupedIndex <
+              regroupedLines.length;
+            regroupedIndex++
+          ) {
+            const candidates =
+              detectOcrLine(
+                regroupedLines[
+                  regroupedIndex
+                ],
+                pageNumber,
+                baseViewport
+                  .width,
+                baseViewport
+                  .height,
+                renderScale,
+                `regrouped-${regroupedIndex}`
+              );
+
+            for (const candidate of candidates) {
+              const duplicate =
+                alreadyOnPage()
+                  .some(
+                    (existing) => {
+                      if (
+                        existing.page !==
+                          candidate.page ||
+                        existing.category !==
+                          candidate.category ||
+                        !existing.box ||
+                        !candidate.box
+                      ) {
+                        return false;
+                      }
+
+                      const left =
+                        Math.max(
+                          existing.box.x,
+                          candidate.box.x
+                        );
+
+                      const top =
+                        Math.max(
+                          existing.box.y,
+                          candidate.box.y
+                        );
+
+                      const right =
+                        Math.min(
+                          existing.box.x +
+                            existing.box
+                              .width,
+                          candidate.box.x +
+                            candidate.box
+                              .width
+                        );
+
+                      const bottom =
+                        Math.min(
+                          existing.box.y +
+                            existing.box
+                              .height,
+                          candidate.box.y +
+                            candidate.box
+                              .height
+                        );
+
+                      const intersection =
+                        Math.max(
+                          0,
+                          right -
+                            left
+                        ) *
+                        Math.max(
+                          0,
+                          bottom -
+                            top
+                        );
+
+                      const existingArea =
+                        existing.box.width *
+                        existing.box.height;
+
+                      const candidateArea =
+                        candidate.box.width *
+                        candidate.box.height;
+
+                      return (
+                        intersection /
+                          Math.max(
+                            1,
+                            Math.min(
+                              existingArea,
+                              candidateArea
+                            )
+                          ) >=
+                        0.6
+                      );
+                    }
+                  );
+
+              if (!duplicate) {
+                nextFindings.push(
+                  candidate
+                );
+              }
+            }
+          }
+        } finally {
             try {
               page.cleanup();
             } catch (_) {}
