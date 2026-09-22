@@ -37,6 +37,7 @@ import {
   paragraphsOf,
   flowRegions,
 } from "./layout.ts";
+import { chooseReconstructionStrategy } from "./strategy.ts";
 import { twips as tw, emu, isRotated, baselineOffset, lineHeight, textBoxGeometry, verticalTextFlow } from "./geometry.ts";
 import { fontProfile } from "./fonts.ts";
 const fontFor = (s: Span) => s.outputFont || fontProfile({ name: s.font }).fallback;
@@ -443,35 +444,38 @@ export async function makeDocx(
     const sourceLines = linesOf(unused);
     const intentionalGap = sourceLines.some((line, index) => index > 0 &&
       line.y - sourceLines[index - 1].y > Math.max(line.size, sourceLines[index - 1].size) * 2.5);
-    const positioned =
-      intentionalGap ||
-      rotated.length > 0 ||
-      tables.length > 0 ||
-      regions.columns ||
-      p.pictures.some(
-        (pic) =>
-          pic.background &&
-          unused.some(
-            (s) =>
-              s.x < pic.x + pic.width &&
-              s.x + s.width > pic.x &&
-              s.y > pic.y &&
-              s.y - s.size < pic.y + pic.height,
-          ),
-      );
-    const flow = positioned
+    const strategy = chooseReconstructionStrategy(
+      p,
+      tables,
+      regions.columns,
+      intentionalGap,
+    );
+    const visualHybrid = strategy.mode === "visual-hybrid";
+    const positioned = strategy.mode !== "flow";
+    const flow = visualHybrid
       ? regions.regions.flatMap((r) =>
-          paragraphsOf(linesOf(r.spans)).map((lines) => ({
-            lines,
-            left: r.left,
-            right: r.right,
-          })),
+          linesOf(r.spans).map((line) => {
+            const editRoom = Math.max(...line.spans.map((span) => span.size)) * 0.7;
+            return {
+              lines: [line],
+              left: line.x,
+              right: Math.min(p.width, Math.max(line.right + editRoom, line.x + 2)),
+            };
+          }),
         )
-      : paragraphsOf(linesOf(unused)).map((lines) => ({
-          lines,
-          left: 0,
-          right: 0,
-        }));
+      : positioned
+        ? regions.regions.flatMap((r) =>
+            paragraphsOf(linesOf(r.spans)).map((lines) => ({
+              lines,
+              left: r.left,
+              right: r.right,
+            })),
+          )
+        : paragraphsOf(linesOf(unused)).map((lines) => ({
+            lines,
+            left: 0,
+            right: 0,
+          }));
     const elements = [
       ...tables.map((t) => ({
         y: t.y,
@@ -605,6 +609,7 @@ export async function makeDocx(
       warnings: [...p.warnings,
         ...(rotated.some((s) => !usesWordArt(s) && verticalTextFlow(s.rotation ?? 0) === "horz") ? ["180-degree text uses editable Word shape rotation. Some editors, including the tested LibreOffice renderer, display this text horizontally. Review orientation in your Word editor."] : []),
         ...(rotated.some(usesWordArt) ? ["Diagonal text is preserved as editable WordArt. Font weight and text-path editing support can differ between Word editors."] : []),
+        ...(visualHybrid ? [`Page uses adaptive visual-hybrid reconstruction (score ${strategy.score}): text stays editable while non-text PDF artwork and source line positions preserve layout.`] : []),
         ...(tables.some((t) => t.hybrid) ? ["Some partially ruled tables were reconstructed from repeated row separators and column alignment. Review their cell boundaries."] : []),
         ...(tables.some((t) => t.inferred && !t.hybrid) ? ["Some unruled tables were inferred from repeated alignment. Review their cell boundaries."] : []),
       ],

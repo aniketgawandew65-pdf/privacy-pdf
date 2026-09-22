@@ -10,7 +10,7 @@ import {
 import workerUrl from "pdfjs-word-dist/build/pdf.worker.min.mjs?url";
 import type { PageModel, Rule, Span } from "./model.ts";
 import { detectTables } from "./layout.ts";
-import { fontProfile, advanceScale, type FontHints } from "./fonts.ts";
+import { fontProfile, advanceScale, metricMatchedFont, type FontHints } from "./fonts.ts";
 import { normalizeAngle, isObliqueTransform } from "./geometry.ts";
 import { planTextPreservation, type GlyphRun } from "./text-policy.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -358,18 +358,37 @@ export async function extractPage(
     const rotation = normalizeAngle(Math.atan2(t[1], t[0]) * 180 / Math.PI);
     const bold = !!font.bold || /bold|black|heavy/i.test(raw);
     const italic = !!font.italic || /italic|oblique/i.test(raw) || isObliqueTransform(t);
-    // Preserve installed source families; otherwise use a class-aware fallback.
-    const installed = !/Helvetica|Unknown/i.test(profile.family) && document.fonts.check(`${size}px "${profile.family}"`) &&
-      // FontFaceSet.check also returns true for nonexistent system families.
-      (() => { measure.font = `${size}px monospace`; const a = measure.measureText("Wim0123").width;
-        measure.font = `${size}px "${profile.family}", monospace`; return Math.abs(measure.measureText("Wim0123").width - a) > 0.01; })();
-    const outputFont = installed ? profile.family : profile.fallback;
-    if (!installed && profile.family !== profile.fallback) {
-      model.warnings.push("Some source fonts were replaced with a matching font class. Text remains editable; spacing can differ between Word editors.");
+    const isAvailable = (family: string) => {
+      if (!family || /Unknown/i.test(family)) return false;
+      if (!document.fonts.check(`${size}px "${family}"`)) return false;
+      // FontFaceSet.check can report true for an unknown family because a
+      // generic fallback is available. Compare it against a monospace sentinel
+      // so only a genuinely installed family is accepted.
+      measure.font = `${size}px monospace`;
+      const sentinel = measure.measureText("Wim0123").width;
+      measure.font = `${size}px "${family}", monospace`;
+      return Math.abs(measure.measureText("Wim0123").width - sentinel) > 0.01;
+    };
+    const sourceWidth = Math.abs(item.width) * viewport.userUnit;
+    const matched = metricMatchedFont({
+      ...font,
+      name: raw,
+      fallbackName: font.fallbackName || style.fontFamily,
+      text: item.str,
+      size,
+      sourceWidth,
+      bold,
+      italic,
+      measure,
+      isAvailable,
+    });
+    const outputFont = matched.family;
+    if (outputFont.toLowerCase() !== profile.family.toLowerCase()) {
+      model.warnings.push("Some source fonts were replaced with a locally available metric-matched font. Text remains editable and source advance is preserved.");
     }
     measure.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px "${outputFont}"`;
     const metrics = measure.measureText(item.str);
-    const scale = advanceScale(Math.abs(item.width) * viewport.userUnit, metrics.width);
+    const scale = advanceScale(sourceWidth, metrics.width);
     const ascent = (metrics.fontBoundingBoxAscent || size * (style.ascent || 0.8)) / size;
     const descent = (metrics.fontBoundingBoxDescent || size * Math.abs(style.descent || 0.2)) / size;
     if (scale < 60 || scale > 160) model.warnings.push("Some text needs substantial width scaling to match the source; check its appearance in your Word editor.");
