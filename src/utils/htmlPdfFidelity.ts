@@ -57,6 +57,12 @@ export const needsRasterExactText = (
   value.includes('\\') ||
   /[^\u0009\u000A\u000D\u0020-\u007E\u00A0-\u00FF]/u.test(value);
 
+export const styleNeedsRasterText = (
+  style: CSSStyleDeclaration
+): boolean =>
+  style.transform !== 'none' ||
+  style.writingMode.startsWith('vertical');
+
 const cssContentText = (
   raw: string
 ): string => {
@@ -234,6 +240,15 @@ const materializePseudoContent = (
     addPseudo('::before');
     addPseudo('::after');
   }
+
+  const style =
+    doc.createElement('style');
+
+  style.textContent =
+    '[data-html-pdf-pseudo-before]::before{content:none!important}' +
+    '[data-html-pdf-pseudo-after]::after{content:none!important}';
+
+  doc.head.appendChild(style);
 };
 
 const materializeFormControls = (
@@ -958,6 +973,145 @@ export const rasterizeTextLine = (
     }
 
     output += suffix;
+  }
+
+  if (
+    style.writingMode.startsWith(
+      'vertical'
+    )
+  ) {
+    context.textAlign = 'center';
+    context.direction = 'ltr';
+
+    const graphemes =
+      typeof Intl !== 'undefined' &&
+      'Segmenter' in Intl
+        ? Array.from(
+            new Intl.Segmenter(
+              undefined,
+              {
+                granularity:
+                  'grapheme',
+              }
+            ).segment(output),
+            (
+              item
+            ) =>
+              item.segment
+          )
+        : Array.from(output);
+
+    let y =
+      fontSize;
+
+    for (
+      const grapheme of
+      graphemes
+    ) {
+      context.fillText(
+        grapheme,
+        availableWidth / 2,
+        y
+      );
+
+      y +=
+        fontSize *
+        1.05;
+
+      if (
+        y >
+        height
+      ) {
+        break;
+      }
+    }
+
+    return canvas.toDataURL(
+      'image/png'
+    );
+  }
+
+  const transform =
+    style.transform;
+
+  if (
+    transform &&
+    transform !== 'none'
+  ) {
+    const match =
+      transform.match(
+        /^matrix\(([^)]+)\)$/
+      );
+
+    if (
+      match
+    ) {
+      const values =
+        match[1]
+          .split(',')
+          .map(
+            (
+              value
+            ) =>
+              Number(
+                value.trim()
+              )
+          );
+
+      if (
+        values.length >= 2 &&
+        values.every(
+          Number.isFinite
+        )
+      ) {
+        const angle =
+          Math.atan2(
+            values[1],
+            values[0]
+          );
+
+        context.save();
+
+        context.translate(
+          availableWidth / 2,
+          height / 2
+        );
+
+        context.rotate(
+          angle
+        );
+
+        context.textAlign =
+          style.direction ===
+            'rtl'
+            ? 'right'
+            : 'left';
+
+        context.fillText(
+          output,
+          style.direction ===
+            'rtl'
+            ? availableWidth /
+              2 -
+              1
+            : -availableWidth /
+              2 +
+              1,
+          Math.min(
+            height *
+              0.32,
+            fontSize *
+              0.35
+          )
+        );
+
+        context.restore();
+
+        return canvas.toDataURL(
+          'image/png'
+        );
+      }
+    }
   }
 
   const x =
