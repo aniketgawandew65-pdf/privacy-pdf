@@ -121,7 +121,7 @@ const materializeListMarkers = (
 
     const start =
       list.tagName === 'OL'
-        ? list.start || 1
+        ? (list as HTMLOListElement).start || 1
         : 1;
 
     const type =
