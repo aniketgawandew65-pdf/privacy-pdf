@@ -68,6 +68,14 @@ export async function makeCorpus(directory) {
           text(String(850-r*20)+'.75',484,y,9,bold);
         }
         text('Partially ruled statement table: body has no vertical borders.',40,ys.at(-1)-28,9,serif);
+        // Unrelated footer rules deliberately resemble table separators. They
+        // must remain outside the inferred editable table.
+        const footerTop=ys.at(-1)-90, footerBottom=footerTop-20;
+        for(const y of [footerTop,footerBottom]) for(let c=0;c<xs.length-1;c++)
+          page.drawLine({start:{x:xs[c],y},end:{x:xs[c+1],y},thickness:.6,color:rgb(.75,.75,.75)});
+        text('www.example.test',220,footerTop+25,8,bold);
+        text('Call 1800-000',350,footerTop+25,8,bold);
+        text('Never share passwords with anyone.',70,footerTop-14,8,bold);
       } else if(['table','merged','rounded','unruled'].includes(type)) {
         const xs=[40,120,320,440,560], ys=[height-100,height-124,height-156,height-194,height-230];
         const hasRule=type!=='unruled';
