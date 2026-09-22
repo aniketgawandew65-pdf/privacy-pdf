@@ -356,7 +356,10 @@ export async function extractPage(
     const profile = fontProfile({ ...font, name: raw, fallbackName: font.fallbackName || style.fontFamily });
     const size = Math.hypot(t[2], t[3]);
     const rotation = normalizeAngle(Math.atan2(t[1], t[0]) * 180 / Math.PI);
-    const bold = !!font.bold || /bold|black|heavy/i.test(raw);
+    // DOCX run properties only expose a bold toggle, not CSS-style numeric
+    // weight. Do not turn explicit Medium/SemiBold PDF faces into synthetic
+    // 700-weight text: it is visibly too dark and changes glyph metrics.
+    const bold = profile.weight >= 700;
     const italic = !!font.italic || /italic|oblique/i.test(raw) || isObliqueTransform(t);
     // Preserve installed source families; otherwise use a class-aware fallback.
     const installed = !/Helvetica|Unknown/i.test(profile.family) && document.fonts.check(`${size}px "${profile.family}"`) &&
@@ -394,7 +397,7 @@ export async function extractPage(
       width: Math.abs(item.width) * viewport.userUnit,
       size,
       font: profile.family,
-      fontClass: profile.fontClass, outputFont, scale, ascent, descent, rotation,
+      fontClass: profile.fontClass, outputFont, fontWeight: profile.weight, scale, ascent, descent, rotation,
       direction: item.dir === "rtl" ? "rtl" : "ltr", sourceOrder: index,
       bold, italic,
       opacity: textOpacity,

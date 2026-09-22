@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyFont, fontProfile, advanceScale } from '../src/utils/pdfToWord/fonts.ts';
+import { classifyFont, fontProfile, advanceScale, sourceFontWeight } from '../src/utils/pdfToWord/fonts.ts';
 import { twips, emu, textBoxGeometry, verticalTextFlow, isObliqueTransform } from '../src/utils/pdfToWord/geometry.ts';
 import { detectTables, inferAlignedTables } from '../src/utils/pdfToWord/layout.ts';
 import { makeDocx } from '../src/utils/pdfToWord/docx.ts';
@@ -18,6 +18,18 @@ test('font descriptors and generic fallback families classify opaque subset name
  assert.equal(fontProfile({name:'Symbol'}).fontClass,'symbolic');
  assert.equal(advanceScale(54,60),90);
 });
+test('explicit PDF face names override unreliable coarse bold flags',()=>{
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-Regular',bold:true}).family,'Mulish');
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-SemiBold',bold:true}).family,'Mulish');
+ assert.equal(fontProfile({name:'ABCDEF+Mulish-Black',bold:false}).family,'Mulish');
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Regular',bold:true}),400);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Medium',bold:true}),500);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-SemiBold',bold:true}),600);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Bold',bold:false}),700);
+ assert.equal(sourceFontWeight({name:'ABCDEF+Mulish-Black',bold:false}),900);
+ assert.equal(sourceFontWeight({name:'OpaqueSubset',bold:true}),700);
+});
+
 test('signed page coordinates and rotated centres convert without drift',()=>{
  assert.equal(twips(-3.5),-70);assert.equal(emu(72),914400);
  assert.equal(verticalTextFlow(89.99999),'vert');assert.equal(verticalTextFlow(-90),'vert270');
