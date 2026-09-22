@@ -607,6 +607,31 @@ export default function App() {
     }
 
     /*
+     * WATERMARK LARGE-FILE MEMORY PROTECTION
+     *
+     * Watermark's 64 MB+ path processes the original browser-backed
+     * File directly inside a dedicated qpdf Worker. Mirroring the same
+     * 100-150 MB source into the generic OPFS workspace at selection
+     * time creates a second large-file job while PDF.js is rendering
+     * the preview. On memory-constrained WebKit this can recreate the
+     * page before watermark processing even starts.
+     *
+     * Small/medium watermark files keep the existing workspace
+     * behaviour unchanged.
+     */
+    if (
+      location.pathname ===
+        '/watermark-pdf' &&
+      sharedFiles.some(
+        (selectedFile) =>
+          selectedFile.size >=
+            64 * 1024 * 1024
+      )
+    ) {
+      return;
+    }
+
+    /*
      * Searchable OCR, Dark Mode, B&W / Grayscale, PDF to Image,
      * PDF to Text and PDF to CSV own dedicated durable OPFS
      * recovery sources while processing.
