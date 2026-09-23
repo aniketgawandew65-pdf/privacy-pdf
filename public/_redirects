@@ -4,3 +4,4 @@
 
 /visual-editor /edit-pdf 301
 /add-text-to-pdf /edit-pdf 301
+/offline-pdf-redaction /redact-pdf 301
