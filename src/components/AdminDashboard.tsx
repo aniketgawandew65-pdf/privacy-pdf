@@ -129,7 +129,7 @@ const badgeClass = (
     clean.includes('active') ||
     clean.includes('success')
   ) {
-    return 'bg-emerald-100 text-emerald-900 border-emerald-300';
+    return 'bg-[#ecfdf5] text-[#065f46] border-[#34d399]';
   }
 
   return 'bg-[#f4f4f5] text-[#3f3f46] border-[#d4d4d8]';
@@ -437,9 +437,15 @@ export function AdminDashboard() {
       {latestPurchase && (
         <section className="rounded-2xl border border-emerald-300 bg-emerald-50 p-5">
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-800" />
+            <CheckCircle2
+              className="mt-0.5 h-5 w-5 shrink-0"
+              style={{ color: '#047857' }}
+            />
             <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-emerald-900">
+              <div
+                className="text-xs font-bold uppercase tracking-wide"
+                style={{ color: '#065f46' }}
+              >
                 Latest purchase
               </div>
               <div className="mt-1 text-base font-semibold text-zinc-950">
