@@ -350,7 +350,7 @@ export function AdminDashboard() {
   ];
 
   return (
-    <div className="w-full space-y-5">
+    <div className="w-full space-y-5" style={{ color: '#202023' }}>
       <section className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -370,7 +370,8 @@ export function AdminDashboard() {
             onClick={() =>
               void load()
             }
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 hover:bg-zinc-100"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold hover:bg-zinc-100"
+            style={{ color: '#202023' }}
           >
             <RefreshCw className="h-4 w-4" />
             Refresh
@@ -474,7 +475,7 @@ export function AdminDashboard() {
 
         <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-200">
           <table className="min-w-full text-left text-xs">
-            <thead className="bg-zinc-100 text-zinc-700">
+            <thead style={{ backgroundColor: '#f4f4f5', color: '#3f3f46' }}>
               <tr>
                 <th className="px-3 py-3 font-semibold">
                   Customer
@@ -589,7 +590,7 @@ export function AdminDashboard() {
 
         <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-200">
           <table className="min-w-full text-left text-xs">
-            <thead className="bg-zinc-100 text-zinc-700">
+            <thead style={{ backgroundColor: '#f4f4f5', color: '#3f3f46' }}>
               <tr>
                 <th className="px-3 py-3 font-semibold">
                   Email
@@ -674,7 +675,8 @@ export function AdminDashboard() {
         <div className="mt-4 space-y-2">
           {data.events.length ===
           0 ? (
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-600">
+            <div className="rounded-xl border border-zinc-200 p-4 text-xs"
+              style={{ backgroundColor: '#f7f7f8', color: '#52525b' }}>
               No Lemon Squeezy events received yet.
             </div>
           ) : (
@@ -685,7 +687,8 @@ export function AdminDashboard() {
               ) => (
                 <div
                   key={`${event.eventName}-${event.eventAt}-${index}`}
-                  className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  style={{ backgroundColor: '#f7f7f8', color: '#27272a' }}
                 >
                   <div>
                     <div className="text-xs font-semibold text-zinc-950">
