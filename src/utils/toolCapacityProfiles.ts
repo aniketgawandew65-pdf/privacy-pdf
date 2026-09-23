@@ -966,6 +966,15 @@ export const TOOL_CAPACITY_PROFILES:
   },
 
   {
+    id: 'pdf-to-powerpoint', name: 'PDF to PowerPoint', route: '/pdf-to-powerpoint',
+    processingClass: 'D', inputMetric: 'bytes-pages-pixels', multiFile: false,
+    aggregateInputBytes: false, memoryIntensity: 'high', cpuIntensity: 'high',
+    storageIntensity: 'low', pageComplexity: true, pixelComplexity: true,
+    outputGrowth: 'variable', recovery: 'none', usesOpfs: false, usesWorker: true,
+    desktopReadiness: 'conservative',
+    notes: 'Sequential page rendering and worker ZIP packaging. Bounded canvas resolution; compressed output remains in memory until download.',
+  },
+  {
     id: 'pdf-to-word',
     name: 'PDF to Word',
     route: '/pdf-to-word',
@@ -1137,9 +1146,9 @@ readonly ToolCapacityProfile[] {
  * This has no runtime effect on tool processing.
  */
 if (
-  TOOL_CAPACITY_PROFILE_COUNT !== 44
+  TOOL_CAPACITY_PROFILE_COUNT !== 45
 ) {
   console.warn(
-    `1into1 capacity registry expected 44 tools but found ${TOOL_CAPACITY_PROFILE_COUNT}.`
+    `1into1 capacity registry expected 45 tools but found ${TOOL_CAPACITY_PROFILE_COUNT}.`
   );
 }

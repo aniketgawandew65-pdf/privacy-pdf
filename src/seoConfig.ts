@@ -36,6 +36,7 @@ export const SEO_PRIORITY_PATHS = [
  * page/content SEO change. Do not stamp every deployment as "fresh".
  */
 export const SEO_LASTMOD: Record<string, string> = {
+  '/pdf-to-powerpoint': '2026-09-23',
   '/': '2026-09-23',
   '/blog': '2026-09-23',
   '/blog/pdf-privacy-comparison-2026': '2026-09-23',
@@ -51,6 +52,11 @@ export const SEO_LASTMOD: Record<string, string> = {
 };
 
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
+  '/pdf-to-powerpoint': {
+    path: '/pdf-to-powerpoint', title: 'PDF to PowerPoint — Private, Local Conversion | 1into1',
+    description: 'Convert PDF pages into PowerPoint slides on your device. Keep reliable digital text editable and preserve scanned pages as artwork. No PDF uploads.',
+    heading: 'Convert PDF to PowerPoint', subheading: 'One PDF page per slide, with local processing and editable text where reliable.',
+  },
   '/compress-pdf-to-50kb': {
     path: '/compress-pdf-to-50kb', title: 'Compress PDF to 50KB Online — Free & Private | 1into1',
     description: 'Aim for a 50KB PDF target directly in your browser for strict form and application upload limits. Review readability before downloading the locally processed result.',
