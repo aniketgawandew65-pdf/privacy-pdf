@@ -134,6 +134,51 @@ for (const [path, value] of Object.entries(SEO_LASTMOD || {})) {
 }
 
 
+// Research/editorial integrity checks.
+const articleSlugs = new Set();
+
+for (const article of ARTICLES) {
+  if (articleSlugs.has(article.slug)) {
+    fail(`Duplicate article slug: ${article.slug}`);
+  }
+  articleSlugs.add(article.slug);
+
+  if (article.comparison?.length) {
+    if (!article.published || !article.updated) {
+      fail(`Research article is missing published/updated dates: ${article.slug}`);
+    }
+
+    if (!article.methodology) {
+      fail(`Research article is missing methodology: ${article.slug}`);
+    }
+
+    if (!article.sources?.length) {
+      fail(`Research article is missing official sources: ${article.slug}`);
+    }
+
+    for (const row of article.comparison) {
+      const validSource =
+        row.sourceUrl.startsWith('/') ||
+        row.sourceUrl.startsWith('https://');
+
+      if (!validSource) {
+        fail(`Research comparison has invalid source URL: ${article.slug} -> ${row.service}`);
+      }
+    }
+
+    for (const source of article.sources || []) {
+      const validSource =
+        source.url.startsWith('/') ||
+        source.url.startsWith('https://');
+
+      if (!validSource) {
+        fail(`Research article has invalid source URL: ${article.slug} -> ${source.label}`);
+      }
+    }
+  }
+}
+
+
 // Duplicate canonical titles/descriptions
 const titles = new Map();
 const descriptions = new Map();
@@ -272,6 +317,51 @@ for (const path of allPaths) {
       JSON.parse(schema[1]);
     } catch {
       fail(`Invalid JSON-LD: ${path}`);
+    }
+  }
+}
+
+
+// Research pages must render their comparison, sources and dated Article schema.
+for (const article of ARTICLES.filter(article => article.comparison?.length)) {
+  const path = '/blog/' + article.slug;
+  const html = await readFile(
+    new URL(fileFor(path), dist),
+    'utf8'
+  );
+
+  if (!html.includes('class="research-table"')) {
+    fail(`${path}: research comparison table did not render.`);
+  }
+
+  if (!html.includes('class="research-sources"')) {
+    fail(`${path}: research source list did not render.`);
+  }
+
+  const schemaMatch =
+    html.match(
+      /<script id="schema-org-ld" type="application\/ld\+json">([\s\S]*?)<\/script>/
+    );
+
+  if (!schemaMatch) {
+    fail(`${path}: missing Article schema.`);
+  } else {
+    try {
+      const schema = JSON.parse(schemaMatch[1]);
+      const articleNode =
+        schema['@graph']?.find(
+          node => node['@type'] === 'Article'
+        );
+
+      if (!articleNode?.datePublished || !articleNode?.dateModified) {
+        fail(`${path}: Article schema is missing published/modified dates.`);
+      }
+
+      if (!Array.isArray(articleNode?.citation) || !articleNode.citation.length) {
+        fail(`${path}: Article schema is missing source citations.`);
+      }
+    } catch {
+      fail(`${path}: invalid research Article schema.`);
     }
   }
 }
