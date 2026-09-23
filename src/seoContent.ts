@@ -33,7 +33,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/pdf-to-csv','Extract PDF tables to Excel-ready data'],
       ['/edit-pdf','Edit the PDF directly in your browser'],
-      ['/pdf-to-markdown','Convert PDF to Markdown locally']
+      ['/pdf-to-markdown','Convert PDF to Markdown locally'],
+      ['/blog/pdf-privacy-comparison-2026','Compare browser-local and server PDF processing']
     ]
   },
   '/crop-pdf': {
@@ -334,7 +335,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/redact-pdf','Permanently redact visible PDF content'],
       ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
       ['/protect-pdf','Password-protect a PDF'],
-      ['/extract-pdf-for-llm','Prepare PDF content before using an LLM']
+      ['/extract-pdf-for-llm','Prepare PDF content before using an LLM'],
+      ['/blog/pdf-privacy-comparison-2026','Compare PDF processing privacy models']
     ]
   },
 
@@ -360,7 +362,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/redact-pdf','Permanently redact visible information'],
       ['/edit-metadata','Edit selected PDF metadata fields'],
       ['/protect-pdf','Password-protect the sanitized copy'],
-      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets']
+      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
+      ['/blog/pdf-privacy-comparison-2026','Read the 2026 PDF privacy comparison']
     ]
   },
 
