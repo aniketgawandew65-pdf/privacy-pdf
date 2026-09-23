@@ -23,10 +23,13 @@ async function loadTs(path) {
 const {
   TOOLS_METADATA,
   SEO_ALIASES,
+  SEO_LASTMOD,
+  SEO_PRIORITY_PATHS,
 } = await loadTs('../src/seoConfig.ts');
 
 const {
   ARTICLES,
+  TOOL_GUIDES,
   blogMeta,
   renderGuide,
   renderBlog,
@@ -90,6 +93,43 @@ for (const path of allPaths) {
 for (const path of Object.keys(TOOLS_METADATA)) {
   if (!allPaths.includes(path)) {
     fail(`SEO metadata exists for non-route: ${path}`);
+  }
+}
+
+
+// Priority crawl targets must be real canonical routes with substantive guide content.
+for (const path of SEO_PRIORITY_PATHS || []) {
+  if (!allPaths.includes(path)) {
+    fail(`Priority SEO path is not a route: ${path}`);
+    continue;
+  }
+
+  if (aliases[path]) {
+    fail(`Priority SEO path must be canonical, not an alias: ${path}`);
+  }
+
+  if (!metaFor(path)) {
+    fail(`Priority SEO path is missing metadata: ${path}`);
+  }
+
+  if (!TOOL_GUIDES[path]) {
+    fail(`Priority SEO path is missing a guide: ${path}`);
+  }
+}
+
+
+// Supported sitemap lastmod values must be real canonical routes and ISO dates.
+for (const [path, value] of Object.entries(SEO_LASTMOD || {})) {
+  if (!allPaths.includes(path)) {
+    fail(`lastmod exists for non-route: ${path}`);
+  }
+
+  if (aliases[path]) {
+    fail(`lastmod must be attached to the canonical route, not alias: ${path}`);
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    fail(`Invalid lastmod date for ${path}: ${value}`);
   }
 }
 
