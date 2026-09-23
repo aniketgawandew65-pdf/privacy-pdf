@@ -8,6 +8,44 @@ export interface ToolMeta {
 
 export const SEO_ALIASES: Record<string, string> = {
   '/visual-editor': '/edit-pdf',
+  '/offline-pdf-redaction': '/redact-pdf',
+};
+
+/*
+ * Priority crawl targets.
+ *
+ * These are the pages we want the homepage/static shell to surface most
+ * clearly while the domain is still earning crawl frequency and authority.
+ * Keep this list intentionally small instead of treating every tool as equal.
+ */
+export const SEO_PRIORITY_PATHS = [
+  '/pdf-to-word',
+  '/bank-statement-to-excel',
+  '/document-data-extractor',
+  '/private-pii-secrets-auto-redactor',
+  '/sanitize-pdf',
+  '/ocr-pdf',
+  '/compress-pdf-to-100kb',
+  '/booklet-pdf',
+  '/pdf-to-markdown',
+  '/redact-pdf',
+] as const;
+
+/*
+ * Only publish lastmod when we can support the date with a meaningful
+ * page/content SEO change. Do not stamp every deployment as "fresh".
+ */
+export const SEO_LASTMOD: Record<string, string> = {
+  '/': '2026-09-23',
+  '/pdf-to-word': '2026-09-22',
+  '/bank-statement-to-excel': '2026-09-21',
+  '/document-data-extractor': '2026-09-21',
+  '/private-pii-secrets-auto-redactor': '2026-09-21',
+  '/sanitize-pdf': '2026-09-21',
+  '/ocr-pdf': '2026-09-21',
+  '/compress-pdf-to-100kb': '2026-09-21',
+  '/pdf-to-markdown': '2026-09-21',
+  '/redact-pdf': '2026-09-21',
 };
 
 export const TOOLS_METADATA: Record<string, ToolMeta> = {

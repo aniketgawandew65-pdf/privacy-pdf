@@ -331,7 +331,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Should I still inspect the redacted file?', 'Yes. Reopen the finished copy and verify that the intended information is removed while required document content remains readable.']
     ],
     related: [
-      ['/offline-pdf-redaction','Permanently redact visible PDF content'],
+      ['/redact-pdf','Permanently redact visible PDF content'],
       ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
       ['/protect-pdf','Password-protect a PDF'],
       ['/extract-pdf-for-llm','Prepare PDF content before using an LLM']
@@ -357,7 +357,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the PDF uploaded for sanitization?', 'The sanitization workflow runs locally in your browser.']
     ],
     related: [
-      ['/offline-pdf-redaction','Permanently redact visible information'],
+      ['/redact-pdf','Permanently redact visible information'],
       ['/edit-metadata','Edit selected PDF metadata fields'],
       ['/protect-pdf','Password-protect the sanitized copy'],
       ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets']
@@ -386,7 +386,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/sanitize-pdf','Deep-sanitize PDF hidden data'],
       ['/protect-pdf','Password-protect a PDF'],
-      ['/offline-pdf-redaction','Remove visible sensitive information'],
+      ['/redact-pdf','Remove visible sensitive information'],
       ['/pdf-to-text','Extract selectable PDF text']
     ]
   },
@@ -410,7 +410,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the PDF uploaded for Bates stamping?', 'The Bates-numbering workflow runs locally in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
-      ['/offline-pdf-redaction','Redact confidential information'],
+      ['/redact-pdf','Redact confidential information'],
       ['/sanitize-pdf','Sanitize PDF metadata'],
       ['/page-numbers','Add ordinary page numbers'],
       ['/compare-pdf','Compare PDF versions']

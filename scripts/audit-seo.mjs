@@ -23,10 +23,13 @@ async function loadTs(path) {
 const {
   TOOLS_METADATA,
   SEO_ALIASES,
+  SEO_LASTMOD,
+  SEO_PRIORITY_PATHS,
 } = await loadTs('../src/seoConfig.ts');
 
 const {
   ARTICLES,
+  TOOL_GUIDES,
   blogMeta,
   renderGuide,
   renderBlog,
@@ -90,6 +93,43 @@ for (const path of allPaths) {
 for (const path of Object.keys(TOOLS_METADATA)) {
   if (!allPaths.includes(path)) {
     fail(`SEO metadata exists for non-route: ${path}`);
+  }
+}
+
+
+// Priority crawl targets must be real canonical routes with substantive guide content.
+for (const path of SEO_PRIORITY_PATHS || []) {
+  if (!allPaths.includes(path)) {
+    fail(`Priority SEO path is not a route: ${path}`);
+    continue;
+  }
+
+  if (aliases[path]) {
+    fail(`Priority SEO path must be canonical, not an alias: ${path}`);
+  }
+
+  if (!metaFor(path)) {
+    fail(`Priority SEO path is missing metadata: ${path}`);
+  }
+
+  if (!TOOL_GUIDES[path]) {
+    fail(`Priority SEO path is missing a guide: ${path}`);
+  }
+}
+
+
+// Supported sitemap lastmod values must be real canonical routes and ISO dates.
+for (const [path, value] of Object.entries(SEO_LASTMOD || {})) {
+  if (!allPaths.includes(path)) {
+    fail(`lastmod exists for non-route: ${path}`);
+  }
+
+  if (aliases[path]) {
+    fail(`lastmod must be attached to the canonical route, not alias: ${path}`);
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    fail(`Invalid lastmod date for ${path}: ${value}`);
   }
 }
 
@@ -237,6 +277,38 @@ for (const path of allPaths) {
 }
 
 
+// Priority pages must expose useful static HTML before React executes.
+for (const path of SEO_PRIORITY_PATHS || []) {
+  const html = await readFile(
+    new URL(fileFor(path), dist),
+    'utf8'
+  );
+
+  if (!html.includes('class="seo-guide"')) {
+    fail(`${path}: priority page has no static SEO guide.`);
+  }
+
+  if (html.includes('seo-static-shell-style')) {
+    fail(`${path}: static crawl content is hidden.`);
+  }
+}
+
+
+// The homepage must contain contextual links to every priority crawl target.
+{
+  const homeHtml = await readFile(
+    new URL('index.html', dist),
+    'utf8'
+  );
+
+  for (const path of SEO_PRIORITY_PATHS || []) {
+    if (!homeHtml.includes(`href="${path}"`)) {
+      fail(`Homepage is missing priority internal link: ${path}`);
+    }
+  }
+}
+
+
 // Sitemap coverage
 const sitemap = await readFile(
   new URL('sitemap.xml', dist),
@@ -267,6 +339,21 @@ if (
   );
 }
 
+for (const [path, value] of Object.entries(SEO_LASTMOD || {})) {
+  const loc =
+    origin +
+    (path === '/' ? '/' : path);
+
+  const expected =
+    `<url><loc>${loc}</loc><lastmod>${value}</lastmod></url>`;
+
+  if (!sitemap.includes(expected)) {
+    fail(
+      `Sitemap lastmod mismatch: ${path}`
+    );
+  }
+}
+
 
 // Private route checks
 try {
@@ -289,6 +376,35 @@ try {
   fail(
     'Missing generated HTML: /admin'
   );
+}
+
+
+// Canonical aliases must also have server-side 301 redirects.
+const redirects = await readFile(
+  new URL('../public/_redirects', import.meta.url),
+  'utf8'
+);
+
+const redirectLines =
+  redirects
+    .split(/\r?\n/)
+    .map(line => line.trim().split(/\s+/))
+    .filter(parts => parts.length >= 3);
+
+for (const [from, to] of Object.entries(aliases)) {
+  const found =
+    redirectLines.some(
+      parts =>
+        parts[0] === from &&
+        parts[1] === to &&
+        parts[2] === '301'
+    );
+
+  if (!found) {
+    fail(
+      `Missing 301 redirect for SEO alias: ${from} -> ${to}`
+    );
+  }
 }
 
 

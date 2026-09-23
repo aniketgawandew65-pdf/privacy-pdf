@@ -1995,6 +1995,51 @@ export default function App() {
               </NavLink>
 
               <NavLink
+                to="/pdf-to-word"
+                className="specialist-moat-card"
+              >
+                <FileText size={21} />
+                <div>
+                  <strong>PDF → Word</strong>
+                  <span>
+                    Rebuild digital PDFs as editable DOCX without
+                    uploading the source file.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/ocr-pdf"
+                className="specialist-moat-card"
+              >
+                <ScanText size={21} />
+                <div>
+                  <strong>Searchable OCR</strong>
+                  <span>
+                    Add a searchable text layer to scanned PDFs
+                    locally in your browser.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
+                to="/compress-pdf-to-100kb"
+                className="specialist-moat-card"
+              >
+                <Sliders size={21} />
+                <div>
+                  <strong>Compress to 100KB</strong>
+                  <span>
+                    Target strict upload limits while keeping the
+                    document on your device.
+                  </span>
+                </div>
+                <ArrowRight size={15} />
+              </NavLink>
+
+              <NavLink
                 to="/bates-numbering"
                 className="specialist-moat-card"
               >
