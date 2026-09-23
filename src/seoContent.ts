@@ -33,7 +33,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/pdf-to-csv','Extract PDF tables to Excel-ready data'],
       ['/edit-pdf','Edit the PDF directly in your browser'],
-      ['/pdf-to-markdown','Convert PDF to Markdown locally']
+      ['/pdf-to-markdown','Convert PDF to Markdown locally'],
+      ['/blog/pdf-privacy-comparison-2026','Compare browser-local and server PDF processing']
     ]
   },
   '/crop-pdf': {
@@ -334,7 +335,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/redact-pdf','Permanently redact visible PDF content'],
       ['/sanitize-pdf','Remove PDF metadata and hidden traces'],
       ['/protect-pdf','Password-protect a PDF'],
-      ['/extract-pdf-for-llm','Prepare PDF content before using an LLM']
+      ['/extract-pdf-for-llm','Prepare PDF content before using an LLM'],
+      ['/blog/pdf-privacy-comparison-2026','Compare PDF processing privacy models']
     ]
   },
 
@@ -360,7 +362,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/redact-pdf','Permanently redact visible information'],
       ['/edit-metadata','Edit selected PDF metadata fields'],
       ['/protect-pdf','Password-protect the sanitized copy'],
-      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets']
+      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
+      ['/blog/pdf-privacy-comparison-2026','Read the 2026 PDF privacy comparison']
     ]
   },
 
@@ -975,7 +978,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
 
 };
 
-export interface Article { slug: string; title: string; description: string; tool: string; toolLabel: string; sections: { title: string; paragraphs: string[] }[] }
+export interface ArticleComparisonRow {
+  service: string;
+  processing: string;
+  deletion: string;
+  localOption: string;
+  sourceLabel: string;
+  sourceUrl: string;
+}
+export interface ArticleSource {
+  label: string;
+  url: string;
+  detail: string;
+}
+export interface Article {
+  slug: string;
+  title: string;
+  description: string;
+  tool: string;
+  toolLabel: string;
+  category?: string;
+  published?: string;
+  updated?: string;
+  methodology?: string;
+  comparison?: ArticleComparisonRow[];
+  sources?: ArticleSource[];
+  sections: { title: string; paragraphs: string[] }[];
+}
 export const ARTICLES: Article[] = [
   {
     slug: 'reduce-pdf-for-upload-limit', title: 'How to reduce a PDF for an upload size limit',
@@ -1000,6 +1029,121 @@ export const ARTICLES: Article[] = [
       {title: 'Cropping is not redaction', paragraphs: ['Cropping can change the visible page boundary without deleting the content outside it. Do not use it to hide account numbers, addresses or other information that must not remain recoverable.', 'Use a dedicated redaction workflow for information removal and inspect the exported copy. The distinction matters even when the cropped page looks correct in your viewer.']},
       {title: 'Cropping is not compression either', paragraphs: ['Removing visible margins does not necessarily remove the underlying page data or make the file substantially smaller. If your goal is an upload limit, crop for appearance first and then use the compressor if needed.', 'The crop tool runs on your device. On a phone, work with a manageable document size and leave the browser open until the download is ready.']}
     ]
+  },
+  {
+    slug: 'pdf-privacy-comparison-2026',
+    title: 'Where does your PDF go? A 2026 privacy comparison of online PDF tools',
+    description: 'Compare browser-local and server-based PDF processing models, published file-deletion windows and offline options using official vendor documentation.',
+    tool: '/privacy',
+    toolLabel: 'Read the 1into1 privacy policy',
+    category: 'PDF PRIVACY RESEARCH',
+    published: '2026-09-23',
+    updated: '2026-09-23',
+    methodology: 'Reviewed on 23 September 2026 using official vendor documentation linked below. This comparison describes the documented data path and retention model of online PDF workflows. It is not a security score or an overall product ranking. Policies and product behavior can change, and some vendors offer both online and desktop or client-side products.',
+    comparison: [
+      {
+        service: '1into1 PDF',
+        processing: 'Core local workflows process the document in the browser on the user’s device. Optional cloud AI and checkout are separate networked features.',
+        deletion: 'Core local document workflows do not require a normal document-processing server upload, so there is no server-side file-retention window for those workflows.',
+        localOption: 'Yes. Local browser processing is the default for core tools; many workflows can continue after the app and required resources have loaded.',
+        sourceLabel: '1into1 Privacy',
+        sourceUrl: '/privacy'
+      },
+      {
+        service: 'Smallpdf',
+        processing: 'Its online tools upload documents to Smallpdf infrastructure and protect transfers with TLS.',
+        deletion: 'Smallpdf says files used with free tools are permanently deleted after one hour. Files intentionally stored in an account follow account-storage controls.',
+        localOption: 'This row describes Smallpdf’s online tools and their published server-processing model.',
+        sourceLabel: 'Smallpdf safety guide',
+        sourceUrl: 'https://smallpdf.com/blog/is-smallpdf-safe'
+      },
+      {
+        service: 'iLovePDF',
+        processing: 'Its web service processes uploaded files on iLovePDF servers.',
+        deletion: 'Its privacy policy says processed content files are deleted within two hours, with separate terms applying to iLoveSign.',
+        localOption: 'This row covers the web service and its published server-retention policy.',
+        sourceLabel: 'iLovePDF privacy policy',
+        sourceUrl: 'https://www.ilovepdf.com/help/privacy'
+      },
+      {
+        service: 'Sejda',
+        processing: 'Sejda’s online service uploads files over an encrypted connection for processing.',
+        deletion: 'Sejda states that online files are automatically deleted after two hours.',
+        localOption: 'Sejda also offers a Desktop product for offline work where files do not leave the computer.',
+        sourceLabel: 'Sejda online editor',
+        sourceUrl: 'https://www.sejda.com/pdf-editor'
+      },
+      {
+        service: 'PDF24',
+        processing: 'PDF24 says its online tools process documents on PDF24 servers.',
+        deletion: 'Uploaded files used by the online tools are automatically deleted from the server after one hour.',
+        localOption: 'PDF24 Creator is offered as a Windows desktop alternative that works locally and offline.',
+        sourceLabel: 'PDF24 FAQ',
+        sourceUrl: 'https://tools.pdf24.org/en/faq'
+      },
+      {
+        service: 'Adobe Acrobat online',
+        processing: 'Adobe says Acrobat online services upload files to Adobe cloud storage.',
+        deletion: 'If a user does not sign in, Adobe says the uploaded file is deleted from its servers within a short period. Signed-in users can choose to save files to their Adobe account.',
+        localOption: 'This row covers Acrobat online services rather than the separate desktop Acrobat application.',
+        sourceLabel: 'Adobe Acrobat online FAQ',
+        sourceUrl: 'https://helpx.adobe.com/document-cloud/faq/try-acrobat-online-services.html'
+      },
+      {
+        service: 'PDFgear secure browser tools',
+        processing: 'PDFgear describes a set of secure client-side PDF tools that process directly in the browser without uploading the PDF.',
+        deletion: 'For the client-side tools described on that page, PDFgear says files remain on the user’s device rather than being stored by the service.',
+        localOption: 'Yes for the client-side tool set described by PDFgear; the page says those tools can function without internet after opening.',
+        sourceLabel: 'PDFgear secure tools',
+        sourceUrl: 'https://www.pdfgear.com/secure-pdf-tools/'
+      }
+    ],
+    sections: [
+      {
+        title: 'Local processing and server processing are different data paths',
+        paragraphs: [
+          'A browser-based interface does not automatically mean a document stays in the browser. Some web PDF services upload the file to a processing server, while other workflows execute the document operation locally with JavaScript, WebAssembly or browser APIs.',
+          'Both models can be designed with security controls. The practical privacy difference is where the document travels, which systems receive a copy, and whether a server-retention policy becomes part of the workflow.'
+        ]
+      },
+      {
+        title: 'Deletion windows matter only after a file is uploaded',
+        paragraphs: [
+          'Smallpdf, iLovePDF, Sejda and PDF24 publish server-deletion windows for their online workflows. Those policies are useful because they tell users how long an uploaded processing copy is expected to remain after the task.',
+          'A deletion window is not the same thing as local processing. With a local workflow, the document-processing step does not create the same server-side copy in the first place. With a server workflow, transport encryption and deletion controls are the relevant safeguards.'
+        ]
+      },
+      {
+        title: 'Several vendors now offer both models',
+        paragraphs: [
+          'The market is not simply local versus cloud by company name. Sejda offers an online service and a separate desktop application. PDF24 offers server-based online tools and the local PDF24 Creator. PDFgear publishes a client-side subset of secure browser tools. Adobe offers online services as well as separate desktop software.',
+          'That is why privacy comparisons should identify the exact workflow being discussed instead of applying one label to every product a company offers.'
+        ]
+      },
+      {
+        title: 'For sensitive documents, check the data path before choosing a tool',
+        paragraphs: [
+          'Bank statements, contracts, identity documents, legal files and confidential business records can contain information that users may prefer not to transmit unless necessary. Before processing a sensitive document, check whether the specific tool says the file stays on-device or is uploaded, how transfers are protected, how long server copies are retained and whether an offline alternative exists.',
+          'No processing model removes the need to review the output. Redacted documents should be reopened and verified, extracted financial values should be checked against the source, and any tool handling sensitive material should be used within the policies and requirements that apply to the user’s organization.'
+        ]
+      },
+      {
+        title: 'What this comparison does not claim',
+        paragraphs: [
+          'This page does not claim that a server-based service is unsafe, and it does not score or rank the companies. A mature cloud service can use strong encryption, access controls, certifications and deletion systems. Local processing instead minimizes the document-processing data path by keeping supported work on the user’s device.',
+          'The table is a snapshot of public vendor documentation reviewed on the date shown above. If a provider changes its architecture, retention policy or product scope, its own current documentation should take precedence.'
+        ]
+      }
+    ],
+    sources: [
+      { label: '1into1 PDF — Privacy policy', url: '/privacy', detail: 'Local document processing, optional cloud features and browser storage.' },
+      { label: 'Smallpdf — Is Smallpdf Safe?', url: 'https://smallpdf.com/blog/is-smallpdf-safe', detail: 'Online transfer, server location and one-hour deletion policy for free-tool files.' },
+      { label: 'iLovePDF — Privacy Policy', url: 'https://www.ilovepdf.com/help/privacy', detail: 'Processing and two-hour deletion policy for content files, with stated exceptions.' },
+      { label: 'Sejda — Online PDF Editor', url: 'https://www.sejda.com/pdf-editor', detail: 'Encrypted upload, two-hour deletion and Desktop offline alternative.' },
+      { label: 'PDF24 — FAQ', url: 'https://tools.pdf24.org/en/faq', detail: 'Online server processing, one-hour deletion and PDF24 Creator offline option.' },
+      { label: 'Adobe — Acrobat online services FAQ', url: 'https://helpx.adobe.com/document-cloud/faq/try-acrobat-online-services.html', detail: 'Adobe cloud upload behavior and deletion/storage conditions for online services.' },
+      { label: 'PDFgear — Secure Online Tools', url: 'https://www.pdfgear.com/secure-pdf-tools/', detail: 'Client-side browser tool set and no-upload claims for those tools.' }
+    ]
   }
 ];
 
@@ -1011,10 +1155,22 @@ export function renderGuide(path: string): string {
   return `<section class="seo-guide" aria-label="Tool instructions"><h2>${escapeHtml(guide.title)}</h2><p>${escapeHtml(guide.intro)}</p><ol>${guide.steps.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ol><div class="guide-example"><h3>A practical example</h3><p>${escapeHtml(guide.example)}</p></div><h3>Common questions</h3>${guide.questions.map(([q,a])=>`<details><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join('')}<nav class="guide-related" aria-label="Related tools and guides">${guide.related.map(([p,l])=>link(p,l)).join('')}</nav></section>`;
 }
 export function renderBlog(path: string): string {
-  if (path === '/blog') return `<section class="blog-list" aria-label="PDF guides">${ARTICLES.map(a=>`<article><p class="guide-category">PRACTICAL PDF GUIDE</p><h2>${link('/blog/'+a.slug,a.title)}</h2><p>${escapeHtml(a.description)}</p>${link('/blog/'+a.slug,'Read guide →')}</article>`).join('')}</section>`;
+  if (path === '/blog') return `<section class="blog-list" aria-label="PDF guides">${ARTICLES.map(a=>`<article><p class="guide-category">${escapeHtml(a.category || 'PRACTICAL PDF GUIDE')}</p><h2>${link('/blog/'+a.slug,a.title)}</h2><p>${escapeHtml(a.description)}</p>${link('/blog/'+a.slug,a.comparison ? 'Read research →' : 'Read guide →')}</article>`).join('')}</section>`;
   const article = ARTICLES.find(a=>path==='/blog/'+a.slug);
   if (!article) return '';
-  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav><p class="article-byline">By the 1into1 team</p><a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
+  const dateLine = article.updated
+    ? `<p class="article-byline">By the 1into1 team · Updated ${escapeHtml(article.updated)}</p>`
+    : '<p class="article-byline">By the 1into1 team</p>';
+
+  const comparison = article.comparison?.length
+    ? `<section class="research-comparison" aria-labelledby="research-comparison-heading"><h2 id="research-comparison-heading">At-a-glance processing and retention comparison</h2>${article.methodology ? `<p class="research-methodology">${escapeHtml(article.methodology)}</p>` : ''}<div class="research-table-wrap"><table class="research-table"><thead><tr><th>Service</th><th>Document processing path</th><th>Published deletion / retention</th><th>Local or offline option</th><th>Source</th></tr></thead><tbody>${article.comparison.map(row=>`<tr><th scope="row">${escapeHtml(row.service)}</th><td>${escapeHtml(row.processing)}</td><td>${escapeHtml(row.deletion)}</td><td>${escapeHtml(row.localOption)}</td><td><a href="${escapeHtml(row.sourceUrl)}"${row.sourceUrl.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(row.sourceLabel)}</a></td></tr>`).join('')}</tbody></table></div></section>`
+    : '';
+
+  const sources = article.sources?.length
+    ? `<section class="research-sources"><h2>Official sources reviewed</h2><ol>${article.sources.map(source=>`<li><a href="${escapeHtml(source.url)}"${source.url.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(source.label)}</a><span>${escapeHtml(source.detail)}</span></li>`).join('')}</ol></section>`
+    : '';
+
+  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
   if(path==='/blog') return {path,title:'PDF guides: upload limits, cropping & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF upload limits, cropping pages and using local document tools.',subheading:'Straightforward answers. Tools you can use right away.'};
