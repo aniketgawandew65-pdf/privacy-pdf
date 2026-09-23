@@ -1501,6 +1501,7 @@ export const DocumentDataExtractor:
                     file
                   )
                 }
+                style={{ color: '#ffffff' }}
                 className="mt-4 w-full min-h-12 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition"
               >
                 <FileSpreadsheet className="w-4 h-4" />
@@ -1746,6 +1747,7 @@ export const DocumentDataExtractor:
                   onClick={
                     downloadCsv
                   }
+                  style={{ color: '#ffffff' }}
                   className="min-h-12 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 px-5 flex items-center justify-center gap-2 text-sm font-semibold transition"
                 >
                   <Download className="w-4 h-4" />
@@ -1760,6 +1762,7 @@ export const DocumentDataExtractor:
                   disabled={
                     exportingExcel
                   }
+                  style={{ color: '#ffffff' }}
                   className="min-h-12 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 px-5 flex items-center justify-center gap-2 text-sm font-semibold transition"
                 >
                   {exportingExcel ? (
