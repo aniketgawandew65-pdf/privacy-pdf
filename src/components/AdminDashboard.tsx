@@ -132,7 +132,7 @@ const badgeClass = (
     return 'bg-emerald-100 text-emerald-900 border-emerald-300';
   }
 
-  return 'bg-zinc-100 text-zinc-800 border-zinc-300';
+  return 'bg-[#f4f4f5] text-[#3f3f46] border-[#d4d4d8]';
 };
 
 export function AdminDashboard() {
@@ -260,7 +260,7 @@ export function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="w-full rounded-2xl border border-zinc-300 bg-white p-8 text-center text-zinc-700">
+      <div className="w-full rounded-2xl border border-[#d4d4d8] bg-white p-8 text-center text-zinc-700">
         <RefreshCw className="mx-auto h-6 w-6 animate-spin" />
         <p className="mt-3 text-sm font-semibold">
           Loading 1into1 Admin…
@@ -293,7 +293,7 @@ export function AdminDashboard() {
               onClick={() =>
                 void load()
               }
-              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-zinc-900 bg-zinc-900 px-4 text-sm font-semibold"
+              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#202023] bg-[#202023] px-4 text-sm font-semibold"
               style={{
                 color: '#ffffff',
               }}
@@ -351,7 +351,7 @@ export function AdminDashboard() {
 
   return (
     <div className="w-full space-y-5" style={{ color: '#202023' }}>
-      <section className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-7">
+      <section className="rounded-2xl border border-[#d4d4d8] bg-white p-5 sm:p-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-800">
@@ -370,7 +370,7 @@ export function AdminDashboard() {
             onClick={() =>
               void load()
             }
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold hover:bg-zinc-100"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#d4d4d8] bg-white px-4 text-sm font-semibold hover:bg-[#f4f4f5]"
             style={{ color: '#202023' }}
           >
             <RefreshCw className="h-4 w-4" />
@@ -390,7 +390,8 @@ export function AdminDashboard() {
         {!data.previewMode && (
           <div className="mt-5 flex flex-wrap gap-2 text-xs text-zinc-600">
             {data.adminEmail && (
-              <span className="rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1.5">
+              <span className="rounded-full border border-[#d4d4d8] px-3 py-1.5"
+                style={{ backgroundColor: '#f7f7f8', color: '#52525b' }}>
                 Admin: {data.adminEmail}
               </span>
             )}
@@ -419,7 +420,7 @@ export function AdminDashboard() {
           }) => (
             <article
               key={label}
-              className="rounded-2xl border border-zinc-300 bg-white p-5"
+              className="rounded-2xl border border-[#d4d4d8] bg-white p-5"
             >
               <Icon className="h-5 w-5 text-emerald-800" />
               <div className="mt-5 text-2xl font-semibold text-zinc-950">
@@ -460,7 +461,7 @@ export function AdminDashboard() {
         </section>
       )}
 
-      <section className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-6">
+      <section className="rounded-2xl border border-[#d4d4d8] bg-white p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-zinc-950">
@@ -473,7 +474,7 @@ export function AdminDashboard() {
           <ShoppingCart className="h-5 w-5 text-zinc-500" />
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-200">
+        <div className="mt-4 overflow-x-auto rounded-xl border border-[#e4e4e7]">
           <table className="min-w-full text-left text-xs">
             <thead style={{ backgroundColor: '#f4f4f5', color: '#3f3f46' }}>
               <tr>
@@ -515,7 +516,7 @@ export function AdminDashboard() {
                       key={
                         purchase.orderId
                       }
-                      className="border-t border-zinc-200 text-zinc-800"
+                      className="border-t border-[#e4e4e7] text-zinc-800"
                     >
                       <td className="px-3 py-3">
                         <div className="font-medium text-zinc-950">
@@ -575,7 +576,7 @@ export function AdminDashboard() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-6">
+      <section className="rounded-2xl border border-[#d4d4d8] bg-white p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-zinc-950">
@@ -588,7 +589,7 @@ export function AdminDashboard() {
           <UserRound className="h-5 w-5 text-zinc-500" />
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-200">
+        <div className="mt-4 overflow-x-auto rounded-xl border border-[#e4e4e7]">
           <table className="min-w-full text-left text-xs">
             <thead style={{ backgroundColor: '#f4f4f5', color: '#3f3f46' }}>
               <tr>
@@ -627,7 +628,7 @@ export function AdminDashboard() {
                       key={
                         user.email
                       }
-                      className="border-t border-zinc-200 text-zinc-800"
+                      className="border-t border-[#e4e4e7] text-zinc-800"
                     >
                       <td className="px-3 py-3 font-medium text-zinc-950">
                         {user.email}
@@ -659,7 +660,7 @@ export function AdminDashboard() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-zinc-300 bg-white p-5 sm:p-6">
+      <section className="rounded-2xl border border-[#d4d4d8] bg-white p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-zinc-950">
@@ -675,7 +676,7 @@ export function AdminDashboard() {
         <div className="mt-4 space-y-2">
           {data.events.length ===
           0 ? (
-            <div className="rounded-xl border border-zinc-200 p-4 text-xs"
+            <div className="rounded-xl border border-[#e4e4e7] p-4 text-xs"
               style={{ backgroundColor: '#f7f7f8', color: '#52525b' }}>
               No Lemon Squeezy events received yet.
             </div>
@@ -687,7 +688,7 @@ export function AdminDashboard() {
               ) => (
                 <div
                   key={`${event.eventName}-${event.eventAt}-${index}`}
-                  className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-2 rounded-xl border border-[#e4e4e7] p-3 sm:flex-row sm:items-center sm:justify-between"
                   style={{ backgroundColor: '#f7f7f8', color: '#27272a' }}
                 >
                   <div>
