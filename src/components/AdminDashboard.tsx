@@ -398,9 +398,14 @@ export function AdminDashboard() {
             <span
               className={`rounded-full border px-3 py-1.5 ${
                 data.webhookConfigured
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                  : 'border-amber-300 bg-amber-50 text-amber-900'
+                  ? 'border-[#34d399] bg-[#ecfdf5]'
+                  : 'border-[#f59e0b] bg-[#fffbeb]'
               }`}
+              style={{
+                color: data.webhookConfigured
+                  ? '#065f46'
+                  : '#92400e',
+              }}
             >
               Lemon webhook{' '}
               {data.webhookConfigured
