@@ -63,7 +63,21 @@ function headFor(meta,path) {
   } else if(path==='/blog') {
     primaryEntity={'@type':'CollectionPage','@id':url+'#page',name:meta.heading,description:meta.description,url,isPartOf:{'@id':origin+'/#website'}};
   } else if(isArticle) {
-    primaryEntity={'@type':'Article','@id':url+'#article',headline:meta.heading,name:meta.heading,description:meta.description,url,author:{'@id':origin+'/#organization'},publisher:{'@id':origin+'/#organization'},mainEntityOfPage:url};
+    const article = ARTICLES.find(a => path === '/blog/' + a.slug);
+    primaryEntity={
+      '@type':'Article',
+      '@id':url+'#article',
+      headline:meta.heading,
+      name:meta.heading,
+      description:meta.description,
+      url,
+      author:{'@id':origin+'/#organization'},
+      publisher:{'@id':origin+'/#organization'},
+      mainEntityOfPage:url,
+      ...(article?.published ? {datePublished:article.published} : {}),
+      ...(article?.updated ? {dateModified:article.updated} : {}),
+      ...(article?.sources?.length ? {citation:article.sources.map(source=>source.url.startsWith('/') ? origin+source.url : source.url)} : {})
+    };
   } else if(['/privacy','/terms'].includes(path)) {
     primaryEntity={'@type':'WebPage','@id':url+'#page',name:meta.heading,description:meta.description,url,isPartOf:{'@id':origin+'/#website'}};
   } else {
