@@ -139,6 +139,7 @@ const CodeToPdf = lazy(() => import('./components/CodeToPdf').then((m) => ({ def
 const HtmlToPdf = lazy(() => import('./components/HtmlToPdf').then((m) => ({ default: m.HtmlToPdf })));
 
 const NotFound = lazy(() => import('./components/NotFound').then((m) => ({ default: m.NotFound })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -1624,6 +1625,7 @@ export default function App() {
     `${tool.name} ${tool.path} ${TOOLS_METADATA[tool.path]?.description || ''}`.toLowerCase().includes(search.toLowerCase().trim())
   );
   const isHome = location.pathname === '/';
+  const isAdminPage = location.pathname === '/admin';
   const isCloudAiTool = location.pathname === '/ai-summary-pdf';
 
   const freeTasksExhausted =
@@ -1657,12 +1659,22 @@ export default function App() {
         <div className="header-actions">
           <button className="quiet-button tools-toggle" onClick={() => setDirectoryOpen(!directoryOpen)} aria-expanded={directoryOpen} aria-controls="tool-directory"><LayoutGrid size={17} /><span>All tools</span><ChevronDown size={14} /></button>
           {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
+          {isDevMode && (
+            <NavLink
+              to="/admin"
+              className="quiet-button"
+              onClick={closeDirectory}
+            >
+              Admin
+            </NavLink>
+          )}
           <button className="primary-button pro-button" onClick={() => setIsProModalOpen(true)}>{isDevMode ? 'Admin Pro' : isPro ? 'Pro active' : 'Get Pro'}<ArrowRight size={15} /></button>
         </div>
-              {!isPro && <GoogleBonusAccount />}
+              {(!isPro || isAdminPage) && <GoogleBonusAccount />}
 </header>
 
       <main className="site-main">
+        {!isAdminPage && (
         <section className={`page-intro ${isHome ? 'home-intro' : ''}`}>
           <div className="eyebrow"><ShieldCheck size={14} /> YOUR FILES. YOUR DEVICE.</div>
           <h1>{isHome ? <>All tasks.<br className="mobile-break" /> <span>Simply done.</span></> : currentMeta.heading}</h1>
@@ -1725,13 +1737,16 @@ export default function App() {
             )}
           </>}
         </section>
+        )}
 
+        {!isAdminPage && (
         <nav className="quick-tools" aria-label="Popular PDF tools">
           {popular.map(tool => { const Icon = tool.icon; return <NavLink key={tool.path} to={tool.path} onClick={closeDirectory} className={({isActive}) => `quick-tool ${isActive || (isHome && tool.path === '/compress-pdf') ? 'is-active' : ''}`}><Icon size={17} />{tool.name}</NavLink>; })}
           <button className="quick-tool more-tools" onClick={() => setDirectoryOpen(!directoryOpen)} aria-expanded={directoryOpen} aria-controls="tool-directory"><Search size={17} />Find a tool</button>
         </nav>
+        )}
 
-        {directoryOpen && <section id="tool-directory" className="tool-directory" aria-label="All PDF tools">
+        {!isAdminPage && directoryOpen && <section id="tool-directory" className="tool-directory" aria-label="All PDF tools">
           <div className="directory-heading"><div><span className="eyebrow">THE TOOLKIT</span><h2>What would you like to do?</h2></div><button className="icon-button" aria-label="Close tool directory" onClick={closeDirectory}><X size={20} /></button></div>
           <div className="tool-search"><Search size={19} /><input type="search" aria-label="Search PDF tools" placeholder="Search tools — crop, OCR, convert…" value={search} onChange={e => setSearch(e.target.value)} /></div>
           <div className="category-tabs" role="group" aria-label="Filter tools">
@@ -1768,6 +1783,7 @@ export default function App() {
             <Routes>
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/terms" element={<Terms />} />
+              <Route path="/admin" element={<AdminDashboard />} />
 
               <Route path="/" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
@@ -1844,9 +1860,9 @@ export default function App() {
             </Suspense>
           </ErrorBoundary>
         </section>
-        {!isInfo && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device.</span><NavLink to="/privacy">How it works</NavLink></div>}
+        {!isInfo && !isAdminPage && <div className="workspace-note"><ShieldCheck size={15} /><span>PDF processing stays on your device.</span><NavLink to="/privacy">How it works</NavLink></div>}
 
-        {!isInfo && freeTasksExhausted && (
+        {!isInfo && !isAdminPage && freeTasksExhausted && (
           <div className="pro-context">
             <div>
               <strong>
@@ -1985,7 +2001,7 @@ export default function App() {
         )}
 
         {isHome && <section className="benefits" aria-label="Why 1into1"><div><span>01</span><h2>Pick a file.</h2><p>No account needed to use the local tools.</p></div><div><span>02</span><h2>Make it yours.</h2><p>Simple controls. No upload queue.</p></div><div><span>03</span><h2>Keep moving.</h2><p>Download your result and get on with your day.</p></div></section>}
-        {!isInfo && <div dangerouslySetInnerHTML={{ __html: renderGuide(location.pathname) }} />}
+        {!isInfo && !isAdminPage && <div dangerouslySetInnerHTML={{ __html: renderGuide(location.pathname) }} />}
       </main>
 
       <footer className="site-footer">
