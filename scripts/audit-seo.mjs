@@ -379,6 +379,35 @@ try {
 }
 
 
+// Canonical aliases must also have server-side 301 redirects.
+const redirects = await readFile(
+  new URL('../public/_redirects', import.meta.url),
+  'utf8'
+);
+
+const redirectLines =
+  redirects
+    .split(/\r?\n/)
+    .map(line => line.trim().split(/\s+/))
+    .filter(parts => parts.length >= 3);
+
+for (const [from, to] of Object.entries(aliases)) {
+  const found =
+    redirectLines.some(
+      parts =>
+        parts[0] === from &&
+        parts[1] === to &&
+        parts[2] === '301'
+    );
+
+  if (!found) {
+    fail(
+      `Missing 301 redirect for SEO alias: ${from} -> ${to}`
+    );
+  }
+}
+
+
 // robots.txt
 const robots = await readFile(
   new URL('../public/robots.txt', import.meta.url),
