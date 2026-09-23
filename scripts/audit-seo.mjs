@@ -40,6 +40,9 @@ const app = await readFile(
   'utf8'
 );
 
+const privatePaths =
+  new Set(['/admin']);
+
 const routes = [
   ...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g),
 ]
@@ -47,7 +50,8 @@ const routes = [
   .filter(
     route =>
       !route.includes('*') &&
-      !route.includes(':')
+      !route.includes(':') &&
+      !privatePaths.has(route)
   );
 
 const articlePaths =
@@ -260,6 +264,30 @@ if (
 ) {
   fail(
     'Sitemap does not exactly match canonical routes.'
+  );
+}
+
+
+// Private route checks
+try {
+  const adminHtml =
+    await readFile(
+      new URL('admin.html', dist),
+      'utf8'
+    );
+
+  if (
+    !adminHtml.includes(
+      'name="robots" content="noindex,nofollow"'
+    )
+  ) {
+    fail(
+      '/admin: missing noindex,nofollow.'
+    );
+  }
+} catch {
+  fail(
+    'Missing generated HTML: /admin'
   );
 }
 
