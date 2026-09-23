@@ -39,15 +39,15 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-23',
   '/blog/pdf-privacy-comparison-2026': '2026-09-23',
-  '/pdf-to-word': '2026-09-22',
-  '/bank-statement-to-excel': '2026-09-21',
+  '/pdf-to-word': '2026-09-23',
+  '/bank-statement-to-excel': '2026-09-23',
   '/document-data-extractor': '2026-09-21',
-  '/private-pii-secrets-auto-redactor': '2026-09-21',
+  '/private-pii-secrets-auto-redactor': '2026-09-23',
   '/sanitize-pdf': '2026-09-21',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf-to-100kb': '2026-09-21',
   '/pdf-to-markdown': '2026-09-21',
-  '/redact-pdf': '2026-09-21',
+  '/redact-pdf': '2026-09-23',
 };
 
 export const TOOLS_METADATA: Record<string, ToolMeta> = {
@@ -348,16 +348,16 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/bank-statement-to-excel': {
     path: '/bank-statement-to-excel',
-    title: 'Bank Statement PDF to Excel-Ready CSV — Private | 1into1',
-    description: 'Extract transactions from text-based bank statement PDFs into CSV or TSV that opens in Excel. Review dates, debits, credits and balances locally; use OCR first for scanned statements.',
-    heading: 'Bank Statement PDF to Excel-Ready CSV',
+    title: 'Bank Statement PDF to Excel — Private Converter | 1into1',
+    description: 'Convert bank statement PDFs into spreadsheet-ready data for Excel. Extract dates, debits, credits and balances locally in your browser, with CSV/TSV export and OCR support for scanned statements.',
+    heading: 'Convert Bank Statement PDF to Excel',
     subheading: 'Extract statement transactions into spreadsheet-ready CSV or TSV locally, then open the result in Excel or another spreadsheet app.',
   },
   '/private-pii-secrets-auto-redactor': {
     path: '/private-pii-secrets-auto-redactor',
-    title: 'Redact PII & Secrets from PDF, TXT & CSV — Private | 1into1',
-    description: 'Scan PDF, TXT and CSV files for supported personal information, financial identifiers and exposed secrets. Review findings and create a redacted copy locally in your browser.',
-    heading: 'Auto Redact PDF',
+    title: 'Auto Redact PII & Secrets from PDF, TXT & CSV — Private | 1into1',
+    description: 'Automatically scan PDF, TXT and CSV files for supported personal information, financial identifiers and exposed secrets. Review findings and create a redacted copy locally in your browser.',
+    heading: 'Auto Redact PII & Secrets',
     subheading: 'Scan for supported personal data, financial identifiers and exposed credentials, then review and redact them locally.',
   },
   '/offline-pdf-redaction': {
