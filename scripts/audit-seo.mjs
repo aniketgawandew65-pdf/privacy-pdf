@@ -210,8 +210,22 @@ for (const path of canonicalPaths) {
 }
 
 
-// Internal links in rendered guides/blogs
-const validPaths = new Set(allPaths);
+// Internal links in rendered guides/blogs.
+// Declared research downloads are static assets, not application routes.
+const researchAssetPaths =
+  ARTICLES
+    .map(article => article.datasetUrl)
+    .filter(
+      (path) =>
+        typeof path === 'string' &&
+        path.startsWith('/')
+    );
+
+const validPaths =
+  new Set([
+    ...allPaths,
+    ...researchAssetPaths,
+  ]);
 
 function checkLinks(source, html) {
   const links = [
