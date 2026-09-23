@@ -1001,6 +1001,7 @@ export interface Article {
   published?: string;
   updated?: string;
   methodology?: string;
+  datasetUrl?: string;
   comparison?: ArticleComparisonRow[];
   sources?: ArticleSource[];
   sections: { title: string; paragraphs: string[] }[];
@@ -1040,6 +1041,7 @@ export const ARTICLES: Article[] = [
     published: '2026-09-23',
     updated: '2026-09-23',
     methodology: 'Reviewed on 23 September 2026 using official vendor documentation linked below. This comparison describes the documented data path and retention model of online PDF workflows. It is not a security score or an overall product ranking. Policies and product behavior can change, and some vendors offer both online and desktop or client-side products.',
+    datasetUrl: '/research/pdf-privacy-comparison-2026.csv',
     comparison: [
       {
         service: '1into1 PDF',
@@ -1162,8 +1164,12 @@ export function renderBlog(path: string): string {
     ? `<p class="article-byline">By the 1into1 team · Updated ${escapeHtml(article.updated)}</p>`
     : '<p class="article-byline">By the 1into1 team</p>';
 
+  const datasetLink = article.datasetUrl
+    ? `<a class="research-download" href="${escapeHtml(article.datasetUrl)}" download>Download comparison data (CSV)</a>`
+    : '';
+
   const comparison = article.comparison?.length
-    ? `<section class="research-comparison" aria-labelledby="research-comparison-heading"><h2 id="research-comparison-heading">At-a-glance processing and retention comparison</h2>${article.methodology ? `<p class="research-methodology">${escapeHtml(article.methodology)}</p>` : ''}<div class="research-table-wrap"><table class="research-table"><thead><tr><th>Service</th><th>Document processing path</th><th>Published deletion / retention</th><th>Local or offline option</th><th>Source</th></tr></thead><tbody>${article.comparison.map(row=>`<tr><th scope="row">${escapeHtml(row.service)}</th><td>${escapeHtml(row.processing)}</td><td>${escapeHtml(row.deletion)}</td><td>${escapeHtml(row.localOption)}</td><td><a href="${escapeHtml(row.sourceUrl)}"${row.sourceUrl.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(row.sourceLabel)}</a></td></tr>`).join('')}</tbody></table></div></section>`
+    ? `<section class="research-comparison" aria-labelledby="research-comparison-heading"><h2 id="research-comparison-heading">At-a-glance processing and retention comparison</h2>${article.methodology ? `<p class="research-methodology">${escapeHtml(article.methodology)}</p>` : ''}${datasetLink}<div class="research-table-wrap"><table class="research-table"><thead><tr><th>Service</th><th>Document processing path</th><th>Published deletion / retention</th><th>Local or offline option</th><th>Source</th></tr></thead><tbody>${article.comparison.map(row=>`<tr><th scope="row">${escapeHtml(row.service)}</th><td>${escapeHtml(row.processing)}</td><td>${escapeHtml(row.deletion)}</td><td>${escapeHtml(row.localOption)}</td><td><a href="${escapeHtml(row.sourceUrl)}"${row.sourceUrl.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(row.sourceLabel)}</a></td></tr>`).join('')}</tbody></table></div></section>`
     : '';
 
   const sources = article.sources?.length
