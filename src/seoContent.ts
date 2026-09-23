@@ -31,12 +31,36 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will it look identical in Word?', 'Not always. Text and tables remain editable, but fonts, wrapping, transformed artwork and complex formatting can differ between Word editors. Review the result before relying on exact layout.']
     ],
     related: [
+      ['/ocr-pdf','OCR scanned or image-only PDFs first'],
       ['/pdf-to-csv','Extract PDF tables to Excel-ready data'],
       ['/edit-pdf','Edit the PDF directly in your browser'],
       ['/pdf-to-markdown','Convert PDF to Markdown locally'],
       ['/blog/pdf-privacy-comparison-2026','Compare browser-local and server PDF processing']
     ]
   },
+  '/redact-pdf': {
+    title: 'How to manually redact selected content from a PDF',
+    intro: 'Use manual redaction when you already know exactly which visible text, numbers or image areas must be permanently removed. Mark those areas yourself, create the burned-in output locally, and verify the result before sharing.',
+    steps: [
+      'Open the PDF and navigate to each page containing information you need to remove.',
+      'Mark the exact visible areas that should be redacted.',
+      'Create the redacted PDF so the selected areas are burned into the rendered output.',
+      'Reopen the downloaded copy and verify every intended redaction before sharing it.'
+    ],
+    example: 'If you need to remove one account number, address or signature from a known location, manual redaction gives you direct control over the exact area. If you first need help finding many possible PII or credential patterns, use the automatic PII & Secrets redactor instead.',
+    questions: [
+      ['When should I use manual redaction instead of Auto Redact?', 'Use manual redaction when you already know exactly what visible content must be removed. Use Auto Redact when you want the browser to scan supported files for common PII, financial identifiers or exposed-secret patterns before you review and select findings.'],
+      ['Is the redaction permanent?', 'The tool creates a burned-in output for the areas you mark rather than relying on a removable visual overlay. Always reopen the exported copy and verify the result before sharing it.'],
+      ['Does the PDF need to be uploaded?', 'The manual redaction workflow runs locally in your browser for supported files.'],
+      ['Does redaction also remove metadata and hidden PDF data?', 'Manual redaction targets the visible areas you mark. Use Sanitize PDF separately when you also need to remove metadata, annotations, forms, scripts, attachments, links or hidden text layers.']
+    ],
+    related: [
+      ['/private-pii-secrets-auto-redactor','Automatically find PII and exposed secrets'],
+      ['/sanitize-pdf','Remove metadata and hidden PDF data'],
+      ['/blog/pdf-privacy-comparison-2026','Compare browser-local and server PDF processing']
+    ]
+  },
+
   '/crop-pdf': {
     title: 'Crop one page or apply the same crop to an entire PDF',
     intro: 'Trim unwanted margins with a visual crop box. Apply one selection across pages when the document uses a consistent layout.',
