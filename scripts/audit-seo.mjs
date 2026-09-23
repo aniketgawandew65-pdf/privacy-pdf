@@ -277,6 +277,38 @@ for (const path of allPaths) {
 }
 
 
+// Priority pages must expose useful static HTML before React executes.
+for (const path of SEO_PRIORITY_PATHS || []) {
+  const html = await readFile(
+    new URL(fileFor(path), dist),
+    'utf8'
+  );
+
+  if (!html.includes('class="seo-guide"')) {
+    fail(`${path}: priority page has no static SEO guide.`);
+  }
+
+  if (html.includes('seo-static-shell-style')) {
+    fail(`${path}: static crawl content is hidden.`);
+  }
+}
+
+
+// The homepage must contain contextual links to every priority crawl target.
+{
+  const homeHtml = await readFile(
+    new URL('index.html', dist),
+    'utf8'
+  );
+
+  for (const path of SEO_PRIORITY_PATHS || []) {
+    if (!homeHtml.includes(`href="${path}"`)) {
+      fail(`Homepage is missing priority internal link: ${path}`);
+    }
+  }
+}
+
+
 // Sitemap coverage
 const sitemap = await readFile(
   new URL('sitemap.xml', dist),
@@ -305,6 +337,21 @@ if (
   fail(
     'Sitemap does not exactly match canonical routes.'
   );
+}
+
+for (const [path, value] of Object.entries(SEO_LASTMOD || {})) {
+  const loc =
+    origin +
+    (path === '/' ? '/' : path);
+
+  const expected =
+    `<url><loc>${loc}</loc><lastmod>${value}</lastmod></url>`;
+
+  if (!sitemap.includes(expected)) {
+    fail(
+      `Sitemap lastmod mismatch: ${path}`
+    );
+  }
 }
 
 
