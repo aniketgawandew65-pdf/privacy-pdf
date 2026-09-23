@@ -14,7 +14,10 @@ const origin = 'https://www.1into1.com';
 const dist = new URL('../dist/',import.meta.url);
 const template = await readFile(new URL('index.html',dist),'utf8');
 const app = await readFile(new URL('../src/App.tsx',import.meta.url),'utf8');
-const paths = [...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g)].map(m=>m[1]).filter(p=>!p.includes('*')&&!p.includes(':'));
+const privatePaths = new Set(['/admin']);
+const paths = [...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g)]
+  .map(m=>m[1])
+  .filter(p=>!p.includes('*')&&!p.includes(':')&&!privatePaths.has(p));
 const articlePaths = ARTICLES.map(a=>'/blog/'+a.slug);
 const allPaths = [...new Set([...paths,...articlePaths])];
 const aliases = SEO_ALIASES;
@@ -87,6 +90,20 @@ for(const path of allPaths) {
   await mkdir(new URL('./',destination),{recursive:true});
   await writeFile(destination,html);
 }
+// Private application routes still need a direct-entry HTML file on
+// Cloudflare Pages because the real 404 file disables SPA fallback.
+// Keep them out of SEO metadata, canonicals and the sitemap.
+const adminHtml = template
+  .replace(/<title>[\s\S]*?<\/title>/, '<title>1into1 Admin</title>')
+  .replace(
+    '</head>',
+    '<meta name="robots" content="noindex,nofollow" /></head>'
+  );
+await writeFile(
+  new URL('admin.html', dist),
+  adminHtml
+);
+
 // A real 404 file disables Cloudflare Pages' automatic SPA fallback.
 // Existing routes are static files; unknown paths must not return homepage HTML with 200.
 await writeFile(new URL('404.html',dist),`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Page not found | 1into1 PDF</title></head><body><main><h1>Page not found</h1><p>This address does not match a tool or guide.</p><a href="/">Open PDF tools</a> · <a href="/blog">Read PDF guides</a></main></body></html>`);
