@@ -7,7 +7,12 @@ async function loadTs(path) {
   const {outputText} = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}});
   return import('data:text/javascript;base64,'+Buffer.from(outputText).toString('base64'));
 }
-const {TOOLS_METADATA,SEO_ALIASES} = await loadTs('../src/seoConfig.ts');
+const {
+  TOOLS_METADATA,
+  SEO_ALIASES,
+  SEO_LASTMOD,
+  SEO_PRIORITY_PATHS,
+} = await loadTs('../src/seoConfig.ts');
 const {TOOL_COPY} = await loadTs('../src/toolCopy.ts');
 const {ARTICLES,blogMeta,renderGuide,renderBlog,escapeHtml:e} = await loadTs('../src/seoContent.ts');
 const origin = 'https://www.1into1.com';
@@ -21,7 +26,21 @@ const paths = [...app.matchAll(/<Route\b[^>]*\bpath="([^"]+)"/g)]
 const articlePaths = ARTICLES.map(a=>'/blog/'+a.slug);
 const allPaths = [...new Set([...paths,...articlePaths])];
 const aliases = SEO_ALIASES;
-const nav = Object.entries(TOOLS_METADATA).filter(([p])=>allPaths.includes(p)&&!aliases[p]&&!['/','/privacy','/terms'].includes(p)).map(([p,m])=>`<a href="${p}">${e(m.heading)}</a>`).join('');
+const nav = Object.entries(TOOLS_METADATA)
+  .filter(([p]) => allPaths.includes(p) && !aliases[p] && !['/','/privacy','/terms'].includes(p))
+  .map(([p,m]) => `<a href="${p}">${e(m.heading)}</a>`)
+  .join('');
+
+const priorityNav = (SEO_PRIORITY_PATHS || [])
+  .filter(path => allPaths.includes(path) && !aliases[path])
+  .map(path => {
+    const meta = TOOLS_METADATA[path];
+    return meta
+      ? `<a href="${path}">${e(meta.heading)}</a>`
+      : '';
+  })
+  .filter(Boolean)
+  .join('');
 function trustFor(path) {
   if(path==='/ai-summary-pdf') {
     return '<div class="trust-points" aria-label="AI PDF connection and privacy details"><span>Local PDF extraction</span><span>Cloud AI needs internet</span><span>You choose provider</span><span>Consent before sending</span></div><p class="trust-caption">PDF text is extracted locally. A document excerpt and your prompts are sent directly to the AI endpoint you choose only after you approve cloud use.</p>';
@@ -81,9 +100,13 @@ for(const path of allPaths) {
   const meta=blogMeta(path)||TOOLS_METADATA[path];
   if(!meta) throw new Error('Missing SEO metadata for route: '+path);
   const isBlog=Boolean(blogMeta(path));
-  const body=`<div class="app-shell seo-static-shell"><header class="site-header"><a class="brand" href="/">1into1 PDF</a><a href="/blog">PDF guides</a></header><main class="site-main"><section class="page-intro ${path==='/'?'home-intro':''}">${!isBlog&&!['/privacy','/terms'].includes(path)?'<div class="eyebrow">YOUR FILES. YOUR DEVICE.</div>':''}<h1>${path==='/'?'All tasks.<br class="mobile-break" /> <span>Simply done.</span>':e(meta.heading)}</h1><p>${e(path==='/'?'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.':TOOL_COPY[path]||meta.subheading)}</p>${!isBlog&&!['/privacy','/terms'].includes(path)?trustFor(path):''}</section>${isBlog?renderBlog(path):`<section id="workspace" class="static-loading"><p>The interactive tool loads in your browser.</p><noscript>Enable JavaScript to process files on this device.</noscript></section>${renderGuide(path)}`}</main><footer class="site-footer"><a href="/blog">PDF guides</a><details class="footer-directory"><summary>Explore PDF tools</summary><nav>${nav}</nav></details><nav class="guide-related"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav></footer></div>`;
+  const prioritySection =
+    path === '/' && priorityNav
+      ? `<section class="seo-priority-links" aria-label="Popular private PDF workflows"><h2>Popular private PDF workflows</h2><nav class="guide-related">${priorityNav}</nav></section>`
+      : '';
+
+  const body=`<div class="app-shell seo-static-shell"><header class="site-header"><a class="brand" href="/">1into1 PDF</a><a href="/blog">PDF guides</a></header><main class="site-main"><section class="page-intro ${path==='/'?'home-intro':''}">${!isBlog&&!['/privacy','/terms'].includes(path)?'<div class="eyebrow">YOUR FILES. YOUR DEVICE.</div>':''}<h1>${path==='/'?'All tasks.<br class="mobile-break" /> <span>Simply done.</span>':e(meta.heading)}</h1><p>${e(path==='/'?'Everyday PDF tools, with privacy built in. Compress, merge, edit and convert — right in your browser.':TOOL_COPY[path]||meta.subheading)}</p>${!isBlog&&!['/privacy','/terms'].includes(path)?trustFor(path):''}</section>${prioritySection}${isBlog?renderBlog(path):`<section id="workspace" class="static-loading"><p>The interactive tool loads in your browser.</p><noscript>Enable JavaScript to process files on this device.</noscript></section>${renderGuide(path)}`}</main><footer class="site-footer"><a href="/blog">PDF guides</a><details class="footer-directory"><summary>Explore PDF tools</summary><nav>${nav}</nav></details><nav class="guide-related"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav></footer></div>`;
   const html=headFor(meta,path)
-    .replace('</head>', '<style id="seo-static-shell-style">.seo-static-shell .site-header,.seo-static-shell .site-footer,.seo-static-shell .site-main>:not(.page-intro){visibility:hidden!important;pointer-events:none!important}</style></head>')
     .replace('<div id="root"></div>',`<div id="root">${body}</div>`);
   const file=path==='/'?'index.html':path.slice(1)+'.html';
   const destination=new URL(file,dist);
@@ -107,7 +130,16 @@ await writeFile(
 // A real 404 file disables Cloudflare Pages' automatic SPA fallback.
 // Existing routes are static files; unknown paths must not return homepage HTML with 200.
 await writeFile(new URL('404.html',dist),`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Page not found | 1into1 PDF</title></head><body><main><h1>Page not found</h1><p>This address does not match a tool or guide.</p><a href="/">Open PDF tools</a> · <a href="/blog">Read PDF guides</a></main></body></html>`);
-const sitemap=`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${allPaths.filter(p=>!aliases[p]).map(p=>`  <url><loc>${origin}${p==='/'?'/':p}</loc></url>`).join('\n')}\n</urlset>\n`;
+const sitemap=`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${allPaths
+  .filter(p=>!aliases[p])
+  .map(p=>{
+    const lastmod = SEO_LASTMOD?.[p];
+    const suffix = lastmod
+      ? `<lastmod>${lastmod}</lastmod>`
+      : '';
+    return `  <url><loc>${origin}${p==='/'?'/':p}</loc>${suffix}</url>`;
+  })
+  .join('\n')}\n</urlset>\n`;
 await writeFile(new URL('sitemap.xml',dist),sitemap);
 await writeFile(new URL('../public/sitemap.xml',import.meta.url),sitemap);
 console.log(`SEO: generated ${allPaths.length} static pages, canonical metadata, sitemap and 404 page.`);
