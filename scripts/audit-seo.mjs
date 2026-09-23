@@ -156,6 +156,10 @@ for (const article of ARTICLES) {
       fail(`Research article is missing official sources: ${article.slug}`);
     }
 
+    if (!article.datasetUrl) {
+      fail(`Research article is missing downloadable data: ${article.slug}`);
+    }
+
     for (const row of article.comparison) {
       const validSource =
         row.sourceUrl.startsWith('/') ||
@@ -206,8 +210,22 @@ for (const path of canonicalPaths) {
 }
 
 
-// Internal links in rendered guides/blogs
-const validPaths = new Set(allPaths);
+// Internal links in rendered guides/blogs.
+// Declared research downloads are static assets, not application routes.
+const researchAssetPaths =
+  ARTICLES
+    .map(article => article.datasetUrl)
+    .filter(
+      (path) =>
+        typeof path === 'string' &&
+        path.startsWith('/')
+    );
+
+const validPaths =
+  new Set([
+    ...allPaths,
+    ...researchAssetPaths,
+  ]);
 
 function checkLinks(source, html) {
   const links = [
@@ -336,6 +354,24 @@ for (const article of ARTICLES.filter(article => article.comparison?.length)) {
 
   if (!html.includes('class="research-sources"')) {
     fail(`${path}: research source list did not render.`);
+  }
+
+  if (
+    article.datasetUrl &&
+    !html.includes(`href="${article.datasetUrl}"`)
+  ) {
+    fail(`${path}: research dataset link did not render.`);
+  }
+
+  if (article.datasetUrl?.startsWith('/')) {
+    try {
+      await readFile(
+        new URL(article.datasetUrl.slice(1), dist),
+        'utf8'
+      );
+    } catch {
+      fail(`${path}: downloadable research dataset is missing from dist.`);
+    }
   }
 
   const schemaMatch =
