@@ -683,9 +683,17 @@ export default function App() {
   const proRequested =
     new URLSearchParams(location.search).get('pro') === 'true';
 
+  const isCloudflarePreviewHost =
+    window.location.hostname.endsWith(
+      '.privacy-pdf.pages.dev'
+    ) &&
+    window.location.hostname !==
+      'privacy-pdf.pages.dev';
+
   const isDevMode =
     window.location.hostname === 'pro.1into1.com' ||
-    (import.meta.env.DEV && proRequested);
+    (import.meta.env.DEV && proRequested) ||
+    (isCloudflarePreviewHost && proRequested);
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
 
 
@@ -1661,7 +1669,11 @@ export default function App() {
           {installPrompt && <button className="quiet-button install-button" onClick={handleInstallApp}><Download size={16} />Install</button>}
           {isDevMode && (
             <NavLink
-              to="/admin"
+              to={
+                isCloudflarePreviewHost
+                  ? '/admin?pro=true'
+                  : '/admin'
+              }
               className="quiet-button"
               onClick={closeDirectory}
             >
