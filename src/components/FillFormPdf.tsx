@@ -392,6 +392,7 @@ export const FillFormPdf: React.FC<FillFormPdfProps> = ({ file, onFileChange }) 
               <button
                 type="button"
                 onClick={handlePreview}
+                style={{ color: '#ffffff' }}
                 className="w-full py-3 px-4 border border-[#3f3f46] bg-[#3f3f46] hover:bg-[#27272a] text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition-all"
               >
                 <FileText className="w-4 h-4 stroke-[2.5]" />
