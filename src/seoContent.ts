@@ -41,6 +41,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will it look identical in Word?', 'Not always. Text and tables remain editable, but fonts, wrapping, transformed artwork and complex formatting can differ between Word editors. Review the result before relying on exact layout.']
     ],
     related: [
+      ['/blog/pdf-to-word-without-losing-formatting','Understand PDF-to-Word formatting preservation'],
+      ['/blog/scanned-pdf-to-word-ocr-first','Convert a scanned PDF with OCR first'],
       ['/ocr-pdf','OCR scanned or image-only PDFs first'],
       ['/pdf-to-csv','Extract PDF tables to Excel-ready data'],
       ['/edit-pdf','Edit the PDF directly in your browser'],
@@ -529,7 +531,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
       ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
-    related: [
+    related: [['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
       ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
@@ -1357,6 +1359,100 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'pdf-to-word-without-losing-formatting',
+    title: 'How to Convert PDF to Word Without Losing Formatting',
+    description: 'Learn what formatting can realistically survive PDF-to-Word conversion, why layouts break, and how to get a cleaner editable DOCX from a digital PDF.',
+    tool: '/pdf-to-word',
+    toolLabel: 'Convert PDF to editable Word',
+    category: 'PDF TO WORD GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Start with the right kind of PDF',
+        paragraphs: [
+          'A computer-created PDF with selectable text is the best source for an editable Word conversion. The PDF still contains characters, coordinates and drawing information that a converter can use to reconstruct paragraphs, tables and page artwork.',
+          'A scanned PDF is different because the page may contain only an image. If you cannot select the words in the original file, run OCR first rather than expecting a normal PDF-to-Word conversion to recover text that is not present.'
+        ]
+      },
+      {
+        title: 'Why Word cannot reproduce every PDF perfectly',
+        paragraphs: [
+          'PDF and Word store documents differently. PDF is primarily a fixed page description, while Word uses editable paragraphs, styles, tables and flowing layout. Conversion therefore requires reconstructing document structure from positioned PDF content.',
+          'That reconstruction can preserve a great deal of useful formatting, but exact visual identity is not guaranteed. Font substitution, text wrapping, multi-column layouts, transformed graphics and unusually complex pages can still move or reflow in Word.'
+        ]
+      },
+      {
+        title: 'Preserve editability instead of turning every page into an image',
+        paragraphs: [
+          'A DOCX that looks identical because each page is inserted as one large picture is not genuinely useful when you need to edit the words. A better conversion keeps text and detected tables editable where the source allows it and preserves artwork separately when it cannot be represented as normal Word content.',
+          '1into1 reconstructs digital PDFs into editable DOCX content locally in the browser. Review the result in Word because editability and perfect visual fidelity are sometimes competing goals.'
+        ]
+      },
+      {
+        title: 'Check tables, fonts and page breaks first',
+        paragraphs: [
+          'After conversion, inspect the areas most likely to reveal layout differences: tables, multi-column sections, headings, page breaks, logos and paragraphs using uncommon fonts.',
+          'Compare important numbers and text with the PDF before making further edits. If a specific page is extremely visual, preserving its appearance may matter more than making every element freely editable.'
+        ]
+      },
+      {
+        title: 'Know when manual cleanup is normal',
+        paragraphs: [
+          'No converter can recreate structure that the PDF never stored explicitly. A complex PDF may need small corrections in Word even when the text and major layout are reconstructed successfully.',
+          'For best results, start from a digital PDF with selectable text, use OCR only when necessary, and keep the original PDF beside the DOCX while reviewing the conversion.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'scanned-pdf-to-word-ocr-first',
+    title: 'Scanned PDF to Word: Use OCR First, Then Convert to DOCX',
+    description: 'Turn an image-only scanned PDF into editable Word by making the scan searchable with OCR first, then converting the resulting text-aware PDF to DOCX.',
+    tool: '/ocr-pdf',
+    toolLabel: 'OCR the scanned PDF first',
+    category: 'PDF TO WORD GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A scanned PDF may contain no real text',
+        paragraphs: [
+          'A scan can look like a normal document while every page is actually a picture. If the letters cannot be selected, a normal PDF-to-Word converter has no text layer to reconstruct into editable paragraphs.',
+          'OCR solves that first problem by recognising characters in the page image and adding searchable text to the PDF.'
+        ]
+      },
+      {
+        title: 'Run OCR before PDF-to-Word conversion',
+        paragraphs: [
+          'Open the scanned document in Searchable OCR and create a searchable copy. Review names, dates, numbers and several representative paragraphs before moving to Word conversion.',
+          'Scan quality matters. Blur, skew, low contrast, compression artefacts and unusual fonts can cause recognition mistakes, so the OCR result should be checked before it becomes the source for an editable DOCX.'
+        ]
+      },
+      {
+        title: 'Convert the searchable PDF to DOCX',
+        paragraphs: [
+          'Once the PDF contains a usable text layer, open the searchable result in PDF to Word. The converter can then reconstruct editable text and detected tables from the digital content rather than treating the whole page as one picture.',
+          'The Word file can still require cleanup because OCR accuracy and PDF layout reconstruction are separate problems. A correct character can still wrap differently in Word, while an OCR mistake remains a wrong character until corrected.'
+        ]
+      },
+      {
+        title: 'Verify numbers and names carefully',
+        paragraphs: [
+          'OCR errors matter most in information such as account numbers, invoice values, dates, IDs, names and legal text. Compare those fields with the original scan before relying on the Word document.',
+          'If the output will be used for financial, legal or administrative work, review the complete set of critical values rather than checking only one page.'
+        ]
+      },
+      {
+        title: 'Keep the original scan',
+        paragraphs: [
+          'Keep the original scanned PDF as the source record, the searchable OCR copy as an intermediate working file and the DOCX as the editable result.',
+          'That three-step workflow makes it easier to trace any recognition or formatting problem back to the correct stage without overwriting the source document.'
+        ]
+      }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1581,7 +1677,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: compression, redaction, bank statements & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF compression, permanent redaction, bank statements, OCR and private local document workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: Word conversion, compression, redaction & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF-to-Word conversion, compression, permanent redaction, bank statements, OCR and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
