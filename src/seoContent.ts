@@ -498,35 +498,6 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
-  '/offline-pdf-redaction': {
-    title: 'How to permanently redact sensitive information from a PDF',
-    intro: 'Mark sensitive visible areas, burn blackouts into the rendered PDF output and verify the finished document before downloading it. This is different from simply placing a removable shape over text.',
-    steps: [
-      'Choose the PDF containing the confidential information.',
-      'Draw redaction boxes over every area that must be removed.',
-      'Review each page and adjust the boxes if needed.',
-      'Burn the blackouts into the redacted PDF output.',
-      'Let the final safety verification complete, then download and reopen the finished file.'
-    ],
-    example: 'Before sharing a bank statement, place redaction boxes over account numbers or other details the recipient does not need. Generate the permanent redacted copy, wait for verification and inspect the downloaded PDF again before sending it.',
-    questions: [
-      ['Is drawing a normal black or white rectangle enough?', 'No. A normal visual overlay may leave underlying document information recoverable. This workflow creates the redacted page output with the selected blackouts burned into it.'],
-      ['Does the tool verify the redacted result?', 'Yes. The finished PDF goes through a final blackout verification step before the normal download becomes available.'],
-      ['Does redaction upload my PDF?', 'The redaction workflow processes the PDF locally in your browser.'],
-      ['Should I keep my original PDF?', 'Yes. Keep the original separately until you have inspected and approved the redacted copy.'],
-      ['Does redaction remove document metadata too?', 'Redaction focuses on visible information. Use Deep Sanitize separately when you also need to remove metadata, forms, attachments, scripts or hidden document data.']
-    ],
-    related: [
-      ['/blog/how-to-permanently-redact-pdf','Learn what makes PDF redaction permanent'],
-      ['/blog/redact-pdf-without-uploading','Redact a confidential PDF without uploading it'],
-      ['/blog/redact-bank-statement-pdf','Redact sensitive bank-statement details'],
-      ['/sanitize-pdf','Deep-sanitize hidden PDF data'],
-      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
-      ['/protect-pdf','Password-protect the finished PDF'],
-      ['/bates-numbering','Add Bates numbers to legal documents']
-    ]
-  },
-
   '/private-pii-secrets-auto-redactor': {
     title: 'How to find and redact PII and exposed secrets before sharing a file',
     intro: 'Scan supported PDF, TXT and CSV files for common personal information, financial identifiers and credential patterns, review every detected item, and create a redacted copy locally in your browser.',
@@ -794,7 +765,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
       ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
-    related: [['/blog/deskew-pdf-before-ocr','Straighten tilted scans before OCR'], ['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned tables into spreadsheet data'], ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
+    related: [['/blog/deskew-pdf-before-ocr','Straighten tilted scans before OCR'], ['/blog/scanned-bank-statement-to-excel-ocr','Extract a scanned bank statement with OCR'], ['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned tables into spreadsheet data'], ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
       ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
@@ -1209,29 +1180,32 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
-  "/redact-pdf": {
-    title: "How to permanently redact information from a PDF",
-    intro: "Use PDF redaction when sensitive text, numbers or images must be removed from the shared copy rather than simply covered visually.",
+  '/redact-pdf': {
+    title: 'How to permanently redact sensitive information from a PDF',
+    intro: 'Mark sensitive visible areas, burn blackouts into the rendered PDF output and verify the finished document before downloading it. This is different from simply placing a removable shape over text.',
     steps: [
-      "Choose the PDF that contains sensitive information.",
-      "Mark every area that must be removed.",
-      "Create the redacted output.",
-      "Download and reopen the new PDF.",
-      "Inspect every redacted area before sending the document to anyone else."
+      'Choose the PDF containing the confidential information.',
+      'Draw redaction boxes over every area that must be removed.',
+      'Review each page and adjust the boxes if needed.',
+      'Burn the blackouts into the redacted PDF output.',
+      'Let the final safety verification complete, then download and reopen the finished file.'
     ],
-    example: "Before sharing a statement, account numbers and private identifiers can be redacted while leaving the transactions the recipient needs to review.",
+    example: 'Before sharing a bank statement, place redaction boxes over account numbers or other details the recipient does not need. Generate the permanent redacted copy, wait for verification and inspect the downloaded PDF again before sending it.',
     questions: [
-      ["Is drawing a black rectangle enough?", "Not always. A visual box can leave underlying content recoverable, which is why a dedicated redaction workflow is preferable for sensitive material."],
-      ["What should I verify after redaction?", "Reopen the output and check every page, including text around the redacted areas and any information that may appear elsewhere in the document."],
-      ["Should I redact metadata too?", "Visible redaction and metadata removal solve different problems. Use a sanitization tool when hidden document metadata also needs attention."],
-      ["Should I keep the original?", "Yes. Store the original securely and share only the verified redacted copy."]
+      ['Is drawing a normal black or white rectangle enough?', 'No. A normal visual overlay may leave underlying document information recoverable. This workflow creates the redacted page output with the selected blackouts burned into it.'],
+      ['Does the tool verify the redacted result?', 'Yes. The finished PDF goes through a final blackout verification step before the normal download becomes available.'],
+      ['Does redaction upload my PDF?', 'The redaction workflow processes the PDF locally in your browser.'],
+      ['Should I keep my original PDF?', 'Yes. Keep the original separately until you have inspected and approved the redacted copy.'],
+      ['Does redaction remove document metadata too?', 'Redaction focuses on visible information. Use Deep Sanitize separately when you also need to remove metadata, forms, attachments, scripts or hidden document data.']
     ],
     related: [
-      ["/private-pii-secrets-auto-redactor","Automatically find PII and exposed secrets"],
-      ["/offline-pdf-redaction","Use the privacy-focused redaction workflow"],
-      ["/sanitize-pdf","Remove PDF metadata"],
-      ["/protect-pdf","Password protect a PDF"],
-      ["/edit-pdf","Make non-sensitive visual edits"]
+      ['/blog/how-to-permanently-redact-pdf','Learn what makes PDF redaction permanent'],
+      ['/blog/redact-pdf-without-uploading','Redact a confidential PDF without uploading it'],
+      ['/blog/redact-bank-statement-pdf','Redact sensitive bank-statement details'],
+      ['/sanitize-pdf','Deep-sanitize hidden PDF data'],
+      ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
+      ['/protect-pdf','Password-protect the finished PDF'],
+      ['/bates-numbering','Add Bates numbers to legal documents']
     ]
   },
 
