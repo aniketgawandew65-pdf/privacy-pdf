@@ -183,6 +183,20 @@ for (const article of ARTICLES) {
 }
 
 
+// Article taxonomy and canonical CTA targets.
+for (const article of ARTICLES) {
+  if (!article.category?.trim()) {
+    fail(`Article is missing category: ${article.slug}`);
+  }
+
+  if (!allPaths.includes(article.tool)) {
+    fail(`Article tool target is not a route: ${article.slug} -> ${article.tool}`);
+  } else if (aliases[article.tool]) {
+    fail(`Article tool target must be canonical, not an alias: ${article.slug} -> ${article.tool}`);
+  }
+}
+
+
 // Duplicate canonical titles/descriptions
 const titles = new Map();
 const descriptions = new Map();
