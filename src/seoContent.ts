@@ -207,6 +207,36 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/csv-to-pdf': {
+    title: 'How to convert CSV, TSV or pasted spreadsheet data to PDF',
+    intro: 'Turn delimited spreadsheet data into a paginated PDF table locally. Upload CSV or TSV, or paste cells copied from a spreadsheet, then choose page size, orientation and table style.',
+    steps: [
+      'Upload a .csv or .tsv file, or paste spreadsheet cells directly into the editor.',
+      'Optionally add a document title.',
+      'Choose A4 or US Letter and select Auto, Portrait or Landscape orientation.',
+      'Choose Striped Rows, Clean Minimal or Emerald Modern.',
+      'Convert and inspect the output, especially wide columns, long values and page breaks.'
+    ],
+    example: 'A seven-column sales export can be uploaded as CSV. With Auto orientation, 1into1 chooses landscape because the detected table has more than five columns, then splits extra-wide column groups into readable PDF panels when necessary.',
+    questions: [
+      ['Does the tool support TSV as well as CSV?', 'Yes. The parser detects whether the first record is more strongly tab-delimited or comma-delimited and supports both .csv and .tsv uploads.'],
+      ['Can I paste cells from Excel or Google Sheets?', 'Yes. Pasted tabular text can be parsed directly, so copied tab-separated spreadsheet cells work without first saving a file.'],
+      ['Does it handle commas inside quoted CSV fields?', 'Yes. The parser understands quoted fields, escaped double quotes and line breaks inside quoted fields.'],
+      ['How does Auto orientation work?', 'The current UI chooses landscape automatically when the parsed table has more than five columns; otherwise it uses portrait.'],
+      ['What happens when the table is too wide for one page?', 'The renderer keeps a readable minimum column width and can split columns into multiple horizontal panels instead of shrinking every column until the text becomes unreadable.'],
+      ['Does the first row become the table header?', 'Yes. The current renderer treats the first parsed row as the header and repeats that header on continuation pages.'],
+      ['Does CSV preserve Excel formulas, charts or formatting?', 'No. CSV and TSV contain delimited values rather than full workbook formatting, charts or formulas. The PDF is built from the parsed cell text.'],
+      ['Is the spreadsheet data uploaded?', 'The parsing and PDF generation run locally in your browser.']
+    ],
+    related: [
+      ['/blog/convert-csv-or-tsv-to-pdf-table','Convert CSV or TSV to a PDF table'],
+      ['/blog/wide-csv-table-to-pdf-landscape','Make wide CSV tables readable in PDF'],
+      ['/pdf-to-csv','Extract table-like PDF content to CSV'],
+      ['/html-to-pdf','Convert a self-contained HTML table to PDF'],
+      ['/text-to-pdf','Create a formatted text PDF']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
@@ -1921,6 +1951,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'convert-csv-or-tsv-to-pdf-table',
+    title: 'How to Convert CSV or TSV to a PDF Table',
+    description: 'Upload comma- or tab-delimited data, or paste spreadsheet cells, then turn the values into a paginated A4 or Letter PDF table locally.',
+    tool: '/csv-to-pdf',
+    toolLabel: 'Convert CSV to PDF',
+    category: 'SPREADSHEET PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'CSV and TSV are delimited text, not full workbooks',
+        paragraphs: [
+          'CSV stores fields separated by commas, while tab-delimited text uses tab characters between fields. Microsoft documents both as text formats for exchanging worksheet values.',
+          'That also means workbook styling, charts and many spreadsheet-specific features are not part of the delimited data itself.'
+        ]
+      },
+      {
+        title: 'Upload a file or paste the cells directly',
+        paragraphs: [
+          '1into1 accepts .csv and .tsv files, and it also accepts pasted spreadsheet data. Copying a block of cells from Excel or Google Sheets commonly produces tab-separated text that can be parsed directly.',
+          'The parser checks the first record and chooses tabs when there are more tab separators than commas outside quoted fields.'
+        ]
+      },
+      {
+        title: 'Quoted CSV fields are parsed before the PDF is built',
+        paragraphs: [
+          'The parser supports quoted fields, doubled quotation marks inside a quoted field, and record separators that appear inside quoted content.',
+          'RFC 4180 describes the common CSV convention of enclosing fields in double quotes when they contain commas, line breaks or quotes.'
+        ]
+      },
+      {
+        title: 'The first row is used as the PDF table header',
+        paragraphs: [
+          'After parsing, the first row becomes the header row and the remaining rows become table data. The renderer repeats the header on continuation pages.',
+          'Add a document title when the PDF needs context beyond the column headings.'
+        ]
+      },
+      {
+        title: 'Choose A4 or Letter and check the final pagination',
+        paragraphs: [
+          'The converter can create A4 or US Letter output with portrait, landscape or automatic orientation. Long values wrap inside cells and very tall rows can continue across pages.',
+          'Reopen the PDF and verify headers, wrapped text, Unicode content and any rows whose cell values contain line breaks.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'RFC 4180 — Common Format and MIME Type for CSV Files', url: 'https://www.rfc-editor.org/rfc/rfc4180.html', detail: 'Documents common CSV conventions including comma-separated records and quoted fields.' },
+      { label: 'Microsoft Excel — Import or export text and CSV files', url: 'https://support.microsoft.com/en-us/excel/get-started/import-or-export-text-txt-or-csv-files', detail: 'Microsoft distinguishes comma-separated CSV from tab-delimited text and explains their use for worksheet data exchange.' }
+    ]
+  },
+  {
+    slug: 'wide-csv-table-to-pdf-landscape',
+    title: 'How to Put a Wide CSV Table into a Readable PDF',
+    description: 'Use landscape orientation and horizontal column panels so wide CSV or TSV data stays readable instead of being squeezed into tiny columns.',
+    tool: '/csv-to-pdf',
+    toolLabel: 'Convert a wide table to PDF',
+    category: 'SPREADSHEET PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Wide tables need more than smaller text',
+        paragraphs: [
+          'A spreadsheet with many columns can become unreadable if every column is simply shrunk to fit one portrait page.',
+          '1into1 keeps a minimum readable column width and treats table width as a layout problem rather than endlessly reducing the text size.'
+        ]
+      },
+      {
+        title: 'Auto orientation switches wide tables to landscape',
+        paragraphs: [
+          'The current Auto setting counts the parsed columns. Tables with more than five columns use landscape; tables with five or fewer use portrait.',
+          'You can override that decision manually when the content inside the cells makes a different orientation more suitable.'
+        ]
+      },
+      {
+        title: 'Very wide tables are split into horizontal panels',
+        paragraphs: [
+          'When the desired column widths exceed the printable width, the renderer groups columns into multiple horizontal panels instead of forcing every column onto one sheet.',
+          'For suitable tables with more than two columns, the first column can repeat on later panels as an anchor so rows remain easier to identify.'
+        ]
+      },
+      {
+        title: 'Headers repeat on continuation pages',
+        paragraphs: [
+          'Each vertical continuation page redraws the current panel header before continuing the data rows.',
+          'The PDF also carries global Page X of Y numbering across all panels and continuation pages, which helps when a large table spans many sheets.'
+        ]
+      },
+      {
+        title: 'Remember that CSV does not contain workbook presentation',
+        paragraphs: [
+          'If you exported the source from Excel, CSV carries text and values rather than the original workbook formatting, graphics or objects. Microsoft explicitly warns that formatting is not retained in CSV and text formats.',
+          'The PDF theme, widths, wrapping and pagination are therefore generated by the converter rather than copied from the workbook appearance.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Microsoft Excel — Save a workbook to text or CSV', url: 'https://support.microsoft.com/en-us/excel/save-a-workbook-to-text-format-txt-or-csv', detail: 'Explains that CSV and text exports preserve delimited values but do not retain workbook formatting.' },
+      { label: 'Microsoft Excel — Formatting not transferred to CSV/text', url: 'https://support.microsoft.com/en-us/excel/excel-formatting-and-features-that-are-not-transferred-to-other-file-formats', detail: 'Documents formatting and feature loss when worksheet data is saved as CSV or tab-delimited text.' }
     ]
   },
   {
@@ -3780,7 +3912,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: HTML, organize, rotate, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for HTML-to-PDF conversion, organizing and rotating pages, unlocking files, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: CSV, HTML, organize, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for CSV and HTML conversion, organizing and rotating PDF pages, OCR, password security, metadata and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
