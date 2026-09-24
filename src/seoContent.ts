@@ -968,6 +968,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ["Are both PDFs processed locally?", "The comparison workflow loads and renders both PDFs in your browser."]
     ],
     related: [
+      ["/blog/compare-two-pdf-versions-side-by-side","Compare two PDF versions side by side"],
+      ["/blog/pdf-overlay-comparison-vs-text-diff","Understand visual overlay vs text diff"],
       ["/bates-numbering","Add Bates numbers for document review"],
       ["/offline-pdf-redaction","Redact a reviewed PDF"],
       ["/edit-pdf","Make visual PDF edits"],
@@ -1712,6 +1714,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'compare-two-pdf-versions-side-by-side',
+    title: 'How to Compare Two PDF Versions Side by Side',
+    description: 'Review an original PDF and a revised PDF page by page with side-by-side viewing, zoom and local browser processing.',
+    tool: '/compare-pdf',
+    toolLabel: 'Compare two PDFs',
+    category: 'PDF COMPARISON GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Use side-by-side view for broad document review',
+        paragraphs: [
+          'Side-by-side comparison is useful when you need to read an original PDF next to a revised copy and visually check page layout, wording, signatures, stamps, diagrams or other visible changes.',
+          '1into1 loads both files locally and displays the corresponding pages together so you can move through the document without uploading the PDFs to a normal server-side comparison service.'
+        ]
+      },
+      {
+        title: 'Start with the same page in both documents',
+        paragraphs: [
+          'Choose the original PDF as Document A and the revised PDF as Document B, then begin the comparison. Page navigation follows the larger of the two page counts, so extra or missing pages can still be reviewed.',
+          'If one document has been reordered substantially, visual page-by-page comparison becomes harder because page 5 in one file may no longer correspond to page 5 in the other.'
+        ]
+      },
+      {
+        title: 'Use zoom for small visual details',
+        paragraphs: [
+          'Increase zoom when you need to inspect fine changes such as shifted text blocks, altered figures, signature placement, margins or small formatting differences.',
+          'A visual review can reveal changes that are difficult to notice when opening the two PDFs in separate tabs and switching back and forth.'
+        ]
+      },
+      {
+        title: 'Switch to overlay when alignment matters',
+        paragraphs: [
+          'When both versions use nearly the same page geometry, overlay mode can make moved or changed elements easier to see because the rendered pages are combined into one high-contrast comparison view.',
+          'Use side by side for reading and context, then switch to overlay for a closer visual check of pages that should align.'
+        ]
+      },
+      {
+        title: 'Visual comparison is not a semantic legal diff',
+        paragraphs: [
+          '1into1 Compare PDF is a visual review tool. It does not classify insertions, deletions or legal wording changes, and it does not generate a formal change report.',
+          'Adobe Acrobat Pro provides a more advanced Compare Files workflow that analyzes document differences and can produce a detailed comparison report. Use the workflow that matches the level of review you need.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Compare two versions of a PDF file', url: 'https://helpx.adobe.com/acrobat/using/compare-documents.html', detail: 'Documents Acrobat Pro comparison, side-by-side result review and automated difference reporting.' },
+      { label: 'MDN — Canvas compositing operations', url: 'https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation', detail: 'Documents browser canvas compositing modes used to combine rendered images for visual comparison.' }
+    ]
+  },
+  {
+    slug: 'pdf-overlay-comparison-vs-text-diff',
+    title: 'PDF Overlay Comparison vs Text Diff: What Is the Difference?',
+    description: 'Understand the difference between visual pixel-overlay comparison and semantic text-difference analysis when reviewing two PDF versions.',
+    tool: '/compare-pdf',
+    toolLabel: 'Open Compare PDF',
+    category: 'PDF COMPARISON GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A visual overlay compares rendered pages',
+        paragraphs: [
+          'A visual overlay starts from how each PDF page looks after rendering. The two page images are combined so areas that match behave differently from areas whose pixels differ.',
+          'This approach is useful for layout changes, moved elements, altered graphics, signatures, stamps and other visible differences.'
+        ]
+      },
+      {
+        title: '1into1 uses a difference compositing view',
+        paragraphs: [
+          'In overlay mode, 1into1 renders both PDF pages and combines them using the browser canvas difference compositing operation together with an adjustable blend level.',
+          'MDN describes difference compositing as subtracting the corresponding layer colors so changed areas become visually distinct. The result is a visual aid rather than a text-aware change report.'
+        ]
+      },
+      {
+        title: 'A text diff analyses document content differently',
+        paragraphs: [
+          'A semantic or text comparison tries to understand changed text, formatting or document structure rather than only comparing the rendered appearance.',
+          'Adobe Acrobat Pro, for example, can analyze two PDF versions and report categories of differences. That is a different capability from a browser-local visual overlay.'
+        ]
+      },
+      {
+        title: 'Overlay works best when pages align',
+        paragraphs: [
+          'Visual overlays are easiest to interpret when the two versions have similar page dimensions, page order and overall layout. If content reflows heavily, many pixels can change even when the underlying meaning changed only slightly.',
+          'For heavily restructured documents, side-by-side reading may be more useful than relying on the overlay alone.'
+        ]
+      },
+      {
+        title: 'Use both views for different questions',
+        paragraphs: [
+          'Use side by side when you want to read both versions in context. Use overlay when you want to spot visual movement or changed appearance on corresponding pages.',
+          'If you need an automated legal redline or a machine-generated list of wording changes, use a dedicated semantic comparison system rather than treating a visual overlay as equivalent.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — globalCompositeOperation', url: 'https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation', detail: 'Defines the Canvas 2D difference compositing operation used for high-contrast visual blending.' },
+      { label: 'Adobe Acrobat — Compare two versions of a PDF file', url: 'https://helpx.adobe.com/acrobat/using/compare-documents.html', detail: 'Explains automated PDF difference analysis, comparison reports and side-by-side result review in Acrobat Pro.' }
+    ]
+  },
+  {
     slug: 'extract-images-from-pdf-without-screenshots',
     title: 'How to Extract Images from a PDF Without Taking Screenshots',
     description: 'Recover embedded raster images from a PDF at their decoded pixel dimensions instead of cropping or screenshotting the visible page.',
@@ -2446,7 +2550,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: images, OCR, repair, Excel & Word | 1into1',heading:'A little help with your PDF.',description:'Practical guides for extracting PDF images, OCR, straightening scans, repair, booklet printing, table extraction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: compare, images, OCR, repair & Excel | 1into1',heading:'A little help with your PDF.',description:'Practical guides for comparing PDF versions, extracting images, OCR, straightening scans, repair, booklet printing and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
