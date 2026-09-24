@@ -251,6 +251,13 @@ function checkLinks(source, html) {
       fail(
         `Broken internal link: ${source} -> ${target}`
       );
+      continue;
+    }
+
+    if (aliases[target]) {
+      fail(
+        `Internal link must use canonical route: ${source} -> ${target} (canonical: ${aliases[target]})`
+      );
     }
   }
 }
