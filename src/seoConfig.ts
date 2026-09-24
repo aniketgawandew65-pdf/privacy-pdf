@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/resize-pdf-to-a4-or-letter': '2026-09-24',
+  '/blog/pdf-resize-fit-vs-center-vs-stretch': '2026-09-24',
   '/blog/how-to-convert-pdf-to-grayscale': '2026-09-24',
   '/blog/grayscale-vs-black-and-white-pdf': '2026-09-24',
   '/blog/how-to-make-pdf-dark-mode-permanent': '2026-09-24',
@@ -88,6 +90,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/edit-metadata': '2026-09-24',
   '/dark-mode-pdf': '2026-09-24',
   '/grayscale-pdf': '2026-09-24',
+  '/resize-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -309,10 +312,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/resize-pdf': {
     path: '/resize-pdf',
-    title: 'Resize PDF Pages to A4, Letter, Legal Free Online',
-    description: 'Standardize PDF pages to A4, US Letter, Legal, or A3 dimensions in browser. Preserves 100% vector text quality with zero server uploads.',
+    title: 'Resize PDF Pages to A4, Letter, Legal, A3 or A5 | 1into1',
+    description: 'Standardize PDF pages to A4, US Letter, Legal, A3 or A5 locally. Choose proportional Fit, Center Original, or Fill Page and keep landscape pages landscape automatically.',
     heading: 'Resize PDF',
-    subheading: 'Convert mixed document formats to uniform A4, US Letter, or custom paper sizes.',
+    subheading: 'Standardize mixed page sizes to A4, Letter, Legal, A3 or A5 with fit, center, or stretch placement.',
   },
   '/nup-pdf': {
     path: '/nup-pdf',
