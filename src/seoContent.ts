@@ -270,6 +270,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/pdf-to-csv','Extract PDF tables to CSV'],
       ['/ocr-pdf','OCR a scanned statement'],
       ['/document-data-extractor','Extract more complex document data'],
+      ['/blog/redact-bank-statement-pdf','Redact a bank statement before sharing'],
       ['/sanitize-pdf','Remove PDF metadata before sharing']
     ]
   },
@@ -319,6 +320,9 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Does redaction remove document metadata too?', 'Redaction focuses on visible information. Use Deep Sanitize separately when you also need to remove metadata, forms, attachments, scripts or hidden document data.']
     ],
     related: [
+      ['/blog/how-to-permanently-redact-pdf','Learn what makes PDF redaction permanent'],
+      ['/blog/redact-pdf-without-uploading','Redact a confidential PDF without uploading it'],
+      ['/blog/redact-bank-statement-pdf','Redact sensitive bank-statement details'],
       ['/sanitize-pdf','Deep-sanitize hidden PDF data'],
       ['/private-pii-secrets-auto-redactor','Scan for supported PII and secrets'],
       ['/protect-pdf','Password-protect the finished PDF'],
@@ -1212,6 +1216,147 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-permanently-redact-pdf',
+    title: 'How to Permanently Redact a PDF: Black Out Text Safely',
+    description: 'Learn why drawing a black rectangle is not enough, how permanent PDF redaction works, and how to verify sensitive text is no longer recoverable.',
+    tool: '/redact-pdf',
+    toolLabel: 'Open Redact PDF',
+    category: 'PDF REDACTION GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A black rectangle is not automatically a redaction',
+        paragraphs: [
+          'Covering text with a normal shape can make information look hidden while leaving the underlying PDF text or image data intact. A recipient may still be able to select, copy, search or extract the supposedly hidden content.',
+          'Permanent redaction needs to remove the sensitive information from the shared output rather than merely place another object over it.'
+        ]
+      },
+      {
+        title: 'Mark every area that must disappear',
+        paragraphs: [
+          'Open the PDF in the Redact tool and draw redaction boxes over names, account numbers, addresses, signatures, images or other visible information that the recipient should not receive.',
+          'Review every page before applying the redactions. Headers, footers and repeated identifiers can appear more than once in a document.'
+        ]
+      },
+      {
+        title: 'Burn the redaction into the output',
+        paragraphs: [
+          '1into1 rebuilds the redacted page output with the selected blackouts burned into it. This avoids the common mistake of leaving a removable overlay above recoverable content.',
+          'The trade-off is intentional: rasterized redacted pages can lose selectable text and interactive PDF features. Keep the original document separately.'
+        ]
+      },
+      {
+        title: 'Verify the downloaded PDF',
+        paragraphs: [
+          'Reopen the finished file rather than trusting only the editor preview. Try selecting or searching for a portion of the information you removed and inspect the page visually at useful zoom levels.',
+          '1into1 also performs a final blackout verification step before the normal redacted download becomes available, but you should still inspect the finished copy before sharing sensitive material.'
+        ]
+      },
+      {
+        title: 'Redaction and sanitization solve different problems',
+        paragraphs: [
+          'Redaction is for visible content you intentionally remove. Sanitization is for hidden document data such as metadata, attachments, scripts, forms, annotations and hidden text layers.',
+          'If the document contains both visible secrets and hidden document traces, redact the visible information first and use Deep Sanitize as a separate final step.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'redact-pdf-without-uploading',
+    title: 'How to Redact a PDF Without Uploading the File',
+    description: 'Redact confidential PDF content locally in your browser so the document does not need to be sent to a normal processing server.',
+    tool: '/redact-pdf',
+    toolLabel: 'Redact a PDF locally',
+    category: 'PDF PRIVACY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why no-upload redaction matters',
+        paragraphs: [
+          'Redaction is usually used on documents that are sensitive by definition: bank statements, contracts, IDs, legal records, financial reports and other material containing private information.',
+          'A local browser workflow avoids sending the normal PDF file to a document-processing server for the redaction operation. The file stays on the device while the supported local workflow runs.'
+        ]
+      },
+      {
+        title: 'Load the PDF locally',
+        paragraphs: [
+          'Open Redact PDF and choose the document from your device. The browser reads the file locally for the supported redaction workflow instead of first transferring it to a remote converter.',
+          'Once the app and required resources are already loaded, supported local workflows can continue without relying on a document-upload round trip.'
+        ]
+      },
+      {
+        title: 'Mark only the information that must be removed',
+        paragraphs: [
+          'Draw blackout regions over the confidential text, numbers or images. Zoom in when working with small account numbers, addresses, signatures or identifiers.',
+          'Do not assume one occurrence is the only occurrence. Check repeated headers, footers and later pages before applying the final redactions.'
+        ]
+      },
+      {
+        title: 'Create and verify the redacted copy',
+        paragraphs: [
+          'Generate the redacted PDF and reopen the downloaded copy. The selected areas should be burned into the resulting page output rather than left as removable shapes.',
+          'Search, select and visually inspect the finished file before sharing it. Keep the original PDF unchanged in case the redaction selection needs to be corrected.'
+        ]
+      },
+      {
+        title: 'Use sanitization when hidden data also matters',
+        paragraphs: [
+          'A visually redacted document can still contain metadata or other hidden structures that are unrelated to the blackout boxes. If those traces also need to be removed, use the separate Deep Sanitize workflow.',
+          'This distinction keeps the jobs clear: Redact removes selected visible information; Sanitize rebuilds the document to remove supported hidden data and interactive structures.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'redact-bank-statement-pdf',
+    title: 'How to Redact a Bank Statement PDF Before Sharing It',
+    description: 'Permanently remove account numbers and other unnecessary private details from a bank statement PDF while keeping the information the recipient actually needs.',
+    tool: '/redact-pdf',
+    toolLabel: 'Redact a bank statement',
+    category: 'BANK STATEMENT PRIVACY',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Start with what the recipient actually needs',
+        paragraphs: [
+          'A landlord, lender, accountant, employer, visa office or other recipient may need different parts of a bank statement. Ask for the exact requirement before hiding information so the document still proves what it is supposed to prove.',
+          'Do not remove balances, transactions or identity details automatically. Keep the fields required for the stated purpose and remove only information the recipient does not need.'
+        ]
+      },
+      {
+        title: 'Common details people may need to protect',
+        paragraphs: [
+          'Depending on the purpose, sensitive fields can include full account numbers, routing or sort-code information, customer IDs, card numbers, addresses and transaction descriptions containing private details.',
+          'The correct choice depends on the recipient and the document requirement. Redaction should protect unnecessary information without changing the financial evidence the recipient legitimately asked to review.'
+        ]
+      },
+      {
+        title: 'Use permanent redaction, not a drawing tool',
+        paragraphs: [
+          'A black rectangle drawn in an ordinary editor can leave the original statement text underneath. For financial documents, that visual-only approach can create a serious privacy mistake.',
+          'Use Redact PDF to mark the areas, burn the blackouts into the resulting page output and create a separate redacted copy.'
+        ]
+      },
+      {
+        title: 'Check every page and repeated identifier',
+        paragraphs: [
+          'Bank statements often repeat the account number, customer number or address in headers and footers. Review all pages rather than redacting only the first page.',
+          'After downloading, reopen the file and inspect the redacted areas. Search for a portion of the removed identifier where the output remains searchable, and visually confirm every intended occurrence is gone.'
+        ]
+      },
+      {
+        title: 'Keep the original statement separately',
+        paragraphs: [
+          'Do not overwrite the source bank statement. Keep the original as the financial record and share only the reviewed redacted copy.',
+          'If you also need spreadsheet data from the statement, use Bank Statement to Excel separately and verify extracted financial values against the original document.'
+        ]
+      }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1436,7 +1581,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: compression, bank statements, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF compression, bank-statement extraction, OCR, cropping and private local document workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: compression, redaction, bank statements & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF compression, permanent redaction, bank statements, OCR and private local document workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
