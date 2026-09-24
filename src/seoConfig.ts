@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/summarize-pdf-with-your-own-ai-api-key': '2026-09-24',
+  '/blog/what-data-ai-pdf-summarizer-sends': '2026-09-24',
   '/blog/add-text-to-pdf-with-visual-overlays': '2026-09-24',
   '/blog/pdf-whiteout-vs-redaction': '2026-09-24',
   '/blog/convert-formatted-text-to-pdf-locally': '2026-09-24',
@@ -121,6 +123,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/code-to-pdf': '2026-09-24',
   '/text-to-pdf': '2026-09-24',
   '/edit-pdf': '2026-09-24',
+  '/ai-summary-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -398,10 +401,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/ai-summary-pdf': {
     path: '/ai-summary-pdf',
-    title: 'AI Summarizer — Bring Your Own AI Key | 1into1',
-    description: 'Extract PDF text locally, then send an excerpt directly to the AI provider you choose after explicit consent. Bring your own key without a 1into1 AI proxy.',
-    heading: 'AI Summarizer',
-    subheading: 'Extract PDF text locally, then choose which AI provider receives the document excerpt after you approve cloud use.',
+    title: 'AI PDF Summarizer — BYO API Key & Local Extraction | 1into1',
+    description: 'Extract PDF text and OCR locally, then after explicit consent send up to 30,000 characters plus recent chat directly to your chosen AI endpoint. No 1into1 AI proxy.',
+    heading: 'AI PDF Summarizer',
+    subheading: 'Extract locally first, then choose exactly which AI endpoint receives the limited document excerpt after you approve cloud use.',
   },
   '/pdf-to-csv': {
     path: '/pdf-to-csv',
