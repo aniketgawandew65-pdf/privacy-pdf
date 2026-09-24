@@ -454,22 +454,26 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/dark-mode-pdf': {
-    title: 'How to create a dark mode PDF for easier night reading',
-    intro: 'Create a dark-reading copy of a PDF instead of only changing the appearance of the viewer. Keep your original file alongside the converted version.',
+    title: 'How to create a permanent dark mode PDF',
+    intro: 'Create a downloadable dark-reading copy of a PDF instead of only changing the viewer interface. Choose OLED pitch black, classic RGB inversion or warm sepia, then keep the original file separately.',
     steps: [
-      'Choose the PDF you want to read in dark mode.',
-      'Run the dark-mode conversion.',
-      'Download the converted copy.',
-      'Inspect text, images, diagrams and contrast before using it for extended reading.'
+      'Choose the PDF you want to convert.',
+      'Select OLED Pitch Black, Classic Inversion or Warm Sepia.',
+      'Check the first-page preview and switch modes if images or charts become difficult to read.',
+      'Convert the document and download the new PDF.',
+      'Reopen the result and verify text, images, diagrams and page order.'
     ],
-    example: 'A bright study PDF can be converted into a darker reading copy for use at night while the original document remains unchanged.',
+    example: 'A bright study PDF can be turned into an image-based dark-reading copy that stays dark when opened in another PDF viewer, while the original PDF remains unchanged.',
     questions: [
-      ['Is this just a browser dark theme?', 'No. The tool creates a converted PDF output rather than only changing the surrounding website interface.'],
-      ['Will every colour look perfect after conversion?', 'Not necessarily. Images, charts and coloured text can behave differently, so inspect the final file.'],
-      ['Does this modify my original PDF?', 'The tool creates a separate output. Keep the original file if you need the original colours or appearance later.'],
+      ['Is this just a viewer dark theme?', 'No. The tool renders and recolors the PDF pages, then builds a separate downloadable PDF from the transformed page images.'],
+      ['Will text remain selectable or searchable?', 'No. Dark Mode rebuilds each page as a JPEG-backed image page, so selectable or OCR text layers do not remain searchable in the converted copy. Keep the original when you need text selection.'],
+      ['What is the difference between the three modes?', 'Classic Inversion applies an RGB negative, OLED Pitch Black maps very bright areas to black and very dark areas to soft white while inverting mid-tones, and Warm Sepia applies a sepia colour transform.'],
+      ['Will photographs and charts keep their original colours?', 'No. The selected transform is applied to the rendered page, including images and charts, so inspect the preview and final output carefully.'],
       ['Is the PDF uploaded for the conversion?', 'The transformation is performed locally in your browser.']
     ],
     related: [
+      ['/blog/how-to-make-pdf-dark-mode-permanent','Create a permanent dark-mode PDF'],
+      ['/blog/invert-pdf-colors-vs-oled-vs-sepia','Compare inversion, OLED and sepia modes'],
       ['/grayscale-pdf','Create a grayscale PDF'],
       ['/pdf-to-image','Convert PDF pages to images'],
       ['/ocr-pdf','Make scanned PDF text searchable'],
@@ -1718,6 +1722,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-make-pdf-dark-mode-permanent',
+    title: 'How to Make a PDF Dark Mode Permanently',
+    description: 'Create a downloadable dark-reading copy that stays dark in other PDF viewers, and understand how that differs from a viewer-only dark theme.',
+    tool: '/dark-mode-pdf',
+    toolLabel: 'Convert PDF to dark mode',
+    category: 'PDF READING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Viewer dark mode and a dark PDF are not the same thing',
+        paragraphs: [
+          'A PDF viewer can change its own interface or apply accessibility colours while leaving the PDF file itself unchanged. Adobe Acrobat, for example, offers display themes and a Replace Document Colors accessibility preference.',
+          'That is useful when you only need a different appearance on one device. It does not necessarily create a new PDF whose pages are permanently dark.'
+        ]
+      },
+      {
+        title: 'A permanent dark copy changes the rendered pages',
+        paragraphs: [
+          '1into1 Dark Mode renders each PDF page, applies the selected colour transformation and writes the transformed page back into a new PDF.',
+          'Because the recoloured pixels are part of the downloaded output, the dark appearance travels with that copy when it is opened in another normal PDF viewer.'
+        ]
+      },
+      {
+        title: 'Choose a mode before converting the whole document',
+        paragraphs: [
+          'OLED Pitch Black is designed around strong black backgrounds and soft light text, Classic Inversion creates an RGB negative, and Warm Sepia creates an amber-toned reading copy.',
+          'Use the first-page preview to see how the selected mode affects text, photographs, charts and coloured highlights before running the full conversion.'
+        ]
+      },
+      {
+        title: 'The converted copy becomes image-based',
+        paragraphs: [
+          'The dark-mode workflow renders each page and encodes the transformed result as a JPEG image inside a new PDF page. That means the output prioritizes the recoloured visual appearance rather than preserving selectable text or interactive PDF structure.',
+          'Keep the original PDF when you still need search, copy-and-paste, form fields, links or the untouched original colours.'
+        ]
+      },
+      {
+        title: 'Verify the final PDF before relying on it',
+        paragraphs: [
+          'Reopen the converted file and check several pages, especially pages containing photographs, coloured diagrams or light-on-light content.',
+          'A colour transform that works well for a mostly black-and-white study document may be less suitable for a photo-heavy report, so retain the original as the authoritative copy.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Change display themes', url: 'https://helpx.adobe.com/acrobat/desktop/get-started/preferences-and-settings/change-display.html', detail: 'Adobe documents application display themes as a viewing-interface preference.' },
+      { label: 'Adobe Acrobat Reader — Accessibility features', url: 'https://helpx.adobe.com/reader/desktop/accessibility-features.html', detail: 'Documents Replace Document Colors as a viewer accessibility preference for text and background colours.' }
+    ]
+  },
+  {
+    slug: 'invert-pdf-colors-vs-oled-vs-sepia',
+    title: 'Invert PDF Colors vs OLED Dark Mode vs Sepia',
+    description: 'Compare classic RGB inversion, OLED pitch-black processing and warm sepia so you can choose the right PDF colour transformation for reading.',
+    tool: '/dark-mode-pdf',
+    toolLabel: 'Try PDF Dark Mode',
+    category: 'PDF READING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Classic inversion flips every RGB colour',
+        paragraphs: [
+          'Classic Inversion applies a direct RGB negative to every rendered pixel: each red, green and blue channel is replaced by its opposite value.',
+          'That can turn black text on white into light text on dark, but it also inverts photographs, coloured charts, logos and highlights.'
+        ]
+      },
+      {
+        title: 'OLED Pitch Black uses luminance thresholds',
+        paragraphs: [
+          '1into1 OLED mode is not the same formula as a simple RGB negative. Very bright pixels are mapped to black, very dark pixels become soft white, and mid-range pixels are inverted.',
+          'The goal is a stronger black-background reading copy for documents where the main content is dark text on light pages. Coloured illustrations can still change significantly.'
+        ]
+      },
+      {
+        title: 'Warm Sepia changes the page to amber tones',
+        paragraphs: [
+          'Sepia mode applies a standard sepia-style colour transform to each rendered pixel rather than turning the page black.',
+          'It is useful when you want a warmer reading copy but do not want a full negative-style appearance.'
+        ]
+      },
+      {
+        title: 'All three modes affect the whole rendered page',
+        paragraphs: [
+          'The transformation is applied after the PDF page is rendered, so text, images, diagrams, backgrounds and other visible page content are transformed together.',
+          'There is no promise that photographs or brand colours remain faithful to the original. Use the preview and inspect the downloaded copy.'
+        ]
+      },
+      {
+        title: 'These modes create a new image-based PDF',
+        paragraphs: [
+          'The transformed page is encoded as JPEG and placed into a new PDF page. This makes the visual colour change permanent in the output but removes normal text selection and searchability.',
+          'If you only want a temporary viewing preference while keeping the source PDF untouched and selectable, a viewer accessibility setting such as Acrobat Replace Document Colors may be a better fit.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat Reader — Replace Document Colors', url: 'https://helpx.adobe.com/reader/desktop/accessibility-features.html', detail: 'Shows a viewer-level alternative for applying high-contrast text and background colours without rewriting the PDF pages.' },
+      { label: 'Adobe Acrobat — Change display themes', url: 'https://helpx.adobe.com/acrobat/desktop/get-started/preferences-and-settings/change-display.html', detail: 'Explains Acrobat interface themes, which are distinct from permanently recolouring PDF page content.' }
+    ]
+  },
+  {
     slug: 'how-to-edit-pdf-title-author-keywords',
     title: 'How to Edit PDF Title, Author, Subject and Keywords',
     description: 'Change selected PDF document properties locally, understand what each metadata field means, and know what metadata editing does not remove.',
@@ -2656,7 +2762,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: metadata, compare, OCR, repair & Excel | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF metadata, hidden-data sanitization, comparison, OCR, image extraction, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: dark mode, metadata, compare, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF dark mode, metadata, sanitization, comparison, OCR, image extraction, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
