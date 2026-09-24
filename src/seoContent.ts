@@ -15,7 +15,16 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will text remain selectable?', 'This compressor renders pages as images. Selectable text, interactive form fields and existing digital-signature validation may not survive. Keep the original file.'],
       ['What if the upload portal still rejects it?', 'Some portals use 1 KB = 1,000 bytes, while this tool uses 1,024. Choose a lower available target for some headroom and check the portal’s file-type and page-count rules too.']
     ],
-    related: [['/compress-pdf-to-50kb','Start with a 50 KB target'], ['/compress-pdf-to-100kb','Start with a 100 KB target'], ['/remove-pages','Remove unnecessary pages'], ['/split-pdf','Split a large document'], ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']]
+    related: [
+      ['/compress-pdf-to-50kb','Compress to a 50 KB target'],
+      ['/compress-pdf-to-100kb','Compress to a 100 KB target'],
+      ['/compress-pdf-to-200kb','Compress to a 200 KB target'],
+      ['/compress-pdf-to-300kb','Compress to a 300 KB target'],
+      ['/compress-pdf-to-500kb','Compress to a 500 KB target'],
+      ['/compress-pdf-to-1mb','Compress to a 1 MB target'],
+      ['/compress-pdf-to-2mb','Compress to a 2 MB target'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
   },
   '/pdf-to-word': {
     title: 'Convert PDF to Word without uploading your file',
@@ -593,6 +602,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/compress-pdf','Choose a custom PDF target'],
       ['/compress-pdf-to-100kb','Try a 100 KB target'],
       ['/compress-pdf-to-200kb','Try a 200 KB target'],
+      ['/compress-pdf-to-300kb','Try a 300 KB target'],
       ['/remove-pages','Remove unnecessary pages'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
     ]
@@ -619,6 +629,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/compress-pdf-to-50kb','Use a stricter 50 KB target'],
       ['/compress-pdf-to-200kb','Try a 200 KB target'],
+      ['/compress-pdf-to-300kb','Try a 300 KB target'],
       ['/compress-pdf-to-500kb','Try a 500 KB target'],
       ['/compress-pdf','Choose a custom PDF target'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
@@ -645,6 +656,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/compress-pdf-to-50kb','Use a 50 KB target'],
       ['/compress-pdf-to-100kb','Use a 100 KB target'],
+      ['/compress-pdf-to-300kb','Use a 300 KB target'],
       ['/compress-pdf-to-500kb','Use a 500 KB target'],
       ['/remove-pages','Remove pages before compression'],
       ['/compress-pdf','Choose a custom PDF size']
@@ -669,11 +681,91 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Can I choose a size other than 500 KB?', 'Yes. Use the main Compress PDF tool when you need another supported target or standard compression instead.']
     ],
     related: [
-      ['/compress-pdf-to-100kb','Use a smaller 100 KB target'],
       ['/compress-pdf-to-200kb','Use a smaller 200 KB target'],
+      ['/compress-pdf-to-300kb','Use a smaller 300 KB target'],
+      ['/compress-pdf-to-1mb','Use a larger 1 MB target'],
+      ['/compress-pdf-to-2mb','Use a larger 2 MB target'],
       ['/compress-pdf','Choose another PDF target size'],
       ['/crop-pdf','Crop unnecessary margins'],
       ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
+  },
+
+  '/compress-pdf-to-300kb': {
+    title: 'How to compress a PDF to a 300 KB target',
+    intro: 'A 300 KB target sits between very restrictive application limits and larger attachment limits, giving short documents and moderate scans more room to remain readable.',
+    steps: [
+      'Choose the PDF you need to reduce.',
+      'Use the 300 KB target already selected for this page.',
+      'Compress and download the result.',
+      'Reopen the file and inspect small text, signatures, stamps and images.',
+      'Confirm the receiving portal accepts a file at or below its stated limit.'
+    ],
+    example: 'A short application packet with text, signatures and a few scanned elements may retain more useful detail at 300 KB than at 100 KB or 200 KB while still fitting a restricted upload portal.',
+    questions: [
+      ['When is a 300 KB target useful?', 'Use it when the receiving website allows around 300 KB and you want more quality headroom than smaller targets provide. Always follow the destination’s exact rule.'],
+      ['Does 300 KB guarantee good quality?', 'No. Page count, photographs, scans and graphics determine how aggressively the PDF must be reduced. Inspect the downloaded copy before submitting it.'],
+      ['Will the tool upload my PDF to a processing server?', 'The compression workflow runs locally in your browser for supported files.'],
+      ['What if the PDF cannot realistically fit 300 KB?', 'Remove unnecessary pages, split the document if the destination permits it, or use a larger allowed limit. A valid PDF has structural overhead and not every document can fit every target.']
+    ],
+    related: [
+      ['/compress-pdf-to-200kb','Try a stricter 200 KB target'],
+      ['/compress-pdf-to-500kb','Try a larger 500 KB target'],
+      ['/compress-pdf-to-1mb','Try a 1 MB target'],
+      ['/compress-pdf','Choose another target size'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
+  },
+
+  '/compress-pdf-to-1mb': {
+    title: 'How to compress a PDF to a 1 MB target',
+    intro: 'A 1 MB target gives documents considerably more room for readable text and images than very small KB limits and is useful for email attachments, forms and document portals that accept files around this size.',
+    steps: [
+      'Choose the PDF you want to reduce.',
+      'Use the 1 MB target selected for this page.',
+      'Compress and download the result.',
+      'Check the output size and reopen the PDF.',
+      'Review important text, tables, photographs and signatures before sending or uploading it.'
+    ],
+    example: 'A longer scan or report that becomes too blurry at 200 KB or 500 KB may preserve substantially more detail when the receiving system allows a 1 MB file.',
+    questions: [
+      ['How does this tool define 1 MB?', 'This compressor uses 1 KB = 1,024 bytes, so the 1 MB route targets 1,024 KB. Some portals calculate limits differently, so leave headroom when their rule is strict.'],
+      ['Is 1 MB better than 500 KB?', 'If the destination permits 1 MB, the larger target generally gives the compressor more room to preserve useful page detail.'],
+      ['Can I use this for email attachments?', 'Yes when a smaller attachment is useful, but email providers and recipients have their own limits. Check the final file size before sending it.'],
+      ['Will interactive PDF features remain intact?', 'Target-size compression may rasterize pages, so selectable text, form fields or existing digital-signature validation may not survive. Keep the original file.']
+    ],
+    related: [
+      ['/compress-pdf-to-500kb','Use a smaller 500 KB target'],
+      ['/compress-pdf-to-2mb','Use a larger 2 MB target'],
+      ['/compress-pdf-to-300kb','Use a 300 KB target'],
+      ['/compress-pdf','Choose another target size'],
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+    ]
+  },
+
+  '/compress-pdf-to-2mb': {
+    title: 'How to compress a PDF to a 2 MB target',
+    intro: 'A 2 MB target is useful when a portal or recipient allows a larger file and preserving document clarity matters more than forcing the PDF into a very small KB budget.',
+    steps: [
+      'Choose the PDF you want to reduce.',
+      'Use the 2 MB target selected for this page.',
+      'Run compression and download the result.',
+      'Reopen the output and check representative pages.',
+      'Verify the final size against the destination’s limit before uploading or sending it.'
+    ],
+    example: 'A multi-page scan containing photographs, stamps or tables can often retain more detail at 2 MB than at 500 KB or 1 MB when the receiving system permits the larger file.',
+    questions: [
+      ['How does this tool define 2 MB?', 'This compressor uses 1 KB = 1,024 bytes, so the 2 MB route targets 2,048 KB. A destination may use a different file-size convention.'],
+      ['Should I use 2 MB if a portal allows it?', 'Use the largest limit that meets the destination’s rules when preserving readability is important, then verify the downloaded output.'],
+      ['Can every PDF be reduced to 2 MB?', 'No. Very large or image-heavy documents can still require substantial reduction, and some PDFs have practical minimum sizes.'],
+      ['Does the document leave my device?', 'The supported compression workflow runs locally in your browser rather than uploading the PDF to a document-processing server.']
+    ],
+    related: [
+      ['/compress-pdf-to-1mb','Use a smaller 1 MB target'],
+      ['/compress-pdf-to-500kb','Use a smaller 500 KB target'],
+      ['/compress-pdf-to-300kb','Use a stricter 300 KB target'],
+      ['/compress-pdf','Choose another target size'],
+      ['/split-pdf','Split a large document when permitted']
     ]
   },
 
