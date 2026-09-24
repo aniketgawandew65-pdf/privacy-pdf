@@ -746,9 +746,38 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/blog/how-to-rotate-pdf-permanently','Permanently rotate a PDF'],
       ['/blog/rotate-pdf-vs-deskew','Rotate PDF vs Deskew'],
+      ['/blog/rotate-selected-pdf-pages-vs-whole-document','Rotate selected pages vs the whole PDF'],
       ['/deskew-pdf','Straighten a slightly tilted scan'],
       ['/organize-pdf','Rotate or reorder individual pages'],
       ['/scan-to-pdf','Create a PDF from document photos']
+    ]
+  },
+
+  '/organize-pdf': {
+    title: 'How to reorder, rotate and delete PDF pages visually',
+    intro: 'Use page thumbnails to rearrange one PDF, rotate individual pages in 90-degree steps, and remove pages you do not want before saving a new organized copy locally.',
+    steps: [
+      'Choose the PDF you want to organize.',
+      'Drag page thumbnails into the order you want, or use the move-earlier and move-later controls.',
+      'Rotate any individual page clockwise in 90-degree steps when its orientation is wrong.',
+      'Delete pages that should not appear in the final document.',
+      'Save and download the organized PDF, then verify page order and orientation.'
+    ],
+    example: 'A scanned packet with pages 1, 3, 2, a sideways page 4 and an unwanted blank page can be reordered, page 4 rotated, and the blank page deleted in one visual workflow.',
+    questions: [
+      ['Can I reorder pages by dragging them?', 'Yes. Drag page cards to new positions. The tool also provides move-earlier and move-later buttons.'],
+      ['Can I rotate only one page?', 'Yes. Each page card has its own clockwise rotation control, applied in 90-degree steps.'],
+      ['Can I delete unwanted pages?', 'Yes. Deleting a page removes it from the configuration used to build the downloaded copy.'],
+      ['Can I insert or duplicate pages here?', 'No. The current Organize PDF workflow reorders, rotates and removes pages from one source PDF; it does not insert or duplicate pages.'],
+      ['Does organizing preserve selectable vector content?', 'Clean unencrypted PDFs use the native page-copy path. Protected or incompatible inputs can fall back to high-resolution rendered pages, so exact vector or text preservation is not guaranteed for every file.'],
+      ['Is the PDF uploaded?', 'The organize workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/how-to-reorder-pdf-pages-visually','Reorder PDF pages visually'],
+      ['/blog/rotate-selected-pdf-pages-vs-whole-document','Rotate selected pages vs the whole PDF'],
+      ['/rotate-pdf','Rotate every page by one angle'],
+      ['/remove-pages','Remove pages with a dedicated page-removal workflow'],
+      ['/split-pdf','Split one PDF into separate files']
     ]
   },
 
@@ -1862,6 +1891,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'how-to-reorder-pdf-pages-visually',
+    title: 'How to Reorder PDF Pages Visually',
+    description: 'Rearrange PDF pages with thumbnails, rotate individual pages, remove unwanted pages, and save the new order locally in your browser.',
+    tool: '/organize-pdf',
+    toolLabel: 'Organize PDF pages',
+    category: 'PDF PAGE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Thumbnail view makes page order easier to verify',
+        paragraphs: [
+          'A visual organizer renders each page as a thumbnail so you can see the current sequence before changing it. This is especially useful for scanned packets where pages were captured out of order.',
+          'Adobe’s Organize Pages workflow similarly uses page thumbnails for moving, rotating and deleting pages.'
+        ]
+      },
+      {
+        title: 'Drag pages into the sequence you need',
+        paragraphs: [
+          'In 1into1, drag a page card to a new position. The output configuration follows that new thumbnail order when the PDF is rebuilt.',
+          'You can also use the move-earlier and move-later controls when precise one-step movement is easier than dragging.'
+        ]
+      },
+      {
+        title: 'Rotate individual pages without rotating the whole document',
+        paragraphs: [
+          'Each thumbnail has its own clockwise rotate button. Pressing it adds another 90-degree rotation to that specific page.',
+          'That is different from the standalone Rotate PDF tool, which applies one selected angle to every page in the document.'
+        ]
+      },
+      {
+        title: 'Delete pages before creating the new PDF',
+        paragraphs: [
+          'Removing a thumbnail excludes that source page from the configuration used for the output PDF.',
+          'Use this for blank scans, duplicate captures or pages that should not be included in the final copy. Keep the original source until the new document has been checked.'
+        ]
+      },
+      {
+        title: 'Check structure-sensitive content after organizing',
+        paragraphs: [
+          'For clean unencrypted files, 1into1 copies the selected source pages into the new order and applies the requested rotations without intentionally rasterizing the page content.',
+          'Protected or incompatible PDFs can use a rendered-image fallback. In either case, verify page references, links, bookmarks, forms and other structure-sensitive behavior if those features matter to your workflow.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Organize pages', url: 'https://helpx.adobe.com/acrobat/web/edit-pdfs/organize-documents/organize-pages.html', detail: 'Adobe documents thumbnail-based page reordering, individual-page rotation and deletion.' },
+      { label: 'Adobe Acrobat — Rearrange PDF pages', url: 'https://www.adobe.com/in/acrobat/how-to/rearrange-pdf-pages.html', detail: 'Shows drag-and-drop page reordering and organizing PDF pages into a new sequence.' }
+    ]
+  },
+  {
+    slug: 'rotate-selected-pdf-pages-vs-whole-document',
+    title: 'Rotate Selected PDF Pages vs the Whole Document',
+    description: 'Choose Organize PDF when only certain pages need rotation, or Rotate PDF when every page needs the same 90°, 180° or 270° correction.',
+    tool: '/organize-pdf',
+    toolLabel: 'Rotate selected pages',
+    category: 'PDF PAGE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Use Organize PDF when only some pages are sideways',
+        paragraphs: [
+          'A mixed-orientation PDF may contain one landscape scan or a few upside-down pages inside an otherwise correct document.',
+          'Organize PDF gives each page its own rotation control, so you can correct those pages without changing the orientation of pages that are already right.'
+        ]
+      },
+      {
+        title: 'Use Rotate PDF when the whole document has the same error',
+        paragraphs: [
+          'The standalone Rotate PDF tool applies one selected +90°, +180° or +270° clockwise correction across the entire document.',
+          'That is more direct when every page came from a scanner or export in the same wrong orientation.'
+        ]
+      },
+      {
+        title: 'Page-specific rotation follows the reordered page',
+        paragraphs: [
+          'In Organize PDF, each page card carries its own original page index and rotation value. If you move that page to another position, its selected rotation moves with it into the output configuration.',
+          'This lets you reorder and fix orientation during the same review instead of performing two separate whole-document operations.'
+        ]
+      },
+      {
+        title: 'Both workflows save the orientation into a new PDF',
+        paragraphs: [
+          'These are saved document changes, not temporary viewer rotations. The downloaded copy stores the requested page rotation or rebuilt page orientation.',
+          'Adobe also distinguishes temporary Rotate View from saved page rotation in its page-organizing tools.'
+        ]
+      },
+      {
+        title: 'Keep the source until the result is verified',
+        paragraphs: [
+          'After rotating selected pages, reopen the new PDF and inspect pages around every changed location. Confirm page order as well as orientation.',
+          'If an input requires the compatibility fallback, also verify text selection or other interactive features that may matter.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Rotate pages in PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/organize-pages/rotate-pages.html', detail: 'Adobe documents rotating selected pages or page ranges and saving the resulting orientation.' },
+      { label: 'Adobe Acrobat — Organize pages on the web', url: 'https://helpx.adobe.com/acrobat/web/edit-pdfs/organize-documents/organize-pages.html', detail: 'Shows page-specific rotation alongside rearranging and deleting pages.' }
     ]
   },
   {
@@ -3517,7 +3648,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: rotate, unlock, forms, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for rotating and straightening PDFs, unlocking and protecting files, forms, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: organize, rotate, unlock, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for organizing and rotating PDF pages, unlocking and protecting files, forms, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
