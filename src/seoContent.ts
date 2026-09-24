@@ -1284,7 +1284,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ["/blog/compare-two-pdf-versions-side-by-side","Compare two PDF versions side by side"],
       ["/blog/pdf-overlay-comparison-vs-text-diff","Understand visual overlay vs text diff"],
       ["/bates-numbering","Add Bates numbers for document review"],
-      ["/offline-pdf-redaction","Redact a reviewed PDF"],
+      ["/redact-pdf","Redact a reviewed PDF"],
       ["/edit-pdf","Make visual PDF edits"],
       ["/organize-pdf","Reorder or remove PDF pages"]
     ]
