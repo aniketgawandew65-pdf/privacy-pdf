@@ -269,6 +269,37 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/text-to-pdf': {
+    title: 'How to turn formatted text into an A4 PDF locally',
+    intro: 'Write or paste rich text into the browser editor, format the document, preview discrete A4 pages, insert manual page breaks when needed, and export the pages as a visual PDF.',
+    steps: [
+      'Type text directly or paste formatted document content into the editor.',
+      'Choose a base font or format selected text with font family, size, color, bold, italic or underline.',
+      'Use alignment, lists and other editor controls to structure the document.',
+      'Insert a manual page break where you need a new A4 page to begin.',
+      'Review the discrete A4 preview and page count.',
+      'Download the PDF and inspect every page before sharing it.'
+    ],
+    example: 'A short proposal pasted from a document editor can keep headings, lists, emphasis and alignment while 1into1 normalizes foreign font sizing and layout CSS into its own A4 page model.',
+    questions: [
+      ['Which page size does Text to PDF use?', 'The current tool exports fixed portrait A4 pages.'],
+      ['Can I add manual page breaks?', 'Yes. The editor inserts a dedicated page-break marker that the paginator uses to start a new A4 page.'],
+      ['Which font sizes are available?', 'The current toolbar offers 8, 10, 12, 14, 16, 18, 24 and 32pt choices.'],
+      ['Which base fonts are available?', 'Sans-Serif, Serif, Georgia and Monospace presets are available, and selected text can also receive the toolbar font choice.'],
+      ['What formatting can survive a rich-text paste?', 'Semantic document structure such as headings, lists, tables, blockquotes and emphasis can survive after sanitization. Useful styles such as color, background, weight, style, alignment and decoration can remain, while foreign font sizing, margins, dimensions and layout CSS are normalized.'],
+      ['Can pasted content load remote images or scripts?', 'No. Executable markup and remote-resource elements are stripped. Raster images are allowed only when embedded as data:image PNG, JPEG or WebP content.'],
+      ['Is the final PDF searchable or selectable?', 'Not as native PDF text. Each A4 page is rendered to a JPEG-backed page image before being embedded into the PDF, so the output behaves like an image-based document.'],
+      ['Is the document uploaded?', 'The editor and PDF generation run locally in your browser.']
+    ],
+    related: [
+      ['/blog/convert-formatted-text-to-pdf-locally','Convert formatted text to PDF locally'],
+      ['/blog/paste-rich-text-to-pdf-clean-formatting','Paste rich text into a clean PDF layout'],
+      ['/html-to-pdf','Convert self-contained HTML to PDF'],
+      ['/code-to-pdf','Create a source-code PDF'],
+      ['/ocr-pdf','Add searchable text to an image-based PDF afterward']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
@@ -1983,6 +2014,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'convert-formatted-text-to-pdf-locally',
+    title: 'How to Convert Formatted Text to PDF Locally',
+    description: 'Write or paste rich text, format it in a browser editor, preview discrete A4 pages, add manual page breaks, and export a visual PDF locally.',
+    tool: '/text-to-pdf',
+    toolLabel: 'Create a Text PDF',
+    category: 'TEXT PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Use the browser editor for the document itself',
+        paragraphs: [
+          '1into1 Text to PDF is an editor-first workflow rather than a file converter. You type or paste the document content into an editable rich-text surface and format it before export.',
+          'The editor supports common document controls such as font family, font size, color, bold, italic, underline, alignment and lists.'
+        ]
+      },
+      {
+        title: 'Preview the document as discrete A4 pages',
+        paragraphs: [
+          'The paginator measures the sanitized document against a fixed A4 layout and separates it into page-sized containers before export.',
+          'The preview displays each sheet individually with Page X of Y numbering so you can inspect where content breaks before creating the PDF.'
+        ]
+      },
+      {
+        title: 'Add a manual page break when automatic flow is not enough',
+        paragraphs: [
+          'Automatic pagination is useful for normal paragraphs, lists and tables, but reports and letters sometimes need a deliberate new-page boundary.',
+          'The editor inserts a page-break marker for that purpose. CSS defines break-before as a way to force or avoid breaks before a generated box.'
+        ]
+      },
+      {
+        title: 'The PDF is rendered visually, not as native text objects',
+        paragraphs: [
+          'During download, each prepared A4 page is rendered into a browser canvas, encoded as JPEG and embedded as a full-page image in a fresh PDF.',
+          'This gives the downloaded file the same visual page model as the preview, but selectable or searchable native PDF text is not preserved.'
+        ]
+      },
+      {
+        title: 'Use OCR afterward when searchability matters',
+        paragraphs: [
+          'If the finished document must support text search or selection, run OCR on the image-based PDF afterward.',
+          'Keep the editor source until you have verified the visual PDF because OCR can add a text layer later, but it cannot recover the original rich-text editing structure.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — contenteditable', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable', detail: 'Documents editable HTML content surfaces used for rich-text authoring in the browser.' },
+      { label: 'MDN — break-before', url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/break-before', detail: 'Explains forcing page or column breaks before an element in paged or fragmented layouts.' }
+    ]
+  },
+  {
+    slug: 'paste-rich-text-to-pdf-clean-formatting',
+    title: 'How to Paste Rich Text into a Clean PDF Layout',
+    description: 'Paste formatted content from Word, WPS or the web while keeping useful document structure and stripping risky or layout-breaking markup before A4 PDF export.',
+    tool: '/text-to-pdf',
+    toolLabel: 'Paste text into the PDF editor',
+    category: 'TEXT PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Rich-text paste can carry far more than visible words',
+        paragraphs: [
+          'Clipboard HTML from office editors and websites can include fonts, sizes, dimensions, margins, layout rules and executable or remote-resource markup in addition to the visible document content.',
+          'A clean PDF editor should preserve useful document meaning without blindly inheriting every piece of source-page CSS.'
+        ]
+      },
+      {
+        title: '1into1 sanitizes the pasted HTML first',
+        paragraphs: [
+          'The sanitizer allows document-oriented elements such as paragraphs, headings, lists, tables, blockquotes, preformatted text, horizontal rules and bounded embedded images.',
+          'It removes scripts, stylesheets, iframes, objects, embeds, metadata tags, SVG, MathML and other disallowed active or external structures.'
+        ]
+      },
+      {
+        title: 'Useful formatting survives while foreign layout CSS is normalized',
+        paragraphs: [
+          'The paste-normalization step keeps useful presentation properties such as text color, background color, font weight, font style, alignment and text decoration.',
+          'It deliberately removes pasted font-family, font-size, margins, dimensions, flex/layout properties and related presentation rules so the content follows the Text-to-PDF A4 typography instead of importing an entire foreign page layout.'
+        ]
+      },
+      {
+        title: 'Remote images are not fetched',
+        paragraphs: [
+          'Image elements are retained only when their source is an embedded data:image PNG, JPEG or WebP payload. Ordinary remote image URLs are removed rather than requested.',
+          'That makes pasted content more self-contained and avoids depending on external image servers during document creation.'
+        ]
+      },
+      {
+        title: 'Preview before export because the page model changes',
+        paragraphs: [
+          'A Word or webpage layout is not the same as a fixed A4 browser editor. After paste normalization, inspect headings, tables, lists, emphasis and page breaks in the preview.',
+          'The final export uses the normalized A4 preview as the visual source for the image-based PDF pages.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — ClipboardEvent.clipboardData', url: 'https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent/clipboardData', detail: 'Documents access to clipboard data transferred during copy-and-paste events.' },
+      { label: 'MDN — HTML contenteditable', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable', detail: 'Explains browser-editable HTML regions used for document editing and rich-text input.' }
     ]
   },
   {
@@ -4046,7 +4179,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: code, CSV, HTML, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for code, CSV and HTML conversion, organizing PDF pages, OCR, password security, metadata and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: text, code, CSV, HTML & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for text, code, CSV and HTML conversion, PDF page organization, OCR, password security and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
