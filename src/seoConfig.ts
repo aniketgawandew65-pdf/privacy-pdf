@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-rotate-pdf-permanently': '2026-09-24',
+  '/blog/rotate-pdf-vs-deskew': '2026-09-24',
   '/blog/remove-known-pdf-password-locally': '2026-09-24',
   '/blog/what-changes-when-you-unlock-pdf': '2026-09-24',
   '/blog/how-to-password-protect-pdf-locally': '2026-09-24',
@@ -100,6 +102,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/fill-pdf': '2026-09-24',
   '/protect-pdf': '2026-09-24',
   '/unlock-pdf': '2026-09-24',
+  '/rotate-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -272,10 +275,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/rotate-pdf': {
     path: '/rotate-pdf',
-    title: 'Rotate PDF Pages — Change Orientation In-Browser',
-    description: 'Rotate PDF pages permanently by 90, 180, or 270 degrees without server uploads.',
+    title: 'Rotate PDF Permanently — 90°, 180° or 270° | 1into1',
+    description: 'Permanently rotate an entire PDF clockwise by 90, 180 or 270 degrees locally in your browser. Download a new file with the saved orientation.',
     heading: 'Rotate PDF',
-    subheading: 'Reorient landscape and portrait pages directly in local memory.',
+    subheading: 'Apply one permanent 90°, 180° or 270° rotation to every page of the PDF locally.',
   },
   '/organize-pdf': {
     path: '/organize-pdf',

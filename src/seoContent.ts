@@ -724,6 +724,34 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/rotate-pdf': {
+    title: 'How to permanently rotate an entire PDF',
+    intro: 'Apply the same 90°, 180° or 270° clockwise rotation to every page and save the orientation into a new PDF. Use Organize PDF instead when only selected pages need different rotations.',
+    steps: [
+      'Choose the PDF you want to rotate.',
+      'Select 90°, 180° or 270° clockwise.',
+      'Check the first-page live preview.',
+      'Rotate the PDF and download the new copy.',
+      'Reopen the result in another viewer to confirm the saved orientation.'
+    ],
+    example: 'If every page in a scanned document is sideways, choose +90° once and create a new PDF whose pages open in that corrected orientation.',
+    questions: [
+      ['Is this rotation permanent?', 'Yes. The downloaded PDF stores the changed page orientation instead of only rotating the temporary viewer display.'],
+      ['Can I rotate only one page with this standalone tool?', 'No. The current Rotate PDF interface applies one selected angle to the whole PDF. Use Organize PDF when individual pages need different rotations.'],
+      ['What angles are available?', 'The standalone tool offers +90°, +180° and +270° clockwise rotations.'],
+      ['Does rotation reduce quality?', 'For normal unencrypted PDFs, the standard path changes page rotation without intentionally re-rendering the page content. Internally encrypted PDFs can use a rendered compatibility path, so keep the original when exact vector or text preservation matters.'],
+      ['Is rotation the same as deskewing?', 'No. Rotate fixes quarter-turn or upside-down orientation. Deskew corrects small tilts such as a page leaning by a few degrees.'],
+      ['Is the PDF uploaded?', 'The rotation workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/how-to-rotate-pdf-permanently','Permanently rotate a PDF'],
+      ['/blog/rotate-pdf-vs-deskew','Rotate PDF vs Deskew'],
+      ['/deskew-pdf','Straighten a slightly tilted scan'],
+      ['/organize-pdf','Rotate or reorder individual pages'],
+      ['/scan-to-pdf','Create a PDF from document photos']
+    ]
+  },
+
   '/deskew-pdf': {
     title: 'How to straighten a crooked scanned PDF',
     intro: 'Correct a small consistent tilt in a scanned PDF locally. Use the first-page preview to estimate or fine-tune one angle, then apply that selected correction across the document.',
@@ -745,6 +773,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/blog/how-to-straighten-crooked-scanned-pdf','Straighten a crooked scanned PDF'],
       ['/blog/deskew-pdf-before-ocr','Deskew a PDF before OCR'],
+      ['/blog/rotate-pdf-vs-deskew','Rotate PDF vs Deskew'],
       ['/ocr-pdf','Run OCR after straightening'],
       ['/rotate-pdf','Rotate pages by 90 degrees'],
       ['/scan-to-pdf','Create a PDF from scans or photos']
@@ -1833,6 +1862,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'how-to-rotate-pdf-permanently',
+    title: 'How to Rotate a PDF Permanently',
+    description: 'Save a 90°, 180° or 270° rotation into a new PDF so the corrected orientation remains when the file is reopened or shared.',
+    tool: '/rotate-pdf',
+    toolLabel: 'Rotate the whole PDF',
+    category: 'PDF PAGE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Viewer rotation can be temporary',
+        paragraphs: [
+          'Some PDF viewers let you rotate what you see on screen without changing the actual page orientation stored in the document.',
+          'Adobe explicitly distinguishes Rotate View, which is temporary, from rotating pages through Organize Pages and saving the PDF, which changes the document orientation.'
+        ]
+      },
+      {
+        title: 'Choose the quarter-turn that fixes the document',
+        paragraphs: [
+          'The standalone 1into1 Rotate PDF tool offers +90°, +180° and +270° clockwise. The first-page preview shows the selected orientation before the full document is processed.',
+          'Use +90° or +270° for sideways documents and +180° when every page is upside down.'
+        ]
+      },
+      {
+        title: 'The same rotation is applied to every page',
+        paragraphs: [
+          'The current Rotate PDF interface passes one angle to the whole document, so every page receives the same additional rotation.',
+          'That makes it a good fit for documents scanned consistently in the wrong orientation. When only a few pages are wrong, use Organize PDF for page-specific changes instead.'
+        ]
+      },
+      {
+        title: 'Normal PDFs use the vector-preserving rotation path',
+        paragraphs: [
+          'For ordinary unencrypted PDFs, 1into1 changes the page rotation value and saves a new PDF rather than intentionally turning every page into an image.',
+          'Internally encrypted inputs can require a rendered compatibility path, so verify text selection and page quality when exact structure preservation matters.'
+        ]
+      },
+      {
+        title: 'Reopen the downloaded file to verify the change',
+        paragraphs: [
+          'Open the result in another viewer or browser after downloading it. The corrected orientation should still be present because the change is saved into the output PDF rather than being only a viewer preference.',
+          'Keep the original until you have checked page order, orientation and important content.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Rotate pages in PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/organize-pages/rotate-pages.html', detail: 'Adobe documents saved page rotation and separately notes that Rotate View is only temporary.' },
+      { label: 'Adobe Acrobat — Adjusting PDF views', url: 'https://helpx.adobe.com/acrobat/using/adjusting-pdf-views.html', detail: 'Explains that rotating the page view changes only the display and is not the same as saving the page orientation.' }
+    ]
+  },
+  {
+    slug: 'rotate-pdf-vs-deskew',
+    title: 'Rotate PDF vs Deskew: Which Fix Does a Scanned Page Need?',
+    description: 'Use PDF rotation for sideways or upside-down pages and deskew for small scan tilt. Learn which correction matches each orientation problem.',
+    tool: '/rotate-pdf',
+    toolLabel: 'Rotate a PDF',
+    category: 'SCANNED PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Rotate fixes quarter-turn orientation errors',
+        paragraphs: [
+          'Use Rotate PDF when the document is sideways or upside down and needs a 90°, 180° or 270° correction.',
+          'This is an orientation problem: the page is facing the wrong direction as a whole.'
+        ]
+      },
+      {
+        title: 'Deskew fixes a small angular lean',
+        paragraphs: [
+          'Use Deskew PDF when text lines are almost horizontal but lean by a few degrees because the paper entered a scanner or camera slightly crooked.',
+          'Adobe describes deskewing as automatically straightening tilted scanned pages, which is different from a quarter-turn page rotation.'
+        ]
+      },
+      {
+        title: 'Do not use a 90-degree tool for a 2-degree problem',
+        paragraphs: [
+          'A small scan tilt needs fine correction, not a quarter-turn. Likewise, a page that is fully sideways should be rotated rather than adjusted a few tenths of a degree at a time.',
+          'Choosing the correct tool avoids unnecessary transformations and makes the preview easier to interpret.'
+        ]
+      },
+      {
+        title: 'The standalone Rotate tool changes every page',
+        paragraphs: [
+          '1into1 Rotate PDF applies the selected 90°, 180° or 270° angle across the entire document.',
+          '1into1 Deskew also uses one selected fine angle across the PDF, estimated from the first-page preview. If pages need different corrections, separate or organize them before applying the appropriate fix.'
+        ]
+      },
+      {
+        title: 'Correct orientation before OCR when possible',
+        paragraphs: [
+          'OCR works best when the page is oriented and aligned sensibly before recognition. A sideways page should be rotated first; a slightly tilted scan can benefit from deskewing before OCR.',
+          'Adobe’s scanned-PDF settings list Deskew as a scan-enhancement step, while rotation is handled as page orientation.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Rotate pages in PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/organize-pages/rotate-pages.html', detail: 'Documents 90-degree page rotation used to correct PDF orientation.' },
+      { label: 'Adobe Acrobat — Improve scanned PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/create-documents/scan-documents-to-pdfs/scanned-pdf-settings.html', detail: 'Defines Deskew as automatically straightening tilted scanned pages.' }
     ]
   },
   {
@@ -3386,7 +3517,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: unlock, password security, forms & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for unlocking and protecting PDFs, forms, resizing, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: rotate, unlock, forms, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for rotating and straightening PDFs, unlocking and protecting files, forms, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
