@@ -32,9 +32,17 @@ export interface SlideLine {
 export interface SlideLink extends Rect {
   url: string;
 }
+/** A verified rectangular grid. Empty cells remain empty and values are never inferred. */
+export interface SlideTable extends Rect {
+  columns: number[];
+  rows: number[];
+  cells: (SlideText | null)[][];
+  border: { width: number; color: string };
+}
 export interface SlidePage extends Size {
   sourcePage: number;
   texts: SlideText[];
+  tables?: SlideTable[];
   lines: SlideLine[];
   links: SlideLink[];
   image: Uint8Array;
@@ -48,6 +56,7 @@ export interface PageReport {
   preservedCharacters: number;
   reason: string;
   renderPixels: number;
+  nativeTables?: number;
 }
 export interface ConversionReport {
   pages: PageReport[];

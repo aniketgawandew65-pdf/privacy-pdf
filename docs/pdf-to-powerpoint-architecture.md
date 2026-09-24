@@ -47,3 +47,14 @@ The final package writer emits known-size local ZIP headers one entry at a time.
 PDF.js CMaps, standard fonts and WASM decoders are an explicit local allowlist. Each becomes a lazy inline-data JavaScript asset, which the existing PWA precaches without changing global cache rules. PDF-provided URLs cannot select arbitrary rendering resources. Editable text does not embed fonts; image-preserved content uses PDF.js rendering and available PDF/system fonts.
 
 Complete PDF text objects are omitted during artwork rendering, preserving cursor semantics for any text left in artwork. A later painted object or preserved text run that overlaps an earlier candidate prevents that candidate from being lifted over it. Invisible OCR, clipped text, rotated text, complex scripts and ambiguous Unicode mappings remain artwork. Extremely dense analysis falls back per page instead of freezing in a quadratic reconstruction pass.
+
+
+## Quality revision — 24 September 2026
+
+Known face names take precedence over generic PDF family flags. Substitute families remain Arial, Times New Roman and Courier New. A bounded short-fragment tracking rule accounts for a two-character run concentrating its width difference into one gap; longer runs and unsafe Unicode keep their earlier limits. No font files are embedded.
+
+Before rendering mutates numeric paths into Path2D, snapshot safe axis-aligned strokes. Migrate only complete rectangular grids with uniform solid borders, a single fully contained text run per cell, and all page text safely extracted. Reject partial/internal borders, annotations, later overpainting and ambiguous paths. Remove complete drawing operators, retain backgrounds as artwork, and serialize native DrawingML table cells with explicit dimensions/margins/borders. Decorative fills remain artwork and do not follow a resized table. Dense/vector-heavy analysis is bounded and optional.
+
+A single full-page raster can cap its rendering scale at source pixel density. A strict operator allowlist and full-page axis-aligned transform check prevent reducing resolution on mixed/vector/annotated pages. All existing device limits still apply.
+
+Native table support is validated by actual LibreOffice rendering as well as XML/cell assertions. Office table rows have reader-dependent minimum text heights, so the initial implementation requires comfortable single-run containment and explicit cell margins; it does not guess merged/multiline geometry. See [Microsoft table sizing guidance](https://support.microsoft.com/en-us/powerpoint/change-the-size-of-a-table-column-or-row-in-powerpoint).

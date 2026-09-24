@@ -1,6 +1,7 @@
 import { OPS, Util, type PDFPageProxy } from "pdfjs-word-dist";
 import type { Rect, SlideText } from "./model";
 import { overlaps } from "./geometry";
+import { substituteFont, trackingLimit } from "./fonts";
 interface Item {
   hasEOL: boolean;
   str: string;
@@ -44,9 +45,7 @@ export function supportedText(s: string): boolean {
     )
   );
 }
-export async function editableText(
-  page: PDFPageProxy,
-): Promise<{
+export async function editableText(page: PDFPageProxy): Promise<{
   texts: SlideText[];
   omit: Set<number>;
   total: number;
@@ -252,11 +251,7 @@ export async function editableText(
       continue;
     }
     const hint = `${fontInfo.name ?? ""} ${style.fontFamily}`;
-    const font = /mono|courier/i.test(hint)
-      ? "Courier New"
-      : /times|serif|cambria|georgia/i.test(hint) && !/sans/i.test(hint)
-        ? "Times New Roman"
-        : "Arial";
+    const font = substituteFont(fontInfo.name ?? "", style.fontFamily);
     const bold = !!(
       fontInfo.bold ||
       fontInfo.black ||
@@ -305,7 +300,8 @@ export async function editableText(
       item.str.length > 1 ? (width - measured) / (item.str.length - 1) : 0;
     if (
       !Number.isFinite(spacing) ||
-      Math.abs(spacing) > size * 0.2 ||
+      Math.abs(spacing) >
+        trackingLimit(item.str.length, width, measured, size) ||
       (item.str.length === 1 && Math.abs(width - measured) > size * 0.3)
     ) {
       reject();

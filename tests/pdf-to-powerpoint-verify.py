@@ -32,4 +32,21 @@ with ZipFile(p) as z:
   assert 'INVISIBLE OCR' not in text(22)
   assert 'First second third 1234' in text(23)
   assert 'hidden' not in text(24).lower()
+  table=E.fromstring(z.read(slides[4])).find('.//a:tbl',ns)
+  assert table is not None,'Expected native ledger table'
+  rows=table.findall('a:tr',ns);assert len(rows)==30
+  for i,row in enumerate(rows):
+   values=[''.join(cell.xpath('.//a:t/text()',namespaces=ns)) for cell in row.findall('a:tc',ns)]
+   assert values==[f'{i+1:02}-09-2026','Payment reference','500.00','12500.75'],(i,values)
+  # Optional headless-render round trip: XML alone cannot prove a reader displays tables.
+  if len(sys.argv)>3:
+   import pdfplumber
+   with pdfplumber.open(sys.argv[3]) as rendered:
+    assert len(rendered.pages)==24
+    words=rendered.pages[4].extract_words();values=[w['text'] for w in words]
+    assert len(words)==155
+    assert values.count('500.00')==30 and values.count('12500.75')==30
+    for i in range(30):
+     date=next(w for w in words if w['text']==f'{i+1:02}-09-2026')
+     assert abs(date['x0']-35)<1 and abs(date['top']-(89.75+i*20))<1,(i,date)
  print(json.dumps({'file':p,'slides':len(slides),'editableCharacters':sum(len(text(i+1)) for i in range(len(slides))),'valid':True}))

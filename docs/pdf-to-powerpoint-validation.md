@@ -1,75 +1,93 @@
-# PDF to PowerPoint validation — 23 September 2026
+# PDF to PowerPoint validation — 24 September 2026
 
 Branch: `feature/pdf-to-powerpoint`. Base: `c9f772e9d2b408b39916cc937a2f06f3ec502e58`.
-This is a preview feature awaiting user testing, not a production approval.
+Draft PR #14 remains a preview awaiting manual approval. Main/production is untouched.
 
-## Results
+## Quality improvements in this revision
 
-- Full TypeScript/Vite/PWA build passed. SEO audit passed: 63 static pages and 61 canonical sitemap URLs.
-- New package/geometry unit tests: 5 passed. Existing PDF-to-Word regression tests: 29 passed.
-- New component and engine ESLint check passed.
-- Read-only browser smoke: PDF to Word, PDF to JPG, OCR and Rotate PDF all produced their expected result/download state. No existing engine was modified.
-- 24-page synthetic corpus generated 24 valid slides, with 10,131 editable characters. ZIP CRC, XML parsing, relationship targets, media decoding, source order and selected fallback/text expectations passed.
-- Corpus covers simple/dense text, two columns, scans, mixed pages, table/ledger, legal clauses, transparency, vectors, landscape, rotation, receipt proportions, font styles/sizes, links, opaque occlusion, low-quality scan, punctuation, diagonal watermark, clipping, huge page, CropBox offsets, blank page, invisible OCR and consecutive/partially hidden text operators.
-- Additional multilingual/CMap and overlapping rotated-text cases converted. Unsupported scripts/ambiguous mappings stay in artwork. A source missing its own glyphs cannot be repaired by this converter.
-- Final browser-generated PPTX opened directly in bundled headless LibreOffice. The 24-page corpus, rent and April bank outputs were rendered locally for visual inspection. Desktop Microsoft PowerPoint and Keynote were not tested.
-- Invalid, empty, damaged and password-protected PDF errors passed. Cancellation passed. A 75-page file converted sequentially.
-- Real component credit checks: one successful conversion reduced the current free balance from 2 to 1. Download, invalid range and cancellation did not reduce it further. The existing rules were reused unchanged.
-- Chrome Pixel 7 emulation converted five mixed pages with approximately 3 million pixels per page. Physical Android/iOS devices and Safari were not tested for this new tool.
-- Production PWA tests passed offline reload plus both Auto and Best fidelity conversions after caching. Network inspection observed local worker GETs and the existing GA4 task metadata POSTs; no document text or filename appeared in those requests. No conversion server is used.
+- Recognized font names now override incorrect generic PDF family flags. The supplied statement marks ArialMT as monospace; that previously selected Courier New and preserved an entire text block as artwork.
+- Two-character fragments can use slightly more tracking only when their total width differs by at most 20% and the gap stays within 30% of font size. Longer runs retain the original tighter limit. This fixes a two-letter fragment that previously preserved all 3,467 surrounding characters on statement page two. Whole PDF text objects are still removed together, preserving cursor and stacking semantics.
+- Clear, fully ruled grids become native PowerPoint tables. Cell values, row/column sizes and uniform borders come from the PDF; no values or missing rows are inferred. Single-run cells only. Ambiguous/multiline/merged/dashed/clipped/overpainted/annotated layouts retain the existing text/artwork approach. Table border operators are removed atomically, so original borders are not left behind. Complex bank tables remain positioned text, not native cells.
+- A lone full-page scan is rendered at no more than its source resolution, within the existing device budget. Text, vectors, masks, clipping, annotations or unknown operations keep the full normal budget. The supplied rent scans already need that resolution and remain unchanged.
+- Optional table analysis has explicit limits for large vector paths and dense grids.
 
-## Reference comparison and measured runs
+## Measured results
 
-Timings are local observations, not cross-device guarantees; other work was running on the Mac.
+V1 is commit `561aef9`. Timings are local observations on a busy Mac, not cross-device performance guarantees.
 
-| Input | Slides | Editable characters | PPTX bytes | Local conversion |
+| Input | Slides | Editable characters, V1 → current | PPTX bytes, V1 → current | Current local run |
 |---|---:|---:|---:|---:|
-| Synthetic mixed corpus | 24 | 10,131 | 4,246,109 | 7.93 s |
-| Rent scan PDF | 10 | 0 | 7,024,036 | 7.22 s |
-| April 2022 statement | 9 | 18,010 | 2,389,076 | 37.56 s |
-| Repeated digital page stress file | 75 | Present on each page | 5,783,747 | 20.00 s |
+| Synthetic mixed corpus | 24 | 10,131 → 10,131 | 4,246,109 → 3,733,470 | 6.39 s |
+| April 2022 statement | 9 | 18,010 → 22,378 | 2,389,076 → 1,865,650 | 10.54 s |
+| Rent scan PDF | 10 | 0 → 0 | 7,024,036 → 7,024,036 | 34.74 s under load |
+| Repeated digital stress file | 75 | Present on every slide | 5,783,747 | 13.20 s |
 
-The rent reference PPTX is 4,625,147 bytes. It reconstructs the first scan using text shapes and preserves the other nine as images. Our output preserves all ten scans as images at up to 216 dpi on desktop, without OCR number/word substitutions. That improves faithfulness to the scanned first page but gives up its editability and produces a larger file. Mobile resolution is lower and bounded by the shared device policy.
+The corpus is 12.1% smaller and the statement is 21.9% smaller. Statement pages two through nine have all extracted text editable. Page one preserves 36 barcode-related characters as artwork. This is measured coverage of these documents, not a promise for all PDFs.
 
-The June 2026 bank reference has six slides, two native tables and many text shapes. The supplied source statements are February 2022 (seven pages) and April 2022 (nine pages). Neither is the matching source, so no page-for-page superiority claim is justified. The April output retains the source's columns, watermark, header and page boundaries; font weight/character spacing differs. Its first two pages use more conservative artwork preservation; most later body text is editable. Tables are not native PowerPoint table objects.
+The synthetic ledger now has one native table containing 30 rows and 120 cells. Every cell's date/description/amount was checked. Its LibreOffice render contains all 155 expected words, with a maximum coordinate drift of 0.454 pt relative to the previous positioned-text output. A render check guards against a structurally present table being invisible to a reader. Four additional real PDF cases verify native-table counts `[1, 0, 0, 0]`: clear grid, multiple text runs per cell, covered content, dashed borders.
+
+## Verification
+
+- Full TypeScript/Vite/PWA build and SEO audit passed: 63 static pages, 61 canonical URLs. Scoped ESLint passed.
+- 15 PDF-to-PowerPoint unit tests and 29 existing Word regression tests passed.
+- ZIP CRC, XML, media decoding, relationships, slide order/count, expected text and hidden-text exclusion passed for the 24-page corpus. Native-cell and rendered-word/position assertions passed.
+- Bundled headless LibreOffice opened and rendered the generated presentations. Visually checked native ledger, statement pages 1/2/3/9 and diagonal watermark against source/baseline. The second-page spacing correction retained the layout. PowerPoint desktop and Keynote remain untested.
+- Invalid, empty, damaged and encrypted PDF errors; cancellation; and 75-page sequential conversion passed.
+- Component credit test: 2 → 1 after success; download, invalid range and cancellation did not charge again.
+- Chrome Pixel 7 emulation converted five mixed pages with a maximum 3,002,877 pixels per page. This is not physical Android/iPhone/Safari validation.
+- Built PWA passed offline reload and both Auto/Best fidelity conversions after caching. Network inspection saw local worker GETs and existing GA4 task metadata POSTs, with no document upload observed.
+- Read-only existing-tool smoke passed: PDF to Word, PDF to JPG, OCR, Rotate PDF. Existing engines and shared behavior are unchanged.
+- One statement attempt timed out under concurrent build/render/browser load; it passed on the stable retry. One development integration run was interrupted by a source reload; the repeated run against stable source passed. Neither failed run is counted as a pass.
+
+## Reference comparison
+
+The rent reference deck is 4,625,147 bytes and OCR-reconstructs the first scan, preserving the other nine as images. Our ten-slide output preserves the scanned appearance without OCR word/number substitutions, but is larger and is not text-editable.
+
+The supplied June 2026 reference deck has six slides and two native tables. The supplied source statements are February 2022 (seven pages) and April 2022 (nine pages), so a direct page-for-page competitor comparison is not valid. The April output retains columns, watermark, logos and page boundaries, but uses substitute fonts. Its complex rounded/unruled tables remain positioned text plus artwork.
 
 ## Strict provisional rating
 
-Overall: **7.8/10** for this preview. It is not yet demonstrated to meet a 9+/10 production target.
+**8.4/10**, up from the initial **7.8/10** preview. The requested **9.5/10 is not yet demonstrated**. This remains a qualitative engineering assessment, not a standardized benchmark score.
 
-| Area | /10 | Main limitation |
+| Area | /10 | Remaining limit |
 |---|---:|---|
-| Visual fidelity | 8.5 | Font substitution; raster artwork at bounded resolution |
-| Editable content | 6.5 | Reliable horizontal text only; no native tables/OCR |
-| Scanned PDFs | 8.5 | Faithful images, larger outputs, not editable |
-| Mixed PDFs | 8.5 | Page-level/per-object fallback, one common slide size |
-| Fonts/text | 7 | Substitute fonts; complex scripts preserved visually |
-| Images/graphics | 8 | Preserved visually, not editable vectors |
-| Tables/layout | 7.5 | Positioned text and artwork rather than editable cells |
-| PPTX compatibility | 7 | LibreOffice tested; PowerPoint/Keynote still need manual tests |
-| Performance | 7.5 | Sequential/bounded canvases; final compressed file still in memory |
-| Privacy/offline | 9.5 | Core local and cached; shared analytics still exists |
+| Visual fidelity | 8.8 | Substitute fonts and bounded raster artwork |
+| Editable content | 8.2 | Reliable horizontal scripts; conservative complex-layout fallback |
+| Scanned PDFs | 8.7 | Source-aware resolution, but no OCR editing; rent output still larger |
+| Mixed PDFs | 8.5 | One common slide size; bounded per-page fallback |
+| Fonts/text | 8.2 | Better classification/tracking; no embedded font reproduction |
+| Images/graphics | 8 | Visually preserved, mostly not editable vectors |
+| Tables/layout | 8 | Simple native grids; merged/multiline/rounded tables remain text/artwork |
+| PPTX compatibility | 7.5 | LibreOffice round trips pass; PowerPoint/Keynote acceptance pending |
+| Performance | 8 | Bounded pages and smaller scans; compressed output stays in memory |
+| Privacy/offline | 9.5 | Local conversion/cached assets; shared analytics remains |
 | Error handling | 8.5 | Explicit failures/cancel; no interrupted-job resume |
 
-## Manual preview checks
+## Manual acceptance needed
 
-1. On desktop PowerPoint and Keynote, open the rent and both bank conversions. Verify every slide and important numbers, especially the bottom rows and watermark.
-2. Edit text on a bank transaction slide. Check that nearby columns do not move unexpectedly. Table cells and graphics are not promised editable.
-3. Compare Auto with Best fidelity. Try `1-3, 5`; confirm four slides in source order.
-4. Try a scan, mixed portrait/landscape PDF, rotated page, cancellation and protected PDF.
-5. On physical iPhone Safari and Android Chrome, test normal and Private/Incognito tabs, download/open the PPTX and monitor behavior with longer scans.
-6. Let the app finish caching, go offline, reload and convert. Verify the task balance only decreases on success.
-7. Supply the actual June 2026 source PDF for a direct comparison with the provided six-slide reference deck.
+1. Open statement, native-ledger and rent PPTX files in desktop PowerPoint and Keynote. Verify all slides, important numbers, font spacing and bottom rows. Edit the synthetic ledger as cells; edit bank text independently.
+2. On physical iPhone Safari and Android Chrome, try normal and Private/Incognito sessions, conversion/download/opening, cancellation and a longer scan. Earlier physical-device credit tests do not validate this new converter.
+3. Compare Auto/Best fidelity and page range `1-3, 5`; try rotated/mixed-size PDFs. Go offline after caching and verify conversion and success-only task charging.
+4. A matching June 2026 PDF is still needed for a direct comparison with the supplied reference PPTX.
 
 ## Reproduce
 
-- `npm ci`, then `npm run test:pdf-to-powerpoint`, `npm run test:pdf-to-word`, `npm run build`.
-- Use Python with reportlab, pypdf, Pillow and lxml: `python tests/pdf-to-powerpoint-fixtures.py /private/tmp/pdf-to-powerpoint-qa`.
-- Start Vite on port 5197. Run the browser/integration/smoke scripts with Playwright installed, or set `PLAYWRIGHT_MODULE` to its module path and `CHROME_PATH` to an installed Chrome executable.
-- Browser converter: `node tests/pdf-to-powerpoint-browser.mjs INPUT.pdf OUTPUT.pptx [auto|fidelity] [page-range]`.
-- Structural verification: `python tests/pdf-to-powerpoint-verify.py OUTPUT.pptx [torture]`.
-- Serve the built site on 5198 and run `node tests/pdf-to-powerpoint-offline.mjs`.
-- Render PPTX locally with headless LibreOffice; inspect against source PDF renders. Keep real user documents/output outside the repository.
+- `npm ci`; `npm run test:pdf-to-powerpoint`; `npm run test:pdf-to-word`; `npm run build`.
+- Generate fixtures with Python + reportlab/pypdf/Pillow: `python tests/pdf-to-powerpoint-fixtures.py /private/tmp/pdf-to-powerpoint-qa`.
+- Start Vite on 5197. Use the browser/integration/smoke scripts with `PLAYWRIGHT_MODULE` and `CHROME_PATH` if needed.
+- Convert: `node tests/pdf-to-powerpoint-browser.mjs INPUT.pdf OUTPUT.pptx [auto|fidelity] [page-range]`.
+- Render with headless LibreOffice. Validate corpus plus rendered native-table geometry: `python tests/pdf-to-powerpoint-verify.py OUTPUT.pptx torture RENDERED.pdf`.
+- The `table-guards.pdf` fixture must report native-table counts `[1,0,0,0]`.
+- Serve the build on 5198; run `node tests/pdf-to-powerpoint-offline.mjs`.
+- Keep real user documents, outputs and screenshots outside the repository.
+
+## Files changed in this revision (relative to V1)
+
+Added: `src/utils/pdfToPowerPoint/fonts.ts`, `rules.ts`, `scan.ts`, `tables.ts`; `tests/pdf-to-powerpoint-fonts.test.ts`, `pdf-to-powerpoint-scan.test.ts`, `pdf-to-powerpoint-tables.test.ts`.
+
+Updated: `src/utils/pdfToPowerPoint/convert.ts`, `model.ts`, `package.ts`, `text.ts`; `tests/pdf-to-powerpoint-fixtures.py`, `pdf-to-powerpoint-verify.py`; both PDF-to-PowerPoint architecture/validation documents.
+
+No existing tool engine, UI, pricing, credit rule, dependency or shared integration file changed in this revision.
 
 ## Exact changed files
 
@@ -104,3 +122,11 @@ New files:
 - `tests/pdf-to-powerpoint-verify.py`
 - `docs/pdf-to-powerpoint-architecture.md`
 - `docs/pdf-to-powerpoint-validation.md`
+
+- `src/utils/pdfToPowerPoint/fonts.ts`
+- `src/utils/pdfToPowerPoint/rules.ts`
+- `src/utils/pdfToPowerPoint/scan.ts`
+- `src/utils/pdfToPowerPoint/tables.ts`
+- `tests/pdf-to-powerpoint-fonts.test.ts`
+- `tests/pdf-to-powerpoint-scan.test.ts`
+- `tests/pdf-to-powerpoint-tables.test.ts`

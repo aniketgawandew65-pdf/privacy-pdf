@@ -1,7 +1,7 @@
 import { strToU8 } from "fflate";
 import { CompatibleZip } from "./zip.ts";
 import { emu, fitPage, safeLink } from "./geometry.ts";
-import type { Size, SlidePage, SlideText } from "./model.ts";
+import type { Size, SlidePage, SlideText, SlideTable } from "./model.ts";
 const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -34,12 +34,48 @@ function textShape(
   id: number,
   fit: ReturnType<typeof fitPage>,
 ): string {
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Text ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${transform(fit.x + t.x * fit.scale, fit.y + t.y * fit.scale, t.width * fit.scale, t.height * fit.scale, t.rotation)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody>${textBody(t, fit)}</p:txBody></p:sp>`;
+}
+function textBody(t: SlideText, fit: ReturnType<typeof fitPage>): string {
   const color = /^[0-9a-f]{6}$/i.test(t.color) ? t.color : "000000";
   const size = Math.max(
     100,
     Math.min(400000, Math.round(t.size * fit.scale * 100)),
   );
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Text ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${transform(fit.x + t.x * fit.scale, fit.y + t.y * fit.scale, t.width * fit.scale, t.height * fit.scale, t.rotation)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr rtl="${t.rtl ? 1 : 0}" algn="l"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft></a:pPr><a:r><a:rPr lang="en-US" sz="${size}" b="${t.bold ? 1 : 0}" i="${t.italic ? 1 : 0}" spc="${Math.round(t.spacing * fit.scale * 100)}"><a:solidFill><a:srgbClr val="${color}"><a:alpha val="${Math.round(t.opacity * 100000)}"/></a:srgbClr></a:solidFill><a:latin typeface="${escapeXml(t.font)}"/><a:ea typeface="${escapeXml(t.font)}"/><a:cs typeface="${escapeXml(t.font)}"/></a:rPr><a:t xml:space="preserve">${escapeXml(t.text)}</a:t></a:r><a:endParaRPr sz="${size}"/></a:p></p:txBody></p:sp>`;
+  return `<a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:pPr rtl="${t.rtl ? 1 : 0}" algn="l"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft></a:pPr><a:r><a:rPr lang="en-US" sz="${size}" b="${t.bold ? 1 : 0}" i="${t.italic ? 1 : 0}" spc="${Math.round(t.spacing * fit.scale * 100)}"><a:solidFill><a:srgbClr val="${color}"><a:alpha val="${Math.round(t.opacity * 100000)}"/></a:srgbClr></a:solidFill><a:latin typeface="${escapeXml(t.font)}"/><a:ea typeface="${escapeXml(t.font)}"/><a:cs typeface="${escapeXml(t.font)}"/></a:rPr><a:t xml:space="preserve">${escapeXml(t.text)}</a:t></a:r><a:endParaRPr sz="${size}"/></a:p>`;
+}
+function tableShape(
+  table: SlideTable,
+  id: number,
+  fit: ReturnType<typeof fitPage>,
+): string {
+  const border = ["L", "R", "T", "B"]
+    .map(
+      (side) =>
+        `<a:ln${side} w="${emu(table.border.width * fit.scale)}"><a:solidFill><a:srgbClr val="${table.border.color}"/></a:solidFill><a:prstDash val="solid"/></a:ln${side}>`,
+    )
+    .join("");
+  let y = table.y;
+  const rows = table.rows
+    .map((height, row) => {
+      let x = table.x;
+      const cells = table.columns
+        .map((width, col) => {
+          const t = table.cells[row][col];
+          // Reuse the exact run/paragraph formatting used for positioned text.
+          const body = t
+            ? textBody(t, fit)
+            : '<a:bodyPr wrap="none"><a:noAutofit/></a:bodyPr><a:lstStyle/><a:p><a:endParaRPr sz="100"/></a:p>';
+          const cell = `<a:tc><a:txBody>${body}</a:txBody><a:tcPr marL="${emu((t ? t.x - x : 0) * fit.scale)}" marR="0" marT="${emu((t ? t.y - y : 0) * fit.scale)}" marB="0" anchor="t">${border}<a:noFill/></a:tcPr></a:tc>`;
+          x += width;
+          return cell;
+        })
+        .join("");
+      y += height;
+      return `<a:tr h="${emu(height * fit.scale)}">${cells}</a:tr>`;
+    })
+    .join("");
+  return `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Editable table ${id}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${emu(fit.x + table.x * fit.scale)}" y="${emu(fit.y + table.y * fit.scale)}"/><a:ext cx="${emu(table.width * fit.scale)}" cy="${emu(table.height * fit.scale)}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr><a:noFill/></a:tblPr><a:tblGrid>${table.columns.map((width) => `<a:gridCol w="${emu(width * fit.scale)}"/>`).join("")}</a:tblGrid>${rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 }
 /** Incremental ZIP writer. Only one page's raw image/XML is retained by the worker. */
 export class PresentationPackage {
@@ -72,6 +108,7 @@ export class PresentationPackage {
     let id = 2;
     let shapes = `<p:pic><p:nvPicPr><p:cNvPr id="${id++}" name="PDF page ${page.sourcePage} artwork"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId2"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(fit.x, fit.y, fit.width, fit.height)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
     shapes += page.texts.map((t) => textShape(t, id++, fit)).join("");
+    shapes += (page.tables ?? []).map((t) => tableShape(t, id++, fit)).join("");
     let relationships =
       rel("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml") +
       rel("rId2", "image", `../media/page${n}.${page.imageType}`);

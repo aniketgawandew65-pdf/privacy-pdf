@@ -1,8 +1,11 @@
-import { AnnotationMode, type PDFPageProxy } from "pdfjs-word-dist";
+import { AnnotationMode, OPS, type PDFPageProxy } from "pdfjs-word-dist";
 import { isMobileSafetyEnvironment } from "../deviceCapability";
 import { deckSize, parsePages, renderScale, safeLink } from "./geometry";
 import { openSource, bounded } from "./source";
 import { editableText } from "./text";
+import { collectRules } from "./rules";
+import { extractTables } from "./tables";
+import { scanScale } from "./scan";
 import type {
   ConversionMode,
   ConversionReport,
@@ -112,6 +115,47 @@ export async function convertPdfToPowerPoint(
           "Unable to read this PDF page.",
         );
         const points = page.getViewport({ scale: 1 });
+        // PDF.js replaces numeric path data with Path2D on first render.
+        // Snapshot only rules drawn after other artwork, avoiding hidden grids.
+        const operators = await bounded(
+          page.getOperatorList(),
+          signal,
+          "Reading page graphics took too long.",
+        );
+        const annotations = await bounded(
+          page.getAnnotations({ intent: "display" }),
+          signal,
+          "Reading page annotations took too long.",
+        );
+        const lastArtwork =
+          operators?.fnArray.findLastIndex(
+            (fn, i) =>
+              [
+                OPS.paintImageXObject,
+                OPS.paintInlineImageXObject,
+                OPS.paintImageMaskXObject,
+                OPS.paintImageMaskXObjectRepeat,
+                OPS.paintImageMaskXObjectGroup,
+                OPS.paintImageXObjectRepeat,
+                OPS.paintInlineImageXObjectGroup,
+                OPS.paintSolidColorImageMask,
+                OPS.shadingFill,
+                OPS.beginGroup,
+              ].includes(fn) ||
+              (fn === OPS.constructPath &&
+                ![OPS.stroke, OPS.closeStroke, OPS.endPath].includes(
+                  operators.argsArray[i][0],
+                )),
+          ) ?? -1;
+        const rules =
+          options.mode !== "fidelity" && !annotations.length
+            ? collectRules(
+                operators.fnArray,
+                operators.argsArray,
+                points.transform,
+                OPS,
+              ).filter((r) => r.operation > lastArtwork)
+            : [];
         if (!size) {
           firstPage = { width: points.width, height: points.height };
           size = deckSize(points);
@@ -124,7 +168,16 @@ export async function convertPdfToPowerPoint(
         )
           report.mixedSizes = true;
         const viewport = page.getViewport({
-          scale: renderScale(points, mobile),
+          scale: annotations.length
+            ? renderScale(points, mobile)
+            : scanScale(
+                operators.fnArray,
+                operators.argsArray,
+                points.transform,
+                points,
+                renderScale(points, mobile),
+                OPS,
+              ),
         });
         canvas.width = Math.max(1, Math.ceil(viewport.width));
         canvas.height = Math.max(1, Math.ceil(viewport.height));
@@ -173,11 +226,18 @@ export async function convertPdfToPowerPoint(
                 signal,
                 "Text analysis took too long. Try Best fidelity mode.",
               );
+        const editableCharacters = extracted.texts.reduce(
+          (n, t) => n + t.text.length,
+          0,
+        );
+        const tables =
+          editableCharacters === extracted.total
+            ? extractTables(rules, extracted.texts)
+            : { texts: extracted.texts, tables: [], omit: new Set<number>() };
+        tables.omit.forEach((i) => extracted.omit.add(i));
         if (extracted.omit.size) await render(extracted.omit);
         const links: SlideLink[] = [];
-        for (const annotation of await page.getAnnotations({
-          intent: "display",
-        })) {
+        for (const annotation of annotations) {
           const url = safeLink(annotation.url);
           if (!url || !annotation.rect) continue;
           const [x1, y1] = points.convertToViewportPoint(
@@ -214,16 +274,13 @@ export async function convertPdfToPowerPoint(
           width: points.width,
           height: points.height,
           sourcePage: selected[i],
-          texts: extracted.texts,
+          texts: tables.texts,
+          tables: tables.tables,
           lines: [],
           links,
           image: bytes,
           imageType: type,
         };
-        const editableCharacters = extracted.texts.reduce(
-          (n, t) => n + t.text.length,
-          0,
-        );
         await send("page", { page: slide }, [bytes.buffer]);
         report.pages.push({
           sourcePage: selected[i],
@@ -239,6 +296,7 @@ export async function convertPdfToPowerPoint(
           ),
           reason: extracted.reason,
           renderPixels: canvas.width * canvas.height,
+          nativeTables: tables.tables.length,
         });
       } finally {
         canvas.width = canvas.height = 0;
