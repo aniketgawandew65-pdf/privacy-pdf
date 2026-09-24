@@ -963,31 +963,6 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
-  "/protect-pdf": {
-    title: "How to password-protect a PDF locally",
-    intro: "Add standard 128-bit password protection to a PDF in your browser and download an encrypted copy without sending the document to a processing server.",
-    steps: [
-      "Choose the PDF you want to protect.",
-      "Enter the password you want the protected copy to require.",
-      "Confirm the password.",
-      "Create the encrypted PDF.",
-      "Download the protected copy and test the password before sharing it."
-    ],
-    example: "If you need to send a private document by email, create a password-protected copy first, verify that it opens only with the password and communicate the password separately when appropriate.",
-    questions: [
-      ["What protection does this tool apply?", "The current workflow applies standard 128-bit PDF password protection."],
-      ["Is the PDF uploaded for encryption?", "No normal document-processing upload is required. Encryption runs locally in your browser."],
-      ["Should I test the protected PDF?", "Yes. Open the downloaded copy and confirm that the password works before sharing or deleting anything."],
-      ["Does password protection remove sensitive information?", "No. Encryption controls access to the PDF. Use Permanent Redaction to remove visible confidential content and Deep Sanitize to remove hidden document data."]
-    ],
-    related: [
-      ["/offline-pdf-redaction","Permanently redact confidential content"],
-      ["/sanitize-pdf","Deep-sanitize hidden document data"],
-      ["/unlock-pdf","Unlock a PDF when you know the password"],
-      ["/edit-metadata","Review PDF metadata"]
-    ]
-  },
-
   "/redact-pdf": {
     title: "How to permanently redact information from a PDF",
     intro: "Use PDF redaction when sensitive text, numbers or images must be removed from the shared copy rather than simply covered visually.",
