@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-make-pdf-dark-mode-permanent': '2026-09-24',
+  '/blog/invert-pdf-colors-vs-oled-vs-sepia': '2026-09-24',
   '/blog/how-to-edit-pdf-title-author-keywords': '2026-09-24',
   '/blog/pdf-metadata-editor-vs-deep-sanitize': '2026-09-24',
   '/blog/compare-two-pdf-versions-side-by-side': '2026-09-24',
@@ -82,6 +84,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/extract-images': '2026-09-24',
   '/compare-pdf': '2026-09-24',
   '/edit-metadata': '2026-09-24',
+  '/dark-mode-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -338,10 +341,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/dark-mode-pdf': {
     path: '/dark-mode-pdf',
-    title: 'Dark Mode PDF Converter Online Free — Invert PDF Colors',
-    description: 'Convert bright white PDFs into OLED pure black, inverted negative, or warm sepia night-reading modes. 100% private in-browser processing.',
+    title: 'Dark Mode PDF Converter — OLED, Invert & Sepia | 1into1',
+    description: 'Create a downloadable dark-reading PDF with OLED pitch black, classic RGB inversion or warm sepia. Pages are processed locally and rebuilt as image-based PDF pages.',
     heading: 'PDF Dark Mode & Invert Colors',
-    subheading: 'Turn harsh white backgrounds into OLED pure black or warm sepia tones to eliminate eye strain.',
+    subheading: 'Create a permanent dark-reading copy with OLED black, classic negative, or warm sepia processing in your browser.',
   },
   '/booklet-pdf': {
     path: '/booklet-pdf',
