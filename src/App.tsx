@@ -1858,7 +1858,10 @@ export default function App() {
               <Route path="/compress-pdf-to-100kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-50kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-200kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-300kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/compress-pdf-to-500kb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-1mb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/compress-pdf-to-2mb" element={<Compressor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/csv-to-pdf" element={<CsvToPdf />} />
               <Route path="/edit-pdf" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/visual-editor" element={<VisualEditor file={activeFile} onFileChange={handleSingleFileChange} />} />
