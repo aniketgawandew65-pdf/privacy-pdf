@@ -303,6 +303,39 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/ai-summary-pdf': {
+    title: 'How to summarize and chat with a PDF using your own AI endpoint',
+    intro: '1into1 extracts the PDF text locally first. Only after you approve the data-sharing notice does the browser send a limited document excerpt and recent chat messages directly to the AI endpoint you selected.',
+    steps: [
+      'Choose the PDF you want to summarize or question.',
+      'Wait while the text is extracted locally. Pages with little usable text can use the local OCR fallback.',
+      'Choose Groq, OpenAI, OpenRouter, DeepSeek, or a custom OpenAI-compatible endpoint.',
+      'Enter your own API key when the selected cloud provider requires one, or configure a local custom endpoint.',
+      'Read and check the consent notice, then approve it only if you want to send the excerpt to that provider.',
+      'Use Executive Summary, Key Action Items, Explain Like I am 5, or enter your own question.',
+      'Review the AI response against the source PDF before relying on important claims.'
+    ],
+    example: 'A 90-page report can be extracted locally first. When you ask for an executive summary, the current workflow sends only the first 30,000 characters of the extracted text plus recent chat context to the provider you approved, rather than uploading the PDF file itself through a 1into1 AI proxy.',
+    questions: [
+      ['Is the PDF itself uploaded to the AI provider?', 'The current AI workflow extracts text locally and sends text in the chat request. It does not send the PDF file itself through a 1into1 AI proxy.'],
+      ['How much document text is sent?', 'The current request limits the document context to the first 30,000 characters of extracted text.'],
+      ['Are earlier chat messages sent too?', 'Yes. The provider request includes up to the six most recent chat messages in addition to the document excerpt.'],
+      ['Can scanned PDFs work?', 'The shared extraction pipeline can run local English OCR on pages that do not contain enough usable digital text, then include recognized text in the extracted document output.'],
+      ['Do I have to consent before anything is sent?', 'Yes. The send action stops until the current cloud data-sharing notice is checked. Consent resets when the file, provider or custom endpoint changes.'],
+      ['Where is my API key stored?', 'The current app keeps the third-party API key in browser session storage rather than persistent local storage. Provider, custom model and custom endpoint preferences can be stored locally in the browser.'],
+      ['Does 1into1 proxy the AI request?', 'No. The browser calls the configured provider or custom endpoint directly with fetch. Provider terms, retention policies, quotas and charges apply separately.'],
+      ['Can I use a local AI server?', 'Yes. The Custom / Local option defaults to an OpenAI-compatible localhost endpoint and can be changed. A custom endpoint does not require a key unless your server requires one.'],
+      ['Will the AI always be correct?', 'No. The prompt asks the model to answer from the supplied document excerpt, but model outputs can still be incomplete or wrong. Verify important answers against the PDF.']
+    ],
+    related: [
+      ['/blog/summarize-pdf-with-your-own-ai-api-key','Summarize a PDF with your own AI API key'],
+      ['/blog/what-data-ai-pdf-summarizer-sends','See exactly what data is sent to the AI provider'],
+      ['/extract-pdf-for-llm','Prepare PDF text for another LLM workflow'],
+      ['/pdf-to-markdown','Convert a PDF to reviewable Markdown first'],
+      ['/ocr-pdf','OCR scanned PDF pages before another workflow']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
@@ -2017,6 +2050,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'summarize-pdf-with-your-own-ai-api-key',
+    title: 'How to Summarize a PDF with Your Own AI API Key',
+    description: 'Extract PDF text locally, choose your own AI provider or compatible endpoint, approve the data-sharing notice, and summarize or question the document.',
+    tool: '/ai-summary-pdf',
+    toolLabel: 'Open AI PDF Summarizer',
+    category: 'AI PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'The PDF is read locally before any AI request',
+        paragraphs: [
+          '1into1 first opens the PDF in the browser and extracts page text locally. Pages with very little digital text can use the shared local English OCR fallback before the document text is assembled.',
+          'This separates document reading from the later AI network request.'
+        ]
+      },
+      {
+        title: 'Choose the endpoint that should receive the excerpt',
+        paragraphs: [
+          'The current interface includes presets for Groq, OpenAI, OpenRouter and DeepSeek, plus a Custom / Local option for an OpenAI-compatible endpoint such as a local model server.',
+          'Cloud providers normally require your own API key. A custom endpoint can be used without a key when the server itself does not require authorization.'
+        ]
+      },
+      {
+        title: 'Consent is required before the provider request starts',
+        paragraphs: [
+          'The Send workflow checks the data-sharing consent box before it performs the model lookup or chat request. Changing the file, provider or custom endpoint clears that consent so the destination must be approved again.',
+          'The browser Fetch API is what sends the request to the configured endpoint; there is no 1into1 AI relay in this component.'
+        ]
+      },
+      {
+        title: 'The document context is capped at 30,000 characters',
+        paragraphs: [
+          'Before building the system prompt, the current tool takes the extracted document text and keeps the first 30,000 characters. That excerpt becomes the document context supplied to the chosen model.',
+          'For long PDFs, later sections beyond that character limit are therefore not part of the current AI request unless the workflow is changed in a future version.'
+        ]
+      },
+      {
+        title: 'Treat the answer as an assistant response, not the source of record',
+        paragraphs: [
+          'The system instruction tells the model to answer from the provided excerpt and to say when the answer is not present, but that does not eliminate model error.',
+          'Check names, numbers, obligations, dates and other important conclusions against the original PDF before acting on them.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — Fetch API', url: 'https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API', detail: 'Documents browser-side network requests using fetch, the mechanism the current AI workflow uses to call the configured endpoint.' },
+      { label: 'MDN — Window.sessionStorage', url: 'https://developer.mozilla.org/en-US/docs/Web/API/Window/sessionStorage', detail: 'Explains browser session storage, which the current component uses for the third-party API key.' }
+    ]
+  },
+  {
+    slug: 'what-data-ai-pdf-summarizer-sends',
+    title: 'What Data Does the AI PDF Summarizer Send to the Provider?',
+    description: 'See the exact privacy boundary: local PDF extraction first, explicit consent, up to 30,000 document characters, recent chat messages, and direct browser-to-provider requests.',
+    tool: '/ai-summary-pdf',
+    toolLabel: 'Review AI PDF Summarizer',
+    category: 'AI PRIVACY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'The source PDF file is processed locally first',
+        paragraphs: [
+          'The current component passes the selected PDF into 1into1’s local text-extraction pipeline. Digital page text is read in the browser, and low-text or scanned pages can use the local OCR path.',
+          'The resulting text is kept in application memory for the AI workflow.'
+        ]
+      },
+      {
+        title: 'Nothing is sent until the consent box is checked',
+        paragraphs: [
+          'If consent is not checked, the send function stops and shows a notice instead of contacting the selected AI provider for the chat workflow.',
+          'Consent is tied to the current file and destination choice: selecting another PDF, provider or custom endpoint clears it.'
+        ]
+      },
+      {
+        title: 'The provider receives a text excerpt and recent conversation context',
+        paragraphs: [
+          'The system prompt contains up to the first 30,000 characters of extracted document text. The chat payload also includes up to the six most recent messages from the current conversation.',
+          'The PDF binary itself is not attached to that chat request by the current component.'
+        ]
+      },
+      {
+        title: 'The request goes directly from the browser to the configured endpoint',
+        paragraphs: [
+          'The component uses browser fetch calls against the provider URL or the custom endpoint entered by the user. Authentication is sent as a bearer token when an API key is present.',
+          'Because the destination is a third party or your own server, its own privacy, retention, security, rate-limit and billing rules govern what happens after the request reaches it.'
+        ]
+      },
+      {
+        title: 'API key storage is separate from provider preferences',
+        paragraphs: [
+          'The third-party API key is written to session storage, while the selected provider, custom model and custom endpoint can be stored in persistent browser local storage.',
+          'MDN notes that session storage belongs to the current page session, while local storage persists across browser sessions unless it is cleared or browser policy removes it.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — Using the Fetch API', url: 'https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch', detail: 'Explains request URLs, methods, headers and bodies for browser fetch requests.' },
+      { label: 'MDN — Web Storage API', url: 'https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API', detail: 'Explains the difference between sessionStorage and localStorage used for key and preference storage in the browser.' }
     ]
   },
   {
@@ -4284,7 +4419,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: edit, text, code, CSV & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for visual PDF editing, text and code conversion, CSV and HTML workflows, OCR, redaction, password security and local privacy.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: AI, edit, text, code & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for AI PDF summarization, visual editing, text and code conversion, OCR, redaction, password security and local privacy.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
