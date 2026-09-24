@@ -75,19 +75,8 @@ export async function editableText(page: PDFPageProxy): Promise<{
     result.reason = "No visible digital text; page artwork preserved.";
     return result;
   }
-  // Clipping, soft masks and unusual compositing need the PDF renderer's exact geometry.
-  if (
-    ops.fnArray.some(
-      (fn, i) =>
-        fn === OPS.clip ||
-        fn === OPS.eoClip ||
-        fn === OPS.beginGroup ||
-        (fn === OPS.setTextRenderingMode && ops.argsArray[i][0] >= 4),
-    )
-  ) {
-    result.reason = "Clipped or composited layout preserved as artwork.";
-    return result;
-  }
+  // Clipping and transparency effects are handled per text object below.
+  // Safe text elsewhere on the same page can still become editable.
   let state: State = {
     font: "",
     color: "000000",
@@ -99,7 +88,8 @@ export async function editableText(page: PDFPageProxy): Promise<{
   const stack: State[] = [];
   const operations: Operation[] = [];
   let cursor = 0,
-    group = 0;
+    group = 0,
+    groupDepth = 0;
   const paints: number[] = [];
   for (let index = 0; index < ops.fnArray.length; index++) {
     const fn = ops.fnArray[index],
@@ -108,6 +98,9 @@ export async function editableText(page: PDFPageProxy): Promise<{
       stack.push({ ...state });
     else if (fn === OPS.restore || fn === OPS.paintFormXObjectEnd)
       state = stack.pop() ?? state;
+    else if (fn === OPS.beginGroup) groupDepth++;
+    else if (fn === OPS.endGroup) groupDepth = Math.max(0, groupDepth - 1);
+    else if (fn === OPS.clip || fn === OPS.eoClip) state.unsafe = true;
     else if (fn === OPS.beginText) state.group = ++group;
     else if (fn === OPS.setFont) state.font = args[0];
     else if (fn === OPS.setFillRGBColor)
@@ -138,7 +131,7 @@ export async function editableText(page: PDFPageProxy): Promise<{
         index,
         start: cursor,
         end: cursor + value.length,
-        state: { ...state },
+        state: { ...state, unsafe: state.unsafe || groupDepth > 0 },
         value,
       });
       cursor += value.length;
