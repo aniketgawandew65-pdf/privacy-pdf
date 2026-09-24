@@ -559,6 +559,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/grayscale-pdf': {
+    title: 'How to convert a PDF to grayscale or pure black and white',
+    intro: 'Create a monochrome copy locally. Use Smooth Grayscale when you want many gray tones, or Pure B&W when you want only black and white pixels with an adjustable threshold.',
+    steps: [
+      'Choose the PDF you want to convert.',
+      'Select Smooth Grayscale or Pure B&W (Photocopy).',
+      'If you choose Pure B&W, adjust the Scan Contrast Threshold while checking the first-page preview.',
+      'Convert the document and download the new PDF.',
+      'Reopen several pages and verify photos, diagrams, light text and fine lines before printing or sharing.'
+    ],
+    example: 'A colour report with photographs can use Smooth Grayscale to retain tonal detail, while a text-heavy scan can use Pure B&W with a tuned threshold for stronger photocopy-style contrast.',
+    questions: [
+      ['What is the difference between grayscale and pure black and white?', 'Grayscale keeps many intermediate gray tones. Pure B&W uses only black or white pixels, determined by the selected luminance threshold.'],
+      ['What does the threshold slider do?', 'In Pure B&W mode, pixels darker than the threshold become black and lighter pixels become white. The current control ranges from 50 to 200.'],
+      ['Will text remain selectable or searchable?', 'No. The converter renders each page and rebuilds the output from JPEG-backed page images, so normal selectable or OCR text layers do not remain searchable in the converted copy.'],
+      ['Does this preserve vector graphics?', 'No. The visible page is rendered before the grayscale or black-and-white transform is applied. Keep the original when you need editable or vector content.'],
+      ['Is the PDF uploaded?', 'The conversion runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/how-to-convert-pdf-to-grayscale','Convert a PDF to grayscale'],
+      ['/blog/grayscale-vs-black-and-white-pdf','Grayscale vs pure black-and-white PDF'],
+      ['/dark-mode-pdf','Create a dark-reading PDF'],
+      ['/pdf-to-image','Render PDF pages as images'],
+      ['/compress-pdf','Compress the converted PDF']
+    ]
+  },
+
   '/nup-pdf': {
     title: 'How to place multiple PDF pages on one sheet',
     intro: 'Create an N-Up PDF by arranging multiple document pages onto each output sheet. This can reduce printed sheet count or create compact reference copies.',
@@ -1722,6 +1749,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-convert-pdf-to-grayscale',
+    title: 'How to Convert a PDF to Grayscale for Printing',
+    description: 'Turn a colour PDF into smooth grayscale locally, preserve tonal differences in photos and diagrams, and understand what changes in the output.',
+    tool: '/grayscale-pdf',
+    toolLabel: 'Convert PDF to grayscale',
+    category: 'PDF PRINTING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Grayscale keeps shades between black and white',
+        paragraphs: [
+          'Grayscale does not mean that every pixel becomes only black or white. It removes colour while retaining different brightness levels as shades of gray.',
+          'Adobe makes the same distinction: grayscale preserves tonal transitions and detail, while pure black-and-white uses only two tones.'
+        ]
+      },
+      {
+        title: 'Use grayscale for photos, diagrams and shaded documents',
+        paragraphs: [
+          'When a PDF contains photographs, gradients, shaded tables or colour-coded diagrams that still need tonal separation after colour is removed, Smooth Grayscale is usually the safer starting point.',
+          'The first-page preview lets you inspect the result before converting the whole document.'
+        ]
+      },
+      {
+        title: '1into1 converts the rendered page, not the original vector colours',
+        paragraphs: [
+          'The tool renders each PDF page, converts every rendered pixel to a luminance-based gray value, and then writes the transformed page into a new PDF.',
+          'This makes the visible grayscale appearance permanent in the downloaded copy, but the result is image-based rather than a vector-preserving colour-space rewrite.'
+        ]
+      },
+      {
+        title: 'Selectable text does not survive the grayscale conversion',
+        paragraphs: [
+          'Because each page is rebuilt from a JPEG image, selectable text, OCR text layers, links and other interactive page structures are not preserved as normal PDF objects.',
+          'Keep the original PDF if you need search, copy-and-paste, editable forms or original vector content.'
+        ]
+      },
+      {
+        title: 'Check the final file before printing',
+        paragraphs: [
+          'Review several pages containing fine lines, light text, photographs and charts. Tonal detail can look different on paper than it does on a screen.',
+          'If you actually need a hard photocopy look with no gray tones, switch to Pure B&W rather than assuming grayscale and black-and-white are identical.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — How to make a PDF black and white', url: 'https://www.adobe.com/uk/acrobat/resources/pdf-to-greyscale.html', detail: 'Adobe distinguishes grayscale from pure black-and-white and explains why grayscale retains tonal detail.' },
+      { label: 'Adobe Acrobat India — Convert PDF to black and white', url: 'https://www.adobe.com/in/acrobat/roc/blog/convert-pdf-to-black-and-white.html', detail: 'Discusses grayscale and black-and-white conversion for print-oriented PDF workflows.' }
+    ]
+  },
+  {
+    slug: 'grayscale-vs-black-and-white-pdf',
+    title: 'Grayscale vs Black and White PDF: What Is the Difference?',
+    description: 'Understand smooth grayscale versus thresholded two-tone black-and-white output, when to use each, and how the threshold affects a photocopy-style PDF.',
+    tool: '/grayscale-pdf',
+    toolLabel: 'Choose grayscale or B&W',
+    category: 'PDF PRINTING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Grayscale uses many gray tones',
+        paragraphs: [
+          'A grayscale page can represent dark gray, medium gray, light gray and many intermediate levels between black and white.',
+          'That tonal range helps retain detail in photographs, shaded charts, scanned signatures and anti-aliased text edges.'
+        ]
+      },
+      {
+        title: 'Pure black and white uses only two pixel values',
+        paragraphs: [
+          'Pure B&W is a threshold operation. Each rendered pixel is measured for brightness and then assigned either black or white.',
+          'There are no intermediate gray tones, so the result looks more like a high-contrast photocopy than a grayscale photograph.'
+        ]
+      },
+      {
+        title: 'The threshold controls what becomes black',
+        paragraphs: [
+          'In 1into1 Pure B&W mode, pixels darker than the selected threshold become black and lighter pixels become white. The control ranges from 50 to 200 and defaults to 135.',
+          'Lower values make fewer pixels black and can thin text. Higher values darken more of the page, which can help faint scans but may also swallow light details.'
+        ]
+      },
+      {
+        title: 'Choose based on the source document',
+        paragraphs: [
+          'Use Smooth Grayscale when photographs, soft shading or tonal differences matter. Use Pure B&W when you want high-contrast text-and-line output and can accept loss of gray detail.',
+          'Preview page 1 and inspect the final file because no single threshold is ideal for every scanner, background tone or document type.'
+        ]
+      },
+      {
+        title: 'Both modes create an image-based PDF',
+        paragraphs: [
+          'The current 1into1 workflow renders the source pages and rebuilds the output using JPEG-backed page images in both modes.',
+          'The distinction is therefore about the pixel transform: grayscale keeps intermediate gray values, while Pure B&W reduces those rendered pixels to black or white.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — How to make a PDF black and white', url: 'https://www.adobe.com/uk/acrobat/resources/pdf-to-greyscale.html', detail: 'Explains the difference between grayscale tonal depth and two-tone black-and-white output.' },
+      { label: 'Smallpdf — Print PDFs in black and white', url: 'https://smallpdf.com/blog/print-pdfs-black-white-quick-guide', detail: 'Provides a recent practical explanation of grayscale versus pure black-and-white output.' }
+    ]
+  },
+  {
     slug: 'how-to-make-pdf-dark-mode-permanent',
     title: 'How to Make a PDF Dark Mode Permanently',
     description: 'Create a downloadable dark-reading copy that stays dark in other PDF viewers, and understand how that differs from a viewer-only dark theme.',
@@ -2762,7 +2891,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: dark mode, metadata, compare, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF dark mode, metadata, sanitization, comparison, OCR, image extraction, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: grayscale, dark mode, metadata, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for grayscale and black-and-white PDFs, dark mode, metadata, comparison, OCR, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
