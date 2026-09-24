@@ -23,7 +23,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/compress-pdf-to-500kb','Compress to a 500 KB target'],
       ['/compress-pdf-to-1mb','Compress to a 1 MB target'],
       ['/compress-pdf-to-2mb','Compress to a 2 MB target'],
-      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide']
+      ['/blog/reduce-pdf-for-upload-limit','Read the upload-limit guide'],
+      ['/blog/india-pdf-upload-size-limits-2026','Check verified India upload limits']
     ]
   },
   '/pdf-to-word': {
@@ -1096,6 +1097,7 @@ export interface Article {
   updated?: string;
   methodology?: string;
   datasetUrl?: string;
+  datasetLabel?: string;
   comparison?: ArticleComparisonRow[];
   sources?: ArticleSource[];
   sections: { title: string; paragraphs: string[] }[];
@@ -1126,6 +1128,70 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'india-pdf-upload-size-limits-2026',
+    title: 'India PDF Upload Size Limits (2026): Government & Application Portals',
+    description: 'A sourced 2026 directory of PDF upload-size limits published by Indian government, regulatory and application portals, with official links and practical compression guidance.',
+    tool: '/compress-pdf',
+    toolLabel: 'Compress a PDF to the required size',
+    category: 'PDF UPLOAD LIMIT RESEARCH',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    methodology: 'Verified on 24 September 2026 from the official pages and manuals linked below. Each row describes a specific document field or workflow, not a universal limit for the entire organisation. Portal rules can change, so the current official instruction should always take precedence.',
+    datasetUrl: '/research/india-pdf-upload-size-limits-2026.csv',
+    datasetLabel: 'Download upload-limit data (CSV)',
+    sections: [
+      {
+        title: 'Why PDF upload limits vary so much',
+        paragraphs: [
+          'Indian application portals do not use one standard PDF limit. In the official sources reviewed for this directory, requirements range from a few hundred kilobytes to many megabytes, and the same organisation can use different limits for different document fields.',
+          'That is why the correct strategy is to read the exact upload instruction first, keep the original file, and compress only as far as the destination requires. Choosing an unnecessarily tiny target can make names, stamps, signatures or scanned certificates difficult to read.'
+        ]
+      },
+      {
+        title: '200 KB to 500 KB limits are still common',
+        paragraphs: [
+          'The Indian Visa Online document-upload page currently specifies PDF documents between 10 KB and 500 KB. The Press Registrar General of India user manual uses a 300 KB maximum for several owner and publisher document fields, while Kerala State Medical Council instructions require supporting certificates in PDF format at a maximum of 500 KB.',
+          'RRCAT also states a 500 KB PDF limit for uploaded score cards in its 2026 Ph.D. application instructions. These examples show why exact-size searches such as 300 KB and 500 KB remain useful rather than being arbitrary SEO variations.'
+        ]
+      },
+      {
+        title: '1 MB and 2 MB are common application limits',
+        paragraphs: [
+          'GST registration guidance lists a 1 MB maximum for the proof-of-appointment upload for an authorised signatory. A recent Passport Seva applicant-portal SOP published by an Indian mission also states a 1 MB total supporting-document limit.',
+          'FSSAI recruitment pages allow a resume in PDF or Word format up to 2 MB. The NCPCR chairperson/member application requires Aadhaar and date-of-birth PDFs below 2 MB, and Maharashtra State Information Commission instructions list a 2 MB maximum upload size for its online second-appeal workflow.'
+        ]
+      },
+      {
+        title: 'Some portals allow 5 MB, 10 MB or more',
+        paragraphs: [
+          'Punjab Land Records currently allows an optional grievance supporting document in PDF format up to 5 MB. The Telecommunication Engineering Centre control-lab form allows PDF or DOCX supporting documents up to 10 MB.',
+          'SEBI’s settlement-application portal illustrates why users must read each field separately: it allows an ITR PDF up to 20 MB while the PAN-card PDF on the same form is limited to 500 KB.'
+        ]
+      },
+      {
+        title: 'How to use this directory',
+        paragraphs: [
+          'Find the exact portal and document type in the downloadable dataset, open the official source, and confirm the rule is still current. Then choose the largest permitted target that meets the requirement so the document keeps as much readable detail as possible.',
+          '1into1 uses 1 KB = 1,024 bytes. Some receiving systems may calculate limits differently or apply additional rules such as page count, password protection, filename restrictions or image dimensions. Leave headroom when a portal is strict and always reopen the compressed PDF before submitting it.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Indian Visa Online — Document Upload', url: 'https://indianvisaonline.gov.in/visa/DocumentUpload', detail: 'PDF documents: minimum 10 KB, maximum 500 KB.' },
+      { label: 'Press Registrar General of India — Owner/Applicant/Publisher User Manual', url: 'https://prgi.gov.in/sites/default/files/2024-06/prgi_user_manual_version_owner-appliccant-publisher.pdf', detail: 'Several uploaded document fields permit PDF/JPG/JPEG/PNG up to 300 KB.' },
+      { label: 'Kerala State Medical Council — Upload instructions', url: 'https://automation.medicalcouncil.kerala.gov.in/instructions.xhtml', detail: 'Supporting certificates in PDF format: maximum 500 KB.' },
+      { label: 'RRCAT — Ph.D. Programme 2026 instructions', url: 'https://www.rrcat.gov.in/hrd/advt/phdonline.html', detail: 'Score-card PDF: up to 500 KB.' },
+      { label: 'GST Portal — Registration guide', url: 'https://tutorial.gst.gov.in/userguide/registration/Apply_for_Registration_Normal_Taxpayer.htm', detail: 'Proof of appointment upload: PDF/JPEG up to 1 MB in the cited workflow.' },
+      { label: 'Consulate General of India Belfast — Passport Seva document-upload SOP', url: 'https://www.cgibelfast.gov.in/content/SOP-for-document-uploading-in-Applicant-Portal.pdf', detail: 'Supporting documents: PDF, total upload maximum 1 MB.' },
+      { label: 'FSSAI — FFRC Recruitment Portal', url: 'https://sites.fssai.gov.in/ffrcrecruitment/applyonline.php', detail: 'Resume: PDF or Word, maximum 2 MB.' },
+      { label: 'NCPCR — Chairperson / Member application', url: 'https://ncpcrvacancies.wcd.gov.in/', detail: 'Aadhaar and date-of-birth PDF uploads: less than 2 MB.' },
+      { label: 'Maharashtra State Information Commission — Second Appeal', url: 'https://sic.maharashtra.gov.in/SICOnline/SecondAppeal/SecondAppealNew.aspx', detail: 'Allowed upload types include PDF; maximum file size 2 MB.' },
+      { label: 'Punjab Land Records — Grievance', url: 'https://jamabandi.punjab.gov.in/Grievance.aspx', detail: 'Supporting document: PDF, maximum 5 MB.' },
+      { label: 'Telecommunication Engineering Centre — Control Lab Form', url: 'https://tec.gov.in/control-lab-form', detail: 'Supporting document: PDF or DOCX, maximum 10 MB.' },
+      { label: 'SEBI — Settlement Application', url: 'https://siportal.sebi.gov.in/intermediary/settlementApplication.html', detail: 'ITR PDF up to 20 MB; PAN-card PDF up to 500 KB.' }
+    ]
+  },
+  {
     slug: 'pdf-privacy-comparison-2026',
     title: 'Where does your PDF go? A 2026 privacy comparison of online PDF tools',
     description: 'Compare browser-local and server-based PDF processing models, published file-deletion windows and offline options using official vendor documentation.',
@@ -1136,6 +1202,7 @@ export const ARTICLES: Article[] = [
     updated: '2026-09-23',
     methodology: 'Reviewed on 23 September 2026 using official vendor documentation linked below. This comparison describes the documented data path and retention model of online PDF workflows. It is not a security score or an overall product ranking. Policies and product behavior can change, and some vendors offer both online and desktop or client-side products.',
     datasetUrl: '/research/pdf-privacy-comparison-2026.csv',
+    datasetLabel: 'Download comparison data (CSV)',
     comparison: [
       {
         service: '1into1 PDF',
@@ -1251,7 +1318,7 @@ export function renderGuide(path: string): string {
   return `<section class="seo-guide" aria-label="Tool instructions"><h2>${escapeHtml(guide.title)}</h2><p>${escapeHtml(guide.intro)}</p><ol>${guide.steps.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ol><div class="guide-example"><h3>A practical example</h3><p>${escapeHtml(guide.example)}</p></div><h3>Common questions</h3>${guide.questions.map(([q,a])=>`<details><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join('')}<nav class="guide-related" aria-label="Related tools and guides">${guide.related.map(([p,l])=>link(p,l)).join('')}</nav></section>`;
 }
 export function renderBlog(path: string): string {
-  if (path === '/blog') return `<section class="blog-list" aria-label="PDF guides">${ARTICLES.map(a=>`<article><p class="guide-category">${escapeHtml(a.category || 'PRACTICAL PDF GUIDE')}</p><h2>${link('/blog/'+a.slug,a.title)}</h2><p>${escapeHtml(a.description)}</p>${link('/blog/'+a.slug,a.comparison ? 'Read research →' : 'Read guide →')}</article>`).join('')}</section>`;
+  if (path === '/blog') return `<section class="blog-list" aria-label="PDF guides">${ARTICLES.map(a=>`<article><p class="guide-category">${escapeHtml(a.category || 'PRACTICAL PDF GUIDE')}</p><h2>${link('/blog/'+a.slug,a.title)}</h2><p>${escapeHtml(a.description)}</p>${link('/blog/'+a.slug,(a.comparison || a.datasetUrl) ? 'Read research →' : 'Read guide →')}</article>`).join('')}</section>`;
   const article = ARTICLES.find(a=>path==='/blog/'+a.slug);
   if (!article) return '';
   const dateLine = article.updated
@@ -1259,18 +1326,18 @@ export function renderBlog(path: string): string {
     : '<p class="article-byline">By the 1into1 team</p>';
 
   const datasetLink = article.datasetUrl
-    ? `<a class="research-download" href="${escapeHtml(article.datasetUrl)}" download>Download comparison data (CSV)</a>`
+    ? `<a class="research-download" href="${escapeHtml(article.datasetUrl)}" download>${escapeHtml(article.datasetLabel || 'Download research data (CSV)')}</a>`
     : '';
 
   const comparison = article.comparison?.length
-    ? `<section class="research-comparison" aria-labelledby="research-comparison-heading"><h2 id="research-comparison-heading">At-a-glance processing and retention comparison</h2>${article.methodology ? `<p class="research-methodology">${escapeHtml(article.methodology)}</p>` : ''}${datasetLink}<div class="research-table-wrap"><table class="research-table"><thead><tr><th>Service</th><th>Document processing path</th><th>Published deletion / retention</th><th>Local or offline option</th><th>Source</th></tr></thead><tbody>${article.comparison.map(row=>`<tr><th scope="row">${escapeHtml(row.service)}</th><td>${escapeHtml(row.processing)}</td><td>${escapeHtml(row.deletion)}</td><td>${escapeHtml(row.localOption)}</td><td><a href="${escapeHtml(row.sourceUrl)}"${row.sourceUrl.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(row.sourceLabel)}</a></td></tr>`).join('')}</tbody></table></div></section>`
+    ? `<section class="research-comparison" aria-labelledby="research-comparison-heading"><h2 id="research-comparison-heading">At-a-glance processing and retention comparison</h2>${article.methodology ? `<p class="research-methodology">${escapeHtml(article.methodology)}</p>` : ''}<div class="research-table-wrap"><table class="research-table"><thead><tr><th>Service</th><th>Document processing path</th><th>Published deletion / retention</th><th>Local or offline option</th><th>Source</th></tr></thead><tbody>${article.comparison.map(row=>`<tr><th scope="row">${escapeHtml(row.service)}</th><td>${escapeHtml(row.processing)}</td><td>${escapeHtml(row.deletion)}</td><td>${escapeHtml(row.localOption)}</td><td><a href="${escapeHtml(row.sourceUrl)}"${row.sourceUrl.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(row.sourceLabel)}</a></td></tr>`).join('')}</tbody></table></div></section>`
     : '';
 
   const sources = article.sources?.length
     ? `<section class="research-sources"><h2>Official sources reviewed</h2><ol>${article.sources.map(source=>`<li><a href="${escapeHtml(source.url)}"${source.url.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(source.label)}</a><span>${escapeHtml(source.detail)}</span></li>`).join('')}</ol></section>`
     : '';
 
-  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
+  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
   if(path==='/blog') return {path,title:'PDF guides: upload limits, cropping & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF upload limits, cropping pages and using local document tools.',subheading:'Straightforward answers. Tools you can use right away.'};

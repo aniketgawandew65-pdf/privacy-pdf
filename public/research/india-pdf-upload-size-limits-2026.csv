@@ -1,0 +1,14 @@
+organization,portal_or_workflow,document_or_field,allowed_format,max_size,notes,official_source,verified_date
+Indian Visa Online,Document Upload,Applicant documents,PDF,500 KB,"Minimum 10 KB; documents must be in English.",https://indianvisaonline.gov.in/visa/DocumentUpload,2026-09-24
+Press Registrar General of India,Owner/Applicant/Publisher portal,"PAN copy / DOB document / GST certificate / IEC certificate / other document",JPG/JPEG/PDF/PNG,300 KB,"Manual lists 300 KB for several upload fields.",https://prgi.gov.in/sites/default/files/2024-06/prgi_user_manual_version_owner-appliccant-publisher.pdf,2026-09-24
+Kerala State Medical Council,Applicant portal,Supporting certificates,PDF,500 KB,"Multiple pages should be scanned together as a single PDF when applicable.",https://automation.medicalcouncil.kerala.gov.in/instructions.xhtml,2026-09-24
+RRCAT,Ph.D. Programme 2026,Score card,PDF,500 KB,"Applies to CSIR-UGC NET/JEST/BET/ICMR-JRF/GATE score-card upload.",https://www.rrcat.gov.in/hrd/advt/phdonline.html,2026-09-24
+GST Portal,Normal Taxpayer Registration,Proof of appointment of Authorised Signatory,PDF/JPEG,1 MB,"Specific cited registration workflow; other GST upload fields can use different limits.",https://tutorial.gst.gov.in/userguide/registration/Apply_for_Registration_Normal_Taxpayer.htm,2026-09-24
+Consulate General of India Belfast,Passport Seva Applicant Portal,Supporting documents,PDF,1 MB,"SOP states total of uploaded documents should not exceed 1 MB.",https://www.cgibelfast.gov.in/content/SOP-for-document-uploading-in-Applicant-Portal.pdf,2026-09-24
+FSSAI,FFRC Recruitment Portal,Resume,PDF/Word,2 MB,"Photo has a separate 500 KB image limit.",https://sites.fssai.gov.in/ffrcrecruitment/applyonline.php,2026-09-24
+NCPCR,Chairperson / Member Application,Aadhaar PDF and DOB PDF,PDF,2 MB,"Each cited PDF field must be less than 2 MB.",https://ncpcrvacancies.wcd.gov.in/,2026-09-24
+Maharashtra State Information Commission,Online Second Appeal,Supporting documents,PDF/JPG/GIF,2 MB,"Instructions also require specified appeal documents to be uploaded as a single PDF.",https://sic.maharashtra.gov.in/SICOnline/SecondAppeal/SecondAppealNew.aspx,2026-09-24
+Punjab Land Records,Grievance,Supporting document,PDF,5 MB,"Optional supporting document field.",https://jamabandi.punjab.gov.in/Grievance.aspx,2026-09-24
+Telecommunication Engineering Centre,Control Lab Form,Supporting document,PDF/DOCX,10 MB,"Form states PDF and DOCX are allowed.",https://tec.gov.in/control-lab-form,2026-09-24
+SEBI,Settlement Application,ITRs last 3 FY,PDF,20 MB,"PAN-card copy on the same form has a separate 500 KB PDF limit.",https://siportal.sebi.gov.in/intermediary/settlementApplication.html,2026-09-24
+SEBI,Settlement Application,PAN Card copy,PDF,500 KB,"Same form permits ITR PDFs up to 20 MB.",https://siportal.sebi.gov.in/intermediary/settlementApplication.html,2026-09-24
