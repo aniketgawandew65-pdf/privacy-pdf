@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/convert-source-code-to-pdf-with-syntax-highlighting': '2026-09-24',
+  '/blog/print-long-code-to-pdf-with-line-numbers': '2026-09-24',
   '/blog/convert-csv-or-tsv-to-pdf-table': '2026-09-24',
   '/blog/wide-csv-table-to-pdf-landscape': '2026-09-24',
   '/blog/convert-html-file-to-pdf-locally': '2026-09-24',
@@ -112,6 +114,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/organize-pdf': '2026-09-24',
   '/html-to-pdf': '2026-09-24',
   '/csv-to-pdf': '2026-09-24',
+  '/code-to-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -500,6 +503,6 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   "/ocr-pdf": {"path": "/ocr-pdf", "title": "OCR PDF Online — Make Scanned PDFs Searchable Privately | 1into1", "description": "Run OCR on scanned PDFs in your browser and add an invisible searchable, selectable text layer. English OCR runs locally after required resources are available.", "heading": "OCR PDF", "subheading": "Add an invisible text layer so scanned pages become searchable and selectable while the visible PDF stays unchanged."},
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF — Convert CSV, TSV or Pasted Tables | 1into1", "description": "Convert CSV or TSV files, or pasted spreadsheet cells, into A4 or Letter PDF tables locally. Auto orientation uses landscape for tables with more than five columns.", "heading": "CSV to PDF", "subheading": "Turn CSV, TSV, or pasted spreadsheet data into readable PDF tables with smart orientation and wide-table handling."},
   "/visual-editor": {"path": "/visual-editor", "title": "Add Text & Shapes to PDF | 1into1", "description": "Add text, images and shapes to a PDF without uploading it.", "heading": "Add text & shapes", "subheading": "Add text, images and shapes to a PDF without uploading it."},
-  "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF | 1into1 PDF", "description": "Create a readable PDF of your code with syntax highlighting.", "heading": "Code to PDF", "subheading": "Create a readable PDF of your code with syntax highlighting."},
+  "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF — Syntax Highlighting & Line Numbers | 1into1", "description": "Paste source code or upload a text code file and create an A4 or Letter PDF locally with generic syntax highlighting, optional line numbers, dark/light themes and safe long-line wrapping.", "heading": "Code to PDF", "subheading": "Turn pasted or uploaded source code into a readable PDF with line numbers, themes, page-size controls and long-line handling."},
   "/html-to-pdf": {"path": "/html-to-pdf", "title": "HTML to PDF — Convert Code or .HTML Files Locally | 1into1", "description": "Paste HTML or upload an .html/.htm file and create a PDF locally. Supports A4, Letter and 80mm receipt output without fetching a live webpage URL.", "heading": "HTML to PDF", "subheading": "Convert pasted or uploaded self-contained HTML into A4, Letter, or receipt PDFs directly in your browser."},
 };
