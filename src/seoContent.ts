@@ -265,6 +265,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the statement processed locally?', 'The extraction workflow is designed to process the PDF in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
+      ['/blog/bank-statement-pdf-to-csv','Convert a bank statement PDF to CSV'],
+      ['/blog/scanned-bank-statement-to-excel-ocr','Handle a scanned bank statement with OCR first'],
       ['/pdf-to-csv','Extract PDF tables to CSV'],
       ['/ocr-pdf','OCR a scanned statement'],
       ['/document-data-extractor','Extract more complex document data'],
@@ -1116,6 +1118,100 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'bank-statement-pdf-to-csv',
+    title: 'How to Convert a Bank Statement PDF to CSV for Excel',
+    description: 'Extract transaction rows from a text-based bank statement PDF into CSV, review dates and balances, and open the result in Excel without a normal document upload.',
+    tool: '/bank-statement-to-excel',
+    toolLabel: 'Open Bank Statement to Excel',
+    category: 'BANK STATEMENT GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why CSV is useful for bank statements',
+        paragraphs: [
+          'A bank statement PDF is designed to be read, not sorted. CSV turns detected transaction rows into a spreadsheet-friendly format so dates, descriptions, debits, credits and balances can be filtered or reviewed in Excel, Google Sheets and other spreadsheet applications.',
+          '1into1 exports spreadsheet-ready CSV or TSV rather than a native XLSX workbook. That distinction matters: the file opens in Excel, but you should not expect the same formatting or workbook features as a hand-built .xlsx file.'
+        ]
+      },
+      {
+        title: 'Use a text-based statement when possible',
+        paragraphs: [
+          'Statements downloaded directly from online banking often contain selectable text. Those are the best candidates for local table extraction because the converter can work from the PDF text layer rather than guessing characters from an image.',
+          'If you cannot select any text because the statement is a scan or photograph, run OCR first. OCR can introduce digit errors, so financial values from scanned documents need especially careful review.'
+        ]
+      },
+      {
+        title: 'Check the extracted transaction columns',
+        paragraphs: [
+          'After extraction, review the detected date, description, debit, credit and balance fields where available. Banks use different layouts and column labels, and wrapped descriptions can make a visual statement harder to interpret automatically.',
+          'Compare the opening balance, several transactions and the closing balance against the original PDF before using the CSV for reconciliation, accounting, tax work or reporting.'
+        ]
+      },
+      {
+        title: 'Open the CSV in Excel',
+        paragraphs: [
+          'Download the CSV or TSV and open it in Excel or another spreadsheet application. You can then sort transactions, filter descriptions, calculate totals or import the data into another workflow.',
+          'Keep the original statement beside the spreadsheet while checking the result. Extraction is a productivity aid, not a substitute for validating important financial records.'
+        ]
+      },
+      {
+        title: 'Keep sensitive statement data local',
+        paragraphs: [
+          'The supported bank-statement extraction workflow runs in the browser rather than requiring a normal server-side document upload. That is useful for financial files containing account details, balances and transaction history.',
+          'For scanned statements, the OCR step should also be completed before extraction, and the final spreadsheet should still be checked against the original statement.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'scanned-bank-statement-to-excel-ocr',
+    title: 'Scanned Bank Statement to Excel: OCR First, Then Extract',
+    description: 'Learn how to prepare an image-only bank statement with OCR before extracting transactions into CSV or TSV that opens in Excel.',
+    tool: '/ocr-pdf',
+    toolLabel: 'Make the scanned statement searchable',
+    category: 'BANK STATEMENT GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why a scanned statement needs OCR first',
+        paragraphs: [
+          'A scanned bank statement may look identical to a normal PDF on screen while containing no usable text layer underneath. A transaction extractor cannot reliably identify dates, descriptions and amounts from text that does not exist in the PDF.',
+          'OCR adds searchable text to the page images. Once the statement has a usable text layer, the extracted text can be passed to the bank-statement workflow.'
+        ]
+      },
+      {
+        title: 'Make the statement searchable',
+        paragraphs: [
+          'Open the OCR tool, choose the scanned PDF and create a searchable copy. Review several names, dates and amounts in the OCR result before moving on.',
+          'Poor scans, skewed pages, unusual fonts, stamps and low-resolution images can all reduce recognition accuracy. If critical digits are visibly wrong after OCR, do not rely on the extracted spreadsheet.'
+        ]
+      },
+      {
+        title: 'Extract the transaction table after OCR',
+        paragraphs: [
+          'Open the searchable result in Bank Statement to Excel. The workflow extracts table-style transaction data into CSV or TSV that can be opened in Excel, Google Sheets or another spreadsheet application.',
+          'Different banks use different statement layouts, so column detection should always be reviewed rather than assumed to be perfect.'
+        ]
+      },
+      {
+        title: 'Verify numbers before accounting use',
+        paragraphs: [
+          'OCR can confuse characters such as 0 and O, 1 and I, or misread punctuation in amounts. Compare important dates, debits, credits and balances against the original scanned statement.',
+          'For financial records, checking a few representative transactions is not enough when the spreadsheet will be used for reconciliation or reporting. Review the rows and totals that matter to your workflow.'
+        ]
+      },
+      {
+        title: 'Keep both copies',
+        paragraphs: [
+          'Keep the original scan as the source record and the OCR/searchable copy as a working document. Keep the extracted CSV or TSV separately so corrections do not overwrite the source.',
+          'This gives you a clear path back to the original page whenever a spreadsheet value looks suspicious.'
+        ]
+      }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1340,7 +1436,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: upload limits, cropping & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF upload limits, cropping pages and using local document tools.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: compression, bank statements, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF compression, bank-statement extraction, OCR, cropping and private local document workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
