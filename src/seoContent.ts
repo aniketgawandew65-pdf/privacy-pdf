@@ -191,6 +191,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will every PDF convert perfectly?', 'No. Complex layouts, scans, columns and unusual fonts can require manual review. OCR may help when the PDF contains scanned images instead of selectable text.']
     ],
     related: [
+      ['/blog/pdf-to-markdown-for-rag','Prepare Markdown for a RAG workflow'],
+      ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown with OCR first'],
       ['/extract-pdf-for-llm','Prepare PDF text for LLM use'],
       ['/ocr-pdf','Make scanned PDF text searchable'],
       ['/pdf-to-text','Extract plain PDF text'],
@@ -215,6 +217,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Can I download the result?', 'Use the available Markdown output controls to save or copy the extracted content for your workflow.']
     ],
     related: [
+      ['/blog/pdf-to-markdown-for-rag','Use PDF Markdown in a RAG pipeline'],
+      ['/blog/scanned-pdf-to-markdown-ocr-first','Prepare scanned PDFs with OCR first'],
       ['/pdf-to-markdown','Convert PDF to Markdown'],
       ['/ocr-pdf','OCR a scanned PDF'],
       ['/pdf-to-text','Extract plain text'],
@@ -531,7 +535,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
       ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
-    related: [['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
+    related: [['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
       ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
@@ -1453,6 +1457,100 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'pdf-to-markdown-for-rag',
+    title: 'PDF to Markdown for RAG: Prepare Cleaner AI Context',
+    description: 'Learn why Markdown can be easier to chunk and review than raw PDF text for RAG workflows, and how to prepare a PDF without sending the document directly to an AI provider.',
+    tool: '/extract-pdf-for-llm',
+    toolLabel: 'Prepare PDF Markdown for an LLM',
+    category: 'AI DOCUMENT GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why PDF is awkward input for retrieval workflows',
+        paragraphs: [
+          'PDF is designed to preserve page appearance. It can store text as positioned items rather than as the clean heading, paragraph and list structure a retrieval pipeline would ideally ingest.',
+          'Before chunking a document for retrieval, it is useful to turn the relevant content into a simpler text format that can be inspected and cleaned.'
+        ]
+      },
+      {
+        title: 'Why Markdown is useful as an intermediate format',
+        paragraphs: [
+          'Markdown keeps lightweight structure such as headings, paragraphs and lists while remaining plain text. That makes it easier to read, edit and divide into logical sections than a raw copy-paste dump from a PDF.',
+          '1into1 extracts selectable PDF text into Markdown locally and can detect some heading and list structure. Complex layouts, tables, columns and unusual fonts still need review because a PDF does not always expose semantic structure cleanly.'
+        ]
+      },
+      {
+        title: 'Review before chunking or embedding',
+        paragraphs: [
+          'Do not send the first extracted output straight into a production RAG index. Remove irrelevant front matter, repeated page furniture and sections that do not belong in the knowledge base, and check that the reading order makes sense.',
+          'If a document contains complex tables whose row and column relationships matter, use a structured data workflow or manual review rather than assuming every visual table has been reconstructed perfectly as Markdown.'
+        ]
+      },
+      {
+        title: 'Use only the context you actually need',
+        paragraphs: [
+          'A 100-page document does not always need to become one giant AI input. After extraction, you can keep only the chapters or sections relevant to the retrieval system or task you are building.',
+          'The local extraction step does not automatically send the PDF or the generated Markdown to ChatGPT, Claude or another provider. Passing the reviewed content to an external AI service is a separate action.'
+        ]
+      },
+      {
+        title: 'Handle scans before Markdown conversion',
+        paragraphs: [
+          'Image-only PDFs need OCR because there may be no selectable text to extract. Create a searchable copy first, verify important characters, and then convert the text-aware document into Markdown.',
+          'For RAG or other AI workflows, OCR errors can become retrieval errors later. Names, numbers, formulas and domain-specific terms deserve extra checking before indexing.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'scanned-pdf-to-markdown-ocr-first',
+    title: 'Scanned PDF to Markdown: OCR First, Then Convert',
+    description: 'Convert an image-only scanned PDF into Markdown by creating a searchable OCR copy first, then extracting and reviewing the text locally.',
+    tool: '/ocr-pdf',
+    toolLabel: 'OCR the scanned PDF first',
+    category: 'PDF TO MARKDOWN GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why scanned PDFs need an extra step',
+        paragraphs: [
+          'A scanned PDF can contain page images without a usable text layer. A Markdown converter cannot reliably extract headings and paragraphs from text that does not exist as characters in the document.',
+          'OCR recognises the visible characters and creates searchable text. That searchable result can then be used as the source for Markdown extraction.'
+        ]
+      },
+      {
+        title: 'Create a searchable PDF with OCR',
+        paragraphs: [
+          'Open the scan in Searchable OCR and process the pages. Afterward, test whether names, dates and representative sentences can be searched or selected in the OCR result.',
+          'Poor contrast, blur, skew and compression artefacts can reduce recognition accuracy. If important text is wrong at the OCR stage, converting it to Markdown will preserve the mistake rather than fix it.'
+        ]
+      },
+      {
+        title: 'Convert the searchable copy to Markdown',
+        paragraphs: [
+          'Open the searchable result in PDF to Markdown and extract the document text. Review the generated headings, paragraphs and lists before copying or downloading the Markdown.',
+          'The conversion is most reliable when the OCR reading order is sensible. Multi-column scans, complex forms and heavily visual pages can still require manual cleanup.'
+        ]
+      },
+      {
+        title: 'Check the details that matter',
+        paragraphs: [
+          'Numbers, names, identifiers, formulas and specialist terminology deserve particular attention because a single OCR error can change the meaning of the extracted Markdown.',
+          'If the Markdown will be used with an LLM or retrieval system, correct those errors before the content is indexed or pasted into another service.'
+        ]
+      },
+      {
+        title: 'Keep the workflow local until you choose otherwise',
+        paragraphs: [
+          'The OCR and Markdown-preparation steps are designed to run locally in the browser for supported workflows. The document is not automatically sent to an AI provider.',
+          'After reviewing the Markdown, you decide whether to keep it as a local note, use it in documentation, or pass selected content to an external AI or RAG system.'
+        ]
+      }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1677,7 +1775,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: Word conversion, compression, redaction & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF-to-Word conversion, compression, permanent redaction, bank statements, OCR and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: Word, Markdown, AI, compression & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF-to-Word, Markdown for AI and RAG, compression, redaction, bank statements, OCR and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
