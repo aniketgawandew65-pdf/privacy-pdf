@@ -882,6 +882,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ["What if repair does not work?", "Try obtaining another copy from the original source, backup, sender or export process."]
     ],
     related: [
+      ["/blog/pdf-wont-open-corrupted-or-viewer-problem","Diagnose why a PDF will not open"],
+      ["/blog/what-pdf-repair-can-and-cannot-recover","Understand what PDF repair can recover"],
       ["/compare-pdf","Compare the repaired PDF with another copy"],
       ["/pdf-to-image","Render PDF pages as images"],
       ["/pdf-to-text","Check whether text can be extracted"],
@@ -1651,6 +1653,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'pdf-wont-open-corrupted-or-viewer-problem',
+    title: 'PDF Won’t Open: Corrupted File or Viewer Problem?',
+    description: 'Diagnose a PDF that will not open by separating file corruption from viewer, password, security and incomplete-download problems before attempting repair.',
+    tool: '/repair-pdf',
+    toolLabel: 'Try Repair PDF',
+    category: 'PDF REPAIR GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'First confirm that the PDF itself is the problem',
+        paragraphs: [
+          'A PDF that will not open is not automatically corrupted. The issue can also come from the viewer, browser, local security settings, a password requirement or an incomplete download.',
+          'Try the file in another trusted PDF reader and, when possible, obtain a fresh copy from the original source before changing the document.'
+        ]
+      },
+      {
+        title: 'Re-download or recreate the file when you can',
+        paragraphs: [
+          'If a download stopped early or a transfer failed, the safest fix is usually to download the document again because repair software cannot recreate bytes that never arrived.',
+          'If you own the source document, exporting a fresh PDF from the original application can also be more reliable than trying to recover a damaged copy.'
+        ]
+      },
+      {
+        title: 'Password and security errors are different from corruption',
+        paragraphs: [
+          'A password-protected PDF may be structurally healthy even though it cannot be opened without the correct password. Likewise, a viewer can block a file for security or compatibility reasons without the document being damaged.',
+          'Use the error message and another trusted reader to distinguish access problems from a genuinely malformed PDF before running a repair workflow.'
+        ]
+      },
+      {
+        title: 'Use repair when the internal PDF structure is damaged',
+        paragraphs: [
+          'A PDF contains structural information that tells a reader where document objects are stored. If cross-reference information, trailer data or related structure becomes inconsistent, a tolerant repair process may be able to rebuild a readable copy when the underlying page data is still present.',
+          '1into1 Repair PDF works locally in the browser and attempts recovery without requiring a normal server-side document upload.'
+        ]
+      },
+      {
+        title: 'Verify every repaired document',
+        paragraphs: [
+          'A repaired file opening successfully does not prove that every page, image, form field or piece of text survived unchanged. Inspect the beginning, middle and end of the recovered copy and verify important content.',
+          'Keep the original damaged file and any known-good source separately until you are satisfied that the recovered PDF contains what you need.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat Help — Can’t open PDF', url: 'https://helpx.adobe.com/acrobat/kb/cant-open-pdf.html', detail: 'Adobe troubleshooting guidance distinguishes corruption from viewer, password, security and application problems.' },
+      { label: 'Adobe Acrobat — How to repair a PDF file', url: 'https://www.adobe.com/in/acrobat/roc/blog/repair-corrupted-pdf-file-quickly.html', detail: 'Describes common corruption symptoms, interrupted downloads and recovery or recreation options.' }
+    ]
+  },
+  {
+    slug: 'what-pdf-repair-can-and-cannot-recover',
+    title: 'What PDF Repair Can and Cannot Recover',
+    description: 'Understand the difference between damaged PDF structure and missing document data, what cross-reference repair can help with, and why every recovered file needs verification.',
+    tool: '/repair-pdf',
+    toolLabel: 'Open Repair PDF',
+    category: 'PDF REPAIR GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Repair works best when the data still exists',
+        paragraphs: [
+          'PDF repair is most useful when the document bytes are largely present but the internal structure that connects them has become inconsistent or unreadable.',
+          'If part of the file is genuinely missing because a download or copy was truncated, no repair tool can reconstruct information that is no longer present. A fresh download or original source is preferable whenever available.'
+        ]
+      },
+      {
+        title: 'Why cross-reference information matters',
+        paragraphs: [
+          'The PDF file format uses cross-reference information so a reader can locate indirect objects efficiently, together with trailer information that points to important document structures.',
+          'Damage around these structures can make a file fail even when useful page objects remain elsewhere in the document. Rebuilding readable structure can sometimes make those surviving objects accessible again.'
+        ]
+      },
+      {
+        title: 'Use the least destructive recovery that works',
+        paragraphs: [
+          'A repair workflow should preserve the original document structure when possible and fall back to salvage only when a normal reconstruction cannot produce a usable PDF.',
+          '1into1 uses a two-stage recovery approach: it first attempts a lossless structural rebuild and can fall back to page-stream salvage when the normal structure cannot be recovered.'
+        ]
+      },
+      {
+        title: 'Some problems are not repair problems',
+        paragraphs: [
+          'Password protection, unsupported viewer features, local application problems and security restrictions can prevent a PDF from opening even when the file is not corrupted.',
+          'Diagnose those cases separately instead of repeatedly rewriting a healthy document.'
+        ]
+      },
+      {
+        title: 'Recovery is not the same as verification',
+        paragraphs: [
+          'After repair, reopen the downloaded PDF and check page count, visible content, important numbers, forms and any other information that matters to your workflow.',
+          'For legal, financial or archival documents, compare the repaired copy with another known-good version whenever one is available.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe PDF Reference — File Structure', url: 'https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.3.pdf', detail: 'Documents the PDF header, body, cross-reference table and trailer structure used to locate document objects.' },
+      { label: 'Adobe Acrobat Help — Can’t open PDF', url: 'https://helpx.adobe.com/acrobat/kb/cant-open-pdf.html', detail: 'Provides troubleshooting guidance for damaged files and other causes of PDF opening failures.' }
+    ]
+  },
+  {
     slug: 'bates-numbering-for-legal-discovery',
     title: 'Bates Numbering for Legal Discovery: Prefixes, Padding & Placement',
     description: 'Learn how Bates identifiers are structured for document production, how prefixes and zero-padding work, and what to check before sharing a numbered PDF.',
@@ -1977,7 +2081,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: Excel, Word, Bates numbering, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF table extraction, Word conversion, Bates numbering, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: Excel, Word, repair, Bates & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF repair, table extraction, Word conversion, Bates numbering, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
