@@ -134,15 +134,19 @@ export class PresentationPackage {
       `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.${type}+xml"/>`;
     this.add(
       "[Content_Types].xml",
-      `${declaration}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/>${override("ppt/presentation.xml", "presentation.main")}${override("ppt/slideMasters/slideMaster1.xml", "slideMaster")}${override("ppt/slideLayouts/slideLayout1.xml", "slideLayout")}<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${numbers.map((n) => override(`ppt/slides/slide${n}.xml`, "slide")).join("")}</Types>`,
+      `${declaration}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>${override("ppt/presentation.xml", "presentation.main")}${override("ppt/slideMasters/slideMaster1.xml", "slideMaster")}${override("ppt/slideLayouts/slideLayout1.xml", "slideLayout")}<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${numbers.map((n) => override(`ppt/slides/slide${n}.xml`, "slide")).join("")}</Types>`,
     );
     this.add(
       "_rels/.rels",
-      rels(rel("rId1", "officeDocument", "ppt/presentation.xml")),
+      rels(
+        rel("rId1", "officeDocument", "ppt/presentation.xml") +
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
+          rel("rId3", "extended-properties", "docProps/app.xml"),
+      ),
     );
     this.add(
       "ppt/presentation.xml",
-      `${declaration}<p:presentation xmlns:a="${A}" xmlns:r="${R}" xmlns:p="${P}"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${numbers.map((n) => `<p:sldId id="${255 + n}" r:id="rId${n + 1}"/>`).join("")}</p:sldIdLst><p:sldSz cx="${emu(this.size.width)}" cy="${emu(this.size.height)}"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle/></p:presentation>`,
+      `${declaration}<p:presentation xmlns:a="${A}" xmlns:r="${R}" xmlns:p="${P}"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${numbers.map((n) => `<p:sldId id="${255 + n}" r:id="rId${n + 1}"/>`).join("")}</p:sldIdLst><p:sldSz cx="${emu(this.size.width)}" cy="${emu(this.size.height)}" type="custom"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle/></p:presentation>`,
     );
     this.add(
       "ppt/_rels/presentation.xml.rels",
@@ -173,6 +177,14 @@ export class PresentationPackage {
     this.add(
       "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
       rels(rel("rId1", "slideMaster", "../slideMasters/slideMaster1.xml")),
+    );
+    this.add(
+      "docProps/core.xml",
+      `${declaration}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>PDF to PowerPoint</dc:title><dc:creator>1into1 PDF</dc:creator><cp:lastModifiedBy>1into1 PDF</cp:lastModifiedBy></cp:coreProperties>`,
+    );
+    this.add(
+      "docProps/app.xml",
+      `${declaration}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>1into1 PDF</Application><PresentationFormat>Custom</PresentationFormat><Slides>${this.count}</Slides><Notes>0</Notes><HiddenSlides>0</HiddenSlides><MMClips>0</MMClips><ScaleCrop>false</ScaleCrop><AppVersion>16.0000</AppVersion></Properties>`,
     );
     this.add(
       "ppt/theme/theme1.xml",
