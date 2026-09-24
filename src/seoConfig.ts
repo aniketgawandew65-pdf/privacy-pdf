@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-convert-pdf-to-grayscale': '2026-09-24',
+  '/blog/grayscale-vs-black-and-white-pdf': '2026-09-24',
   '/blog/how-to-make-pdf-dark-mode-permanent': '2026-09-24',
   '/blog/invert-pdf-colors-vs-oled-vs-sepia': '2026-09-24',
   '/blog/how-to-edit-pdf-title-author-keywords': '2026-09-24',
@@ -85,6 +87,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/compare-pdf': '2026-09-24',
   '/edit-metadata': '2026-09-24',
   '/dark-mode-pdf': '2026-09-24',
+  '/grayscale-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -299,10 +302,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/grayscale-pdf': {
     path: '/grayscale-pdf',
-    title: 'Convert PDF to Grayscale & Black and White Free Online',
-    description: 'Convert PDF pages to grayscale or pure black-and-white photocopy style locally in your browser. Save printer toner and prepare court filings with zero uploads.',
+    title: 'Convert PDF to Grayscale or Pure Black & White | 1into1',
+    description: 'Convert PDF pages to smooth grayscale or thresholded pure black and white locally in your browser. Preview the first page, adjust B&W threshold, and download an image-based PDF.',
     heading: 'B&W / Grayscale PDF',
-    subheading: 'Turn color PDFs into monochrome or high-contrast black and white for ink-saving printing and archiving.',
+    subheading: 'Choose smooth gray tones or pure black-and-white photocopy output with an adjustable contrast threshold.',
   },
   '/resize-pdf': {
     path: '/resize-pdf',
