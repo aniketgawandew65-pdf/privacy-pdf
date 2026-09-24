@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/compare-two-pdf-versions-side-by-side': '2026-09-24',
+  '/blog/pdf-overlay-comparison-vs-text-diff': '2026-09-24',
   '/blog/extract-images-from-pdf-without-screenshots': '2026-09-24',
   '/blog/extract-images-vs-pdf-to-image': '2026-09-24',
   '/blog/how-to-straighten-crooked-scanned-pdf': '2026-09-24',
@@ -76,6 +78,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/booklet-pdf': '2026-09-24',
   '/deskew-pdf': '2026-09-24',
   '/extract-images': '2026-09-24',
+  '/compare-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
