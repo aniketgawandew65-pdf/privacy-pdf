@@ -541,7 +541,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
       ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
-    related: [['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned tables into spreadsheet data'], ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
+    related: [['/blog/deskew-pdf-before-ocr','Straighten tilted scans before OCR'], ['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned tables into spreadsheet data'], ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
       ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
@@ -572,6 +572,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/resize-pdf','Change PDF paper size'],
       ['/page-numbers','Add page numbers'],
       ['/compress-pdf','Reduce the finished PDF size']
+    ]
+  },
+
+  '/deskew-pdf': {
+    title: 'How to straighten a crooked scanned PDF',
+    intro: 'Correct a small consistent tilt in a scanned PDF locally. Use the first-page preview to estimate or fine-tune one angle, then apply that selected correction across the document.',
+    steps: [
+      'Choose the scanned PDF you want to straighten.',
+      'Use Auto-Detect Tilt on the first-page preview or adjust the angle manually.',
+      'Fine-tune the correction between -10° and +10° while watching the preview.',
+      'Straighten and download the PDF.',
+      'Inspect several pages to confirm the same correction angle is suitable across the document.'
+    ],
+    example: 'If a scanner feeder produced a ten-page document with the same slight clockwise lean on every page, estimate the tilt from page 1, fine-tune it if needed, then apply that angle to the full PDF.',
+    questions: [
+      ['Does Auto-Detect check every page?', 'No. The current Auto-Detect control estimates the tilt from the first-page preview. The selected angle is then applied across the PDF, so inspect multiple pages when the scan may have inconsistent skew.'],
+      ['Can I adjust the angle manually?', 'Yes. Fine Tilt Angle allows adjustments from -10° to +10° in 0.2° steps.'],
+      ['Does straightening run OCR?', 'No. Deskew changes page alignment. Use OCR PDF separately when you need a searchable text layer.'],
+      ['Can deskewing help before OCR?', 'Yes when skew is interfering with text-line alignment. OCR systems such as Tesseract document deskewing as a useful preprocessing step for skewed scans.'],
+      ['Is the PDF uploaded for straightening?', 'The Deskew PDF workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/how-to-straighten-crooked-scanned-pdf','Straighten a crooked scanned PDF'],
+      ['/blog/deskew-pdf-before-ocr','Deskew a PDF before OCR'],
+      ['/ocr-pdf','Run OCR after straightening'],
+      ['/rotate-pdf','Rotate pages by 90 degrees'],
+      ['/scan-to-pdf','Create a PDF from scans or photos']
     ]
   },
 
@@ -1656,6 +1683,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-straighten-crooked-scanned-pdf',
+    title: 'How to Straighten a Crooked Scanned PDF',
+    description: 'Fix a consistently tilted scanned PDF by estimating the skew from a page preview, fine-tuning the angle and applying the correction locally in your browser.',
+    tool: '/deskew-pdf',
+    toolLabel: 'Straighten a scanned PDF',
+    category: 'SCANNED PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Deskew fixes small tilt, not page orientation',
+        paragraphs: [
+          'Deskewing is for pages that lean by a few degrees because the paper entered a scanner or camera slightly crooked. A page that is sideways by 90 degrees is an orientation problem and should be rotated instead.',
+          '1into1 Deskew PDF is designed for fine correction between -10° and +10°, with a live first-page preview before you create the output.'
+        ]
+      },
+      {
+        title: 'Estimate the angle from the first-page preview',
+        paragraphs: [
+          'Choose the PDF and use Auto-Detect Tilt to estimate a correction from the rendered first page. The preview rotates immediately so you can see whether the text baseline looks level.',
+          'Auto-Detect currently evaluates the first-page preview rather than independently measuring every page. This works best when the scanner introduced a similar tilt throughout the document.'
+        ]
+      },
+      {
+        title: 'Fine-tune before applying the correction',
+        paragraphs: [
+          'If the automatic estimate is slightly off, adjust the angle manually in 0.2-degree steps. Use horizontal text lines, table rules or page edges as visual references.',
+          'Avoid over-correcting. The goal is to make the document level, not to rotate a page more than necessary.'
+        ]
+      },
+      {
+        title: 'Check several pages after straightening',
+        paragraphs: [
+          'The selected angle is applied across the PDF, so reopen the result and inspect pages from the beginning, middle and end of the document.',
+          'If different pages lean in different directions, one document-wide angle may not be appropriate. In that case, separate the affected pages or use a workflow that supports page-by-page correction.'
+        ]
+      },
+      {
+        title: 'Keep the original until the output is verified',
+        paragraphs: [
+          'For ordinary unprotected PDFs, 1into1 can apply the correction to existing page content without intentionally re-encoding the normal vector/text content. More complex files may require a compatibility path.',
+          'Keep the original scan separately until you have checked page edges, text, images and any important document details in the straightened copy.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Tesseract OCR — Improving the quality of the output', url: 'https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html', detail: 'Explains rotation and deskewing for scanned pages and notes that excessive skew can significantly reduce line-segmentation quality.' },
+      { label: 'ABBYY FineReader Engine — Skew correction', url: 'https://support.abbyy.com/hc/en-us/articles/360003293640-Skew-correction-deskew-in-FineReader-Engine', detail: 'Describes skew in scanner/camera images and deskewing as a preprocessing step for OCR quality.' }
+    ]
+  },
+  {
+    slug: 'deskew-pdf-before-ocr',
+    title: 'Deskew PDF Before OCR: Why Straight Text Lines Matter',
+    description: 'Learn when to straighten a tilted scan before OCR, how skew affects text-line recognition, and when deskewing is unnecessary.',
+    tool: '/deskew-pdf',
+    toolLabel: 'Deskew before OCR',
+    category: 'OCR PREPARATION GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'OCR works from page image geometry as well as characters',
+        paragraphs: [
+          'OCR does not only identify individual letter shapes. It also has to segment the page into lines, words and regions so the recognised characters can be assembled in the correct order.',
+          'When text lines are noticeably tilted, that layout analysis becomes harder. Tesseract documentation specifically warns that excessive skew can significantly reduce line-segmentation quality.'
+        ]
+      },
+      {
+        title: 'Straighten the scan before recognising text',
+        paragraphs: [
+          'If the pages share a small consistent tilt, straighten the PDF first and then run OCR on the corrected copy. The aim is to make text lines horizontal enough for the OCR engine to analyse them cleanly.',
+          'ABBYY also treats skew correction as document-image preprocessing and describes deskewing skewed scanner or camera images to improve OCR quality.'
+        ]
+      },
+      {
+        title: 'Do not confuse deskew with 90-degree rotation',
+        paragraphs: [
+          'Deskew addresses small angular errors such as a page leaning 2 degrees. A page that is sideways or upside down needs orientation correction instead.',
+          'Use Rotate PDF for quarter-turn orientation problems, and Deskew PDF for fine tilt correction.'
+        ]
+      },
+      {
+        title: 'One angle is best for consistently skewed documents',
+        paragraphs: [
+          '1into1 estimates tilt from the first-page preview and applies the selected angle across the PDF. That is appropriate when a scanner feeder produced a consistent lean across the batch.',
+          'If every page has a different tilt, verify the output carefully because a single correction cannot independently deskew each page.'
+        ]
+      },
+      {
+        title: 'Run OCR only after the page alignment looks right',
+        paragraphs: [
+          'After straightening, open the corrected PDF and inspect several text lines. Then use OCR PDF to create the searchable text layer.',
+          'Deskewing does not guarantee perfect OCR. Resolution, contrast, noise, font shape and scan quality still affect recognition, so verify important names and numbers against the visible document.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Tesseract OCR — Improving the quality of the output', url: 'https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html', detail: 'Documents rotation/deskewing as image preprocessing and explains the effect of skew on line segmentation and OCR quality.' },
+      { label: 'ABBYY FineReader PDF User Guide', url: 'https://help.abbyy.com/assets/en-us/finereader/16/Users_Guide.pdf', detail: 'Lists deskewing and page-orientation correction among preprocessing steps used when scan defects reduce OCR quality.' }
+    ]
+  },
+  {
     slug: 'how-to-print-pdf-as-booklet',
     title: 'How to Print a PDF as a Booklet: Double-Sided, Fold & Staple',
     description: 'Turn a normal PDF into saddle-stitch booklet spreads, understand why pages are reordered, and check duplex printing before folding and stapling.',
@@ -2186,7 +2315,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: repair, booklet, Excel, Word & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF repair, booklet printing, table extraction, Word conversion, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: OCR, deskew, repair, Excel & Word | 1into1',heading:'A little help with your PDF.',description:'Practical guides for OCR, straightening scanned PDFs, repair, booklet printing, table extraction, Word conversion and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
