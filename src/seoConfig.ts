@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/convert-html-file-to-pdf-locally': '2026-09-24',
+  '/blog/html-file-to-pdf-vs-webpage-to-pdf': '2026-09-24',
   '/blog/how-to-reorder-pdf-pages-visually': '2026-09-24',
   '/blog/rotate-selected-pdf-pages-vs-whole-document': '2026-09-24',
   '/blog/how-to-rotate-pdf-permanently': '2026-09-24',
@@ -106,6 +108,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/unlock-pdf': '2026-09-24',
   '/rotate-pdf': '2026-09-24',
   '/organize-pdf': '2026-09-24',
+  '/html-to-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -495,5 +498,5 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF | 1into1 PDF", "description": "Turn spreadsheet data into a clear, shareable PDF table.", "heading": "CSV to PDF", "subheading": "Turn spreadsheet data into a clear, shareable PDF table."},
   "/visual-editor": {"path": "/visual-editor", "title": "Add Text & Shapes to PDF | 1into1", "description": "Add text, images and shapes to a PDF without uploading it.", "heading": "Add text & shapes", "subheading": "Add text, images and shapes to a PDF without uploading it."},
   "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF | 1into1 PDF", "description": "Create a readable PDF of your code with syntax highlighting.", "heading": "Code to PDF", "subheading": "Create a readable PDF of your code with syntax highlighting."},
-  "/html-to-pdf": {"path": "/html-to-pdf", "title": "HTML to PDF | 1into1 PDF", "description": "Convert HTML or a receipt into a PDF, right in your browser.", "heading": "HTML to PDF", "subheading": "Convert HTML or a receipt into a PDF, right in your browser."},
+  "/html-to-pdf": {"path": "/html-to-pdf", "title": "HTML to PDF — Convert Code or .HTML Files Locally | 1into1", "description": "Paste HTML or upload an .html/.htm file and create a PDF locally. Supports A4, Letter and 80mm receipt output without fetching a live webpage URL.", "heading": "HTML to PDF", "subheading": "Convert pasted or uploaded self-contained HTML into A4, Letter, or receipt PDFs directly in your browser."},
 };
