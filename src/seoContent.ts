@@ -567,6 +567,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Does the PDF need to be uploaded?', 'The N-Up transformation runs locally in your browser.']
     ],
     related: [
+      ['/blog/booklet-imposition-vs-two-pages-per-sheet','Booklet imposition vs two pages per sheet'],
       ['/booklet-pdf','Create a booklet layout'],
       ['/resize-pdf','Change PDF paper size'],
       ['/page-numbers','Add page numbers'],
@@ -592,6 +593,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the document processed locally?', 'The booklet arrangement is created in your browser without requiring a normal server-side document upload.']
     ],
     related: [
+      ['/blog/how-to-print-pdf-as-booklet','Print a PDF as a folded booklet'],
+      ['/blog/booklet-imposition-vs-two-pages-per-sheet','Booklet imposition vs two pages per sheet'],
       ['/nup-pdf','Place multiple pages on each sheet'],
       ['/resize-pdf','Resize PDF pages'],
       ['/page-numbers','Add page numbers'],
@@ -1653,6 +1656,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-print-pdf-as-booklet',
+    title: 'How to Print a PDF as a Booklet: Double-Sided, Fold & Staple',
+    description: 'Turn a normal PDF into saddle-stitch booklet spreads, understand why pages are reordered, and check duplex printing before folding and stapling.',
+    tool: '/booklet-pdf',
+    toolLabel: 'Create a printable booklet',
+    category: 'PDF PRINTING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A booklet needs printer spreads, not normal page order',
+        paragraphs: [
+          'A standard PDF usually stores pages in reading order. A folded booklet has to place different page numbers beside each other on the physical sheet so that the pages return to normal order after double-sided printing and folding.',
+          'This rearrangement is called booklet imposition. The first and last pages share a sheet, and the remaining pages are paired around them according to the saddle-stitch sequence.'
+        ]
+      },
+      {
+        title: 'Choose the output sheet size before imposing',
+        paragraphs: [
+          '1into1 Booklet PDF can create A4 Landscape or US Letter Landscape printer spreads. Each output side contains two imposed document pages positioned for a center fold.',
+          'Use the paper format that matches the sheets you intend to print on, then generate the imposed PDF rather than resizing the document after imposition.'
+        ]
+      },
+      {
+        title: 'Why blank pages may be added',
+        paragraphs: [
+          'A folded saddle-stitch booklet uses four document pages per physical sheet: two on the front and two on the back. That means the imposed page count has to resolve into groups of four.',
+          'When the source PDF does not have a multiple-of-four page count, 1into1 pads the booklet with blank pages so the final folds can still produce the correct reading order.'
+        ]
+      },
+      {
+        title: 'Print double-sided and test the binding direction',
+        paragraphs: [
+          'Print the imposed PDF on both sides of the sheet and use the duplex or binding setting that keeps the back side upright after the sheet is folded. Printer terminology varies, so use a one-sheet test before printing the full job.',
+          'Adobe also recommends checking booklet subset and binding settings for duplex or manual two-pass booklet printing. A test print catches reversed backs or upside-down pages before paper is wasted.'
+        ]
+      },
+      {
+        title: 'Fold, staple and verify the finished booklet',
+        paragraphs: [
+          'After printing, keep the sheets in order, fold them through the center and staple along the fold for a simple saddle-stitched booklet.',
+          'Check the cover, center spread and final page before producing multiple copies. Paper thickness, printer margins and scaling can affect the physical result even when the page order is correct.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Print booklets', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/booklets-posters-banners/print-booklets.html', detail: 'Explains booklet page arrangement, duplex or manual printing, booklet subsets and binding settings.' },
+      { label: 'Adobe Acrobat — About booklet printing', url: 'https://helpx.adobe.com/in/acrobat/desktop/print-documents/booklets-posters-banners/about-booklets-printing.html', detail: 'Describes automatic booklet page ordering, two pages per sheet, folding and stapling.' }
+    ]
+  },
+  {
+    slug: 'booklet-imposition-vs-two-pages-per-sheet',
+    title: 'Booklet Imposition vs Two Pages Per Sheet: What Is the Difference?',
+    description: 'Learn why saddle-stitch booklet imposition changes page order while ordinary two-pages-per-sheet or N-up printing keeps normal sequence.',
+    tool: '/booklet-pdf',
+    toolLabel: 'Open Booklet PDF',
+    category: 'PDF PRINTING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Two pages per sheet is mainly a space-saving layout',
+        paragraphs: [
+          'Ordinary two-pages-per-sheet printing places multiple source pages on one sheet while generally keeping their normal reading sequence. It is useful for handouts, drafts and reducing paper use.',
+          'If you simply fold an ordinary two-up printout in half, the pages will usually not appear in the correct booklet order.'
+        ]
+      },
+      {
+        title: 'Booklet imposition deliberately changes page order',
+        paragraphs: [
+          'A saddle-stitch booklet pairs pages according to their final physical position after printing, folding and stapling. For example, the outside sheet places the final page beside page 1 rather than placing pages 1 and 2 together.',
+          'That changed sequence is the key difference between a booklet workflow and a normal N-up layout.'
+        ]
+      },
+      {
+        title: 'Booklets work in four-page groups',
+        paragraphs: [
+          'Each physical sheet contributes four finished booklet pages because there are two imposed pages on the front and two on the back.',
+          '1into1 therefore pads the source with blank pages when necessary so the page count can be imposed into complete saddle-stitch sheets.'
+        ]
+      },
+      {
+        title: 'Use N-Up when you do not plan to fold the sheets',
+        paragraphs: [
+          'Choose N-Up when the goal is to fit several pages onto a sheet in a compact handout or reference layout. Choose Booklet PDF when the printed sheets will be folded through the center and read as a bound booklet.',
+          'The two workflows can look similar on screen because both may show two pages side by side, but the page sequence solves a different physical printing problem.'
+        ]
+      },
+      {
+        title: 'Print settings still matter after imposition',
+        paragraphs: [
+          'Correct page order does not guarantee a correct physical booklet if the printer flips the back side in the wrong direction or applies unexpected scaling.',
+          'Use the appropriate duplex and binding settings for your printer and make a small test copy before producing the full booklet.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Print booklets', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/booklets-posters-banners/print-booklets.html', detail: 'Documents booklet-specific arrangement, duplex printing and binding controls.' },
+      { label: 'Adobe InDesign — Booklet printing settings', url: 'https://helpx.adobe.com/indesign/desktop/print/print-booklets/booklet-printing-settings.html', detail: 'Describes printer spreads and booklet-imposition settings such as saddle stitch, margins, spacing and bleed.' }
+    ]
+  },
+  {
     slug: 'pdf-wont-open-corrupted-or-viewer-problem',
     title: 'PDF Won’t Open: Corrupted File or Viewer Problem?',
     description: 'Diagnose a PDF that will not open by separating file corruption from viewer, password, security and incomplete-download problems before attempting repair.',
@@ -2081,7 +2186,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: Excel, Word, repair, Bates & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF repair, table extraction, Word conversion, Bates numbering, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: repair, booklet, Excel, Word & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF repair, booklet printing, table extraction, Word conversion, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
