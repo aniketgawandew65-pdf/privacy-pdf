@@ -440,6 +440,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the PDF uploaded for Bates stamping?', 'The Bates-numbering workflow runs locally in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
+      ['/blog/bates-numbering-for-legal-discovery','Use Bates numbering for legal discovery'],
+      ['/blog/bates-numbering-vs-page-numbers','Understand Bates numbers vs page numbers'],
       ['/redact-pdf','Redact confidential information'],
       ['/sanitize-pdf','Sanitize PDF metadata'],
       ['/page-numbers','Add ordinary page numbers'],
@@ -1649,6 +1651,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'bates-numbering-for-legal-discovery',
+    title: 'Bates Numbering for Legal Discovery: Prefixes, Padding & Placement',
+    description: 'Learn how Bates identifiers are structured for document production, how prefixes and zero-padding work, and what to check before sharing a numbered PDF.',
+    tool: '/bates-numbering',
+    toolLabel: 'Add Bates numbers to a PDF',
+    category: 'LEGAL PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'What Bates numbering is used for',
+        paragraphs: [
+          'Bates numbering gives pages unique sequential identifiers so lawyers, reviewers and document-production teams can refer to the same page consistently across a matter or production.',
+          'The exact convention depends on the receiving party, court or production protocol. Before stamping a document set, confirm the required prefix, starting number, digit width and placement.'
+        ]
+      },
+      {
+        title: 'Choose a consistent numbering format',
+        paragraphs: [
+          'A Bates label commonly combines a prefix with a zero-padded sequence number, such as ACME-000001. The U.S. Department of Justice Antitrust Division recommends a consistent format across a production and describes sequence numbers of 6–8 digits as a general example.',
+          '1into1 lets you set the prefix, optional suffix, starting number and digit padding so the stamped identifier matches the convention you need.'
+        ]
+      },
+      {
+        title: 'Continue the sequence deliberately',
+        paragraphs: [
+          'If one PDF ends at CONF-000250 and the next document should continue the same production, start the next PDF at 251 rather than resetting the sequence.',
+          'Court guidance can also require continuous numbering across multiple volumes. Keep a record of the last identifier used so later documents do not create gaps or duplicate numbers.'
+        ]
+      },
+      {
+        title: 'Place the stamp where it stays readable',
+        paragraphs: [
+          'The Bates number should not cover source text, signatures, exhibits or other important content. Court-specific requirements can also dictate a particular margin or placement.',
+          'Choose the available position and font size, then inspect the first, middle and final pages of the stamped PDF before sharing or filing it.'
+        ]
+      },
+      {
+        title: 'Review the output before production',
+        paragraphs: [
+          'Check that the sequence starts at the intended value, increments correctly, uses the expected prefix or suffix and remains visible on pages with different orientations or margins.',
+          'If the document also needs redaction or sanitization, complete those privacy steps deliberately and keep an unchanged source copy so the production can be audited if needed.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'U.S. Department of Justice Antitrust Division — Electronic Production Letter', url: 'https://www.justice.gov/atr/electronic-production-letter-attachment-1', detail: 'Describes consistent Bates-number formats and sequence-number conventions for electronic productions.' },
+      { label: 'U.S. Court of Appeals for the Fourth Circuit — Bates Numbering Instructions', url: 'https://www.ca4.uscourts.gov/docs/pdfs/appendixpagination-briefcitationguide.pdf', detail: 'Provides practical Bates-numbering instructions including prefix, digit count, start number and placement guidance.' }
+    ]
+  },
+  {
+    slug: 'bates-numbering-vs-page-numbers',
+    title: 'Bates Numbers vs Page Numbers: What Is the Difference?',
+    description: 'Understand when ordinary PDF page numbers are enough and when Bates identifiers are more useful for legal review, document production and cross-file references.',
+    tool: '/bates-numbering',
+    toolLabel: 'Add Bates numbers to a PDF',
+    category: 'LEGAL PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Page numbers describe location',
+        paragraphs: [
+          'Ordinary page numbers usually tell a reader where a page sits inside one document: page 1, page 2, page 3 and so on.',
+          'They are useful for navigation, reading and citation inside a single PDF, but the same page number can appear in many different files.'
+        ]
+      },
+      {
+        title: 'Bates numbers identify pages within a larger set',
+        paragraphs: [
+          'A Bates identifier is designed to give a page a unique reference within a document production or review set. A label such as CASE-000127 can still identify that page even when documents are split, merged or reviewed separately.',
+          'That is why Bates numbering is common in discovery and document-production workflows where many files need one consistent reference system.'
+        ]
+      },
+      {
+        title: 'Prefixes and padding add context',
+        paragraphs: [
+          'Bates numbering can include a party or matter prefix plus a fixed-width sequence number. Zero-padding makes identifiers sort consistently and helps keep the format stable as the production grows.',
+          'Ordinary pagination usually does not need that extra identity layer because it only describes position within the current document.'
+        ]
+      },
+      {
+        title: 'You can use both when the workflow requires it',
+        paragraphs: [
+          'A PDF can contain normal page numbers for readers and Bates identifiers for legal or production reference. They solve different problems, so one does not automatically replace the other.',
+          'If both are present, choose positions that do not overlap and follow any filing or production specification supplied by the recipient.'
+        ]
+      },
+      {
+        title: 'Choose the tool based on the job',
+        paragraphs: [
+          'Use Page Numbers when you simply need readable pagination inside one PDF. Use Bates Numbering when pages need stable sequential identifiers for a legal, compliance or document-production workflow.',
+          'When the numbering convention matters externally, the receiving court, firm or production protocol should determine the final format.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'U.S. Court of Appeals for the Fourth Circuit — Brief & Appendix Requirements', url: 'https://www.ca4.uscourts.gov/AppellateProcedureGuide/Briefing/briefapxreq.html', detail: 'Shows a court workflow using Bates-style appendix pagination with prefixes and continuous numbering.' },
+      { label: 'U.S. Department of Justice Antitrust Division — Electronic Production Letter', url: 'https://www.justice.gov/atr/electronic-production-letter-attachment-1', detail: 'Explains Bates numbering as a consistent identifier used in electronic document production.' }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1873,7 +1977,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: Excel extraction, Word, Markdown, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF table extraction to Excel, Word conversion, Markdown for AI, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: Excel, Word, Bates numbering, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF table extraction, Word conversion, Bates numbering, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
