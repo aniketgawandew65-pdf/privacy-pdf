@@ -42,10 +42,12 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/bank-statement-pdf-to-csv': '2026-09-24',
+  '/blog/scanned-bank-statement-to-excel-ocr': '2026-09-24',
   '/blog/india-pdf-upload-size-limits-2026': '2026-09-24',
   '/blog/pdf-privacy-comparison-2026': '2026-09-23',
   '/pdf-to-word': '2026-09-23',
-  '/bank-statement-to-excel': '2026-09-23',
+  '/bank-statement-to-excel': '2026-09-24',
   '/document-data-extractor': '2026-09-21',
   '/private-pii-secrets-auto-redactor': '2026-09-23',
   '/sanitize-pdf': '2026-09-21',
