@@ -4,6 +4,21 @@ export interface Guide {
   questions: [string, string][]; related: [string, string][];
 }
 export const TOOL_GUIDES: Record<string, Guide> = {
+  '/pdf-to-powerpoint': {
+    title: 'Create PowerPoint slides from a PDF privately',
+    intro: 'Convert selected PDF pages into a PowerPoint presentation on your device. Auto mode reconstructs reliable digital text as editable text boxes while preserving graphics and difficult content as page artwork.',
+    steps: ['Choose a PDF and review its page count.', 'Keep Auto mode for editable text where reliable, or select Best fidelity for page artwork. Optionally enter a page range such as 1-3, 5.', 'Convert and download the PPTX. Review text spacing and appearance in your presentation app.'],
+    example: 'A document with digital pages and scans can become one presentation. Each selected page becomes a slide; scanned pages retain their appearance without unreliable OCR reconstruction.',
+    questions: [
+      ['Does my PDF leave my device?', 'No. PDF reading, rendering and PowerPoint creation run locally. After the app and required resources have loaded, conversion can work offline.'],
+      ['Can I edit everything in the presentation?', 'No. Reliable horizontal digital text becomes editable where possible. Scans, complex scripts, clipped or overlapping content and artwork remain images. Tables keep their appearance but are not reconstructed as native PowerPoint tables.'],
+      ['How are different page sizes handled?', 'The first selected page sets the slide proportions. Other pages fit inside that slide size without cropping, with blank margins where necessary.'],
+      ['Will fonts look exactly the same?', 'Editable text uses substitute fonts, so spacing can differ between presentation apps. Best fidelity mode preserves page appearance as high-quality artwork.'],
+      ['What are the limits?', 'The existing task allowance applies. Mobile and tablet use the shared 150 MB file limit. Desktop capacity depends on device resources; image resolution is bounded and very large output may require smaller page ranges.'],
+      ['Can I use password-protected PDFs?', 'Unlock a copy first. This converter reports protected or unreadable PDFs without charging a successful task.']
+    ],
+    related: [['/pdf-to-word', 'Convert digital PDF to Word'], ['/pdf-to-jpg', 'Save PDF pages as images'], ['/split-pdf', 'Split a PDF into smaller files']]
+  },
   '/compress-pdf': {
     title: 'How to compress a PDF to a target size',
     intro: 'Choose a KB target for an upload limit, or use Standard compression when keeping detail matters more than an exact size. Your PDF is processed on your device.',

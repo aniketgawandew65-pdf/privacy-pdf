@@ -1,5 +1,6 @@
 // Concrete capabilities, not unverified claims of competitor exclusivity.
 export const TOOL_COPY: Record<string, string> = {
+  '/pdf-to-powerpoint': 'Create PowerPoint slides locally, with editable digital text where reliable and faithful artwork for scans and complex pages.',
   '/compress-pdf': 'Choose your target KB. Precision compression, with no PDF upload.',
   '/compress-pdf-to-50kb': 'Aim for a 50KB PDF target for strict upload limits, then reopen the result and check small text, signatures and stamps.',
   '/compress-pdf-to-100kb': 'Aim for a 100KB PDF target for forms and application portals, with compression running locally in your browser.',

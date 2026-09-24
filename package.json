@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "seo:audit": "node scripts/audit-seo.mjs",
+    "test:pdf-to-powerpoint": "node --experimental-strip-types --test tests/pdf-to-powerpoint-*.test.ts",
     "test:pdf-to-word": "node --experimental-strip-types --test tests/pdf-to-word-*.test.ts"
   },
   "dependencies": {

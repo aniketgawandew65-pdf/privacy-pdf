@@ -131,6 +131,7 @@ const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy').then((m) =
 const Terms = lazy(() => import('./components/Terms').then((m) => ({ default: m.Terms })));
 const PdfToCsv = lazy(() => import('./components/PdfToCsv').then((m) => ({ default: m.PdfToCsv })));
 const DocumentDataExtractor = lazy(() => import('./components/DocumentDataExtractor').then((m) => ({ default: m.DocumentDataExtractor })));
+const PdfToPowerPoint = lazy(() => import('./components/PdfToPowerPoint').then((m) => ({ default: m.PdfToPowerPoint })));
 const PdfToWord = lazy(() => import('./components/PdfToWord').then((m) => ({ default: m.PdfToWord })));
 const PdfToMarkdown = lazy(() => import('./components/PdfToMarkdown').then((m) => ({ default: m.PdfToMarkdown })));
 const CsvToPdf = lazy(() => import('./components/CsvToPdf').then((m: any) => ({ default: m.CsvToPdf || m.default })));
@@ -157,6 +158,7 @@ interface NavTool {
 
 const TOOLS_LIST: NavTool[] = [
   { name: 'Compress', path: '/compress-pdf', category: 'organize', icon: Sliders },
+  { name: 'PDF to PowerPoint', path: '/pdf-to-powerpoint', category: 'convert', icon: FileText },
   { name: 'PDF to Word', path: '/pdf-to-word', category: 'convert', icon: FileText },
   { name: 'Merge', path: '/merge-pdf', category: 'organize', icon: Files },
   { name: 'Split', path: '/split-pdf', category: 'organize', icon: Scissors },
@@ -1849,6 +1851,7 @@ export default function App() {
               <Route path="/page-numbers" element={<PageNumbers file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-csv" element={<PdfToCsv file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/document-data-extractor" element={<DocumentDataExtractor file={activeFile} onFileChange={handleSingleFileChange} />} />
+              <Route path="/pdf-to-powerpoint" element={<PdfToPowerPoint file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-word" element={<PdfToWord file={activeFile} onFileChange={handleSingleFileChange} />} />
               <Route path="/pdf-to-markdown" element={<PdfToMarkdown file={activeFile} onFileChange={handleSingleFileChange} />} />
 
