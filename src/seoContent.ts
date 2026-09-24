@@ -4396,6 +4396,20 @@ export function renderGuide(path: string): string {
   if (!guide) return '';
   return `<section class="seo-guide" aria-label="Tool instructions"><h2>${escapeHtml(guide.title)}</h2><p>${escapeHtml(guide.intro)}</p><ol>${guide.steps.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ol><div class="guide-example"><h3>A practical example</h3><p>${escapeHtml(guide.example)}</p></div><h3>Common questions</h3>${guide.questions.map(([q,a])=>`<details><summary>${escapeHtml(q)}</summary><p>${escapeHtml(a)}</p></details>`).join('')}<nav class="guide-related" aria-label="Related tools and guides">${guide.related.map(([p,l])=>link(p,l)).join('')}</nav></section>`;
 }
+function relatedArticlesFor(article: Article): Article[] {
+  const candidates = ARTICLES.filter(candidate => candidate.slug !== article.slug);
+
+  const sameTool = candidates.filter(candidate => candidate.tool === article.tool);
+  const sameCategory = candidates.filter(
+    candidate =>
+      candidate.tool !== article.tool &&
+      Boolean(article.category) &&
+      candidate.category === article.category
+  );
+
+  return [...sameTool, ...sameCategory].slice(0, 6);
+}
+
 export function renderBlog(path: string): string {
   if (path === '/blog') return `<section class="blog-list" aria-label="PDF guides">${ARTICLES.map(a=>`<article><p class="guide-category">${escapeHtml(a.category || 'PRACTICAL PDF GUIDE')}</p><h2>${link('/blog/'+a.slug,a.title)}</h2><p>${escapeHtml(a.description)}</p>${link('/blog/'+a.slug,(a.comparison || a.datasetUrl) ? 'Read research →' : 'Read guide →')}</article>`).join('')}</section>`;
   const article = ARTICLES.find(a=>path==='/blog/'+a.slug);
@@ -4416,7 +4430,7 @@ export function renderBlog(path: string): string {
     ? `<section class="research-sources"><h2>Official sources reviewed</h2><ol>${article.sources.map(source=>`<li><a href="${escapeHtml(source.url)}"${source.url.startsWith('/') ? '' : ' target="_blank" rel="noopener noreferrer"'}>${escapeHtml(source.label)}</a><span>${escapeHtml(source.detail)}</span></li>`).join('')}</ol></section>`
     : '';
 
-  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
+  return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${relatedArticlesFor(article).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
   if(path==='/blog') return {path,title:'PDF guides: AI, edit, text, code & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for AI PDF summarization, visual editing, text and code conversion, OCR, redaction, password security and local privacy.',subheading:'Straightforward answers. Tools you can use right away.'};
