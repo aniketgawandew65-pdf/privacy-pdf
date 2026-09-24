@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-password-protect-pdf-locally': '2026-09-24',
+  '/blog/pdf-open-password-vs-permissions-password': '2026-09-24',
   '/blog/fill-interactive-pdf-form-vs-flat-pdf': '2026-09-24',
   '/blog/flatten-pdf-form-fields-vs-keep-editable': '2026-09-24',
   '/blog/resize-pdf-to-a4-or-letter': '2026-09-24',
@@ -94,6 +96,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/grayscale-pdf': '2026-09-24',
   '/resize-pdf': '2026-09-24',
   '/fill-pdf': '2026-09-24',
+  '/protect-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -245,10 +248,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/protect-pdf': {
     path: '/protect-pdf',
-    title: 'Password Protect PDF Online — 128-bit Local Encryption | 1into1',
-    description: 'Add standard 128-bit password protection to a PDF directly in your browser. Create an encrypted copy without sending the document to a processing server.',
+    title: 'Password Protect PDF Locally — 128-bit Encryption | 1into1',
+    description: 'Encrypt a PDF with a document-open password locally in your browser using 128-bit protection. The file is processed on-device and the original page content is preserved.',
     heading: 'Protect PDF',
-    subheading: 'Add standard 128-bit password protection to your PDF directly on your device.',
+    subheading: 'Add a document-open password locally with 128-bit PDF encryption, without uploading the file for processing.',
   },
   '/unlock-pdf': {
     path: '/unlock-pdf',

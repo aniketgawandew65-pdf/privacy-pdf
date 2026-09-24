@@ -426,6 +426,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
 
 
 
+  '/protect-pdf': {
+    title: 'How to password-protect a PDF locally',
+    intro: 'Create an encrypted copy that requires a password to open. The current 1into1 Protect PDF workflow uses 128-bit PDF encryption locally and does not expose separate printing, copying or editing-permission controls.',
+    steps: [
+      'Choose the PDF you want to protect.',
+      'Enter and confirm the document password.',
+      'Run Encrypt & Protect PDF.',
+      'Download the protected copy.',
+      'Close and reopen the downloaded file in a normal PDF reader to verify that the password is required.'
+    ],
+    example: 'A confidential report can be protected with a password before it is shared. The recipient needs that password to open the encrypted copy.',
+    questions: [
+      ['What kind of password does 1into1 add?', 'The current tool uses the entered password as the document-open/user password and also as the owner password while applying 128-bit PDF encryption.'],
+      ['Can I separately block printing, copying or editing?', 'No. The current Protect PDF interface does not expose separate permissions controls for printing, copying or editing.'],
+      ['Does protection rasterize or OCR the PDF?', 'No. The qpdf-based protection worker performs a content-preserving encryption rewrite rather than rendering pages into images.'],
+      ['Can I protect a PDF that already has a password?', 'Unlock the existing protection first, then apply the new password.'],
+      ['Is the PDF uploaded?', 'The protection workflow runs locally in a dedicated browser Worker.']
+    ],
+    related: [
+      ['/blog/how-to-password-protect-pdf-locally','Password-protect a PDF locally'],
+      ['/blog/pdf-open-password-vs-permissions-password','Open password vs permissions password'],
+      ['/unlock-pdf','Remove existing PDF password protection'],
+      ['/sanitize-pdf','Remove hidden data before sharing'],
+      ['/redact-pdf','Permanently redact visible sensitive content']
+    ]
+  },
+
   '/edit-metadata': {
     title: 'How to edit PDF title, author, subject and keywords',
     intro: 'Review and change selected document metadata fields locally before saving a new PDF copy.',
@@ -933,31 +960,6 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ["/remove-pages","Delete unwanted pages"],
       ["/organize-pdf","Reorder PDF pages"],
       ["/compress-pdf","Compress the resulting PDF"]
-    ]
-  },
-
-  "/protect-pdf": {
-    title: "How to password-protect a PDF locally",
-    intro: "Add standard 128-bit password protection to a PDF in your browser and download an encrypted copy without sending the document to a processing server.",
-    steps: [
-      "Choose the PDF you want to protect.",
-      "Enter the password you want the protected copy to require.",
-      "Confirm the password.",
-      "Create the encrypted PDF.",
-      "Download the protected copy and test the password before sharing it."
-    ],
-    example: "If you need to send a private document by email, create a password-protected copy first, verify that it opens only with the password and communicate the password separately when appropriate.",
-    questions: [
-      ["What protection does this tool apply?", "The current workflow applies standard 128-bit PDF password protection."],
-      ["Is the PDF uploaded for encryption?", "No normal document-processing upload is required. Encryption runs locally in your browser."],
-      ["Should I test the protected PDF?", "Yes. Open the downloaded copy and confirm that the password works before sharing or deleting anything."],
-      ["Does password protection remove sensitive information?", "No. Encryption controls access to the PDF. Use Permanent Redaction to remove visible confidential content and Deep Sanitize to remove hidden document data."]
-    ],
-    related: [
-      ["/offline-pdf-redaction","Permanently redact confidential content"],
-      ["/sanitize-pdf","Deep-sanitize hidden document data"],
-      ["/unlock-pdf","Unlock a PDF when you know the password"],
-      ["/edit-metadata","Review PDF metadata"]
     ]
   },
 
@@ -1802,6 +1804,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'how-to-password-protect-pdf-locally',
+    title: 'How to Password-Protect a PDF Locally',
+    description: 'Encrypt a PDF with a password in your browser, understand what the password protects, and verify the finished file before sharing it.',
+    tool: '/protect-pdf',
+    toolLabel: 'Protect a PDF with a password',
+    category: 'PDF SECURITY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A document-open password controls access to the PDF',
+        paragraphs: [
+          'A PDF document-open password, also called a user password, requires the recipient to enter the password before the file can be opened in a conforming reader.',
+          'Adobe distinguishes this from a permissions password, which is used to control or change restrictions such as printing, editing or copying.'
+        ]
+      },
+      {
+        title: '1into1 applies 128-bit password protection locally',
+        paragraphs: [
+          'The Protect PDF tool sends the original browser File to a dedicated local Worker and applies qpdf-based 128-bit protection without first uploading the document to a normal processing server.',
+          'The entered password is used as both the user password and owner password in the current implementation.'
+        ]
+      },
+      {
+        title: 'The page content is preserved rather than rasterized',
+        paragraphs: [
+          'Protection is an encryption rewrite, not a page-conversion workflow. The tool does not intentionally render every page to JPEG, run OCR or flatten the visible page content as part of password protection.',
+          'That makes Protect PDF different from sanitization, grayscale conversion or some compatibility fallbacks that rebuild rendered pages.'
+        ]
+      },
+      {
+        title: 'Use a strong password and share it separately',
+        paragraphs: [
+          'A weak password can undermine otherwise valid encryption. Use a password that is difficult to guess and avoid reusing a password already associated with the same recipient or document.',
+          'When practical, send the protected file and its password through different communication channels so the password is not bundled with the document itself.'
+        ]
+      },
+      {
+        title: 'Verify the downloaded copy before sending it',
+        paragraphs: [
+          'Close the protected file, reopen it in the PDF viewer that matters to your recipient and confirm that the password prompt appears.',
+          'Keep the original unprotected file separately. If the source PDF is already encrypted, unlock it first before applying a new password.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Encrypt PDFs with passwords', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/protect-with-passwords/add-passwords-to-pdfs.html', detail: 'Adobe documents document-open passwords and separate permissions controls for printing, editing and copying.' },
+      { label: 'Adobe PDF Services — PDF document security and permissions', url: 'https://developer.adobe.com/document-services/docs/overview/security', detail: 'Explains the distinction between document-open/user passwords and permissions/owner passwords.' }
+    ]
+  },
+  {
+    slug: 'pdf-open-password-vs-permissions-password',
+    title: 'PDF Open Password vs Permissions Password: What Is the Difference?',
+    description: 'Understand the difference between a PDF document-open password and a permissions or owner password, and what the current 1into1 Protect PDF tool actually applies.',
+    tool: '/protect-pdf',
+    toolLabel: 'Open Protect PDF',
+    category: 'PDF SECURITY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A document-open password controls who can open the file',
+        paragraphs: [
+          'The document-open password is the credential a reader asks for before displaying the encrypted PDF. Adobe also refers to it as the user password.',
+          'This is the password type most people mean when they say they want to password-protect a PDF before sharing it.'
+        ]
+      },
+      {
+        title: 'A permissions password controls security settings',
+        paragraphs: [
+          'A permissions password, also called an owner or master password, is used with restrictions such as whether a reader may print, edit or copy PDF content.',
+          'Adobe treats those restrictions separately from the password that is required simply to open the document.'
+        ]
+      },
+      {
+        title: '1into1 currently uses one password for both roles',
+        paragraphs: [
+          'The current Protect PDF implementation passes the same user-entered password as both the user password and owner password while applying 128-bit encryption.',
+          'The interface does not currently expose separate permission switches or a second independent owner-password field.'
+        ]
+      },
+      {
+        title: 'Do not assume permissions restrictions are enforced',
+        paragraphs: [
+          'Because 1into1 does not expose granular permission settings, do not describe the current tool as separately disabling printing, copying or editing.',
+          'When a workflow specifically requires those permission controls, use a PDF security tool that lets you configure them explicitly.'
+        ]
+      },
+      {
+        title: 'Password protection and redaction solve different problems',
+        paragraphs: [
+          'Encryption controls access to the file. It does not remove confidential text that becomes visible after an authorized recipient opens the document.',
+          'Use permanent redaction to remove visible sensitive information and sanitization to remove broader hidden data when those are part of the sharing requirement.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe PDF Services — Protect PDF', url: 'https://developer.adobe.com/document-services/docs/overview/pdf-services-api/howtos/protect-pdf', detail: 'Adobe documents user passwords, owner passwords, AES encryption and optional granular PDF permissions.' },
+      { label: 'Adobe Acrobat — Password security policies', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/security-policies/create-password-policy.html', detail: 'Adobe documents document-open and permissions-password settings as separate security concepts.' }
     ]
   },
   {
@@ -3151,7 +3255,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: forms, resize, grayscale, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for filling and flattening PDF forms, resizing pages, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: password security, forms, resize & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF password protection, forms, resizing, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
