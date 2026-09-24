@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/remove-known-pdf-password-locally': '2026-09-24',
+  '/blog/what-changes-when-you-unlock-pdf': '2026-09-24',
   '/blog/how-to-password-protect-pdf-locally': '2026-09-24',
   '/blog/pdf-open-password-vs-permissions-password': '2026-09-24',
   '/blog/fill-interactive-pdf-form-vs-flat-pdf': '2026-09-24',
@@ -97,6 +99,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/resize-pdf': '2026-09-24',
   '/fill-pdf': '2026-09-24',
   '/protect-pdf': '2026-09-24',
+  '/unlock-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -255,10 +258,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/unlock-pdf': {
     path: '/unlock-pdf',
-    title: 'Unlock Protected PDF — Remove PDF Password Locally',
-    description: 'Decrypt and remove password restrictions from your PDF files without server logs.',
+    title: 'Unlock PDF Locally — Remove a Known PDF Password | 1into1',
+    description: 'Remove known password protection from a PDF locally in your browser. Enter the current password, decrypt the file, and download a fresh unencrypted image-based copy.',
     heading: 'Unlock PDF',
-    subheading: 'Decrypt and save an unrestricted copy entirely on your machine.',
+    subheading: 'Remove a password you already know and save a fresh unencrypted copy locally on your device.',
   },
   '/edit-metadata': {
     path: '/edit-metadata',
