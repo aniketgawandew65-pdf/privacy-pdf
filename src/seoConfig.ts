@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/extract-images-from-pdf-without-screenshots': '2026-09-24',
+  '/blog/extract-images-vs-pdf-to-image': '2026-09-24',
   '/blog/how-to-straighten-crooked-scanned-pdf': '2026-09-24',
   '/blog/deskew-pdf-before-ocr': '2026-09-24',
   '/blog/how-to-print-pdf-as-booklet': '2026-09-24',
@@ -73,6 +75,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/repair-pdf': '2026-09-24',
   '/booklet-pdf': '2026-09-24',
   '/deskew-pdf': '2026-09-24',
+  '/extract-images': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -308,10 +311,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/extract-images': {
     path: '/extract-images',
-    title: 'Extract Images from PDF Online Free — Original Quality',
-    description: 'Extract photos, figures, and embedded images from PDF documents without quality loss. Download as PNG or ZIP bundle in-browser with zero uploads.',
+    title: 'Extract Images from PDF Online — Full Resolution | 1into1',
+    description: 'Extract embedded raster images from PDFs at their decoded pixel dimensions and download them as PNG files or a ZIP bundle. Processing stays in your browser.',
     heading: 'Extract Embedded Images from PDF',
-    subheading: 'Extract embedded photos and graphics in their original dimensions and resolution.',
+    subheading: 'Recover embedded raster images at their decoded pixel dimensions instead of taking page screenshots.',
   },
   '/compare-pdf': {
     path: '/compare-pdf',
