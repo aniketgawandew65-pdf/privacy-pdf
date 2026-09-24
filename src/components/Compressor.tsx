@@ -50,7 +50,10 @@ type CompressionLevel = 'recommended' | 'extreme' | 'target';
 
 export function Compressor({ file, onFileChange }: CompressorProps) {
   const { pathname } = useLocation();
-  const routeTarget = Number(pathname.match(/compress-pdf-to-(\d+)kb/)?.[1]) || null;
+  const routeTargetMatch = pathname.match(/compress-pdf-to-(\d+)(kb|mb)$/);
+  const routeTarget = routeTargetMatch
+    ? Number(routeTargetMatch[1]) * (routeTargetMatch[2] === 'mb' ? 1024 : 1)
+    : null;
   const [level, setLevel] = useState<CompressionLevel>('target');
   const [targetKb, setTargetKb] = useState(routeTarget || 100);
   const [totalPages, setTotalPages] = useState<number>(1);
