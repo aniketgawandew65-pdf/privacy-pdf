@@ -72,6 +72,34 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['What about password-protected PDFs?', 'Unlock a protected file with its password before merging it. Keep signed originals because modifying a signed document can invalidate its signature.']
     ], related: [['/organize-pdf','Reorder individual pages'], ['/compress-pdf','Compress the merged result'], ['/split-pdf','Extract the pages you need']]
   },
+  '/fill-pdf': {
+    title: 'How to fill and flatten an interactive PDF form',
+    intro: 'Fill supported AcroForm fields directly in your browser. The current tool edits text fields, checkboxes and dropdowns, then lets you keep the form interactive or flatten the filled fields into a static finished copy.',
+    steps: [
+      'Choose a PDF that already contains interactive form fields.',
+      'Wait while the tool detects supported text fields, checkboxes and dropdowns.',
+      'Enter or select the values you need.',
+      'Leave Flatten Form enabled for a static finished copy, or turn it off when the form should stay editable.',
+      'Save the PDF, reopen it, and confirm the filled values and form behavior before submitting or sharing it.'
+    ],
+    example: 'A fillable application PDF with name and address text fields, an agreement checkbox and a country dropdown can be completed in the browser. Flatten it for a final static copy, or keep it interactive if the recipient still needs editable fields.',
+    questions: [
+      ['Which fields can 1into1 fill?', 'The current Fill PDF tool supports AcroForm text fields, checkboxes and dropdowns. Other field types are not presented as editable inputs by this workflow.'],
+      ['Can it fill a scanned or flat PDF with no form fields?', 'No. If no native AcroForm fields are detected, use a visual text, annotation or signature workflow instead of the interactive form filler.'],
+      ['What does Flatten Form do?', 'Flattening keeps the filled field appearance in the PDF while removing the interactive form widgets so the fields are no longer normal editable form controls.'],
+      ['Can I keep the PDF form editable?', 'Yes. Turn Flatten Form off before saving. The output keeps the interactive AcroForm so supported fields remain form controls.'],
+      ['Does flattening make the entire PDF impossible to edit?', 'No. Flattening removes normal form-field interactivity; it should not be treated as DRM or a guarantee that specialized PDF editors cannot alter page content.'],
+      ['Is the PDF uploaded?', 'The form-filling workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/fill-interactive-pdf-form-vs-flat-pdf','Interactive PDF form vs flat PDF'],
+      ['/blog/flatten-pdf-form-fields-vs-keep-editable','Flatten fields or keep them editable'],
+      ['/sign-pdf','Add a drawn signature'],
+      ['/annotate-pdf','Add text and annotations to a flat page'],
+      ['/protect-pdf','Password-protect a finished copy']
+    ]
+  },
+
   '/sign-pdf': {
     title: 'Place a drawn signature on your PDF',
     intro: 'Draw a signature and position it on the page using the preview. The local tool does not require uploading your PDF.',
@@ -81,7 +109,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is this a certificate-based digital signature?', 'No. This tool places a visual signature on a PDF. It does not issue a signing certificate or provide identity verification.'],
       ['Can I draw with my finger?', 'Yes, the drawing interface supports touch. Review the downloaded PDF because the final placement matters more than how large it looked on your phone screen.'],
       ['Will the recipient accept it?', 'Check the recipient’s instructions. Some workflows require a specific signing service or certificate rather than a drawn signature.']
-    ], related: [['/fill-pdf','Fill supported PDF form fields'], ['/edit-pdf','Add text and shapes to a PDF'], ['/protect-pdf','Password-protect a copy']]
+    ], related: [['/blog/fill-interactive-pdf-form-vs-flat-pdf','Interactive form vs flat PDF'], ['/fill-pdf','Fill supported PDF form fields'], ['/edit-pdf','Add text and shapes to a PDF'], ['/protect-pdf','Password-protect a copy']]
   },
   '/heic-to-jpg': {
     title: 'Convert an iPhone HEIC photo to JPG',
@@ -1777,6 +1805,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'fill-interactive-pdf-form-vs-flat-pdf',
+    title: 'Fillable PDF Form vs Flat PDF: Why the Fields Matter',
+    description: 'Learn how an interactive AcroForm differs from a flat or scanned PDF, which field types 1into1 can fill, and what to do when no native fields exist.',
+    tool: '/fill-pdf',
+    toolLabel: 'Fill a PDF form',
+    category: 'PDF FORM GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'An interactive PDF form contains real form fields',
+        paragraphs: [
+          'A fillable PDF contains interactive controls that a PDF reader can identify separately from the visible page. Adobe describes fillable fields such as text inputs, checkboxes and other selectable controls that react when the pointer moves over them.',
+          '1into1 reads the PDF AcroForm structure and turns supported fields into browser inputs so you can fill them without manually positioning text over the page.'
+        ]
+      },
+      {
+        title: 'The current 1into1 filler supports three field types',
+        paragraphs: [
+          'The Fill PDF tool currently edits AcroForm text fields, checkboxes and dropdowns. It reads existing values where available and writes your new values back into those supported controls.',
+          'Other field types are not presented as editable controls in this workflow, so a document can contain form fields that 1into1 detects but does not currently let you change.'
+        ]
+      },
+      {
+        title: 'A flat PDF can look like a form without being fillable',
+        paragraphs: [
+          'A scanned application or exported document may contain boxes and lines that visually resemble a form even though there are no interactive fields underneath.',
+          'Adobe calls these flat forms: the page has visible form-like content but not native fillable controls. 1into1 Fill PDF will report that no interactive form fields were detected in that case.'
+        ]
+      },
+      {
+        title: 'Use a visual editing workflow for flat forms',
+        paragraphs: [
+          'When a PDF is flat, an AcroForm filler has nothing to populate. Use a tool that places visible text, annotations or a drawn signature onto the page instead.',
+          'If you need a reusable interactive form rather than a one-time completed copy, the document must first be prepared with actual form fields.'
+        ]
+      },
+      {
+        title: 'Check the saved PDF in the viewer that matters',
+        paragraphs: [
+          'After filling the form, preview or reopen the downloaded file and verify the text, checkbox states and dropdown selections.',
+          'If the recipient requires the fields to remain editable, save without flattening. If the form is final, flattening can remove the normal interactive controls while keeping the filled appearance.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Check if a PDF form is fillable', url: 'https://helpx.adobe.com/acrobat/desktop/work-with-pdf-forms/fill-sign-forms/check-fillability.html', detail: 'Adobe explains how interactive fillable fields differ from ordinary page content.' },
+      { label: 'Adobe Acrobat — Fill and sign flat forms', url: 'https://helpx.adobe.com/acrobat/desktop/work-with-pdf-forms/fill-sign-forms/flat-forms.html', detail: 'Adobe defines flat forms as scanned or non-interactive PDFs and uses a different visual fill-and-sign workflow for them.' }
+    ]
+  },
+  {
+    slug: 'flatten-pdf-form-fields-vs-keep-editable',
+    title: 'Flatten PDF Form Fields or Keep Them Editable?',
+    description: 'Understand what PDF form flattening changes, when to keep an AcroForm interactive, and what the 1into1 Flatten Form option actually does.',
+    tool: '/fill-pdf',
+    toolLabel: 'Fill and flatten a form',
+    category: 'PDF FORM GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Keeping the form editable preserves interactive controls',
+        paragraphs: [
+          'When Flatten Form is turned off, 1into1 saves the filled PDF while retaining the AcroForm structure. Supported fields remain normal form controls that a compatible PDF reader can continue to edit.',
+          'Choose this when the recipient still needs to revise answers, complete additional fields or reuse the form.'
+        ]
+      },
+      {
+        title: 'Flattening removes normal form-field interactivity',
+        paragraphs: [
+          'When flattening is enabled, the filled field appearance is applied to the page and the interactive form widgets are removed from the finished copy.',
+          'Adobe describes flattening similarly: the graphical appearance remains, but the form field is no longer interactive.'
+        ]
+      },
+      {
+        title: '1into1 also cleans stale form-widget references',
+        paragraphs: [
+          'After flattening, the tool removes remaining Widget annotation references that can be left behind by some form structures, while preserving unrelated normal annotations when possible.',
+          'It then copies the flattened pages into a fresh PDF document so stale AcroForm objects from the source are not intentionally carried into the static finished copy.'
+        ]
+      },
+      {
+        title: 'Flattening is not the same as document security',
+        paragraphs: [
+          'A flattened field is no longer a normal interactive form control, but flattening should not be treated as encryption, access control or a promise that no PDF editor can alter the page.',
+          'Use password protection and appropriate sharing controls when you need access restrictions rather than only a static form appearance.'
+        ]
+      },
+      {
+        title: 'Keep an editable original before flattening',
+        paragraphs: [
+          'Flattening is best treated as a finalization step. Keep the original interactive form separately if you may need to change the answers later.',
+          'Adobe likewise recommends retaining the original because interactive elements cannot simply be restored from a flattened final copy.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — How to flatten a PDF', url: 'https://www.adobe.com/in/acrobat/roc/blog/how-to-flatten-a-pdf.html', detail: 'Adobe explains flattening as integrating interactive elements into static document content and recommends saving an original copy first.' },
+      { label: 'Adobe AEM Forms — Flattening forms', url: 'https://helpx.adobe.com/pdf/aem-forms/6-3/ddxRef.pdf', detail: 'Adobe documentation defines flattened form fields as retaining graphical appearance while no longer remaining interactive.' }
+    ]
+  },
+  {
     slug: 'resize-pdf-to-a4-or-letter',
     title: 'How to Resize a PDF to A4 or US Letter',
     description: 'Standardize PDF page dimensions to A4 or US Letter, understand why margins can appear, and keep portrait and landscape pages oriented correctly.',
@@ -3021,7 +3151,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: resize, grayscale, metadata, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for resizing PDF pages, grayscale and black-and-white output, dark mode, metadata, OCR, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: forms, resize, grayscale, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for filling and flattening PDF forms, resizing pages, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
