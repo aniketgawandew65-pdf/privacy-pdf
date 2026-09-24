@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/extract-pdf-tables-to-excel': '2026-09-24',
+  '/blog/scanned-pdf-tables-to-excel-ocr': '2026-09-24',
   '/blog/pdf-to-markdown-for-rag': '2026-09-24',
   '/blog/scanned-pdf-to-markdown-ocr-first': '2026-09-24',
   '/blog/pdf-to-word-without-losing-formatting': '2026-09-24',
@@ -55,7 +57,8 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/blog/pdf-privacy-comparison-2026': '2026-09-23',
   '/pdf-to-word': '2026-09-24',
   '/bank-statement-to-excel': '2026-09-24',
-  '/document-data-extractor': '2026-09-21',
+  '/document-data-extractor': '2026-09-24',
+  '/pdf-to-csv': '2026-09-24',
   '/private-pii-secrets-auto-redactor': '2026-09-23',
   '/sanitize-pdf': '2026-09-21',
   '/ocr-pdf': '2026-09-21',
