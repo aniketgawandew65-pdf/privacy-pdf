@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-reorder-pdf-pages-visually': '2026-09-24',
+  '/blog/rotate-selected-pdf-pages-vs-whole-document': '2026-09-24',
   '/blog/how-to-rotate-pdf-permanently': '2026-09-24',
   '/blog/rotate-pdf-vs-deskew': '2026-09-24',
   '/blog/remove-known-pdf-password-locally': '2026-09-24',
@@ -103,6 +105,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/protect-pdf': '2026-09-24',
   '/unlock-pdf': '2026-09-24',
   '/rotate-pdf': '2026-09-24',
+  '/organize-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -282,10 +285,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/organize-pdf': {
     path: '/organize-pdf',
-    title: 'Organize PDF Pages — Reorder, Rotate & Delete Pages Free',
-    description: 'Visually organize, reorder, rotate, and delete pages from PDF documents locally in your browser. 100% private, zero server uploads.',
+    title: 'Organize PDF Pages — Reorder, Rotate & Delete | 1into1',
+    description: 'Visually reorder PDF pages, rotate individual pages in 90-degree steps, and delete unwanted pages locally in your browser before downloading a new organized copy.',
     heading: 'Organize PDF Pages',
-    subheading: 'Drag and drop page thumbnails to reorder, rotate, or delete pages in memory.',
+    subheading: 'Drag page thumbnails into order, rotate individual pages, or remove pages before saving a new PDF.',
   },
   '/sanitize-pdf': {
     path: '/sanitize-pdf',
