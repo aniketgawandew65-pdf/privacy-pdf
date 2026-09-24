@@ -150,30 +150,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/edit-pdf': {
-    title: 'How to edit a PDF with text, whiteout areas and shapes',
-    intro: 'Make visual changes to a PDF directly in your browser. Add text, cover existing content and place or resize visual elements without sending the document to a processing server.',
+    title: 'How to add text overlays and whiteout areas to a PDF',
+    intro: 'Use the visual editor when you need to place new text on top of a PDF or cover a visible area with a white rectangle. This is overlay editing: it does not rewrite the original text objects underneath.',
     steps: [
-      'Choose the PDF you want to edit.',
-      'Add a text box or whiteout area.',
-      'Drag the item to the correct position on the PDF.',
-      'Resize it using the corner handles.',
-      'Adjust text style, size and colour when needed.',
-      'Move between pages and repeat your edits.',
-      'Save and download the edited PDF.'
+      'Open the PDF in the visual editor and go to the page you want to change.',
+      'Choose Add Text for a movable text box or Whiteout for a plain white rectangle.',
+      'Drag the overlay into position and resize it with the edge or corner handles.',
+      'For text, choose font, size, color, style, alignment and whether to erase the visible area underneath with a white background.',
+      'Repeat on other pages as needed.',
+      'Save changes and inspect the downloaded PDF before replacing the original.'
     ],
-    example: 'To correct a visible value in a PDF, place a whiteout area over the old value and add a new text box in the same position. The rest of the original page remains unchanged.',
+    example: 'To correct a visible name on a non-sensitive form, place a whiteout rectangle over the old visible name and add a new text overlay above it. Do not use this technique to hide confidential information that must be permanently removed.',
     questions: [
-      ['Does this replace the original PDF text?', 'This editor makes visual PDF changes using text and overlay elements. It does not attempt to rebuild the original document layout like a Word processor.'],
-      ['Does my PDF upload to a processing server?', 'Core editing runs locally in your browser, so the PDF does not need to be uploaded for processing.'],
-      ['Can I edit scanned PDFs?', 'Yes. Because the editor uses visual text and overlay elements, it can also be used on scanned PDF pages.'],
-      ['Can I edit more than one page?', 'Yes. Use the page controls to move between pages and place edits on the pages you need.']
+      ['Does this edit the original PDF text object?', 'No. The current workflow adds new overlays on top of the page. A white background can visually cover what is underneath, but the tool does not rewrite the original text object in place.'],
+      ['What can I add?', 'The current overlay model supports text boxes and whiteout rectangles. It does not currently add arbitrary images or generic vector shapes.'],
+      ['Can I move and resize overlays?', 'Yes. Text and whiteout items can be dragged and resized. Keyboard arrow keys can also nudge a selected item for fine positioning.'],
+      ['What text formatting is available?', 'Text overlays support Helvetica, Times or Courier; font sizes from 1 to 72; color; bold; italic; underline; strikethrough; left/center/right alignment; and an optional white background.'],
+      ['Does it support Unicode text overlays?', 'Not reliably on every path. For clean unencrypted PDFs, the native vector save path keeps printable ASCII characters and strips other characters from overlay text.'],
+      ['Is Whiteout secure redaction?', 'No. Whiteout is a visual covering tool. Use the dedicated Redact PDF workflow when sensitive content must be removed rather than merely covered.'],
+      ['Does the editor preserve the original PDF structure?', 'Clean unencrypted PDFs use a native overlay path that keeps the source PDF and adds the overlays. Protected or incompatible PDFs can fall back to a rendered image-based reconstruction.'],
+      ['Is the PDF uploaded?', 'The editing workflow runs locally in your browser.']
     ],
     related: [
-      ['/annotate-pdf','Draw and annotate a PDF'],
-      ['/sign-pdf','Add a signature'],
-      ['/watermark-pdf','Add a watermark'],
-      ['/pdf-to-word','Convert PDF to editable Word without uploading'],
-      ['/redact-pdf','Permanently redact content']
+      ['/blog/add-text-to-pdf-with-visual-overlays','Add text to a PDF with visual overlays'],
+      ['/blog/pdf-whiteout-vs-redaction','Whiteout vs secure redaction'],
+      ['/redact-pdf','Permanently redact sensitive PDF content'],
+      ['/fill-pdf','Fill existing interactive form fields'],
+      ['/edit-metadata','Edit PDF title, author and metadata']
     ]
   },
 
@@ -297,37 +300,6 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['/html-to-pdf','Convert self-contained HTML to PDF'],
       ['/code-to-pdf','Create a source-code PDF'],
       ['/ocr-pdf','Add searchable text to an image-based PDF afterward']
-    ]
-  },
-
-  '/visual-editor': {
-    title: 'How to add text overlays and whiteout areas to a PDF',
-    intro: 'Use the visual editor when you need to place new text on top of a PDF or cover a visible area with a white rectangle. This is overlay editing: it does not rewrite the original text objects underneath.',
-    steps: [
-      'Open the PDF in the visual editor and go to the page you want to change.',
-      'Choose Add Text for a movable text box or Whiteout for a plain white rectangle.',
-      'Drag the overlay into position and resize it with the edge or corner handles.',
-      'For text, choose font, size, color, style, alignment and whether to erase the visible area underneath with a white background.',
-      'Repeat on other pages as needed.',
-      'Save changes and inspect the downloaded PDF before replacing the original.'
-    ],
-    example: 'To correct a visible name on a non-sensitive form, place a whiteout rectangle over the old visible name and add a new text overlay above it. Do not use this technique to hide confidential information that must be permanently removed.',
-    questions: [
-      ['Does this edit the original PDF text object?', 'No. The current workflow adds new overlays on top of the page. A white background can visually cover what is underneath, but the tool does not rewrite the original text object in place.'],
-      ['What can I add?', 'The current overlay model supports text boxes and whiteout rectangles. It does not currently add arbitrary images or generic vector shapes.'],
-      ['Can I move and resize overlays?', 'Yes. Text and whiteout items can be dragged and resized. Keyboard arrow keys can also nudge a selected item for fine positioning.'],
-      ['What text formatting is available?', 'Text overlays support Helvetica, Times or Courier; font sizes from 1 to 72; color; bold; italic; underline; strikethrough; left/center/right alignment; and an optional white background.'],
-      ['Does it support Unicode text overlays?', 'Not reliably on every path. For clean unencrypted PDFs, the native vector save path keeps printable ASCII characters and strips other characters from overlay text.'],
-      ['Is Whiteout secure redaction?', 'No. Whiteout is a visual covering tool. Use the dedicated Redact PDF workflow when sensitive content must be removed rather than merely covered.'],
-      ['Does the editor preserve the original PDF structure?', 'Clean unencrypted PDFs use a native overlay path that keeps the source PDF and adds the overlays. Protected or incompatible PDFs can fall back to a rendered image-based reconstruction.'],
-      ['Is the PDF uploaded?', 'The editing workflow runs locally in your browser.']
-    ],
-    related: [
-      ['/blog/add-text-to-pdf-with-visual-overlays','Add text to a PDF with visual overlays'],
-      ['/blog/pdf-whiteout-vs-redaction','Whiteout vs secure redaction'],
-      ['/redact-pdf','Permanently redact sensitive PDF content'],
-      ['/fill-pdf','Fill existing interactive form fields'],
-      ['/edit-metadata','Edit PDF title, author and metadata']
     ]
   },
 
@@ -2051,7 +2023,7 @@ export const ARTICLES: Article[] = [
     slug: 'add-text-to-pdf-with-visual-overlays',
     title: 'How to Add Text to a PDF with Visual Overlays',
     description: 'Place, move, resize and format new text on top of existing PDF pages locally, and understand why overlay editing is different from changing the original text object.',
-    tool: '/visual-editor',
+    tool: '/edit-pdf',
     toolLabel: 'Open the Visual PDF Editor',
     category: 'PDF EDITING GUIDE',
     published: '2026-09-24',
@@ -2102,7 +2074,7 @@ export const ARTICLES: Article[] = [
     slug: 'pdf-whiteout-vs-redaction',
     title: 'PDF Whiteout vs Redaction: Why Covering Text Is Not Enough',
     description: 'Learn the difference between visually covering PDF content with a white rectangle and permanently removing sensitive information with a real redaction workflow.',
-    tool: '/visual-editor',
+    tool: '/edit-pdf',
     toolLabel: 'Open the Visual PDF Editor',
     category: 'PDF PRIVACY GUIDE',
     published: '2026-09-24',
