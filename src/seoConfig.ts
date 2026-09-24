@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/how-to-print-pdf-as-booklet': '2026-09-24',
+  '/blog/booklet-imposition-vs-two-pages-per-sheet': '2026-09-24',
   '/blog/pdf-wont-open-corrupted-or-viewer-problem': '2026-09-24',
   '/blog/what-pdf-repair-can-and-cannot-recover': '2026-09-24',
   '/blog/bates-numbering-for-legal-discovery': '2026-09-24',
@@ -67,6 +69,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/sanitize-pdf': '2026-09-21',
   '/bates-numbering': '2026-09-24',
   '/repair-pdf': '2026-09-24',
+  '/booklet-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
