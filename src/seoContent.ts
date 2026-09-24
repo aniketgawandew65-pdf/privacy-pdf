@@ -386,6 +386,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the PDF uploaded for sanitization?', 'The sanitization workflow runs locally in your browser.']
     ],
     related: [
+      ['/blog/pdf-metadata-editor-vs-deep-sanitize','Metadata editing vs deep sanitization'],
+      ['/blog/how-to-edit-pdf-title-author-keywords','Edit selected PDF metadata fields'],
       ['/redact-pdf','Permanently redact visible information'],
       ['/edit-metadata','Edit selected PDF metadata fields'],
       ['/protect-pdf','Password-protect the sanitized copy'],
@@ -414,6 +416,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Should I overwrite my only copy?', 'Keep the original separately until you have confirmed the metadata and visible document content in the updated file.']
     ],
     related: [
+      ['/blog/how-to-edit-pdf-title-author-keywords','Change PDF title, author and keywords'],
+      ['/blog/pdf-metadata-editor-vs-deep-sanitize','Understand metadata editing vs deep sanitization'],
       ['/sanitize-pdf','Deep-sanitize PDF hidden data'],
       ['/protect-pdf','Password-protect a PDF'],
       ['/redact-pdf','Remove visible sensitive information'],
@@ -1714,6 +1718,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'how-to-edit-pdf-title-author-keywords',
+    title: 'How to Edit PDF Title, Author, Subject and Keywords',
+    description: 'Change selected PDF document properties locally, understand what each metadata field means, and know what metadata editing does not remove.',
+    tool: '/edit-metadata',
+    toolLabel: 'Edit PDF metadata',
+    category: 'PDF METADATA GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'PDF metadata is separate from the visible page',
+        paragraphs: [
+          'A PDF can store descriptive document properties such as Title, Author, Subject and Keywords separately from the text and images you see on the page.',
+          'Adobe Acrobat exposes these values in Document Properties. Changing them can correct an outdated title, wrong author name or publishing keywords without intentionally editing the visible page content.'
+        ]
+      },
+      {
+        title: 'Review the existing values before changing them',
+        paragraphs: [
+          'Open the PDF in 1into1 Edit Metadata and inspect the four supported fields: Title, Author, Subject and Keywords.',
+          'The editor pre-fills the values it can read so you can correct only the properties that need to change rather than rewriting the whole document identity.'
+        ]
+      },
+      {
+        title: 'Save the selected document properties',
+        paragraphs: [
+          'Enter the new values and save an updated copy. The metadata writer updates the standard PDF document-information fields and sets a new modification date.',
+          'When the PDF already contains a readable standard XMP packet, 1into1 also attempts to synchronize the matching core title, author, subject and keyword values while preserving unrelated XMP properties.'
+        ]
+      },
+      {
+        title: 'Metadata editing is not the same as removing hidden data',
+        paragraphs: [
+          'Changing Title or Author does not remove comments, attachments, forms, JavaScript, bookmarks, hidden text or other document structures.',
+          'If your goal is privacy before external sharing rather than correcting document properties, use Deep Sanitize instead of assuming a metadata editor cleans the entire PDF.'
+        ]
+      },
+      {
+        title: 'Check the downloaded copy',
+        paragraphs: [
+          'Reopen the saved PDF and inspect its document properties in your usual viewer. Keep the original separately until you have confirmed the updated values and normal visible content.',
+          'Some PDFs contain unusual or unreadable XMP structures. 1into1 avoids replacing unfamiliar XMP wholesale when it cannot synchronize it safely.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Document properties and metadata overview', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/edit-pdf-properties/pdf-properties.html', detail: 'Adobe documents PDF Description properties including Title, Author, Subject, Keywords and additional metadata.' },
+      { label: 'Adobe Acrobat — About redacting and sanitizing PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/redact-pdfs/redacting-sanitizing.html', detail: 'Distinguishes document metadata from broader hidden information that may require sanitization.' }
+    ]
+  },
+  {
+    slug: 'pdf-metadata-editor-vs-deep-sanitize',
+    title: 'PDF Metadata Editor vs Deep Sanitize: What Gets Removed?',
+    description: 'Understand the difference between changing selected PDF properties and rebuilding a PDF to remove broader hidden and interactive document data before sharing.',
+    tool: '/sanitize-pdf',
+    toolLabel: 'Deep sanitize a PDF',
+    category: 'PDF PRIVACY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A metadata editor changes selected document properties',
+        paragraphs: [
+          'Use Edit Metadata when the PDF is otherwise correct and you only need to change Title, Author, Subject or Keywords.',
+          'That workflow preserves the document as a normal PDF and does not intentionally strip the rest of its structure simply because one descriptive field was changed.'
+        ]
+      },
+      {
+        title: 'Hidden PDF data can exist outside those four fields',
+        paragraphs: [
+          'Adobe lists many kinds of potentially hidden information in PDFs, including metadata, comments, hidden layers, attachments, form data, bookmarks, links, actions and JavaScript.',
+          'That is why clearing an Author field is not equivalent to sanitizing a document before distribution.'
+        ]
+      },
+      {
+        title: '1into1 Deep Sanitize rebuilds visible pages into a fresh PDF',
+        paragraphs: [
+          'Deep Sanitize renders the visible appearance of each page, then creates a brand-new PDF from those clean page images instead of carrying the source document object graph forward.',
+          'The output intentionally removes selectable or OCR text layers and interactive structures along with metadata. It also clears newly generated document-info identifiers before saving the final copy.'
+        ]
+      },
+      {
+        title: 'The privacy trade-off is loss of interactivity and selectable text',
+        paragraphs: [
+          'Because Deep Sanitize creates image-based pages, selectable text, form fields, comments, attachments, bookmarks, scripts and similar interactive features do not survive as working PDF structures.',
+          'Use it when removing hidden and interactive data matters more than preserving those features. Keep the original if you still need editable forms or searchable text.'
+        ]
+      },
+      {
+        title: 'Visible secrets still require redaction',
+        paragraphs: [
+          'Sanitization is not a substitute for covering confidential information that is visibly printed on the page. A name, account number or paragraph that is part of the visible page appearance will remain visible in the sanitized page image.',
+          'Use Permanent Redaction for visible confidential content, and Deep Sanitize when you also need to remove hidden and interactive document data.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Sanitize PDFs and remove hidden content', url: 'https://helpx.adobe.com/ca/acrobat/desktop/protect-documents/redact-pdfs/sanitize.html', detail: 'Adobe describes sanitization as removing metadata, comments, hidden layers and other hidden information before sharing.' },
+      { label: 'Adobe Acrobat — About redacting and sanitizing PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/redact-pdfs/redacting-sanitizing.html', detail: 'Explains the difference between redaction of visible content and sanitization of hidden document data.' }
+    ]
+  },
+  {
     slug: 'compare-two-pdf-versions-side-by-side',
     title: 'How to Compare Two PDF Versions Side by Side',
     description: 'Review an original PDF and a revised PDF page by page with side-by-side viewing, zoom and local browser processing.',
@@ -2550,7 +2656,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: compare, images, OCR, repair & Excel | 1into1',heading:'A little help with your PDF.',description:'Practical guides for comparing PDF versions, extracting images, OCR, straightening scans, repair, booklet printing and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: metadata, compare, OCR, repair & Excel | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF metadata, hidden-data sanitization, comparison, OCR, image extraction, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
