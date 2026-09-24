@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/add-text-to-pdf-with-visual-overlays': '2026-09-24',
+  '/blog/pdf-whiteout-vs-redaction': '2026-09-24',
   '/blog/convert-formatted-text-to-pdf-locally': '2026-09-24',
   '/blog/paste-rich-text-to-pdf-clean-formatting': '2026-09-24',
   '/blog/convert-source-code-to-pdf-with-syntax-highlighting': '2026-09-24',
@@ -118,6 +120,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/csv-to-pdf': '2026-09-24',
   '/code-to-pdf': '2026-09-24',
   '/text-to-pdf': '2026-09-24',
+  '/edit-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -176,10 +179,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
 
   '/edit-pdf': {
     path: '/edit-pdf',
-    title: 'Edit PDF Online — Add Text, Whiteout & Shapes Privately | 1into1',
-    description: 'Edit PDF files directly in your browser. Add text, cover existing content, place shapes, move and resize edits without uploading your document.',
-    heading: 'Edit PDF Online',
-    subheading: 'Add text, whiteout areas and visual edits directly to PDF pages with private browser-based processing.',
+    title: 'Edit PDF Visually — Add Text & Whiteout Locally | 1into1',
+    description: 'Add, move, resize and format text overlays or cover visible areas with whiteout rectangles locally in your browser. Visual overlay editing, not secure redaction.',
+    heading: 'Edit PDF Visually',
+    subheading: 'Add formatted text overlays or whiteout rectangles on selected pages, then save a new edited PDF locally.',
   },
 
   '/scan-to-pdf': {
@@ -505,7 +508,7 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   "/text-to-pdf": {"path": "/text-to-pdf", "title": "Text to PDF — Format & Export A4 Pages Locally | 1into1", "description": "Write or paste rich text, apply fonts, sizes, colors, alignment, lists and manual page breaks, then export visual A4 PDF pages locally in your browser.", "heading": "Text to PDF", "subheading": "Write or paste formatted content, preview discrete A4 pages, add page breaks, and export a local visual PDF."},
   "/ocr-pdf": {"path": "/ocr-pdf", "title": "OCR PDF Online — Make Scanned PDFs Searchable Privately | 1into1", "description": "Run OCR on scanned PDFs in your browser and add an invisible searchable, selectable text layer. English OCR runs locally after required resources are available.", "heading": "OCR PDF", "subheading": "Add an invisible text layer so scanned pages become searchable and selectable while the visible PDF stays unchanged."},
   "/csv-to-pdf": {"path": "/csv-to-pdf", "title": "CSV to PDF — Convert CSV, TSV or Pasted Tables | 1into1", "description": "Convert CSV or TSV files, or pasted spreadsheet cells, into A4 or Letter PDF tables locally. Auto orientation uses landscape for tables with more than five columns.", "heading": "CSV to PDF", "subheading": "Turn CSV, TSV, or pasted spreadsheet data into readable PDF tables with smart orientation and wide-table handling."},
-  "/visual-editor": {"path": "/visual-editor", "title": "Add Text & Shapes to PDF | 1into1", "description": "Add text, images and shapes to a PDF without uploading it.", "heading": "Add text & shapes", "subheading": "Add text, images and shapes to a PDF without uploading it."},
+  "/visual-editor": {"path": "/visual-editor", "title": "Edit PDF Visually — Add Text & Whiteout Locally | 1into1", "description": "Add, move, resize and format text overlays or cover visible areas with whiteout rectangles locally in your browser. Visual overlay editing, not secure redaction.", "heading": "Edit PDF Visually", "subheading": "Add formatted text overlays or whiteout rectangles on selected pages, then save a new edited PDF locally."},
   "/code-to-pdf": {"path": "/code-to-pdf", "title": "Code to PDF — Syntax Highlighting & Line Numbers | 1into1", "description": "Paste source code or upload a text code file and create an A4 or Letter PDF locally with generic syntax highlighting, optional line numbers, dark/light themes and safe long-line wrapping.", "heading": "Code to PDF", "subheading": "Turn pasted or uploaded source code into a readable PDF with line numbers, themes, page-size controls and long-line handling."},
   "/html-to-pdf": {"path": "/html-to-pdf", "title": "HTML to PDF — Convert Code or .HTML Files Locally | 1into1", "description": "Paste HTML or upload an .html/.htm file and create a PDF locally. Supports A4, Letter and 80mm receipt output without fetching a live webpage URL.", "heading": "HTML to PDF", "subheading": "Convert pasted or uploaded self-contained HTML into A4, Letter, or receipt PDFs directly in your browser."},
 };

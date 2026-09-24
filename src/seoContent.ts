@@ -150,30 +150,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
   },
 
   '/edit-pdf': {
-    title: 'How to edit a PDF with text, whiteout areas and shapes',
-    intro: 'Make visual changes to a PDF directly in your browser. Add text, cover existing content and place or resize visual elements without sending the document to a processing server.',
+    title: 'How to add text overlays and whiteout areas to a PDF',
+    intro: 'Use the visual editor when you need to place new text on top of a PDF or cover a visible area with a white rectangle. This is overlay editing: it does not rewrite the original text objects underneath.',
     steps: [
-      'Choose the PDF you want to edit.',
-      'Add a text box or whiteout area.',
-      'Drag the item to the correct position on the PDF.',
-      'Resize it using the corner handles.',
-      'Adjust text style, size and colour when needed.',
-      'Move between pages and repeat your edits.',
-      'Save and download the edited PDF.'
+      'Open the PDF in the visual editor and go to the page you want to change.',
+      'Choose Add Text for a movable text box or Whiteout for a plain white rectangle.',
+      'Drag the overlay into position and resize it with the edge or corner handles.',
+      'For text, choose font, size, color, style, alignment and whether to erase the visible area underneath with a white background.',
+      'Repeat on other pages as needed.',
+      'Save changes and inspect the downloaded PDF before replacing the original.'
     ],
-    example: 'To correct a visible value in a PDF, place a whiteout area over the old value and add a new text box in the same position. The rest of the original page remains unchanged.',
+    example: 'To correct a visible name on a non-sensitive form, place a whiteout rectangle over the old visible name and add a new text overlay above it. Do not use this technique to hide confidential information that must be permanently removed.',
     questions: [
-      ['Does this replace the original PDF text?', 'This editor makes visual PDF changes using text and overlay elements. It does not attempt to rebuild the original document layout like a Word processor.'],
-      ['Does my PDF upload to a processing server?', 'Core editing runs locally in your browser, so the PDF does not need to be uploaded for processing.'],
-      ['Can I edit scanned PDFs?', 'Yes. Because the editor uses visual text and overlay elements, it can also be used on scanned PDF pages.'],
-      ['Can I edit more than one page?', 'Yes. Use the page controls to move between pages and place edits on the pages you need.']
+      ['Does this edit the original PDF text object?', 'No. The current workflow adds new overlays on top of the page. A white background can visually cover what is underneath, but the tool does not rewrite the original text object in place.'],
+      ['What can I add?', 'The current overlay model supports text boxes and whiteout rectangles. It does not currently add arbitrary images or generic vector shapes.'],
+      ['Can I move and resize overlays?', 'Yes. Text and whiteout items can be dragged and resized. Keyboard arrow keys can also nudge a selected item for fine positioning.'],
+      ['What text formatting is available?', 'Text overlays support Helvetica, Times or Courier; font sizes from 1 to 72; color; bold; italic; underline; strikethrough; left/center/right alignment; and an optional white background.'],
+      ['Does it support Unicode text overlays?', 'Not reliably on every path. For clean unencrypted PDFs, the native vector save path keeps printable ASCII characters and strips other characters from overlay text.'],
+      ['Is Whiteout secure redaction?', 'No. Whiteout is a visual covering tool. Use the dedicated Redact PDF workflow when sensitive content must be removed rather than merely covered.'],
+      ['Does the editor preserve the original PDF structure?', 'Clean unencrypted PDFs use a native overlay path that keeps the source PDF and adds the overlays. Protected or incompatible PDFs can fall back to a rendered image-based reconstruction.'],
+      ['Is the PDF uploaded?', 'The editing workflow runs locally in your browser.']
     ],
     related: [
-      ['/annotate-pdf','Draw and annotate a PDF'],
-      ['/sign-pdf','Add a signature'],
-      ['/watermark-pdf','Add a watermark'],
-      ['/pdf-to-word','Convert PDF to editable Word without uploading'],
-      ['/redact-pdf','Permanently redact content']
+      ['/blog/add-text-to-pdf-with-visual-overlays','Add text to a PDF with visual overlays'],
+      ['/blog/pdf-whiteout-vs-redaction','Whiteout vs secure redaction'],
+      ['/redact-pdf','Permanently redact sensitive PDF content'],
+      ['/fill-pdf','Fill existing interactive form fields'],
+      ['/edit-metadata','Edit PDF title, author and metadata']
     ]
   },
 
@@ -2014,6 +2017,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'add-text-to-pdf-with-visual-overlays',
+    title: 'How to Add Text to a PDF with Visual Overlays',
+    description: 'Place, move, resize and format new text on top of existing PDF pages locally, and understand why overlay editing is different from changing the original text object.',
+    tool: '/edit-pdf',
+    toolLabel: 'Open the Visual PDF Editor',
+    category: 'PDF EDITING GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Overlay editing adds new content on top of the page',
+        paragraphs: [
+          'The current 1into1 Visual Editor does not select and rewrite an existing PDF text object. Instead, it places a new text box at a page-relative position and saves that overlay into the output PDF.',
+          'This is useful for visible corrections, labels and additions when a full object-level PDF editor is not required.'
+        ]
+      },
+      {
+        title: 'Move and resize the text box visually',
+        paragraphs: [
+          'Each overlay uses page-relative coordinates, so you can drag it into position and resize it using edge or corner handles in the page preview.',
+          'For fine placement on desktop, the selected item can also be nudged with the arrow keys; holding Shift uses a larger step.'
+        ]
+      },
+      {
+        title: 'Match the surrounding document with basic text formatting',
+        paragraphs: [
+          'Text overlays can use Helvetica, Times or Courier with bold and italic variants. The editor also exposes color, underline, strikethrough and left, center or right alignment.',
+          'Font size is editable from 1 to 72, and the optional Erase Underneath setting draws a white rectangle behind the new text.'
+        ]
+      },
+      {
+        title: 'A white background creates a visual replacement, not object-level editing',
+        paragraphs: [
+          'When Erase Underneath is enabled, the renderer draws a white rectangle first and then draws the replacement text on top. The original underlying source object is not rewritten by the native overlay path.',
+          'Adobe distinguishes adding or changing text in a full PDF editor from simply placing content over a page; true object-level editing can depend on the original font and document structure.'
+        ]
+      },
+      {
+        title: 'Check text fidelity before relying on the result',
+        paragraphs: [
+          'For ordinary unencrypted PDFs, overlay text is saved as native PDF text but the current renderer sanitizes it to printable ASCII. Broader Unicode characters can therefore be removed from the overlay on that path.',
+          'Protected or incompatible PDFs can instead use a page-rendering fallback, which burns the visual overlays into reconstructed JPEG-backed pages. Reopen the result and verify every edited area.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Add new text', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/edit-text-in-pdfs/add-text.html', detail: 'Adobe documents adding, formatting, resizing and moving new text in a PDF editor.' },
+      { label: 'Adobe Acrobat — Change, replace or delete text', url: 'https://helpx.adobe.com/acrobat/desktop/edit-documents/edit-text-in-pdfs/modify-text.html', detail: 'Shows object-level PDF text editing, which is different from the overlay approach used by the current 1into1 Visual Editor.' }
+    ]
+  },
+  {
+    slug: 'pdf-whiteout-vs-redaction',
+    title: 'PDF Whiteout vs Redaction: Why Covering Text Is Not Enough',
+    description: 'Learn the difference between visually covering PDF content with a white rectangle and permanently removing sensitive information with a real redaction workflow.',
+    tool: '/edit-pdf',
+    toolLabel: 'Open the Visual PDF Editor',
+    category: 'PDF PRIVACY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Whiteout changes what the page looks like',
+        paragraphs: [
+          'The Visual Editor whiteout item is a plain white rectangle placed over a selected area. On the normal native save path, the original PDF remains underneath while the rectangle is added above it.',
+          'That can be useful for cosmetic cleanup or visible replacement, but it is not a security guarantee.'
+        ]
+      },
+      {
+        title: 'Redaction is meant to remove sensitive content',
+        paragraphs: [
+          'A proper redaction workflow is designed to permanently remove the marked visible content when the redaction is applied, rather than only covering it.',
+          'Adobe describes redaction as permanently hiding sensitive text or images and separately recommends sanitization for hidden information such as metadata, embedded content or scripts.'
+        ]
+      },
+      {
+        title: 'Do not use visual whiteout for secrets or personal data',
+        paragraphs: [
+          'If a bank account number, identity number, address, confidential clause or other sensitive value must not remain recoverable, use the dedicated Redact PDF tool instead of the Visual Editor whiteout box.',
+          'The visual editor is best treated as a presentation and correction tool, not a privacy-removal tool.'
+        ]
+      },
+      {
+        title: 'Rendered fallback does not turn Whiteout into a redaction feature',
+        paragraphs: [
+          'For protected or incompatible PDFs, the Visual Editor can rebuild pages from rendered images and burn overlays into those page images.',
+          'Even then, the workflow is not designed or audited as a comprehensive redaction-and-sanitization process, so it should not be used as a substitute for the dedicated redaction workflow.'
+        ]
+      },
+      {
+        title: 'Use the right 1into1 tool for the intent',
+        paragraphs: [
+          'Use Visual Editor when the goal is to add text, correct visible presentation or cover a non-sensitive area.',
+          'Use Redact PDF when the goal is to permanently remove sensitive visible information, and use Sanitize PDF when hidden document data also needs attention.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Redact sensitive content in PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/redact-pdfs/redact.html', detail: 'Adobe documents applying redaction to permanently remove confidential visible content.' },
+      { label: 'Adobe Acrobat — About redacting and sanitizing PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/redact-pdfs/redacting-sanitizing.html', detail: 'Explains the difference between visible-content redaction and removing hidden document information through sanitization.' }
     ]
   },
   {
@@ -4179,7 +4284,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: text, code, CSV, HTML & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for text, code, CSV and HTML conversion, PDF page organization, OCR, password security and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: edit, text, code, CSV & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for visual PDF editing, text and code conversion, CSV and HTML workflows, OCR, redaction, password security and local privacy.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
