@@ -516,6 +516,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the PDF uploaded for conversion?', 'Page rendering is performed locally in your browser.']
     ],
     related: [
+      ['/blog/extract-images-vs-pdf-to-image','Understand embedded-image extraction vs page rendering'],
+      ['/extract-images','Extract embedded raster images instead'],
       ['/image-converter','Convert images to other formats or PDF'],
       ['/ocr-pdf','Make scanned PDF text searchable'],
       ['/dark-mode-pdf','Create a dark-reading PDF'],
@@ -918,6 +920,33 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ["/pdf-to-image","Render PDF pages as images"],
       ["/pdf-to-text","Check whether text can be extracted"],
       ["/compress-pdf","Create a smaller verified copy"]
+    ]
+  },
+
+  '/extract-images': {
+    title: 'How to extract embedded images from a PDF',
+    intro: 'Scan a PDF for embedded raster images and export the decoded images as PNG files at their detected pixel dimensions, without rendering the entire page as an image.',
+    steps: [
+      'Choose the PDF containing the photos, figures or raster graphics you want.',
+      'Run Scan & Extract Embedded Images.',
+      'Review the images found and their pixel dimensions.',
+      'Download individual PNG files or download all extracted images as a ZIP.',
+      'Use PDF to Image instead when you need whole PDF pages rendered as JPG, PNG or WebP.'
+    ],
+    example: 'If a report contains a 2400×1600 embedded photograph placed inside a page layout, Extract Images can recover that raster image at the decoded 2400×1600 pixel dimensions rather than creating a screenshot of the entire PDF page.',
+    questions: [
+      ['Does this export the original JPEG file bytes?', 'Not necessarily. The current extractor decodes supported embedded raster images through the PDF rendering layer and exports them as PNG files at the detected pixel dimensions.'],
+      ['Does it preserve the embedded image dimensions?', 'Yes for successfully extracted raster images. The output records the decoded image width and height and exports the bitmap at those pixel dimensions.'],
+      ['Will it extract vector drawings?', 'No. The extractor targets embedded raster images. Pure vector artwork is different from an embedded bitmap image.'],
+      ['What if no images are found?', 'The PDF may contain only vector drawings, text or image structures the current extractor cannot decode. Use PDF to Image when you need the visible page itself as an image.'],
+      ['Is the PDF uploaded?', 'The extraction workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/extract-images-from-pdf-without-screenshots','Extract PDF images without taking screenshots'],
+      ['/blog/extract-images-vs-pdf-to-image','Extract Images vs PDF to Image'],
+      ['/pdf-to-image','Render whole PDF pages as images'],
+      ['/compress-image','Compress extracted image files'],
+      ['/image-converter','Convert images to another format']
     ]
   },
 
@@ -1683,6 +1712,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'extract-images-from-pdf-without-screenshots',
+    title: 'How to Extract Images from a PDF Without Taking Screenshots',
+    description: 'Recover embedded raster images from a PDF at their decoded pixel dimensions instead of cropping or screenshotting the visible page.',
+    tool: '/extract-images',
+    toolLabel: 'Extract embedded PDF images',
+    category: 'PDF IMAGE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A PDF page can contain separate image objects',
+        paragraphs: [
+          'A PDF page is not always one flat picture. It can combine text, vector graphics and sampled raster images as separate objects positioned on the page.',
+          'Adobe’s PDF reference describes image XObjects as sampled visual images such as photographs. That means a photograph visible inside a report may exist as its own raster object rather than only as part of a page screenshot.'
+        ]
+      },
+      {
+        title: 'Extract the embedded raster image instead of the page',
+        paragraphs: [
+          'A screenshot captures whatever pixels are currently rendered on screen, including page background, text and surrounding layout. Embedded-image extraction targets the raster image object itself.',
+          '1into1 scans the PDF page operations for supported embedded and inline image objects, decodes them and exports the extracted bitmap as a PNG.'
+        ]
+      },
+      {
+        title: 'What full resolution means in this tool',
+        paragraphs: [
+          'For a successfully decoded image, the extractor keeps the detected bitmap width and height and creates the PNG at those pixel dimensions. It does not intentionally downscale the image to the size at which it happened to appear on the PDF page.',
+          'The output is not necessarily the original compressed JPEG or WebP byte stream. The image is decoded and written as PNG, so “full resolution” here refers to the extracted bitmap dimensions rather than preservation of the original file encoding.'
+        ]
+      },
+      {
+        title: 'Vector graphics are different',
+        paragraphs: [
+          'Logos, diagrams or illustrations in a PDF can be drawn as vector instructions instead of stored as raster images. A raster-image extractor may therefore find nothing even though the page visibly contains graphics.',
+          'If you need the complete visible page, including vector artwork and text, use PDF to Image to render the whole page instead.'
+        ]
+      },
+      {
+        title: 'Download individually or as a ZIP',
+        paragraphs: [
+          'After scanning, review the extracted gallery and pixel dimensions. Download one PNG when you need a specific figure, or package all found images into a ZIP.',
+          'For sensitive reports or documents, local browser processing also avoids the ordinary workflow of uploading the source PDF to a remote extraction service.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Export images from PDFs', url: 'https://helpx.adobe.com/in/acrobat/using/exporting-pdfs-file-formats.html', detail: 'Adobe distinguishes exporting individual raster images from exporting complete PDF pages and notes that vector objects are not raster-image exports.' },
+      { label: 'Adobe PDF Reference 1.5 — External Objects', url: 'https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.5_v6.pdf', detail: 'Defines image XObjects as sampled visual images such as photographs stored as self-contained graphics objects.' }
+    ]
+  },
+  {
+    slug: 'extract-images-vs-pdf-to-image',
+    title: 'Extract Images vs PDF to Image: Which One Do You Need?',
+    description: 'Choose between recovering embedded raster images from inside a PDF and rendering each complete PDF page as JPG, PNG or WebP.',
+    tool: '/extract-images',
+    toolLabel: 'Extract images from a PDF',
+    category: 'PDF IMAGE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Extract Images targets objects inside the page',
+        paragraphs: [
+          'Use Extract Images when you want photographs, figures or other supported raster images that are embedded inside the PDF.',
+          'The result is a set of PNG files representing the decoded raster objects the extractor can identify, rather than a picture of every PDF page.'
+        ]
+      },
+      {
+        title: 'PDF to Image renders the entire page',
+        paragraphs: [
+          'Use PDF to Image when you need each page exactly as it appears visually, including text, vector drawings, backgrounds, annotations that render visibly and embedded pictures.',
+          'That workflow converts the composed page into a JPG, PNG or WebP image. It is the right choice for page thumbnails, presentation slides, social sharing or archiving page appearance.'
+        ]
+      },
+      {
+        title: 'Why screenshots are a third, less precise workflow',
+        paragraphs: [
+          'A screenshot depends on the current display size and can include browser chrome, margins or a scaled page preview. It may also capture far fewer pixels than an embedded photograph contains.',
+          'If the goal is a photo from inside the PDF, extraction is usually more direct. If the goal is the complete page, page rendering is more reproducible than a manual screenshot.'
+        ]
+      },
+      {
+        title: 'Not every visible graphic is an extractable image',
+        paragraphs: [
+          'PDF pages can contain vector shapes, text and raster images together. Adobe documents raster images and vector objects as different kinds of page content.',
+          'If a logo or diagram is vector-based, Extract Images may not return it as a bitmap. Rendering the page with PDF to Image will still capture the visible vector artwork as part of the page image.'
+        ]
+      },
+      {
+        title: 'Choose based on what you want to reuse',
+        paragraphs: [
+          'Choose Extract Images for individual embedded raster assets. Choose PDF to Image for whole-page output.',
+          'If you are unsure, scan with Extract Images first. When no suitable bitmap is found, switch to PDF to Image for a rendered page copy.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Export images from PDFs', url: 'https://helpx.adobe.com/in/acrobat/using/exporting-pdfs-file-formats.html', detail: 'Separates exporting individual images from saving complete PDF pages to an image format.' },
+      { label: 'Adobe Acrobat Reader — Copy content from PDFs', url: 'https://helpx.adobe.com/reader/desktop/copy-content-pdfs.html', detail: 'Explains selecting individual images and separately describes the Snapshot tool for copying a rendered page area as an image.' }
+    ]
+  },
+  {
     slug: 'how-to-straighten-crooked-scanned-pdf',
     title: 'How to Straighten a Crooked Scanned PDF',
     description: 'Fix a consistently tilted scanned PDF by estimating the skew from a page preview, fine-tuning the angle and applying the correction locally in your browser.',
@@ -2315,7 +2446,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: OCR, deskew, repair, Excel & Word | 1into1',heading:'A little help with your PDF.',description:'Practical guides for OCR, straightening scanned PDFs, repair, booklet printing, table extraction, Word conversion and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: images, OCR, repair, Excel & Word | 1into1',heading:'A little help with your PDF.',description:'Practical guides for extracting PDF images, OCR, straightening scans, repair, booklet printing, table extraction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
