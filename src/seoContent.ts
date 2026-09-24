@@ -1501,6 +1501,7 @@ export const ARTICLES: Article[] = [
     slug: 'reduce-pdf-for-upload-limit', title: 'How to reduce a PDF for an upload size limit',
     description: 'Choose a PDF size target, understand KB limits and check readability before submitting a compressed document.',
     tool: '/compress-pdf', toolLabel: 'Open PDF compressor',
+    category: 'PDF COMPRESSION GUIDE',
     sections: [
       {title: 'Read the upload rule before changing the file', paragraphs: ['Write down the maximum file size, allowed format and any page-count requirement. A portal that accepts JPG will not necessarily accept PDF, and a size error can be different from a password-protection error.', 'Keep the original. Compression can turn text and form fields into page images, so use a copy when the document contains information you may need to edit later.']},
       {title: 'Choose the largest size the portal allows', paragraphs: ['In 1into1, open Compress PDF, choose Target Size and select your KB target. A larger target usually leaves more room for readable text and images. Do not choose 50 KB merely because it is the smallest option if the portal allows 500 KB.', 'There is also a units difference to consider: 1into1 uses 1 KB = 1,024 bytes. A portal using 1 KB = 1,000 bytes may reject an exact 50 KB result of 51,200 bytes. Choose a lower available target when you need extra headroom.']},
@@ -4172,6 +4173,7 @@ export const ARTICLES: Article[] = [
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
+    category: 'PDF PAGE GUIDE',
     sections: [
       {title: 'Decide whether one crop fits the whole document', paragraphs: ['An all-pages crop works best when every page has similar margins and orientation. Look through the PDF first: a landscape table, a larger diagram or a page number close to an edge may need a different selection.', 'For example, a ten-page scan with the same wide white border is a good candidate for one crop. A collection of receipts with different dimensions is better handled page by page.']},
       {title: 'Set the crop using a representative page', paragraphs: ['Open the PDF in the Crop tool and position the crop box around the content you want to keep. Leave a little space around text instead of drawing exactly against the letters.', 'Use the option to apply the crop to all pages when their layouts match. For mixed layouts, set individual page crops and check each preview before generating the output.']},
