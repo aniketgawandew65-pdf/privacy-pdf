@@ -1866,7 +1866,7 @@ export const ARTICLES: Article[] = [
         title: 'Use a strong password and share it separately',
         paragraphs: [
           'A weak password can undermine otherwise valid encryption. Use a password that is difficult to guess and avoid reusing a password already associated with the same recipient or document.',
-          'Adobe recommends sharing the protected file and its password through different communication channels when practical.'
+          'When practical, send the protected file and its password through different communication channels so the password is not bundled with the document itself.'
         ]
       },
       {
@@ -1878,7 +1878,7 @@ export const ARTICLES: Article[] = [
       }
     ],
     sources: [
-      { label: 'Adobe Acrobat — Encrypt PDFs with passwords', url: 'https://helpx.adobe.com/in_hi/acrobat/desktop/protect-documents/protect-with-passwords/encrypt-pdfs-with-password.html', detail: 'Adobe documents document-open passwords and separate permissions controls for printing, editing and copying.' },
+      { label: 'Adobe Acrobat — Encrypt PDFs with passwords', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/protect-with-passwords/add-passwords-to-pdfs.html', detail: 'Adobe documents document-open passwords and separate permissions controls for printing, editing and copying.' },
       { label: 'Adobe PDF Services — PDF document security and permissions', url: 'https://developer.adobe.com/document-services/docs/overview/security', detail: 'Explains the distinction between document-open/user passwords and permissions/owner passwords.' }
     ]
   },
@@ -1930,7 +1930,7 @@ export const ARTICLES: Article[] = [
     ],
     sources: [
       { label: 'Adobe PDF Services — Protect PDF', url: 'https://developer.adobe.com/document-services/docs/overview/pdf-services-api/howtos/protect-pdf', detail: 'Adobe documents user passwords, owner passwords, AES encryption and optional granular PDF permissions.' },
-      { label: 'Adobe Acrobat — Password security policies', url: 'https://helpx.adobe.com/in/acrobat/desktop/protect-documents/security-policies/create-password-policy.html', detail: 'Adobe documents document-open and permissions-password settings as separate security concepts.' }
+      { label: 'Adobe Acrobat — Password security policies', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/security-policies/create-password-policy.html', detail: 'Adobe documents document-open and permissions-password settings as separate security concepts.' }
     ]
   },
   {
