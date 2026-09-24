@@ -120,7 +120,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/csv-to-pdf': '2026-09-24',
   '/code-to-pdf': '2026-09-24',
   '/text-to-pdf': '2026-09-24',
-  '/visual-editor': '2026-09-24',
+  '/edit-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -179,10 +179,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
 
   '/edit-pdf': {
     path: '/edit-pdf',
-    title: 'Edit PDF Online — Add Text, Whiteout & Shapes Privately | 1into1',
-    description: 'Edit PDF files directly in your browser. Add text, cover existing content, place shapes, move and resize edits without uploading your document.',
-    heading: 'Edit PDF Online',
-    subheading: 'Add text, whiteout areas and visual edits directly to PDF pages with private browser-based processing.',
+    title: 'Edit PDF Visually — Add Text & Whiteout Locally | 1into1',
+    description: 'Add, move, resize and format text overlays or cover visible areas with whiteout rectangles locally in your browser. Visual overlay editing, not secure redaction.',
+    heading: 'Edit PDF Visually',
+    subheading: 'Add formatted text overlays or whiteout rectangles on selected pages, then save a new edited PDF locally.',
   },
 
   '/scan-to-pdf': {
