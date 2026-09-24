@@ -447,9 +447,38 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     related: [
       ['/blog/how-to-password-protect-pdf-locally','Password-protect a PDF locally'],
       ['/blog/pdf-open-password-vs-permissions-password','Open password vs permissions password'],
+      ['/blog/remove-known-pdf-password-locally','Remove a known PDF password locally'],
       ['/unlock-pdf','Remove existing PDF password protection'],
       ['/sanitize-pdf','Remove hidden data before sharing'],
       ['/redact-pdf','Permanently redact visible sensitive content']
+    ]
+  },
+
+  '/unlock-pdf': {
+    title: 'How to remove a known PDF password locally',
+    intro: 'Unlock a PDF when you already know the current password. The file is authenticated locally, each decrypted page is rendered, and a fresh unencrypted image-based PDF is created for download.',
+    steps: [
+      'Choose the password-protected PDF.',
+      'Enter the current document password.',
+      'Run Unlock & Remove Password.',
+      'Download the unlocked copy.',
+      'Reopen the result and verify every page before deleting or replacing the protected original.'
+    ],
+    example: 'If you own a protected statement and know its password, you can create an unlocked copy for a workflow that cannot process encrypted PDFs. Keep the original protected file separately until the rebuilt copy is verified.',
+    questions: [
+      ['Can this unlock a PDF without knowing the password?', 'No. The current workflow requires the existing password. It is not a password-cracking tool.'],
+      ['What happens after the password is accepted?', 'The decrypted pages are rendered and rebuilt into a fresh unencrypted PDF rather than preserving the original encrypted object structure.'],
+      ['Will searchable or selectable text remain?', 'No. The rebuilt output uses JPEG-backed page images, so selectable text, OCR text layers, form fields and other interactive structures are not preserved as normal PDF objects.'],
+      ['Does it preserve the visible page appearance?', 'The tool renders every decrypted page at high resolution and places the rendered page image into the new PDF. Always inspect the result because rendering can differ from the original internal structure.'],
+      ['Is the PDF uploaded?', 'The unlock workflow runs locally in your browser.'],
+      ['Can I use this on a file I am not authorized to access?', 'Use the tool only for documents you own or are legally authorized to decrypt.']
+    ],
+    related: [
+      ['/blog/remove-known-pdf-password-locally','Remove a known PDF password locally'],
+      ['/blog/what-changes-when-you-unlock-pdf','Understand what changes after unlocking'],
+      ['/protect-pdf','Add password protection again'],
+      ['/merge-pdf','Merge the unlocked copy'],
+      ['/pdf-to-text','Check whether text is selectable after conversion']
     ]
   },
 
@@ -1804,6 +1833,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'remove-known-pdf-password-locally',
+    title: 'How to Remove a Known PDF Password Locally',
+    description: 'Remove password protection from a PDF you are authorized to access, without uploading the document, and understand what the unlocked output contains.',
+    tool: '/unlock-pdf',
+    toolLabel: 'Unlock a PDF locally',
+    category: 'PDF SECURITY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'You need the current password',
+        paragraphs: [
+          'Removing legitimate PDF password protection is different from guessing or bypassing an unknown password. The current 1into1 workflow requires you to enter the existing password before the document can be decrypted.',
+          'Adobe likewise requires the relevant password or authorization when removing document security from a protected PDF.'
+        ]
+      },
+      {
+        title: 'The document is decrypted locally in the browser',
+        paragraphs: [
+          '1into1 authenticates the encrypted PDF in the browser using the password you provide. The source file does not need to be uploaded to a normal document-processing server for the unlock step.',
+          'If the password is incorrect, the workflow stops rather than creating an unlocked copy.'
+        ]
+      },
+      {
+        title: 'The unlocked output is rebuilt from rendered pages',
+        paragraphs: [
+          'After authentication, the tool renders each decrypted page and places that page image into a new, unencrypted PDF.',
+          'This deliberately avoids carrying the original encrypted object graph into the output, but it also means the result is not a structure-preserving decryption of the original file.'
+        ]
+      },
+      {
+        title: 'Searchable text and form controls do not survive',
+        paragraphs: [
+          'Because the new PDF is built from page images, selectable text, OCR text layers, links, form fields and other interactive PDF structures are not preserved as normal objects.',
+          'If those features matter, keep the protected original and use a different authorized decryption workflow that preserves the original PDF structure.'
+        ]
+      },
+      {
+        title: 'Verify the unlocked copy before using it',
+        paragraphs: [
+          'Open the downloaded PDF without entering a password and inspect the first, middle and last pages. Check important numbers, signatures, stamps and image detail.',
+          'Keep the original protected file until you are satisfied that the rebuilt copy is visually complete and suitable for the next workflow.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Remove passwords from PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/protect-with-passwords/remove-passwords-from-pdfs.html', detail: 'Adobe documents removing document-open and permissions passwords when the required authorization is available.' },
+      { label: 'Adobe Acrobat — Unlock a PDF', url: 'https://www.adobe.com/acrobat/how-to/unlock-pdf.html', detail: 'Adobe explains authorized password removal and distinguishes document-open password removal from permissions-password removal.' }
+    ]
+  },
+  {
+    slug: 'what-changes-when-you-unlock-pdf',
+    title: 'What Changes When You Unlock a PDF in 1into1?',
+    description: 'Learn why the current Unlock PDF workflow creates a fresh image-based PDF, what is removed with the encryption, and which original PDF features do not survive.',
+    tool: '/unlock-pdf',
+    toolLabel: 'Open Unlock PDF',
+    category: 'PDF SECURITY GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'The password protection is not copied into the new file',
+        paragraphs: [
+          'The output is a newly created PDF that does not carry forward the source encryption dictionary. The downloaded copy can therefore be opened without the original document password.',
+          'That is the main purpose of the Unlock PDF workflow.'
+        ]
+      },
+      {
+        title: 'Each source page is rendered before rebuilding',
+        paragraphs: [
+          'Instead of rewriting the original encrypted PDF objects in place, 1into1 renders each decrypted page at high resolution and embeds the rendered result into a fresh page.',
+          'This makes the output visually oriented rather than structurally identical to the encrypted source.'
+        ]
+      },
+      {
+        title: 'Text selection and interactivity are lost',
+        paragraphs: [
+          'The rebuilt pages are JPEG-backed images. Native selectable text, OCR text layers, hyperlinks, form fields, annotations and similar interactive structures are not preserved as their original PDF objects.',
+          'The visible appearance can remain readable, but the document behaves more like a scanned PDF afterward.'
+        ]
+      },
+      {
+        title: 'Unlocking is different from changing PDF permissions in place',
+        paragraphs: [
+          'Adobe distinguishes removing a document-open password from removing permissions restrictions such as editing and printing controls.',
+          'The current 1into1 tool does not expose a granular permissions editor. It accepts a password and produces a fresh unencrypted image-based copy.'
+        ]
+      },
+      {
+        title: 'Choose the workflow based on what you need afterward',
+        paragraphs: [
+          'Use this Unlock PDF workflow when the priority is obtaining an unencrypted visual copy for authorized viewing, sharing or a downstream process that rejects encrypted files.',
+          'If you need to preserve form fields, links, searchable text or original vector objects, use an authorized decryption tool that preserves the original PDF structure instead.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Remove passwords from PDFs', url: 'https://helpx.adobe.com/acrobat/desktop/protect-documents/protect-with-passwords/remove-passwords-from-pdfs.html', detail: 'Shows that document-open passwords and permissions restrictions are separate security settings.' },
+      { label: 'Adobe PDF Services — Security and password-protected PDFs', url: 'https://developer.adobe.com/document-services/docs/overview/security', detail: 'Describes user/document-open passwords and owner/permissions restrictions as distinct PDF security mechanisms.' }
     ]
   },
   {
@@ -3255,7 +3386,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: password security, forms, resize & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF password protection, forms, resizing, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: unlock, password security, forms & OCR | 1into1',heading:'A little help with your PDF.',description:'Practical guides for unlocking and protecting PDFs, forms, resizing, grayscale output, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
