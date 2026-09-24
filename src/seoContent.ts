@@ -237,6 +237,38 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/code-to-pdf': {
+    title: 'How to convert source code to a syntax-highlighted PDF',
+    intro: 'Paste source code or upload a text source file, then create an A4 or US Letter PDF locally with optional line numbers, dark or light styling and safe handling for long lines.',
+    steps: [
+      'Paste source code into the editor or upload a source file that can be read as text.',
+      'Optionally set a header title such as main.py or query.sql.',
+      'Choose Dark (Terminal) or Light (Print).',
+      'Choose portrait or landscape, A4 or US Letter, and 7.5pt, 8.5pt or 10pt text.',
+      'Keep line numbers enabled when you need stable references during review.',
+      'Convert and inspect wrapped long lines, special characters and page breaks.'
+    ],
+    example: 'A Python or JavaScript source file can be exported as a dark A4 PDF with line numbers. If individual lines are too wide, they are split into continuation chunks instead of being cut off at the right edge.',
+    questions: [
+      ['Does the tool auto-detect the programming language?', 'No. The current highlighter is generic rather than a full language parser. It recognizes common keywords, strings, comments, numbers and function-like names across several coding styles.'],
+      ['Which code files can I upload?', 'The current file picker does not restrict extensions. The selected file must be readable as text; examples shown in the interface include .js, .ts, .py and .json.'],
+      ['Can I remove line numbers?', 'Yes. Line numbers are optional and enabled by default.'],
+      ['What font sizes are available?', 'The current controls offer 7.5pt Compact, 8.5pt Standard and 10pt Large.'],
+      ['What happens to tabs?', 'Tabs are expanded to four-space tab stops before layout so indentation stays predictable in the PDF.'],
+      ['What happens to very long code lines?', 'Long lines are split into safe chunks based on the available page width. The original source line number is shown on the first chunk only.'],
+      ['Is the PDF fully vector text?', 'Ordinary Latin/ASCII lines use vector text. Lines containing broader Unicode or backslashes can use a local raster fallback to preserve visible fidelity, so not every line is guaranteed to remain selectable.'],
+      ['Does the tool compile or run the code?', 'No. It formats source text for PDF output; it does not execute, compile or validate the program.'],
+      ['Is the source code uploaded?', 'The conversion runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/convert-source-code-to-pdf-with-syntax-highlighting','Convert source code to a highlighted PDF'],
+      ['/blog/print-long-code-to-pdf-with-line-numbers','Print long code with line numbers'],
+      ['/html-to-pdf','Convert self-contained HTML to PDF'],
+      ['/text-to-pdf','Create a formatted text PDF'],
+      ['/pdf-to-text','Extract text from a PDF']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
@@ -1951,6 +1983,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'convert-source-code-to-pdf-with-syntax-highlighting',
+    title: 'How to Convert Source Code to PDF with Syntax Highlighting',
+    description: 'Paste or upload source code, add optional line numbers, choose a dark or light theme, and create a readable A4 or Letter PDF locally.',
+    tool: '/code-to-pdf',
+    toolLabel: 'Convert code to PDF',
+    category: 'CODE PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Start with pasted code or a readable source file',
+        paragraphs: [
+          '1into1 Code to PDF accepts code pasted directly into the editor or a file selected from your device. Uploaded files are read as text rather than compiled or executed.',
+          'Use an optional header title when the PDF needs to identify the source file, module or snippet.'
+        ]
+      },
+      {
+        title: 'Highlighting is generic, not a full language parser',
+        paragraphs: [
+          'The renderer marks common keyword patterns, quoted strings, line and block comments, numbers and function-like names. Its keyword set spans several familiar programming styles, including JavaScript-like, Python-like, SQL-like and typed-language terms.',
+          'There is no programming-language selector and no claim that every token will match an IDE or compiler-grade syntax grammar.'
+        ]
+      },
+      {
+        title: 'Choose the PDF layout for reading or printing',
+        paragraphs: [
+          'Use Dark (Terminal) for a dark code-page appearance or Light (Print) for a white-background version. A4 and US Letter are both available in portrait or landscape.',
+          'The current font-size choices are 7.5pt, 8.5pt and 10pt, so landscape plus the smaller sizes can give wide source lines more horizontal room.'
+        ]
+      },
+      {
+        title: 'Whitespace and indentation need deliberate handling',
+        paragraphs: [
+          'Source code depends on spaces, tabs and line breaks for readability, and sometimes for program meaning. MDN documents how whitespace-preserving layouts differ from normal collapsed text rendering.',
+          '1into1 expands tab characters to four-space tab stops before laying out the source, then keeps code lines separate rather than flowing them like ordinary prose.'
+        ]
+      },
+      {
+        title: 'Verify special characters in the final PDF',
+        paragraphs: [
+          'Most ordinary Latin or ASCII source is written as vector PDF text. Lines containing broader Unicode or backslashes can be rendered locally as images to avoid corrupting visible characters or escape-heavy source.',
+          'Check regex-heavy lines, multilingual comments, emoji and unusual symbols after export when exact visual fidelity matters.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — white-space CSS property', url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/white-space', detail: 'Explains preserving spaces, tabs and line breaks versus collapsing ordinary text whitespace.' },
+      { label: 'MDN — tab-size CSS property', url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/tab-size', detail: 'Documents tab-width concepts used when presenting indented preformatted text.' }
+    ]
+  },
+  {
+    slug: 'print-long-code-to-pdf-with-line-numbers',
+    title: 'How to Print Long Code to PDF with Line Numbers',
+    description: 'Create a readable source-code PDF with optional line numbers, landscape layout and safe long-line chunking instead of cutting code off at the page edge.',
+    tool: '/code-to-pdf',
+    toolLabel: 'Create a code PDF',
+    category: 'CODE PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Line numbers make printed code easier to reference',
+        paragraphs: [
+          'When reviewers discuss a printed or shared code listing, line numbers provide stable reference points that are easier to cite than visual positions on a page.',
+          '1into1 includes a dedicated line-number gutter by default, and you can turn it off when the PDF is intended only for presentation.'
+        ]
+      },
+      {
+        title: 'Landscape gives long lines more room',
+        paragraphs: [
+          'Portrait pages leave less horizontal space for monospace source. Switching to landscape increases the width available to each source line.',
+          'A4 and US Letter are both supported, and the 7.5pt Compact setting fits more characters per line than 8.5pt or 10pt.'
+        ]
+      },
+      {
+        title: 'Long lines are chunked instead of clipped',
+        paragraphs: [
+          'The renderer calculates how many monospace characters fit in the current code area and splits wider lines into sequential chunks.',
+          'Only the first chunk displays the original source line number, so continuation chunks remain visually tied to that same source line instead of pretending to be new numbered lines.'
+        ]
+      },
+      {
+        title: 'Unicode chunks are split by grapheme when possible',
+        paragraphs: [
+          'Breaking a Unicode string at an arbitrary UTF-16 position can split a surrogate pair or combined character sequence. The current renderer uses the browser Intl.Segmenter grapheme API when available for Unicode lines and falls back to code-point iteration otherwise.',
+          'This reduces the risk of breaking emoji, combining marks or joined character sequences at a page-width boundary.'
+        ]
+      },
+      {
+        title: 'Syntax color stays behind the source text',
+        paragraphs: [
+          'The highlighter draws subtle background regions for detected keywords, strings, comments, numbers and function-like names, then writes the visible source once on top.',
+          'That design avoids reconstructing a code line from individually spaced colored tokens, which helps protect punctuation and whitespace alignment.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — Handling whitespace', url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Text/Whitespace', detail: 'Explains why source-code whitespace such as spaces, tabs and line feeds needs explicit preservation rules.' },
+      { label: 'MDN — Intl.Segmenter', url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segmenter', detail: 'Documents locale-sensitive segmentation, including grapheme segmentation used to avoid splitting complex Unicode character sequences.' }
     ]
   },
   {
@@ -3912,7 +4046,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: CSV, HTML, organize, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for CSV and HTML conversion, organizing and rotating PDF pages, OCR, password security, metadata and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: code, CSV, HTML, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for code, CSV and HTML conversion, organizing PDF pages, OCR, password security, metadata and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
