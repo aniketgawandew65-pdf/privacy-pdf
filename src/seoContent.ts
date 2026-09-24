@@ -245,6 +245,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Is the document processed locally?', 'The extraction workflow is designed to process the document in your browser rather than requiring a normal server-side document upload.']
     ],
     related: [
+      ['/blog/extract-pdf-tables-to-excel','Extract PDF tables into Excel-ready data'],
+      ['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned PDF tables with OCR'],
       ['/bank-statement-to-excel','Extract bank-statement data'],
       ['/pdf-to-csv','Extract PDF tables to CSV'],
       ['/ocr-pdf','Make scanned PDF text searchable'],
@@ -299,6 +301,8 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Should I verify the exported data?', 'Yes. Always compare important rows, totals and values with the original PDF.']
     ],
     related: [
+      ['/blog/extract-pdf-tables-to-excel','Learn how PDF table extraction works'],
+      ['/blog/scanned-pdf-tables-to-excel-ocr','Handle scanned tables with OCR'],
       ['/bank-statement-to-excel','Convert a bank statement to spreadsheet data'],
       ['/ocr-pdf','OCR scanned tables'],
       ['/pdf-to-text','Extract raw PDF text'],
@@ -535,7 +539,7 @@ export const TOOL_GUIDES: Record<string, Guide> = {
       ['Will OCR always be completely accurate?', 'No. Accuracy depends on scan resolution, contrast, fonts, skew, handwriting and image clarity. Verify important values manually.'],
       ['Does OCR upload my PDF?', 'The OCR operation runs in your browser. Required application or OCR resources may need to load before local processing is available.']
     ],
-    related: [['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
+    related: [['/blog/scanned-pdf-tables-to-excel-ocr','Extract scanned tables into spreadsheet data'], ['/blog/scanned-pdf-to-markdown-ocr-first','Convert a scanned PDF to Markdown'], ['/blog/scanned-pdf-to-word-ocr-first','Turn a scanned PDF into editable Word'], 
       ['/pdf-to-markdown','Convert recognised PDF text to Markdown'],
       ['/pdf-to-csv','Extract table-style data'],
       ['/bank-statement-to-excel','Extract statement data'],
@@ -1551,6 +1555,100 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'extract-pdf-tables-to-excel',
+    title: 'How to Extract Tables from PDF to Excel',
+    description: 'Extract rows and columns from a digital PDF into editable spreadsheet data, review the detected structure, and export the result for Excel or CSV workflows.',
+    tool: '/document-data-extractor',
+    toolLabel: 'Extract PDF tables',
+    category: 'PDF DATA EXTRACTION',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'A PDF table is not the same as an Excel table',
+        paragraphs: [
+          'A PDF can make rows and columns look perfectly aligned while storing the page as positioned text and drawing instructions rather than as real spreadsheet cells.',
+          'Table extraction therefore has to infer structure from coordinates, spacing, rules and repeated patterns before the values can become editable spreadsheet data.'
+        ]
+      },
+      {
+        title: 'Start with a digital PDF when possible',
+        paragraphs: [
+          'A computer-created PDF with selectable text is usually easier to extract than a scan because the characters already exist in the document.',
+          'If the page is image-only, OCR is required first or as part of a workflow that supports OCR fallback. Scan quality can affect both character recognition and the ability to reconstruct the correct table structure.'
+        ]
+      },
+      {
+        title: 'Review rows and columns before exporting',
+        paragraphs: [
+          'Check that headings, dates, descriptions, amounts and totals have landed in the intended columns. Merged cells, multi-line rows, sparse tables and borderless layouts are common reasons a visual table can be interpreted incorrectly.',
+          '1into1 lets you review and edit detected structured data before export so you can correct obvious extraction issues rather than treating the first result as final.'
+        ]
+      },
+      {
+        title: 'Choose the export that fits your workflow',
+        paragraphs: [
+          'Structured data can be exported for spreadsheet use, including CSV or Excel output where supported by the extractor. A CSV focuses on rows and values, while an Excel workbook can be more convenient for direct spreadsheet editing.',
+          'Decorative PDF formatting is not the same thing as usable spreadsheet structure. The important goal is usually to preserve the correct row-and-column relationships and values.'
+        ]
+      },
+      {
+        title: 'Verify important numbers against the source PDF',
+        paragraphs: [
+          'For financial reports, invoices, research tables or operational data, compare totals and representative rows with the original PDF before using the spreadsheet for analysis or reporting.',
+          'Extraction saves retyping time, but complex PDFs can still require correction. Keep the original PDF as the source of truth while reviewing the exported data.'
+        ]
+      }
+    ]
+  },
+  {
+    slug: 'scanned-pdf-tables-to-excel-ocr',
+    title: 'Scanned PDF to Excel: Extract Tables with OCR',
+    description: 'Extract table data from a scanned PDF by using OCR to recognise the page text, then review the detected rows and columns before exporting to Excel or CSV.',
+    tool: '/document-data-extractor',
+    toolLabel: 'Extract data from a scanned PDF',
+    category: 'PDF DATA EXTRACTION',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Why scanned tables are harder to extract',
+        paragraphs: [
+          'A scanned PDF is often just an image of a table. The rows, columns and values are visible to a person, but there may be no selectable text or spreadsheet structure inside the file.',
+          'OCR first has to recognise the characters. The extraction workflow then has to infer which recognised values belong together as rows and columns.'
+        ]
+      },
+      {
+        title: 'Use OCR on image-only pages',
+        paragraphs: [
+          'For scanned documents, use a workflow with OCR support or create a searchable PDF first. Check names, dates and numeric values in the OCR result because recognition errors can become spreadsheet errors later.',
+          'Blur, skew, shadows, low contrast and compression damage can reduce OCR accuracy. Clean scans usually produce more reliable table extraction than camera photos or heavily degraded pages.'
+        ]
+      },
+      {
+        title: 'Reconstruct the table after text recognition',
+        paragraphs: [
+          'Once text is available, the extractor uses page layout and detected positions to organise values into structured rows and columns.',
+          'Ruled tables are often easier to interpret than loose multi-column layouts, but merged headers, wrapped descriptions and multi-line cells can still need manual correction.'
+        ]
+      },
+      {
+        title: 'Review before exporting to Excel or CSV',
+        paragraphs: [
+          'Inspect the extracted table before download. Pay particular attention to decimal points, negative signs, dates, totals and values that are visually close together in the scan.',
+          'Correct any cells that need adjustment, then export the reviewed result to the spreadsheet format supported by your workflow.'
+        ]
+      },
+      {
+        title: 'Do not treat OCR output as verified financial data',
+        paragraphs: [
+          'A single recognition mistake can change a number significantly. If the spreadsheet will be used for accounting, financial analysis, compliance or reporting, compare the important values against the original scan.',
+          'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
+        ]
+      }
+    ]
+  },
+  {
     slug: 'crop-all-pdf-pages', title: 'How to crop the same margins from every PDF page',
     description: 'Apply one crop across a PDF, check mixed page layouts and understand why cropping is different from secure redaction.',
     tool: '/crop-pdf', toolLabel: 'Open PDF crop tool',
@@ -1775,7 +1873,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: Word, Markdown, AI, compression & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF-to-Word, Markdown for AI and RAG, compression, redaction, bank statements, OCR and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: Excel extraction, Word, Markdown, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for PDF table extraction to Excel, Word conversion, Markdown for AI, OCR, compression, redaction and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
