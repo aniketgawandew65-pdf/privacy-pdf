@@ -177,6 +177,36 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/html-to-pdf': {
+    title: 'How to convert self-contained HTML into a PDF locally',
+    intro: 'Paste HTML markup or upload an .html/.htm file, choose A4, US Letter or 80mm receipt output, and generate the PDF locally. The tool does not fetch or render a live webpage URL.',
+    steps: [
+      'Paste HTML into the editor or upload an .html/.htm file.',
+      'Choose A4, US Letter or 80mm Thermal Receipt.',
+      'Choose portrait or landscape for A4 and Letter.',
+      'Use self-contained HTML: inline styles, embedded style blocks, SVG and data-image assets work more reliably than external dependencies.',
+      'Convert and download the PDF, then inspect layout, images, links and page breaks.'
+    ],
+    example: 'A self-contained invoice with inline CSS and a base64-embedded logo can be converted to A4 PDF without sending the HTML to a rendering server. A remote stylesheet or remote image is not fetched by the converter.',
+    questions: [
+      ['Can I paste HTML code directly?', 'Yes. Paste mode converts the markup currently in the editor.'],
+      ['Can I upload an HTML file?', 'Yes. The current interface accepts .html and .htm files.'],
+      ['Can I paste a webpage URL?', 'No. The tool converts HTML source, not a live URL. It does not crawl or fetch an external webpage.'],
+      ['Are scripts executed?', 'No. Script elements, inline event-handler attributes and javascript: links are removed before styled document rendering.'],
+      ['Do external stylesheets load?', 'No. External link-based stylesheets are removed. Use inline styles or an embedded style block for self-contained formatting.'],
+      ['Do remote images load?', 'No. Image elements whose source is not a data:image URL are removed by the styled HTML sanitizer. Embed important images as data URLs.'],
+      ['Is receipt output rendered the same way as A4 or Letter?', 'No. Receipt mode uses a simpler semantic document renderer for headings, text, tables, rules and embedded data images. A4 and Letter use the richer styled renderer.'],
+      ['Is the HTML uploaded?', 'The conversion runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/convert-html-file-to-pdf-locally','Convert an HTML file to PDF locally'],
+      ['/blog/html-file-to-pdf-vs-webpage-to-pdf','HTML file to PDF vs webpage to PDF'],
+      ['/text-to-pdf','Turn plain text into a PDF'],
+      ['/code-to-pdf','Create a syntax-highlighted code PDF'],
+      ['/pdf-to-image','Render finished PDF pages as images']
+    ]
+  },
+
   '/scan-to-pdf': {
     title: 'How to scan documents into a PDF on your device',
     intro: 'Capture a document with your camera or choose existing photos, arrange the pages and create a PDF without sending the document to a processing server.',
@@ -1891,6 +1921,108 @@ export const ARTICLES: Article[] = [
           'Keep the original PDF unchanged and use the extracted spreadsheet as a working copy rather than as the only record.'
         ]
       }
+    ]
+  },
+  {
+    slug: 'convert-html-file-to-pdf-locally',
+    title: 'How to Convert an HTML File to PDF Locally',
+    description: 'Paste HTML or upload an .html file, keep the source self-contained, choose A4, Letter or receipt output, and create the PDF in your browser.',
+    tool: '/html-to-pdf',
+    toolLabel: 'Convert HTML to PDF',
+    category: 'HTML TO PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Start with HTML source, not a webpage URL',
+        paragraphs: [
+          '1into1 HTML to PDF accepts markup you paste into the editor or an .html/.htm file you choose from your device.',
+          'It is not a URL-to-PDF crawler. If all you have is a website address, first obtain or prepare the HTML content you are authorized to use.'
+        ]
+      },
+      {
+        title: 'Keep the document self-contained',
+        paragraphs: [
+          'The styled A4 and Letter workflow parses the HTML locally, removes executable and externally dependent elements, and lays out the remaining document content into PDF pages.',
+          'Inline style attributes and embedded style blocks are safer choices than linked stylesheets. Important raster images should be embedded as data:image URLs instead of relying on remote image addresses.'
+        ]
+      },
+      {
+        title: 'Choose A4, Letter or receipt output',
+        paragraphs: [
+          'A4 and US Letter can be generated in portrait or landscape. These modes use the richer styled renderer and aim to preserve readable text as PDF text where the supported layout allows it.',
+          'The 80mm Thermal Receipt mode uses a simpler semantic renderer designed around document blocks such as headings, paragraphs, tables, rules and embedded data images.'
+        ]
+      },
+      {
+        title: 'Scripts are removed rather than executed',
+        paragraphs: [
+          'The converter removes script elements, inline event handlers and javascript: links before rendering. It also removes iframes, objects, embeds and similar active content.',
+          'This means the output represents the static document content, not the result of running a web application.'
+        ]
+      },
+      {
+        title: 'Inspect the PDF after conversion',
+        paragraphs: [
+          'HTML and PDF have different layout models, so complex CSS can paginate differently from a browser tab. Check page breaks, tables, images, links, fonts and any layout that depends on exact browser behavior.',
+          'For the most predictable result, simplify the source and keep required assets inside the HTML itself.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — DOMParser.parseFromString()', url: 'https://developer.mozilla.org/en-US/docs/Web/API/DOMParser/parseFromString', detail: 'Documents parsing HTML strings into a DOM document, the starting point for the local HTML processing workflow.' },
+      { label: 'MDN — data: URLs', url: 'https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/data', detail: 'Explains embedding data directly inside a URL, the supported approach for self-contained raster image sources in the converter.' }
+    ]
+  },
+  {
+    slug: 'html-file-to-pdf-vs-webpage-to-pdf',
+    title: 'HTML File to PDF vs Webpage to PDF: What Is the Difference?',
+    description: 'Understand why converting HTML source is different from capturing a live webpage URL, especially for CSS, remote images, scripts and dynamic content.',
+    tool: '/html-to-pdf',
+    toolLabel: 'Open HTML to PDF',
+    category: 'HTML TO PDF GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'HTML-file conversion starts from source markup',
+        paragraphs: [
+          'An HTML-file converter reads markup you provide directly. It does not need to navigate to a website first.',
+          '1into1 supports pasted HTML and uploaded .html/.htm files, then parses and renders that source locally.'
+        ]
+      },
+      {
+        title: 'Webpage-to-PDF tools usually start from a URL',
+        paragraphs: [
+          'A webpage-to-PDF service typically loads a live URL in a browser-like environment, waits for styles, images and scripts, and then prints or captures the rendered page.',
+          'That is a different capability from the current 1into1 HTML to PDF tool, which does not accept or fetch a live webpage URL.'
+        ]
+      },
+      {
+        title: 'External dependencies are the biggest practical difference',
+        paragraphs: [
+          'A live webpage can request linked CSS, fonts, remote images and JavaScript from other servers. A self-contained HTML document can carry the formatting and assets it needs inside the source.',
+          '1into1 intentionally removes external stylesheet links and non-data image sources from its styled renderer, so externally hosted assets should not be expected to appear.'
+        ]
+      },
+      {
+        title: 'Dynamic JavaScript output is not reproduced',
+        paragraphs: [
+          'Client-side applications can generate content only after JavaScript executes. Because 1into1 strips scripts and event handlers, it converts static document markup rather than executing the application.',
+          'If the information exists only after a live app runs, export or capture that content into self-contained HTML before using this converter.'
+        ]
+      },
+      {
+        title: 'Choose the workflow based on the source you control',
+        paragraphs: [
+          'Use HTML to PDF when you control the markup and can make the document self-contained. It is useful for invoices, receipts, reports, email-style documents and generated HTML templates.',
+          'Use a true webpage-to-PDF browser renderer when the task specifically requires loading a public or authenticated URL with its live network assets and runtime behavior.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'MDN — DOMParser', url: 'https://developer.mozilla.org/en-US/docs/Web/API/DOMParser', detail: 'Describes parsing markup supplied as a string into a DOM rather than navigating a browser to a remote URL.' },
+      { label: 'MDN — HTML script element', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script', detail: 'Documents executable script content, which the current 1into1 HTML conversion sanitizer removes instead of executing.' }
     ]
   },
   {
@@ -3648,7 +3780,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: organize, rotate, unlock, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for organizing and rotating PDF pages, unlocking and protecting files, forms, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: HTML, organize, rotate, OCR & privacy | 1into1',heading:'A little help with your PDF.',description:'Practical guides for HTML-to-PDF conversion, organizing and rotating pages, unlocking files, OCR, metadata, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
