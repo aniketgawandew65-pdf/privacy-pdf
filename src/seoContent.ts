@@ -586,6 +586,34 @@ export const TOOL_GUIDES: Record<string, Guide> = {
     ]
   },
 
+  '/resize-pdf': {
+    title: 'How to resize PDF pages to A4, Letter, Legal, A3 or A5',
+    intro: 'Standardize every page to a chosen paper size locally. Choose proportional Fit, Center Original without scaling, or Fill Page stretching, and optionally keep landscape source pages in landscape orientation.',
+    steps: [
+      'Choose the PDF whose page size you want to standardize.',
+      'Select A4, US Letter, Legal, A3 or A5.',
+      'Choose Fit to Page, Center Original or Fill Page.',
+      'Leave Auto-Detect Orientation enabled when landscape pages should stay landscape.',
+      'Resize the PDF, download the result and inspect margins, clipping or distortion on several pages.'
+    ],
+    example: 'A mixed document can be standardized to A4. Fit to Page scales each page proportionally and centers it, while Auto-Detect Orientation keeps wide landscape pages on landscape A4 sheets.',
+    questions: [
+      ['What does Fit to Page do?', 'It scales the source page proportionally until it fits inside the target page and centers it. Different page proportions can leave margins.'],
+      ['What does Center Original do?', 'It keeps the original content size and centers it on the new page. If the source is larger than the target page, some content can fall outside the new page boundary.'],
+      ['What does Fill Page do?', 'It stretches the source width and height independently to fill the target page. This removes empty margins but can distort the original proportions.'],
+      ['Does Resize always preserve selectable vector text?', 'Clean PDFs use a vector-preserving page embedding path. Complex or protected PDFs can fall back to high-resolution rendered pages for compatibility, so vector/selectable text is not guaranteed for every file.'],
+      ['Which page sizes are supported?', 'The current presets are A4, US Letter, Legal, A3 and A5.'],
+      ['Is the PDF uploaded?', 'The resize workflow runs locally in your browser.']
+    ],
+    related: [
+      ['/blog/resize-pdf-to-a4-or-letter','Resize a PDF to A4 or Letter'],
+      ['/blog/pdf-resize-fit-vs-center-vs-stretch','Choose Fit, Center or Stretch'],
+      ['/crop-pdf','Crop visible page boundaries'],
+      ['/nup-pdf','Place multiple pages on one sheet'],
+      ['/booklet-pdf','Create a printable booklet']
+    ]
+  },
+
   '/nup-pdf': {
     title: 'How to place multiple PDF pages on one sheet',
     intro: 'Create an N-Up PDF by arranging multiple document pages onto each output sheet. This can reduce printed sheet count or create compact reference copies.',
@@ -1749,6 +1777,108 @@ export const ARTICLES: Article[] = [
     ]
   },
   {
+    slug: 'resize-pdf-to-a4-or-letter',
+    title: 'How to Resize a PDF to A4 or US Letter',
+    description: 'Standardize PDF page dimensions to A4 or US Letter, understand why margins can appear, and keep portrait and landscape pages oriented correctly.',
+    tool: '/resize-pdf',
+    toolLabel: 'Resize PDF pages',
+    category: 'PDF PAGE SIZE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Changing page size is different from changing print settings',
+        paragraphs: [
+          'A viewer can scale a PDF only when it is printed, but that does not necessarily rewrite the PDF page dimensions. Adobe Acrobat, for example, offers Fit and other page-sizing options in the Print dialog.',
+          '1into1 Resize PDF creates a new PDF whose pages use the selected target size, so the standardized page dimensions travel with the downloaded file.'
+        ]
+      },
+      {
+        title: 'Choose A4 or Letter as the target standard',
+        paragraphs: [
+          'Select A4 when the receiving workflow requires the ISO-style page size, or US Letter when that is the required paper format. The tool also supports Legal, A3 and A5.',
+          'A4 and Letter do not have the same proportions, so a proportional fit cannot simultaneously fill both dimensions without either leaving margins or cropping or distorting content.'
+        ]
+      },
+      {
+        title: 'Fit to Page preserves the source proportions',
+        paragraphs: [
+          'Fit to Page calculates one proportional scale factor so the entire source page fits inside the target dimensions, then centers the result.',
+          'This avoids stretching, but a thin white band can remain on one axis when the source and target page shapes differ.'
+        ]
+      },
+      {
+        title: 'Keep landscape pages landscape when needed',
+        paragraphs: [
+          'With Auto-Detect Orientation enabled, a landscape source page uses the landscape version of the selected target size while portrait pages use portrait orientation.',
+          'That is useful for mixed documents containing portrait letters and landscape spreadsheets or diagrams.'
+        ]
+      },
+      {
+        title: 'Check whether the file stayed vector-based',
+        paragraphs: [
+          'For clean PDFs, 1into1 embeds and scales the original PDF page into the new target page, preserving vector content through the normal path.',
+          'Complex or protected PDFs can use a rendered-image compatibility fallback instead. Reopen the result and test text selection when selectable vector text matters to your workflow.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Adjust page size for printing', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/set-up-and-print-pdfs/page-size.html', detail: 'Adobe documents Fit, Actual Size, Shrink Oversized Pages and Custom Scale as print-time page-sizing options.' },
+      { label: 'Adobe Acrobat — Print PDFs with mixed page sizes', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/set-up-and-print-pdfs/mixed-sizes.html', detail: 'Adobe documents workflows for PDFs containing mixed Letter, Legal and other page sizes.' }
+    ]
+  },
+  {
+    slug: 'pdf-resize-fit-vs-center-vs-stretch',
+    title: 'Resize PDF: Fit to Page vs Center Original vs Stretch',
+    description: 'Understand the three PDF resize placement modes: proportional fit, original-size centering, and full-page stretching, including their trade-offs.',
+    tool: '/resize-pdf',
+    toolLabel: 'Open Resize PDF',
+    category: 'PDF PAGE SIZE GUIDE',
+    published: '2026-09-24',
+    updated: '2026-09-24',
+    sections: [
+      {
+        title: 'Fit to Page scales proportionally',
+        paragraphs: [
+          'Fit uses the smaller of the horizontal and vertical scale ratios, so the complete source page fits inside the target page without changing its aspect ratio.',
+          'Because the proportions of formats such as A4 and Letter differ, proportional fit can leave margins on two sides. That is expected rather than a failed resize.'
+        ]
+      },
+      {
+        title: 'Center Original does not scale the content',
+        paragraphs: [
+          'Center Original places the source page at its existing width and height in the middle of the new target page.',
+          'When the target page is larger, this can add surrounding space. When the target is smaller, parts of the original can extend beyond the new page boundary and become clipped from view.'
+        ]
+      },
+      {
+        title: 'Fill Page stretches to both target dimensions',
+        paragraphs: [
+          'Fill Page sets the source width to the target width and the source height to the target height independently.',
+          'That removes the proportional-fit margins, but it can make circles oval, alter image proportions and change the apparent shape of text or diagrams.'
+        ]
+      },
+      {
+        title: 'Resize and crop solve different problems',
+        paragraphs: [
+          'Resizing creates a new target page size and places or scales the existing page content inside it. Cropping changes the visible page boundary around existing content.',
+          'If the goal is standard paper dimensions such as A4 or Letter, use Resize. If the goal is trimming excess margins or showing a smaller region of the existing page, use Crop.'
+        ]
+      },
+      {
+        title: 'Compare the output against the source',
+        paragraphs: [
+          'After resizing, inspect pages with edge-to-edge graphics, forms, barcodes or scale-sensitive drawings. Fit can add margins, Center can clip oversized pages, and Stretch can distort proportions.',
+          'Adobe’s print sizing guidance similarly separates Fit from Actual Size and other scaling choices because each option changes how content relates to the paper boundary.'
+        ]
+      }
+    ],
+    sources: [
+      { label: 'Adobe Acrobat — Adjust page size for printing', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/set-up-and-print-pdfs/page-size.html', detail: 'Explains Fit, Actual Size, Shrink Oversized Pages and Custom Scale and the trade-offs between fitting and clipping.' },
+      { label: 'Adobe Acrobat — Print settings', url: 'https://helpx.adobe.com/acrobat/desktop/print-documents/set-up-and-print-pdfs/print-settings.html', detail: 'Documents automatic portrait/landscape handling for mixed-layout documents.' }
+    ]
+  },
+  {
     slug: 'how-to-convert-pdf-to-grayscale',
     title: 'How to Convert a PDF to Grayscale for Printing',
     description: 'Turn a colour PDF into smooth grayscale locally, preserve tonal differences in photos and diagrams, and understand what changes in the output.',
@@ -2891,7 +3021,7 @@ export function renderBlog(path: string): string {
   return `<article class="blog-article"><nav aria-label="Breadcrumb">${link('/blog','All guides')}</nav>${dateLine}<a class="primary-button article-cta" href="${article.tool}">${escapeHtml(article.toolLabel)}</a>${datasetLink}${comparison}${article.sections.map(s=>`<section><h2>${escapeHtml(s.title)}</h2>${s.paragraphs.map(p=>`<p>${escapeHtml(p)}</p>`).join('')}</section>`).join('')}${sources}<nav class="guide-related" aria-label="More guides">${ARTICLES.filter(a=>a.slug!==article.slug).map(a=>link('/blog/'+a.slug,a.title)).join('')}</nav></article>`;
 }
 export function blogMeta(path: string) {
-  if(path==='/blog') return {path,title:'PDF guides: grayscale, dark mode, metadata, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for grayscale and black-and-white PDFs, dark mode, metadata, comparison, OCR, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
+  if(path==='/blog') return {path,title:'PDF guides: resize, grayscale, metadata, OCR & repair | 1into1',heading:'A little help with your PDF.',description:'Practical guides for resizing PDF pages, grayscale and black-and-white output, dark mode, metadata, OCR, repair and private local workflows.',subheading:'Straightforward answers. Tools you can use right away.'};
   const a=ARTICLES.find(a=>path==='/blog/'+a.slug);
   return a ? {path,title:a.title+' | 1into1',heading:a.title,description:a.description,subheading:a.description} : undefined;
 }
