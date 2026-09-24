@@ -42,6 +42,8 @@ export const SEO_PRIORITY_PATHS = [
 export const SEO_LASTMOD: Record<string, string> = {
   '/': '2026-09-23',
   '/blog': '2026-09-24',
+  '/blog/fill-interactive-pdf-form-vs-flat-pdf': '2026-09-24',
+  '/blog/flatten-pdf-form-fields-vs-keep-editable': '2026-09-24',
   '/blog/resize-pdf-to-a4-or-letter': '2026-09-24',
   '/blog/pdf-resize-fit-vs-center-vs-stretch': '2026-09-24',
   '/blog/how-to-convert-pdf-to-grayscale': '2026-09-24',
@@ -91,6 +93,7 @@ export const SEO_LASTMOD: Record<string, string> = {
   '/dark-mode-pdf': '2026-09-24',
   '/grayscale-pdf': '2026-09-24',
   '/resize-pdf': '2026-09-24',
+  '/fill-pdf': '2026-09-24',
   '/ocr-pdf': '2026-09-21',
   '/compress-pdf': '2026-09-24',
   '/compress-pdf-to-50kb': '2026-09-24',
@@ -298,10 +301,10 @@ export const TOOLS_METADATA: Record<string, ToolMeta> = {
   },
   '/fill-pdf': {
     path: '/fill-pdf',
-    title: 'PDF Forms Online Free — Fill and Flatten Privately | 1into1',
-    description: 'Fill interactive PDF forms, check boxes, and flatten form fields directly in your browser. Zero server uploads and complete document privacy.',
+    title: 'Fill PDF Forms Online — Text, Checkboxes & Dropdowns | 1into1',
+    description: 'Fill supported interactive AcroForm text fields, checkboxes and dropdowns locally, then keep the form editable or flatten the filled fields into a static finished copy.',
     heading: 'PDF Forms',
-    subheading: 'Populate interactive AcroForm fields and optionally bake inputs permanently into static text.',
+    subheading: 'Fill supported AcroForm fields locally and choose whether the finished form stays interactive or is flattened.',
   },
   '/grayscale-pdf': {
     path: '/grayscale-pdf',
